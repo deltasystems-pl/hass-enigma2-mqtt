@@ -46,6 +46,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The diagnostics download now carries the last payload of every state topic.** The screen
   grab appears as a size and a timestamp, the channel list as its shape, and the remote keys
   not at all: a bug report should answer a question, not describe a household.
+- Command cleanup now retires internal waiters without spurious asyncio errors. Clearing an old
+  plugin error no longer reports concurrent commands as complete before their own result is
+  known.
 
 ## [0.1.0] - 2026-09-16
 

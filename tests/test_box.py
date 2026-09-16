@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import gc
 import json
 
 from homeassistant.core import HomeAssistant
@@ -28,6 +30,7 @@ from .conftest import (
     SERVICE,
     SERVICE_TOPIC,
     SREF,
+    async_arm_box_error,
     async_setup_box,
     command_topic,
 )
@@ -157,13 +160,52 @@ async def test_a_command_whose_effect_already_happened_does_not_wait(
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """It is still sent — the box may disagree — but there is nothing to wait for."""
+    """A late refusal cannot leave an unhandled future behind."""
+    await async_setup_box(hass, config_entry)
+    box = config_entry.runtime_data
+    await async_arm_box_error(hass, "zap", "already tuned")
+    unhandled: list[dict[str, object]] = []
+    previous_handler = hass.loop.get_exception_handler()
+    hass.loop.set_exception_handler(lambda _loop, context: unhandled.append(context))
+
+    try:
+        await box.async_command("zap", SREF, effect=lambda: True, timeout=0.05)
+        await hass.async_block_till_done()
+        gc.collect()
+        await asyncio.sleep(0)
+    finally:
+        hass.loop.set_exception_handler(previous_handler)
+
+    assert box.updates.get(TOPIC_EPG_GRID) is None
+    assert box._pending == []
+    assert not [
+        context
+        for context in unhandled
+        if context.get("message") == "Future exception was never retrieved"
+    ]
+
+
+async def test_cancelling_a_command_retires_its_pending_future(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Cancelling an automation cannot leave a command waiter attached to the box."""
     await async_setup_box(hass, config_entry)
     box = config_entry.runtime_data
 
-    await box.async_command("zap", SREF, effect=lambda: True, timeout=0.05)
+    command = hass.async_create_task(
+        box.async_command("zap", "nowhere", effect=lambda: False, timeout=60)
+    )
+    await asyncio.sleep(0)
+    assert len(box._pending) == 1
 
-    assert box.updates.get(TOPIC_EPG_GRID) is None
+    command.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await command
+
+    assert box._pending == []
 
 
 @pytest.mark.parametrize(

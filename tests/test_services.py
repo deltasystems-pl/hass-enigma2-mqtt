@@ -7,20 +7,25 @@ box — which is the whole reason the actions were registered there.
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_fire_mqtt_message,
+)
 
 from custom_components.enigma2_mqtt.box import Enigma2CommandError
-from custom_components.enigma2_mqtt.const import DOMAIN
+from custom_components.enigma2_mqtt.const import DOMAIN, TOPIC_SCREEN
 
 from .conftest import (
     EPG_GRID,
     EPG_GRID_TOPIC,
+    LAST_ERROR_TOPIC,
     NODE_ID,
     RECORDING_ACTIVE,
     RECORDING_TOPIC,
@@ -175,6 +180,8 @@ async def test_a_command_that_never_lands_times_out(
             "zap", "nowhere", effect=lambda: False, timeout=0.05
         )
 
+    assert box._pending == []
+
 
 async def test_sending_a_key_through_the_action(
     hass: HomeAssistant,
@@ -182,7 +189,7 @@ async def test_sending_a_key_through_the_action(
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """A key changes no state topic, so a cleared `last_error` is the only answer."""
+    """A key changes no state topic, so silence through the grace period is success."""
     await async_setup_box(hass, config_entry)
     await async_arm_box_ack(hass, "key")
 
@@ -205,6 +212,34 @@ async def test_an_unknown_key_is_refused_by_the_box(
 
     with pytest.raises(HomeAssistantError):
         await _call(hass, "send_key", key="invented")
+
+
+async def test_error_clear_cannot_acknowledge_concurrent_commands(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """An anonymous clear cannot hide a later error for one of two commands."""
+    await async_setup_box(hass, config_entry)
+    box = config_entry.runtime_data
+    key = hass.async_create_task(box.async_command("key", "KEY_GREEN"))
+    message = hass.async_create_task(box.async_command("message", "hello"))
+    await asyncio.sleep(0)
+
+    async_fire_mqtt_message(hass, LAST_ERROR_TOPIC, "")
+    await asyncio.sleep(0)
+    assert not key.done()
+    assert not message.done()
+
+    async_fire_mqtt_message(
+        hass,
+        LAST_ERROR_TOPIC,
+        json.dumps({"cmd": "key", "error": "unknown key"}),
+    )
+    with pytest.raises(Enigma2CommandError, match="unknown key"):
+        await key
+    await message
 
 
 async def test_the_message_action_carries_type_and_timeout(
@@ -363,6 +398,65 @@ async def test_taking_a_screenshot_waits_for_the_picture(
     await _call(hass, "screenshot")
 
     assert_published(mqtt_mock, command_topic("screenshot"), "PRESS")
+
+
+async def test_clearing_an_old_error_does_not_acknowledge_a_screenshot(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """An effect-bearing command waits for its effect, not an error-topic clear."""
+    await async_setup_box(hass, config_entry)
+    box = config_entry.runtime_data
+    before = box.updates.get(TOPIC_SCREEN, 0)
+    command = hass.async_create_task(
+        box.async_command(
+            "screenshot",
+            "PRESS",
+            effect=lambda: box.updates.get(TOPIC_SCREEN, 0) > before,
+        )
+    )
+    await asyncio.sleep(0)
+
+    async_fire_mqtt_message(hass, LAST_ERROR_TOPIC, "")
+    await asyncio.sleep(0)
+    assert not command.done()
+
+    async_fire_mqtt_message(hass, SCREEN_TOPIC, b"\xff\xd8fresh\xff\xd9")
+    await command
+
+
+async def test_screenshot_error_after_a_clear_still_fails_the_command(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A grab failure after startup's error clear is still the command's result."""
+    await async_setup_box(hass, config_entry)
+    box = config_entry.runtime_data
+    before = box.updates.get(TOPIC_SCREEN, 0)
+    command = hass.async_create_task(
+        box.async_command(
+            "screenshot",
+            "PRESS",
+            effect=lambda: box.updates.get(TOPIC_SCREEN, 0) > before,
+        )
+    )
+    await asyncio.sleep(0)
+
+    async_fire_mqtt_message(hass, LAST_ERROR_TOPIC, "")
+    await asyncio.sleep(0)
+    assert not command.done()
+
+    async_fire_mqtt_message(
+        hass,
+        LAST_ERROR_TOPIC,
+        json.dumps({"cmd": "screenshot", "error": "grab failed"}),
+    )
+    with pytest.raises(Enigma2CommandError, match="grab failed"):
+        await command
 
 
 async def test_setting_the_ha_mode_waits_for_the_echo_on_info(

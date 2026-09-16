@@ -366,6 +366,22 @@ class _Pending:
             )
 
 
+@callback
+def _discard(future: asyncio.Future[None]) -> None:
+    """Retire a future nobody is going to wait on.
+
+    A command whose effect had already happened is published and returns at once, and a
+    command that timed out has stopped listening -- but the box can still answer either of
+    them on `last_error` in the meantime, and an exception set on a future nobody reads
+    is logged by asyncio as an unretrieved error, from a module that is working
+    correctly. Retiring it here makes the difference invisible.
+    """
+    if not future.done():
+        future.cancel()
+    elif not future.cancelled():
+        future.exception()
+
+
 @dataclass(slots=True)
 class _Listener:
     """A callback and the topics it cares about. No topics means every topic."""
@@ -718,6 +734,7 @@ class Enigma2Box:
         finally:
             if pending in self._pending:
                 self._pending.remove(pending)
+            _discard(pending.future)
 
     async def async_request_ha_mode(
         self, mode: str, timeout: float = ACK_TIMEOUT
@@ -892,22 +909,18 @@ class Enigma2Box:
         """Track the box's complaints, and fail the command that caused one.
 
         A retained payload is the complaint the broker had before we asked, so it can
-        never be the answer to a command we just sent. An empty payload is the plugin
-        clearing the topic, which is the closest thing the contract has to "that
-        worked" — a command still waiting for an answer takes it as one.
+        never be the answer to a command we just sent. An empty payload only clears
+        state: it carries no command identity, so treating it as an acknowledgement
+        could complete an unrelated concurrent command and hide its later error.
         """
         error = parse_json_payload(msg.payload)
         self.state.last_error = error
-        if not msg.retain:
-            if error is None:
-                for pending in list(self._pending):
-                    pending.resolve()
-            else:
-                cmd = error.get("cmd")
-                text = str(error.get("error") or "")
-                for pending in list(self._pending):
-                    if pending.cmd == cmd:
-                        pending.fail(text)
+        if not msg.retain and error is not None:
+            cmd = error.get("cmd")
+            text = str(error.get("error") or "")
+            for pending in list(self._pending):
+                if pending.cmd == cmd:
+                    pending.fail(text)
         self._async_updated(TOPIC_LAST_ERROR)
 
     @callback
