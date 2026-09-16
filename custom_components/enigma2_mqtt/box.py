@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from contextlib import suppress
+from dataclasses import dataclass
 import json
 import logging
 from typing import Any
@@ -35,6 +37,7 @@ from .const import (
     MANUFACTURERS,
     PAYLOAD_ONLINE,
     PROBE_TIMEOUT,
+    SUBSCRIBE_TIMEOUT,
     TOPIC_AVAILABILITY,
     TOPIC_INFO,
 )
@@ -129,12 +132,22 @@ async def async_request_ha_mode(
     """Switch a box's `ha_mode` and return the `info` payload that acknowledges it.
 
     There is no acknowledgement topic in the contract: the plugin answers by
-    republishing `info` with the new mode. Subscribing before publishing is not
-    optional — the plugin can answer inside the same publish burst.
+    republishing `info` with the new mode, and that answer comes within a fraction of
+    a second.
+
+    Subscribing before publishing is therefore not enough. Home Assistant batches its
+    SUBSCRIBE packets behind a short debouncer, so a subscription that exists in
+    process still reaches the broker a tenth of a second later — about when the
+    receiver replies. The answer is then published to a broker that is not yet sending
+    this topic anywhere, and the only copy Home Assistant ever sees is the retained one
+    that arrives with the subscription, which is not an acknowledgement. Waiting for
+    the subscription to be established on the broker before the command goes out is
+    what closes that race; measured against a real receiver, it is the difference
+    between an acknowledgement in 0.1 s and a timeout at 10 s.
     """
-    subscription = await _async_subscribe_info(hass, base_topic, node_id, mode)
-    future, unsubscribe = subscription
+    watch = await _async_watch_info(hass, base_topic, node_id, mode)
     try:
+        await watch.async_wait_until_established()
         await mqtt.async_publish(
             hass,
             command_topic(base_topic, node_id, "ha_mode"),
@@ -143,12 +156,12 @@ async def async_request_ha_mode(
             retain=False,
         )
         async with asyncio.timeout(timeout):
-            return await future
+            return await watch.matched
     except TimeoutError:
         _LOGGER.debug("Box %s did not acknowledge ha_mode=%s", node_id, mode)
         return None
     finally:
-        unsubscribe()
+        watch.cancel()
 
 
 async def _async_wait_for_info_matching(
@@ -159,28 +172,51 @@ async def _async_wait_for_info_matching(
     timeout: float,
 ) -> dict[str, Any] | None:
     """Wait for an `info` payload, optionally one that reports a given mode."""
-    future, unsubscribe = await _async_subscribe_info(hass, base_topic, node_id, mode)
+    watch = await _async_watch_info(hass, base_topic, node_id, mode)
     try:
         async with asyncio.timeout(timeout):
-            return await future
+            return await watch.matched
     except TimeoutError:
         return None
     finally:
-        unsubscribe()
+        watch.cancel()
 
 
-async def _async_subscribe_info(
+@dataclass(slots=True)
+class _InfoWatch:
+    """A live subscription to one box's `info` topic."""
+
+    matched: asyncio.Future[dict[str, Any]]
+    established: asyncio.Future[None]
+    cancel: CALLBACK_TYPE
+
+    async def async_wait_until_established(
+        self, timeout: float = SUBSCRIBE_TIMEOUT
+    ) -> None:
+        """Wait until the broker is actually sending this topic to us.
+
+        Degrades rather than hangs: if the confirmation never comes, the caller goes
+        ahead anyway and falls back on its own timeout.
+        """
+        with suppress(TimeoutError):
+            async with asyncio.timeout(timeout):
+                await self.established
+
+
+async def _async_watch_info(
     hass: HomeAssistant,
     base_topic: str,
     node_id: str,
     mode: str | None,
-) -> tuple[asyncio.Future[dict[str, Any]], CALLBACK_TYPE]:
+) -> _InfoWatch:
     """Subscribe to `info` and resolve a future on the first payload that matches."""
-    future: asyncio.Future[dict[str, Any]] = hass.loop.create_future()
+    topic = state_topic(base_topic, node_id, TOPIC_INFO)
+    matched: asyncio.Future[dict[str, Any]] = hass.loop.create_future()
+    established: asyncio.Future[None] = hass.loop.create_future()
 
     @callback
     def _message_received(msg: ReceiveMessage) -> None:
-        if future.done():
+        if matched.done():
             return
         if (info := parse_json_payload(msg.payload)) is None:
             return
@@ -191,12 +227,26 @@ async def _async_subscribe_info(
             # real acknowledgement is a fresh publish, and a broker clears the retain
             # flag on everything it delivers to a subscription that is already open.
             return
-        future.set_result(info)
+        matched.set_result(info)
 
-    unsubscribe = await mqtt.async_subscribe(
-        hass, state_topic(base_topic, node_id, TOPIC_INFO), _message_received
+    @callback
+    def _subscription_established() -> None:
+        if not established.done():
+            established.set_result(None)
+
+    # Registered before subscribing, so that a subscription completing immediately
+    # cannot land between the two calls and go unnoticed.
+    stop_tracking = mqtt.async_on_subscribe_done(
+        hass, topic, mqtt.DEFAULT_QOS, _subscription_established
     )
-    return future, unsubscribe
+    unsubscribe = await mqtt.async_subscribe(hass, topic, _message_received)
+
+    @callback
+    def _cancel() -> None:
+        stop_tracking()
+        unsubscribe()
+
+    return _InfoWatch(matched=matched, established=established, cancel=_cancel)
 
 
 class Enigma2Box:

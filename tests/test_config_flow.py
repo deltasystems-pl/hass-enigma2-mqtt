@@ -403,3 +403,33 @@ async def test_a_second_announcement_does_not_start_a_second_flow(
     assert second["type"] is FlowResultType.ABORT
     assert second["reason"] == "already_in_progress"
     assert len(hass.config_entries.flow.async_progress_by_handler(DOMAIN)) == 1
+
+
+async def test_the_command_waits_for_the_subscription_to_reach_the_broker(
+    hass: HomeAssistant, mqtt_mock, mqtt_client_mock
+) -> None:
+    """The receiver answers faster than Home Assistant sends its SUBSCRIBE.
+
+    Subscriptions are batched behind a debouncer, so a command published the instant a
+    subscription exists in process is answered while the broker is still not sending
+    that topic anywhere. Measured against a real receiver, the answer came in 0.1 s and
+    the flow still timed out at 10 s. The SUBSCRIBE has to be on the wire first.
+    """
+    result = await _start_discovered_flow(hass, json.dumps(ANNOUNCEMENT))
+    await async_arm_ha_mode_ack(hass)
+    mqtt_client_mock.reset_mock()
+
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+    traffic = [call for call in mqtt_client_mock.mock_calls
+               if call[0] in ("subscribe", "publish")]
+    subscribed_at = next(
+        i for i, call in enumerate(traffic)
+        if call[0] == "subscribe" and INFO_TOPIC in str(call)
+    )
+    published_at = next(
+        i for i, call in enumerate(traffic)
+        if call[0] == "publish" and HA_MODE_TOPIC in str(call)
+    )
+    assert subscribed_at < published_at

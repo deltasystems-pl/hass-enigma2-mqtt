@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Setting a receiver up no longer times out waiting for an acknowledgement the receiver
+  already sent. Home Assistant batches its MQTT subscriptions behind a short debouncer,
+  so the command went out before the broker was sending the topic the answer arrives on.
 - The release workflow no longer put the changelog's link block into the release notes.
 
 [Unreleased]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/commits/main

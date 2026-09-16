@@ -33,6 +33,12 @@ ACK_TIMEOUT: Final = 10
 # is on the broker answers immediately, because the payload is already retained there.
 PROBE_TIMEOUT: Final = 10
 
+# Seconds to wait for a subscription to reach the broker before sending a command that
+# is answered on it. Home Assistant batches SUBSCRIBE packets behind a 0.1 s debouncer,
+# and the receiver answers in about the same time, so a command sent the instant the
+# subscription exists in process races the subscription that is meant to hear it.
+SUBSCRIBE_TIMEOUT: Final = 5
+
 # Topic suffixes the integration reads in M1. The entity platforms (M3) add the rest.
 TOPIC_AVAILABILITY: Final = "availability"
 TOPIC_INFO: Final = "info"
