@@ -27,7 +27,7 @@ by-effect check. The milestone column says when it is due.
 | `docs-actions` — every action documented | [ ] | M3 |
 | `docs-high-level-description` — what the integration is, in the README | [x] | M1 |
 | `docs-installation-instructions` — HACS and manual | [x] | M1 |
-| `docs-removal-instructions` — how to remove it cleanly, including `cmd/reset` | [ ] | M3 |
+| `docs-removal-instructions` — how to remove it cleanly, including `cmd/reset` | [x] | M1 |
 | `brands` — icon and logo shipped in `brand/` | [x] | M1 |
 | `dependency-transparency` — dependencies pinned, built from source, no blobs | [x] | M1 |
 

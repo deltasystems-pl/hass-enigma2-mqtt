@@ -176,6 +176,23 @@ are already clear:
 - **Entities appear twice.** The box is in `discovery` mode *and* added here. Re-run the setup
   or send `cmd/ha_mode = integration`; the plugin retracts the discovery payloads.
 
+### Removing a receiver
+
+Delete the entry in *Settings → Devices & Services*. On the way out the integration publishes
+`cmd/ha_mode = discovery`, so the plugin announces itself again and the core MQTT integration
+rebuilds its own entities — a box that was taken over here is handed straight back. That
+publish is best effort: if the receiver is off or the broker is unreachable the entry is still
+removed, and the mode can be set on the plugin's setup screen afterwards.
+
+**If you are also uninstalling the plugin, send `cmd/reset` to the box first.** Retained topics
+outlive the plugin that created them: remove the package without resetting and the broker goes
+on serving a snapshot of a receiver that is gone, for as long as the broker lives. `cmd/reset`
+retracts everything the node owns and republishes it in one burst, so it is safe to run at any
+time — but only while the plugin is still running, because after `opkg remove` there is nothing
+left to ask. The plugin's
+[topic contract](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TOPICS.md)
+describes it in full.
+
 ## 9. FAQ
 
 **Can I use the plugin without this integration?** Yes. That is what `ha_mode = discovery` is

@@ -5,6 +5,12 @@ believes about a box — and nothing that would embarrass the person attaching i
 public issue. The MAC and the IP address are redacted because they identify a household,
 not because they are secret; the credential keys are listed before any credential
 exists, so that the installer (M4) cannot add one to a file that is already being shared.
+
+The `node_id` is kept deliberately, although its second half is the last six digits of
+the same MAC address. It is the key every topic in a report is named after, and a
+diagnostics file in which the topics cannot be matched to the box would answer nothing.
+Six hex digits of a MAC are not the MAC, and they identify a receiver model far more
+than a household.
 """
 
 from __future__ import annotations
@@ -44,6 +50,7 @@ async def async_get_config_entry_diagnostics(
         "entry": {
             "data": dict(entry.data),
             "options": dict(entry.options),
+            "source": entry.source,
             "unique_id": entry.unique_id,
             "version": entry.version,
         },

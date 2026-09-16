@@ -13,6 +13,7 @@ from typing import Any
 from unittest.mock import patch
 
 from homeassistant.components import mqtt
+from homeassistant.components.mqtt import ReceiveMessage
 from homeassistant.core import HomeAssistant, callback
 import pytest
 from pytest_homeassistant_custom_component.common import (
@@ -157,7 +158,7 @@ async def async_arm_ha_mode_ack(
     payload = dict(info if info is not None else INFO)
 
     @callback
-    def _command_received(msg: mqtt.models.ReceiveMessage) -> None:
+    def _command_received(msg: ReceiveMessage) -> None:
         mode = msg.payload
         if isinstance(mode, (bytes, bytearray)):
             mode = mode.decode()

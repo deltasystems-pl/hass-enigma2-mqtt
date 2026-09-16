@@ -201,7 +201,7 @@ async def test_manual_flow_creates_the_entry(
 
 
 async def test_manual_flow_reports_a_box_that_is_not_there(
-    hass: HomeAssistant, mqtt_mock
+    hass: HomeAssistant, mqtt_mock, retained: dict[str, str]
 ) -> None:
     """Nothing retained on the topic means the box is not on this broker."""
     result = await hass.config_entries.flow.async_init(
@@ -216,6 +216,16 @@ async def test_manual_flow_reports_a_box_that_is_not_there(
 
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "not_found"}
+
+    # The form is retryable, so correcting the node id in the same flow adds the box.
+    retained[INFO_TOPIC] = json.dumps(INFO)
+    await async_arm_ha_mode_ack(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_BASE_TOPIC: BASE_TOPIC, CONF_NODE_ID: NODE_ID}
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_NODE_ID] == NODE_ID
 
 
 async def test_manual_flow_reports_a_box_that_does_not_acknowledge(
@@ -236,6 +246,14 @@ async def test_manual_flow_reports_a_box_that_does_not_acknowledge(
 
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "no_ack"}
+
+    # Nothing was written, so the same form adds the box once the plugin answers.
+    await async_arm_ha_mode_ack(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_BASE_TOPIC: BASE_TOPIC, CONF_NODE_ID: NODE_ID}
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
 
 
 async def test_manual_flow_aborts_when_already_configured(
@@ -261,7 +279,11 @@ async def test_manual_flow_aborts_when_already_configured(
     [("enigma2/#", NODE_ID), ("enigma2", "+"), ("", NODE_ID), ("enigma2", "")],
 )
 async def test_manual_flow_rejects_a_wildcard_topic(
-    hass: HomeAssistant, mqtt_mock, base_topic: str, node_id: str
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str],
+    base_topic: str,
+    node_id: str,
 ) -> None:
     """A wildcard would subscribe to every box on the broker at once."""
     result = await hass.config_entries.flow.async_init(
@@ -274,6 +296,15 @@ async def test_manual_flow_rejects_a_wildcard_topic(
 
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "invalid_topic"}
+
+    # Nothing was subscribed to, and a sound pair in the same form still works.
+    retained[INFO_TOPIC] = json.dumps(INFO)
+    await async_arm_ha_mode_ack(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_BASE_TOPIC: BASE_TOPIC, CONF_NODE_ID: NODE_ID}
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
 
 
 async def test_manual_flow_falls_back_to_the_node_id_as_a_name(
@@ -294,3 +325,81 @@ async def test_manual_flow_falls_back_to_the_node_id_as_a_name(
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == NODE_ID
+
+
+async def test_a_retained_info_is_not_an_acknowledgement(
+    hass: HomeAssistant, mqtt_mock, retained: dict[str, str]
+) -> None:
+    """A box that is switched off cannot confirm anything.
+
+    Its retained `info` may already say `integration` — from the last time it was set
+    up — and the broker replays that on every new subscription. Accepting it would add
+    a device for a receiver nobody asked and nobody answered.
+    """
+    retained[INFO_TOPIC] = json.dumps({**INFO, "ha_mode": "integration"})
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    with patch("custom_components.enigma2_mqtt.config_flow.ACK_TIMEOUT", 0.05):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {CONF_BASE_TOPIC: BASE_TOPIC, CONF_NODE_ID: NODE_ID},
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "no_ack"}
+
+    # The live box publishing the same payload is accepted, because it is not retained.
+    await async_arm_ha_mode_ack(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_BASE_TOPIC: BASE_TOPIC, CONF_NODE_ID: NODE_ID}
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+
+async def test_discovered_flow_aborts_when_mqtt_went_away(
+    hass: HomeAssistant, mqtt_mock
+) -> None:
+    """MQTT can be removed between the announcement and the confirm."""
+    result = await _start_discovered_flow(hass, json.dumps(ANNOUNCEMENT))
+
+    with patch(
+        "homeassistant.components.mqtt.async_wait_for_mqtt_client", return_value=False
+    ):
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "mqtt_unavailable"
+
+
+async def test_manual_flow_aborts_without_mqtt(hass: HomeAssistant, mqtt_mock) -> None:
+    """Without a broker there is nothing to subscribe to, and saying so beats a traceback."""
+    with patch(
+        "homeassistant.components.mqtt.async_wait_for_mqtt_client", return_value=False
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "mqtt_unavailable"
+
+
+async def test_a_second_announcement_does_not_start_a_second_flow(
+    hass: HomeAssistant, mqtt_mock
+) -> None:
+    """The plugin republishes its announcement on every reconnect.
+
+    With the confirm card open that is a second discovery of the same box, and two
+    cards for one receiver is how a user ends up with two entries for it.
+    """
+    first = await _start_discovered_flow(hass, json.dumps(ANNOUNCEMENT))
+    assert first["type"] is FlowResultType.FORM
+
+    second = await _start_discovered_flow(hass, json.dumps(ANNOUNCEMENT))
+
+    assert second["type"] is FlowResultType.ABORT
+    assert second["reason"] == "already_in_progress"
+    assert len(hass.config_entries.flow.async_progress_by_handler(DOMAIN)) == 1

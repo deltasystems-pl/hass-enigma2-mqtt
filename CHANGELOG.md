@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   topic, so updating the plugin or moving the box to another address updates the page.
 - A diagnostics download that redacts the MAC address, the IP address, the configuration URL
   and every credential key, including the ones the guided installer will add later.
+- Removing a receiver publishes `cmd/ha_mode = discovery`, so the plugin announces itself
+  again and the core MQTT integration rebuilds its own entities. It is best effort: a
+  receiver that is off, or a broker that is unreachable, never blocks the removal.
 - Polish and German translations of everything the setup flow shows. German is a draft and
   needs a native speaker.
 

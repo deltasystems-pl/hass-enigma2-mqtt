@@ -21,6 +21,7 @@ from .conftest import (
     AVAILABILITY_TOPIC,
     BOX_NAME,
     BOXTYPE,
+    HA_MODE_TOPIC,
     IMAGE,
     INFO,
     INFO_TOPIC,
@@ -225,3 +226,38 @@ async def test_manufacturer_is_derived_from_the_box_type(
 ) -> None:
     """A box type nobody mapped is still an Enigma2 receiver."""
     assert manufacturer_for(boxtype) == manufacturer
+
+
+async def test_removing_a_box_hands_it_back_to_discovery(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Adding the box took its discovery entities away; removing it gives them back."""
+    await _setup(hass, config_entry)
+
+    assert await hass.config_entries.async_remove(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    mqtt_mock.async_publish.assert_any_call(
+        HA_MODE_TOPIC, "discovery", 1, False, message_expiry_interval=None
+    )
+
+
+async def test_removing_a_box_survives_a_broker_that_is_gone(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A removal is never refused because the box or the broker cannot be reached."""
+    await _setup(hass, config_entry)
+
+    with patch(
+        "homeassistant.components.mqtt.async_wait_for_mqtt_client", return_value=False
+    ):
+        assert await hass.config_entries.async_remove(config_entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert hass.config_entries.async_get_entry(config_entry.entry_id) is None

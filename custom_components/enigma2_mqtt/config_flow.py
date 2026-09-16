@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from homeassistant.components import mqtt
 from homeassistant.components.mqtt import valid_subscribe_topic
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.helpers.service_info.mqtt import MqttServiceInfo
@@ -30,6 +31,9 @@ from .const import (
     HA_MODE_INTEGRATION,
     PROBE_TIMEOUT,
 )
+
+# Shown in place of a field the box did not report.
+UNKNOWN_PLACEHOLDER = "—"
 
 STEP_USER_SCHEMA = vol.Schema(
     {
@@ -97,6 +101,9 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Ask before taking a box over, then take it over."""
+        if not await mqtt.async_wait_for_mqtt_client(self.hass):
+            return self.async_abort(reason="mqtt_unavailable")
+
         errors: dict[str, str] = {}
         if user_input is not None:
             if await self._async_take_over():
@@ -114,6 +121,9 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Add a box by hand, for a prefix Home Assistant never saw announced."""
+        if not await mqtt.async_wait_for_mqtt_client(self.hass):
+            return self.async_abort(reason="mqtt_unavailable")
+
         errors: dict[str, str] = {}
         if user_input is not None:
             base_topic = user_input[CONF_BASE_TOPIC].strip().strip("/")
@@ -180,11 +190,15 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     def _placeholders(self) -> dict[str, str]:
-        """Return what the confirm card and the flow title say about the box."""
+        """Return what the confirm card and the flow title say about the box.
+
+        A box that reports no type or no image is rare but possible, and „( , )" on
+        the card would look like a bug rather than a gap in what the box said.
+        """
         return {
             "name": self._name,
-            "boxtype": self._boxtype,
-            "image": self._image,
+            "boxtype": self._boxtype or UNKNOWN_PLACEHOLDER,
+            "image": self._image or UNKNOWN_PLACEHOLDER,
         }
 
 

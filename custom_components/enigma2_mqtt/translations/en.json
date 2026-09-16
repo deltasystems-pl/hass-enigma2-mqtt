@@ -29,6 +29,8 @@
     },
     "abort": {
       "already_configured": "Device is already configured",
+      "already_in_progress": "This receiver is already being added.",
+      "mqtt_unavailable": "The MQTT integration is not available. Set it up first, then add the receiver.",
       "not_enigma2_announcement": "That message is not an Enigma2 MQTT Bridge announcement.",
       "retracted": "The receiver has withdrawn its announcement."
     }

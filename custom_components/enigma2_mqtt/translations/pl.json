@@ -29,6 +29,8 @@
     },
     "abort": {
       "already_configured": "Urządzenie jest już skonfigurowane",
+      "already_in_progress": "Ten dekoder jest już dodawany.",
+      "mqtt_unavailable": "Integracja MQTT jest niedostępna. Skonfiguruj ją najpierw, a potem dodaj dekoder.",
       "not_enigma2_announcement": "Ta wiadomość nie jest zgłoszeniem wtyczki Enigma2 MQTT Bridge.",
       "retracted": "Dekoder wycofał swoje zgłoszenie."
     }

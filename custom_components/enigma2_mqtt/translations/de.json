@@ -29,6 +29,8 @@
     },
     "abort": {
       "already_configured": "Gerät ist bereits konfiguriert",
+      "already_in_progress": "Dieser Receiver wird bereits hinzugefügt.",
+      "mqtt_unavailable": "Die MQTT-Integration ist nicht verfügbar. Richte sie zuerst ein und füge dann den Receiver hinzu.",
       "not_enigma2_announcement": "Diese Nachricht ist keine Anmeldung der Enigma2 MQTT Bridge.",
       "retracted": "Der Receiver hat seine Anmeldung zurückgezogen."
     }

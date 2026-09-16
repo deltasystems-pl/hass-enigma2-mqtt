@@ -18,7 +18,7 @@ import logging
 from typing import Any
 
 from homeassistant.components import mqtt
-from homeassistant.components.mqtt.models import ReceiveMessage
+from homeassistant.components.mqtt import ReceiveMessage
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
@@ -184,7 +184,12 @@ async def _async_subscribe_info(
             return
         if (info := parse_json_payload(msg.payload)) is None:
             return
-        if mode is not None and info.get("ha_mode") != mode:
+        if mode is not None and (msg.retain or info.get("ha_mode") != mode):
+            # A retained payload is what the broker had before we asked, so it can
+            # never be the answer to the command we just sent: a box that is switched
+            # off but was last in this mode would otherwise acknowledge instantly. A
+            # real acknowledgement is a fresh publish, and a broker clears the retain
+            # flag on everything it delivers to a subscription that is already open.
             return
         future.set_result(info)
 
@@ -237,22 +242,20 @@ class Enigma2Box:
         return _remove
 
     async def async_start(self) -> None:
-        """Subscribe to the topics that describe the box."""
-        self._unsubscribes = [
-            await mqtt.async_subscribe(
-                self.hass,
-                self.state_topic(TOPIC_AVAILABILITY),
-                self._availability_received,
-            ),
-            await mqtt.async_subscribe(
-                self.hass, self.state_topic(TOPIC_INFO), self._info_received
-            ),
-            await mqtt.async_subscribe(
-                self.hass,
-                announcement_topic(self.node_id),
-                self._announcement_received,
-            ),
-        ]
+        """Subscribe to the topics that describe the box.
+
+        Each unsubscribe callback is kept as soon as it exists, so that a failure on
+        the second or third subscribe leaves the first one cancellable rather than
+        orphaned on the broker for the life of the process.
+        """
+        for topic, handler in (
+            (self.state_topic(TOPIC_AVAILABILITY), self._availability_received),
+            (self.state_topic(TOPIC_INFO), self._info_received),
+            (announcement_topic(self.node_id), self._announcement_received),
+        ):
+            self._unsubscribes.append(
+                await mqtt.async_subscribe(self.hass, topic, handler)
+            )
 
     @callback
     def async_stop(self) -> None:
