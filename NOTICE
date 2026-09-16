@@ -1,0 +1,33 @@
+Enigma2 MQTT for Home Assistant
+Copyright (c) 2026 deltasystems-pl
+
+This integration is licensed under the MIT License; see LICENSE.
+
+Bundled receiver plugin
+-----------------------
+
+From milestone M4 on, a release of this integration ships the Enigma2 receiver plugin as an
+IPK package inside the release artifact, so that the integration can install it on a box over
+SSH.
+
+That plugin is a SEPARATE PROGRAM. It is licensed under the GNU General Public License,
+version 2 or (at your option) any later version, because it imports and runs inside enigma2.
+Bundling it here is mere aggregation: it is not linked into, derived from, or combined with
+the Python code of this integration, and the MIT license of this repository does not apply
+to it.
+
+  Plugin:   enigma2-plugin-extensions-mqttbridge
+  License:  GPL-2.0-or-later
+  Source:   https://github.com/deltasystems-pl/enigma2-mqtt-bridge
+
+The complete corresponding source code of every bundled plugin version is available at that
+repository, tagged with the version of the IPK, and each release records the SHA-256 of the
+package it ships.
+
+Trademarks
+----------
+
+Enigma2, Vu+, Dreambox, OpenViX, OpenATV, OpenPLi, OpenBH, Home Assistant and Mosquitto are
+the property of their respective owners. This project is not affiliated with or endorsed by
+any of them. The artwork in custom_components/enigma2_mqtt/brand/ is original work and
+contains no third-party logo.
