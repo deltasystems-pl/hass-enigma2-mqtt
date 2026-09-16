@@ -35,13 +35,20 @@ jobs:
 
       - name: Extract the release notes
         run: |
+          # index(...) == 1 is a plain prefix test. A dynamic regex would be read
+          # differently by mawk and gawk, and under gawk this silently extracted
+          # nothing at all.
           awk -v ver="$VERSION" '
-            $0 ~ "^## \\[" ver "\\]" { inside = 1; next }
-            inside && /^## \[/ { exit }
-            inside && /^\[/ { exit }
+            index($0, "## [" ver "]") == 1 { inside = 1; next }
+            inside && index($0, "## [") == 1 { exit }
+            inside && index($0, "[") == 1 { exit }
             inside { print }
           ' CHANGELOG.md > release-notes.md
           cat release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::the release notes for ${VERSION} came out empty"
+            exit 1
+          fi
 
       - name: Build the HACS zip
         run: |

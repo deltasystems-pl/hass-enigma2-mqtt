@@ -81,7 +81,7 @@ about 45 seconds instead of at the end of a poll cycle.
 
 | Integration | Plugin | Status |
 |---|---|---|
-| 0.1.0 | 0.1.0 | planned — neither is released yet |
+| 0.1.0 | 0.1.0 | current |
 
 The integration refuses nothing when the versions differ, but the `update` entity tells you
 when the box runs a plugin older than the one this release bundles.
@@ -89,9 +89,6 @@ when the box runs a plugin older than the one this release bundles.
 ## Installation
 
 ### HACS (recommended)
-
-From **v0.1.0** (the repository is installed from release zips, so HACS has nothing to offer
-until the first release is tagged):
 
 1. HACS → ⋮ → *Custom repositories* → add `deltasystems-pl/hass-enigma2-mqtt`, category
    **Integration**
