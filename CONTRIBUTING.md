@@ -74,7 +74,14 @@ requirements document; [ADR-0001](docs/adr/0001-m0-decisions.md) closed its open
 - `pl.json` is reviewed by the maintainer. `de.json` is a draft and **needs community
   review** — corrections are welcome as pull requests.
 - Translation **keys are English** and entity ids derive from them, so a key is never renamed
-  for cosmetic reasons; only display names change.
+  for cosmetic reasons; only display names change. 🔴 An entity's **English name** is what
+  Home Assistant slugifies into its entity id, so every English name has to slugify back to
+  its own key — „Wake" gives `…_wake`, „Wake (WoL)" would give `…_wake_wol`. Rename the
+  English name of an existing entity and you rename every automation that refers to it.
+- Every file covers the same ground: the config and options flows, the name of each of the
+  twenty-six entities, the eight device triggers, and the name, description and every field
+  of each of the nine actions. A file that is missing a key falls back to English, which
+  looks like a bug rather than a gap.
 - A new language is one file plus a line in the pull request saying who reviewed it.
 
 ## Code of conduct

@@ -20,24 +20,345 @@
           "node_id": "Die Knoten-ID des Receivers, zu sehen im Einrichtungsbildschirm des Plugins. Sie besteht aus dem Boxtyp und den letzten sechs Stellen der MAC-Adresse, zum Beispiel `vuuno4kse_005301`.",
           "name": "Wie dieser Receiver in Home Assistant heißen soll. Bleibt das Feld leer, wird der vom Plugin gemeldete Name verwendet."
         }
+      },
+      "reconfigure": {
+        "title": "Ändern, wo dieser Receiver veröffentlicht",
+        "description": "Verwende dies, nachdem die Knoten-ID oder das Basisthema im Einrichtungsbildschirm des Plugins geändert wurde.\n\nEine geänderte Knoten-ID ändert die Identität des Receivers: Seine Entitäten werden mit neuen IDs neu aufgebaut, und der Verlauf bleibt beim alten Gerät, das entfernt wird. Wird nur das Basisthema oder der Name geändert, bleibt alles erhalten.",
+        "data": {
+          "base_topic": "Basisthema",
+          "node_id": "Knoten-ID",
+          "name": "Name"
+        },
+        "data_description": {
+          "base_topic": "Das Präfix, unter dem der Receiver veröffentlicht, so wie Home Assistant es am Broker sieht.",
+          "node_id": "Die Knoten-ID des Receivers, zu sehen im Einrichtungsbildschirm des Plugins.",
+          "name": "Wie dieser Receiver in Home Assistant heißen soll."
+        }
       }
     },
     "error": {
       "no_ack": "Der Receiver hat den Moduswechsel nicht bestätigt. Prüfe, ob das Plugin läuft und ob sein Broker-Zugang in die Themen dieses Knotens schreiben darf.",
       "not_found": "Unter diesem Thema wurde kein Receiver gefunden. Prüfe Basisthema und Knoten-ID im Einrichtungsbildschirm des Plugins.",
-      "invalid_topic": "Das ist kein brauchbares Thema. Basisthema und Knoten-ID dürfen die Platzhalter `+` und `#` nicht enthalten."
+      "invalid_topic": "Das ist kein brauchbares Thema. Basisthema und Knoten-ID dürfen die Platzhalter `+` und `#` nicht enthalten.",
+      "already_configured": "Ein anderer Receiver ist bereits mit dieser Knoten-ID eingerichtet."
     },
     "abort": {
       "already_configured": "Gerät ist bereits konfiguriert",
       "already_in_progress": "Dieser Receiver wird bereits hinzugefügt.",
       "mqtt_unavailable": "Die MQTT-Integration ist nicht verfügbar. Richte sie zuerst ein und füge dann den Receiver hinzu.",
       "not_enigma2_announcement": "Diese Nachricht ist keine Anmeldung der Enigma2 MQTT Bridge.",
-      "retracted": "Der Receiver hat seine Anmeldung zurückgezogen."
+      "retracted": "Der Receiver hat seine Anmeldung zurückgezogen.",
+      "reconfigure_successful": "Der Receiver wurde aktualisiert."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Receiver-Optionen",
+        "description": "Der Receiver meldet die MAC-Adresse {mac}. Magic Packets gehen dorthin, sofern unten keine andere angegeben wird.",
+        "data": {
+          "dangerous_buttons": "Schaltflächen für Tiefschlaf und Neustart anzeigen",
+          "wol_mac": "MAC-Adresse für Wake-on-LAN",
+          "bouquets": "Angebotene Bouquets"
+        },
+        "data_description": {
+          "dangerous_buttons": "Der Tiefschlaf nimmt den Receiver vom Netz, bis ihn ein Magic Packet weckt, und der Neustart unterbricht, was er gerade tut. Beide sind voreingestellt ausgeblendet, damit sie auf einem gemeinsamen Dashboard nicht einen Fehlgriff neben der Lautstärke liegen. Das Plugin verweigert beide während einer Aufnahme, unabhängig von dieser Einstellung.",
+          "wol_mac": "Leer lassen, um die vom Receiver gemeldete Adresse zu verwenden. Setze sie, wenn der Receiver eine andere Schnittstelle meldet als die angeschlossene — eine Box im WLAN antwortet nicht auf ein Magic Packet an ihren Kabelanschluss.",
+          "bouquets": "Welche Bouquets die Senderliste und der Medienbrowser anbieten. Leer lassen für alle Bouquets, die der Receiver veröffentlicht."
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "recording": {
+        "name": "Aufnahme"
+      },
+      "recording_disk": {
+        "name": "Aufnahmefestplatte"
+      }
+    },
+    "button": {
+      "deep_standby": {
+        "name": "Tiefschlaf"
+      },
+      "restart_gui": {
+        "name": "GUI neu starten"
+      },
+      "reboot": {
+        "name": "Neustart"
+      },
+      "wake": {
+        "name": "Wecken (WoL)"
+      },
+      "screenshot": {
+        "name": "Bildschirmfoto"
+      },
+      "refresh_discovery": {
+        "name": "Discovery auffrischen"
+      }
+    },
+    "event": {
+      "key": {
+        "name": "Fernbedienungstaste"
+      }
+    },
+    "image": {
+      "screen": {
+        "name": "Bildschirm"
+      }
+    },
+    "notify": {
+      "osd": {
+        "name": "OSD"
+      }
+    },
+    "number": {
+      "volume": {
+        "name": "Lautstärke"
+      }
+    },
+    "remote": {
+      "remote": {
+        "name": "Fernbedienung"
+      }
+    },
+    "sensor": {
+      "channel": {
+        "name": "Sender"
+      },
+      "program": {
+        "name": "Sendung"
+      },
+      "next_program": {
+        "name": "Nächste Sendung"
+      },
+      "active_recordings": {
+        "name": "Laufende Aufnahmen"
+      },
+      "next_timer": {
+        "name": "Nächster Timer"
+      },
+      "snr": {
+        "name": "SNR"
+      },
+      "agc": {
+        "name": "AGC"
+      },
+      "ber": {
+        "name": "BER"
+      },
+      "uptime": {
+        "name": "Laufzeit"
+      }
+    },
+    "switch": {
+      "power": {
+        "name": "Betrieb"
+      },
+      "mute": {
+        "name": "Stummschaltung"
+      }
+    },
+    "update": {
+      "plugin": {
+        "name": "MQTT-Bridge-Plugin"
+      }
+    }
+  },
+  "device_automation": {
+    "trigger_type": {
+      "red_short": "Rote Taste gedrückt",
+      "red_long": "Rote Taste gehalten",
+      "green_short": "Grüne Taste gedrückt",
+      "green_long": "Grüne Taste gehalten",
+      "yellow_short": "Gelbe Taste gedrückt",
+      "yellow_long": "Gelbe Taste gehalten",
+      "blue_short": "Blaue Taste gedrückt",
+      "blue_long": "Blaue Taste gehalten"
+    }
+  },
+  "services": {
+    "zap": {
+      "name": "Umschalten",
+      "description": "Schaltet den Receiver auf einen Sender um, über die Service-Referenz oder den Namen. Gib genau eines von beiden an.",
+      "fields": {
+        "sref": {
+          "name": "Service-Referenz",
+          "description": "Die Service-Referenz des Senders, samt abschließendem Doppelpunkt. Diese Kennung ändert sich nie."
+        },
+        "name": {
+          "name": "Sendername",
+          "description": "Der Name des Senders, wie ihn das Bouquet schreibt. Der Receiver lehnt ab, wenn mehr als ein Sender in seinen Bouquets so heißt."
+        }
+      }
+    },
+    "send_key": {
+      "name": "Taste senden",
+      "description": "Sendet eine Fernbedienungstaste an den Receiver, als hätte jemand sie gedrückt.",
+      "fields": {
+        "key": {
+          "name": "Taste",
+          "description": "Der Tastenname, etwa `KEY_RED`. `red` funktioniert ebenfalls."
+        },
+        "long": {
+          "name": "Langer Druck",
+          "description": "Als gehaltene Taste senden statt als kurzer Druck."
+        }
+      }
+    },
+    "message": {
+      "name": "Meldung anzeigen",
+      "description": "Zeigt ein Fenster auf dem Fernseher. Der Receiver schneidet den Text bei 500 Zeichen ab.",
+      "fields": {
+        "text": {
+          "name": "Text",
+          "description": "Was das Fenster sagt."
+        },
+        "type": {
+          "name": "Art",
+          "description": "Symbol und Farbe des Fensters."
+        },
+        "timeout": {
+          "name": "Anzeigedauer",
+          "description": "Wie lange das Fenster stehen bleibt, in Sekunden."
+        }
+      }
+    },
+    "add_timer": {
+      "name": "Timer hinzufügen",
+      "description": "Legt einen Aufnahmetimer an, entweder aus einem EPG-Ereignis oder aus Start- und Endzeit. Gib die Ereignis-ID an oder beide Zeiten — nicht beide Formen.",
+      "fields": {
+        "sref": {
+          "name": "Service-Referenz",
+          "description": "Der aufzunehmende Sender."
+        },
+        "event_id": {
+          "name": "Ereignis-ID",
+          "description": "Das aufzunehmende EPG-Ereignis. Bevorzugt: Der Receiver löst das Ereignis selbst auf, der Timer bekommt also den Sendungsnamen und die eingestellten Vor- und Nachlaufzeiten."
+        },
+        "begin": {
+          "name": "Beginn",
+          "description": "Wann die Aufnahme startet, bei einem manuellen Zeitfenster."
+        },
+        "end": {
+          "name": "Ende",
+          "description": "Wann die Aufnahme endet, bei einem manuellen Zeitfenster."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Wie die Aufnahme heißen soll, bei einem manuellen Zeitfenster."
+        }
+      }
+    },
+    "delete_timer": {
+      "name": "Timer löschen",
+      "description": "Löscht einen Aufnahmetimer. enigma2 erkennt einen Timer an Sender, Beginn und Ende, daher werden alle drei gebraucht.",
+      "fields": {
+        "sref": {
+          "name": "Service-Referenz",
+          "description": "Der Sender des Timers."
+        },
+        "begin": {
+          "name": "Beginn",
+          "description": "Die Startzeit des Timers."
+        },
+        "end": {
+          "name": "Ende",
+          "description": "Die Endzeit des Timers."
+        }
+      }
+    },
+    "record": {
+      "name": "Aufnehmen",
+      "description": "Startet oder stoppt eine Sofortaufnahme dessen, was gerade läuft.",
+      "fields": {
+        "action": {
+          "name": "Aktion",
+          "description": "Aufnahme starten oder stoppen."
+        }
+      }
+    },
+    "screenshot": {
+      "name": "Bildschirmfoto aufnehmen",
+      "description": "Nimmt auf, was gerade auf dem Fernseher läuft, und veröffentlicht es — das frischt die Bild-Entität Bildschirm auf."
+    },
+    "set_ha_mode": {
+      "name": "Home-Assistant-Modus setzen",
+      "description": "Schaltet um, wie sich der Receiver darstellt: über diese Integration, über MQTT-Discovery oder gar nicht. Ein Wechsel aus dem Integrationsmodus lässt die Entitäten dieser Integration ohne Aktualisierung zurück.",
+      "fields": {
+        "mode": {
+          "name": "Modus",
+          "description": "In welchem Modus das Plugin laufen soll."
+        }
+      }
+    },
+    "get_epg_grid": {
+      "name": "EPG-Raster abrufen",
+      "description": "Gibt zurück, was läuft — je Bouquet, so wie der Receiver es zuletzt veröffentlicht hat. Für Templates und Skripte; bewusst kein Entitätsattribut, denn ein Raster ist zehntausende Zeichen je Bouquet und landete bei jeder Auffrischung in der Recorder-Datenbank.",
+      "fields": {
+        "bouquet": {
+          "name": "Bouquet",
+          "description": "Ein Bouquet, über Name oder Kurzform. Leer lassen, um alle veröffentlichten zurückzugeben."
+        }
+      }
+    }
+  },
+  "selector": {
+    "message_type": {
+      "options": {
+        "info": "Information",
+        "warning": "Warnung",
+        "error": "Fehler"
+      }
+    },
+    "record_action": {
+      "options": {
+        "start": "Starten",
+        "stop": "Stoppen"
+      }
+    },
+    "ha_mode": {
+      "options": {
+        "discovery": "MQTT-Discovery",
+        "integration": "Diese Integration",
+        "off": "Keines von beiden"
+      }
     }
   },
   "exceptions": {
     "mqtt_not_available": {
       "message": "Die MQTT-Integration ist nicht verfügbar, der Receiver ist daher nicht erreichbar."
+    },
+    "command_failed": {
+      "message": "Der Receiver hat `{command}` abgelehnt: {error}"
+    },
+    "command_timeout": {
+      "message": "Der Receiver hat `{command}` nicht ausgeführt. Prüfe, ob er eingeschaltet ist und das Plugin läuft."
+    },
+    "zap_needs_one": {
+      "message": "Gib entweder eine Service-Referenz oder einen Sendernamen an, nicht beides und nicht keines."
+    },
+    "timer_needs_event_or_window": {
+      "message": "Ein Timer braucht entweder eine Ereignis-ID oder Start- und Endzeit."
+    },
+    "timer_takes_one_form": {
+      "message": "Gib eine Ereignis-ID oder Start- und Endzeit an, nicht beides."
+    },
+    "unknown_bouquet": {
+      "message": "Der Receiver hat kein EPG-Raster für das Bouquet {bouquet} veröffentlicht."
+    },
+    "unknown_channel": {
+      "message": "In den Bouquets dieses Receivers gibt es keinen Sender namens {channel}."
+    },
+    "unsupported_media_type": {
+      "message": "Ein Receiver kann einen Sender wiedergeben, nicht {media_type}."
+    },
+    "wake_on_lan_unavailable": {
+      "message": "Die Integration Wake on LAN ist nicht eingerichtet, es kann also kein Magic Packet gesendet werden. Füge sie in den Einstellungen hinzu und versuche es erneut."
+    },
+    "no_mac": {
+      "message": "Dieser Receiver hat keine MAC-Adresse gemeldet, es gibt also kein Ziel für ein Magic Packet. Trage eine in den Optionen der Integration ein."
     }
   }
 }

@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The receiver as a media player.** What is on and what is next, the channel list of the
+  bouquets you choose, browsing bouquet by bouquet with the box's own picons, volume, mute,
+  channel up and down, and the last screen grab as the artwork. It stays usable while the box
+  is unreachable, because that is when you want to wake it — and turning it on then sends a
+  Wake-on-LAN packet instead of a message the box cannot hear.
+- **A remote.** `remote.send_command` takes `KEY_RED` or just `red`, holds a key when you ask
+  it to, and sends a sequence with a pause between the presses.
+- **A message on the television.** `notify.send_message` puts a popup on the screen.
+- **Every remote key as an event**, with short and long presses told apart, and the four
+  colour keys offered in the automation editor as device triggers on the receiver.
+- **Sensors** for the channel, the programme now and next, running recordings and the next
+  timer — and, for when something is wrong, signal quality and uptime, switched off until you
+  ask for them.
+- **Binary sensors** for whether a recording is running and whether the recording disk is
+  still mounted, which is the failure that otherwise goes unnoticed for weeks.
+- **Switches** for standby and mute, a **volume slider**, and **buttons** for a GUI restart, a
+  screen grab, a Wake-on-LAN packet and a discovery refresh. Deep standby and reboot are there
+  too, hidden until you turn them on, so neither sits one mis-tap from the volume.
+- **An image** of the last screen grab, and an **update entity** that says when the receiver
+  runs an older plugin than this release expects — the first thing to check when something is
+  missing. It cannot install anything yet.
+- **Nine actions** — `zap`, `send_key`, `message`, `add_timer`, `delete_timer`, `record`,
+  `screenshot`, `set_ha_mode` and `get_epg_grid` — each aimed at a receiver, a device or an
+  area. They wait for the receiver to actually do the thing and report what it says when it
+  refuses, rather than reporting success for a message that was merely sent.
+- **Options**: whether the deep standby and reboot buttons appear, which address a Wake-on-LAN
+  packet goes to, and which bouquets are worth browsing. Saving them takes effect at once.
+- **Reconfigure**, for following a receiver whose node ID or base topic was changed on its own
+  setup screen.
+- **Polish and German** names for every entity, action and trigger. German is still a draft
+  and would welcome a native speaker.
+
+### Changed
+
+- **The diagnostics download now carries the last payload of every state topic.** The screen
+  grab appears as a size and a timestamp, the channel list as its shape, and the remote keys
+  not at all: a bug report should answer a question, not describe a household.
+
 ## [0.1.0] - 2026-09-16
 
 The first release. It sets a receiver up and gives it a device page; the entities and

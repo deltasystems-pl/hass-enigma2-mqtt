@@ -1,0 +1,164 @@
+# Every action targets the receiver's media player, which is how a device, an area or
+# an entity all resolve to the same box. Names and descriptions live in strings.json.
+#
+# The target block is repeated rather than written once behind a YAML anchor: hassfest
+# reads this file as a map of service names, and an anchor key would be a service that
+# does not exist.
+
+zap:
+  target:
+    entity:
+      - integration: enigma2_mqtt
+        domain: media_player
+  fields:
+    sref:
+      example: "1:0:19:283D:3FB:1:C00000:0:0:0:"
+      selector:
+        text:
+    name:
+      example: "TVP 1 HD"
+      selector:
+        text:
+
+send_key:
+  target:
+    entity:
+      - integration: enigma2_mqtt
+        domain: media_player
+  fields:
+    key:
+      required: true
+      example: "KEY_RED"
+      selector:
+        text:
+    long:
+      default: false
+      selector:
+        boolean:
+
+message:
+  target:
+    entity:
+      - integration: enigma2_mqtt
+        domain: media_player
+  fields:
+    text:
+      required: true
+      example: "Pralka skończyła"
+      selector:
+        text:
+          multiline: true
+    type:
+      default: info
+      selector:
+        select:
+          translation_key: message_type
+          options:
+            - info
+            - warning
+            - error
+    timeout:
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 300
+          unit_of_measurement: s
+          mode: box
+
+add_timer:
+  target:
+    entity:
+      - integration: enigma2_mqtt
+        domain: media_player
+  fields:
+    sref:
+      required: true
+      example: "1:0:19:283D:3FB:1:C00000:0:0:0:"
+      selector:
+        text:
+    event_id:
+      example: 27431
+      selector:
+        number:
+          min: 0
+          max: 4294967295
+          mode: box
+    begin:
+      selector:
+        datetime:
+    end:
+      selector:
+        datetime:
+    name:
+      example: "Wiadomości"
+      selector:
+        text:
+
+delete_timer:
+  target:
+    entity:
+      - integration: enigma2_mqtt
+        domain: media_player
+  fields:
+    sref:
+      required: true
+      example: "1:0:19:283D:3FB:1:C00000:0:0:0:"
+      selector:
+        text:
+    begin:
+      required: true
+      selector:
+        datetime:
+    end:
+      required: true
+      selector:
+        datetime:
+
+record:
+  target:
+    entity:
+      - integration: enigma2_mqtt
+        domain: media_player
+  fields:
+    action:
+      required: true
+      selector:
+        select:
+          translation_key: record_action
+          options:
+            - start
+            - stop
+
+screenshot:
+  target:
+    entity:
+      - integration: enigma2_mqtt
+        domain: media_player
+
+set_ha_mode:
+  target:
+    entity:
+      - integration: enigma2_mqtt
+        domain: media_player
+  fields:
+    mode:
+      required: true
+      selector:
+        select:
+          translation_key: ha_mode
+          options:
+            - "discovery"
+            - "integration"
+            - "off"
+
+get_epg_grid:
+  target:
+    entity:
+      - integration: enigma2_mqtt
+        domain: media_player
+  fields:
+    bouquet:
+      example: "Ulubione TV"
+      selector:
+        text:

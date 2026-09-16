@@ -20,24 +20,345 @@
           "node_id": "Identyfikator dekodera, widoczny na ekranie ustawień wtyczki. Składa się z typu dekodera i sześciu ostatnich znaków adresu MAC, na przykład `vuuno4kse_005301`.",
           "name": "Jak nazwać ten dekoder w Home Assistancie. Pozostawione puste — użyta zostanie nazwa zgłoszona przez wtyczkę."
         }
+      },
+      "reconfigure": {
+        "title": "Zmień, gdzie publikuje ten dekoder",
+        "description": "Użyj tego po zmianie identyfikatora dekodera lub tematu bazowego na ekranie ustawień wtyczki.\n\nZmiana identyfikatora zmienia tożsamość dekodera: jego encje powstaną na nowo z nowymi identyfikatorami, a historia zostanie przy starym urządzeniu, które zostanie usunięte. Zmiana samego tematu bazowego albo nazwy niczego nie narusza.",
+        "data": {
+          "base_topic": "Temat bazowy",
+          "node_id": "Identyfikator dekodera",
+          "name": "Nazwa"
+        },
+        "data_description": {
+          "base_topic": "Przedrostek, pod którym dekoder publikuje — tak, jak widzi go Home Assistant na brokerze.",
+          "node_id": "Identyfikator dekodera, widoczny na ekranie ustawień wtyczki.",
+          "name": "Jak nazwać ten dekoder w Home Assistancie."
+        }
       }
     },
     "error": {
       "no_ack": "Dekoder nie odpowiedział na przełączenie trybu. Sprawdź, czy wtyczka działa i czy jej konto na brokerze ma prawo zapisu w tematach tego dekodera.",
       "not_found": "Nie znaleziono dekodera pod tym tematem. Sprawdź temat bazowy i identyfikator dekodera na ekranie ustawień wtyczki.",
-      "invalid_topic": "To nie jest poprawny temat. Temat bazowy ani identyfikator dekodera nie mogą zawierać znaków wieloznacznych `+` i `#`."
+      "invalid_topic": "To nie jest poprawny temat. Temat bazowy ani identyfikator dekodera nie mogą zawierać znaków wieloznacznych `+` i `#`.",
+      "already_configured": "Inny dekoder jest już skonfigurowany z tym identyfikatorem."
     },
     "abort": {
       "already_configured": "Urządzenie jest już skonfigurowane",
       "already_in_progress": "Ten dekoder jest już dodawany.",
       "mqtt_unavailable": "Integracja MQTT jest niedostępna. Skonfiguruj ją najpierw, a potem dodaj dekoder.",
       "not_enigma2_announcement": "Ta wiadomość nie jest zgłoszeniem wtyczki Enigma2 MQTT Bridge.",
-      "retracted": "Dekoder wycofał swoje zgłoszenie."
+      "retracted": "Dekoder wycofał swoje zgłoszenie.",
+      "reconfigure_successful": "Dekoder został zaktualizowany."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opcje dekodera",
+        "description": "Dekoder zgłasza adres MAC {mac}. Pakiety budzące trafią tam, o ile poniżej nie zostanie podany inny.",
+        "data": {
+          "dangerous_buttons": "Pokaż przyciski głębokiego uśpienia i restartu",
+          "wol_mac": "Adres MAC do Wake-on-LAN",
+          "bouquets": "Bukiety do wyboru"
+        },
+        "data_description": {
+          "dangerous_buttons": "Głębokie uśpienie odcina dekoder od sieci, dopóki nie obudzi go pakiet budzący, a restart przerywa to, co dekoder właśnie robi. Oba są domyślnie ukryte, żeby na wspólnym panelu nie leżały o jedno nieuważne dotknięcie od głośności. Wtyczka i tak odmawia obu podczas nagrywania, niezależnie od tego ustawienia.",
+          "wol_mac": "Puste — użyty zostanie adres zgłaszany przez dekoder. Wpisz własny, jeżeli dekoder zgłasza inny interfejs niż ten podłączony: pudełko na Wi-Fi nie odpowie na pakiet wysłany na port kablowy.",
+          "bouquets": "Które bukiety trafiają na listę kanałów i do przeglądarki mediów. Puste — wszystkie, które publikuje dekoder."
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "recording": {
+        "name": "Nagrywanie"
+      },
+      "recording_disk": {
+        "name": "Dysk nagrań"
+      }
+    },
+    "button": {
+      "deep_standby": {
+        "name": "Głębokie uśpienie"
+      },
+      "restart_gui": {
+        "name": "Restart GUI"
+      },
+      "reboot": {
+        "name": "Restart"
+      },
+      "wake": {
+        "name": "Obudź (WoL)"
+      },
+      "screenshot": {
+        "name": "Zrzut ekranu"
+      },
+      "refresh_discovery": {
+        "name": "Odśwież discovery"
+      }
+    },
+    "event": {
+      "key": {
+        "name": "Pilot – klawisz"
+      }
+    },
+    "image": {
+      "screen": {
+        "name": "Ekran"
+      }
+    },
+    "notify": {
+      "osd": {
+        "name": "Ekran OSD"
+      }
+    },
+    "number": {
+      "volume": {
+        "name": "Głośność"
+      }
+    },
+    "remote": {
+      "remote": {
+        "name": "Pilot"
+      }
+    },
+    "sensor": {
+      "channel": {
+        "name": "Kanał"
+      },
+      "program": {
+        "name": "Program"
+      },
+      "next_program": {
+        "name": "Następny program"
+      },
+      "active_recordings": {
+        "name": "Aktywne nagrania"
+      },
+      "next_timer": {
+        "name": "Następny timer"
+      },
+      "snr": {
+        "name": "SNR"
+      },
+      "agc": {
+        "name": "AGC"
+      },
+      "ber": {
+        "name": "BER"
+      },
+      "uptime": {
+        "name": "Czas pracy"
+      }
+    },
+    "switch": {
+      "power": {
+        "name": "Zasilanie"
+      },
+      "mute": {
+        "name": "Wyciszenie"
+      }
+    },
+    "update": {
+      "plugin": {
+        "name": "Wtyczka MQTT Bridge"
+      }
+    }
+  },
+  "device_automation": {
+    "trigger_type": {
+      "red_short": "Naciśnięto czerwony przycisk",
+      "red_long": "Przytrzymano czerwony przycisk",
+      "green_short": "Naciśnięto zielony przycisk",
+      "green_long": "Przytrzymano zielony przycisk",
+      "yellow_short": "Naciśnięto żółty przycisk",
+      "yellow_long": "Przytrzymano żółty przycisk",
+      "blue_short": "Naciśnięto niebieski przycisk",
+      "blue_long": "Przytrzymano niebieski przycisk"
+    }
+  },
+  "services": {
+    "zap": {
+      "name": "Przełącz kanał",
+      "description": "Przełącza dekoder na kanał — po referencji usługi albo po nazwie. Podaj dokładnie jedno z dwóch.",
+      "fields": {
+        "sref": {
+          "name": "Referencja usługi",
+          "description": "Referencja usługi kanału, razem z końcowym dwukropkiem. To identyfikator, który się nie zmienia."
+        },
+        "name": {
+          "name": "Nazwa kanału",
+          "description": "Nazwa kanału tak, jak zapisano ją w bukiecie. Dekoder odmówi, gdy w jego bukietach jest więcej niż jeden kanał o tej nazwie."
+        }
+      }
+    },
+    "send_key": {
+      "name": "Wyślij klawisz",
+      "description": "Wysyła do dekodera klawisz pilota — tak, jakby ktoś go nacisnął.",
+      "fields": {
+        "key": {
+          "name": "Klawisz",
+          "description": "Nazwa klawisza, na przykład `KEY_RED`. `red` też zadziała."
+        },
+        "long": {
+          "name": "Długie naciśnięcie",
+          "description": "Wyślij jako przytrzymanie, a nie krótkie naciśnięcie."
+        }
+      }
+    },
+    "message": {
+      "name": "Pokaż komunikat",
+      "description": "Wyświetla na telewizorze okienko z komunikatem. Dekoder ucina tekst po 500 znakach.",
+      "fields": {
+        "text": {
+          "name": "Tekst",
+          "description": "Treść komunikatu."
+        },
+        "type": {
+          "name": "Rodzaj",
+          "description": "Ikona i kolor okienka."
+        },
+        "timeout": {
+          "name": "Czas wyświetlania",
+          "description": "Jak długo okienko zostaje na ekranie, w sekundach."
+        }
+      }
+    },
+    "add_timer": {
+      "name": "Dodaj timer",
+      "description": "Dodaje timer nagrywania — z wydarzenia EPG albo z godziny początku i końca. Podaj identyfikator wydarzenia albo obie godziny, nie obie formy naraz.",
+      "fields": {
+        "sref": {
+          "name": "Referencja usługi",
+          "description": "Kanał do nagrania."
+        },
+        "event_id": {
+          "name": "Identyfikator wydarzenia",
+          "description": "Wydarzenie EPG do nagrania. Lepsza droga: dekoder sam je rozwiąże, więc timer dostanie nazwę audycji i marginesy ustawione w dekoderze."
+        },
+        "begin": {
+          "name": "Początek",
+          "description": "Kiedy zacząć nagrywać, przy ręcznym oknie czasowym."
+        },
+        "end": {
+          "name": "Koniec",
+          "description": "Kiedy skończyć nagrywać, przy ręcznym oknie czasowym."
+        },
+        "name": {
+          "name": "Nazwa",
+          "description": "Jak nazwać nagranie, przy ręcznym oknie czasowym."
+        }
+      }
+    },
+    "delete_timer": {
+      "name": "Usuń timer",
+      "description": "Usuwa timer nagrywania. enigma2 rozpoznaje timer po kanale oraz godzinie początku i końca, więc potrzebne są wszystkie trzy.",
+      "fields": {
+        "sref": {
+          "name": "Referencja usługi",
+          "description": "Kanał timera."
+        },
+        "begin": {
+          "name": "Początek",
+          "description": "Godzina początku timera."
+        },
+        "end": {
+          "name": "Koniec",
+          "description": "Godzina końca timera."
+        }
+      }
+    },
+    "record": {
+      "name": "Nagrywaj",
+      "description": "Zaczyna albo kończy natychmiastowe nagrywanie tego, co jest właśnie oglądane.",
+      "fields": {
+        "action": {
+          "name": "Czynność",
+          "description": "Zacznij albo zakończ nagrywanie."
+        }
+      }
+    },
+    "screenshot": {
+      "name": "Zrób zrzut ekranu",
+      "description": "Robi zdjęcie tego, co jest teraz na telewizorze, i publikuje je — to właśnie odświeża encję obrazu Ekran."
+    },
+    "set_ha_mode": {
+      "name": "Ustaw tryb Home Assistanta",
+      "description": "Przełącza sposób, w jaki dekoder się przedstawia: przez tę integrację, przez wykrywanie MQTT albo wcale. Wyjście z trybu integracji zostawia encje tej integracji bez niczego, co by je aktualizowało.",
+      "fields": {
+        "mode": {
+          "name": "Tryb",
+          "description": "W którym trybie ma pracować wtyczka."
+        }
+      }
+    },
+    "get_epg_grid": {
+      "name": "Pobierz siatkę EPG",
+      "description": "Zwraca program telewizyjny — bukiet po bukiecie — w postaci, w jakiej dekoder go ostatnio opublikował. Do użycia w szablonie albo skrypcie; celowo nie jest atrybutem encji, bo siatka to dziesiątki kilobajtów na bukiet i przy każdym odświeżeniu trafiałaby do bazy rejestratora.",
+      "fields": {
+        "bouquet": {
+          "name": "Bukiet",
+          "description": "Jeden bukiet — po nazwie albo po skrócie. Puste — zwracane są wszystkie opublikowane."
+        }
+      }
+    }
+  },
+  "selector": {
+    "message_type": {
+      "options": {
+        "info": "Informacja",
+        "warning": "Ostrzeżenie",
+        "error": "Błąd"
+      }
+    },
+    "record_action": {
+      "options": {
+        "start": "Zacznij",
+        "stop": "Zakończ"
+      }
+    },
+    "ha_mode": {
+      "options": {
+        "discovery": "Wykrywanie MQTT",
+        "integration": "Ta integracja",
+        "off": "Żadne z nich"
+      }
     }
   },
   "exceptions": {
     "mqtt_not_available": {
       "message": "Integracja MQTT jest niedostępna, więc nie można połączyć się z dekoderem."
+    },
+    "command_failed": {
+      "message": "Dekoder odmówił wykonania `{command}`: {error}"
+    },
+    "command_timeout": {
+      "message": "Dekoder nie wykonał `{command}`. Sprawdź, czy jest włączony i czy wtyczka działa."
+    },
+    "zap_needs_one": {
+      "message": "Podaj albo referencję usługi, albo nazwę kanału — nie oba i nie żadne."
+    },
+    "timer_needs_event_or_window": {
+      "message": "Timer wymaga albo identyfikatora wydarzenia, albo godziny początku i końca."
+    },
+    "timer_takes_one_form": {
+      "message": "Podaj identyfikator wydarzenia albo godziny początku i końca — nie oba naraz."
+    },
+    "unknown_bouquet": {
+      "message": "Dekoder nie opublikował siatki EPG dla bukietu {bouquet}."
+    },
+    "unknown_channel": {
+      "message": "W bukietach tego dekodera nie ma kanału o nazwie {channel}."
+    },
+    "unsupported_media_type": {
+      "message": "Dekoder może odtworzyć kanał, a nie {media_type}."
+    },
+    "wake_on_lan_unavailable": {
+      "message": "Integracja Wake on LAN nie jest skonfigurowana, więc nie ma jak wysłać pakietu budzącego. Dodaj ją w Ustawieniach i spróbuj ponownie."
+    },
+    "no_mac": {
+      "message": "Ten dekoder nie zgłosił adresu MAC, więc nie ma dokąd wysłać pakietu budzącego. Ustaw adres w opcjach integracji."
     }
   }
 }

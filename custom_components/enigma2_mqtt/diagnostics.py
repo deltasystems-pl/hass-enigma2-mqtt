@@ -11,6 +11,12 @@ the same MAC address. It is the key every topic in a report is named after, and 
 diagnostics file in which the topics cannot be matched to the box would answer nothing.
 Six hex digits of a MAC are not the MAC, and they identify a receiver model far more
 than a household.
+
+Two topics are summarised rather than included. `screen` is a JPEG of what is on the
+television: the size and the time it was taken answer every question a bug report asks
+of it, and the picture itself answers none of them. `key` is what somebody pressed on
+the remote a moment ago — it is not state, it has no lasting value here, and a log of
+household behaviour is not something to attach to a public issue by accident.
 """
 
 from __future__ import annotations
@@ -42,6 +48,7 @@ async def async_get_config_entry_diagnostics(
 ) -> dict[str, Any]:
     """Return diagnostics for one box."""
     box = entry.runtime_data
+    state = box.state
     device = dr.async_get(hass).async_get_device_by_identifier(
         (DOMAIN, box.node_id), entry.entry_id
     )
@@ -59,9 +66,37 @@ async def async_get_config_entry_diagnostics(
             "base_topic": box.base_topic,
             "available": box.available,
             "capabilities": box.capabilities,
+            "topics_seen": sorted(box.seen),
+            "topic_updates": dict(sorted(box.updates.items())),
         },
-        "announcement": dict(box.announcement),
-        "info": dict(box.info),
+        "announcement": dict(state.announcement),
+        "info": dict(state.info),
+        "topics": {
+            "power": state.power,
+            "service": state.service,
+            "epg": state.epg,
+            "tuner": state.tuner,
+            "recording": state.recording,
+            "timers": state.timers,
+            "volume": state.volume,
+            "hdd": state.hdd,
+            "channels": _summarise_channels(state.channels),
+            "last_error": state.last_error,
+            "screen": {
+                "bytes": len(state.screen) if state.screen else 0,
+                "updated": None
+                if state.screen_updated is None
+                else state.screen_updated.isoformat(),
+            },
+            "epg_grid": {
+                slug: {
+                    "bouquet": grid.get("bouquet"),
+                    "generated": grid.get("generated"),
+                    "channels": len(grid.get("channels") or []),
+                }
+                for slug, grid in sorted(state.epg_grid.items())
+            },
+        },
         "device": None
         if device is None
         else {
@@ -75,3 +110,29 @@ async def async_get_config_entry_diagnostics(
         },
     }
     return async_redact_data(data, TO_REDACT)
+
+
+def _summarise_channels(channels: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Return the channel list as its shape rather than its contents.
+
+    A full channel list is a few hundred entries and says nothing a bug report needs:
+    what matters is which bouquets exist, how many channels each has, and when the box
+    last built it. It is also, in aggregate, a description of a household's television
+    subscription.
+    """
+    if not channels:
+        return None
+    bouquets = channels.get("bouquets")
+    return {
+        "generated": channels.get("generated"),
+        "bouquets": [
+            {
+                "name": bouquet.get("name"),
+                "channels": len(bouquet.get("channels") or []),
+            }
+            for bouquet in bouquets
+            if isinstance(bouquet, dict)
+        ]
+        if isinstance(bouquets, list)
+        else None,
+    }

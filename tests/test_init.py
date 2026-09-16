@@ -28,26 +28,8 @@ from .conftest import (
     IP,
     NODE_ID,
     PLUGIN_VERSION,
+    async_setup_box,
 )
-
-
-@pytest.fixture
-def expected_lingering_timers() -> bool:
-    """Tolerate the MQTT integration's own periodic timer.
-
-    `mqtt_mock` sets up the real MQTT integration, which schedules
-    `MQTT._async_start_misc_periodic` and does not cancel it on teardown. Home
-    Assistant's own MQTT tests make the same allowance; it says nothing about this
-    integration.
-    """
-    return True
-
-
-async def _setup(hass: HomeAssistant, entry: MockConfigEntry) -> None:
-    """Add the entry to Home Assistant and set it up."""
-    entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
 
 
 async def test_setup_registers_the_device(
@@ -57,7 +39,7 @@ async def test_setup_registers_the_device(
     config_entry: MockConfigEntry,
 ) -> None:
     """The retained announcement becomes a device page."""
-    await _setup(hass, config_entry)
+    await async_setup_box(hass, config_entry)
 
     assert config_entry.state is ConfigEntryState.LOADED
 
@@ -78,7 +60,7 @@ async def test_setup_without_the_box_still_registers_the_device(
     config_entry: MockConfigEntry
 ) -> None:
     """A box that is off is still a device, so the user can see it is off."""
-    await _setup(hass, config_entry)
+    await async_setup_box(hass, config_entry)
 
     device = dr.async_get(hass).async_get_device_by_identifier(
         (DOMAIN, NODE_ID), config_entry.entry_id
@@ -97,7 +79,7 @@ async def test_availability_follows_the_last_will(
     config_entry: MockConfigEntry,
 ) -> None:
     """`online` and `offline` on the availability topic move the box's flag."""
-    await _setup(hass, config_entry)
+    await async_setup_box(hass, config_entry)
     box = config_entry.runtime_data
 
     assert box.available is True
@@ -118,7 +100,7 @@ async def test_a_new_info_updates_the_device(
     config_entry: MockConfigEntry,
 ) -> None:
     """Updating the plugin on the box updates what the device page reports."""
-    await _setup(hass, config_entry)
+    await async_setup_box(hass, config_entry)
 
     async_fire_mqtt_message(
         hass,
@@ -142,7 +124,7 @@ async def test_a_broken_info_is_ignored(
     config_entry: MockConfigEntry,
 ) -> None:
     """A payload that is not a JSON object does not wipe what is known."""
-    await _setup(hass, config_entry)
+    await async_setup_box(hass, config_entry)
     box = config_entry.runtime_data
 
     async_fire_mqtt_message(hass, INFO_TOPIC, "not json")
@@ -158,7 +140,7 @@ async def test_listeners_hear_every_change(
     config_entry: MockConfigEntry,
 ) -> None:
     """The entity platforms of M3 subscribe to the box, not to MQTT."""
-    await _setup(hass, config_entry)
+    await async_setup_box(hass, config_entry)
     box = config_entry.runtime_data
 
     calls: list[None] = []
@@ -181,7 +163,7 @@ async def test_unload_releases_the_subscriptions(
     config_entry: MockConfigEntry,
 ) -> None:
     """After an unload nothing arriving on the box's topics is acted on."""
-    await _setup(hass, config_entry)
+    await async_setup_box(hass, config_entry)
     box = config_entry.runtime_data
 
     assert await hass.config_entries.async_unload(config_entry.entry_id)
@@ -235,7 +217,7 @@ async def test_removing_a_box_hands_it_back_to_discovery(
     config_entry: MockConfigEntry,
 ) -> None:
     """Adding the box took its discovery entities away; removing it gives them back."""
-    await _setup(hass, config_entry)
+    await async_setup_box(hass, config_entry)
 
     assert await hass.config_entries.async_remove(config_entry.entry_id)
     await hass.async_block_till_done()
@@ -252,7 +234,7 @@ async def test_removing_a_box_survives_a_broker_that_is_gone(
     config_entry: MockConfigEntry,
 ) -> None:
     """A removal is never refused because the box or the broker cannot be reached."""
-    await _setup(hass, config_entry)
+    await async_setup_box(hass, config_entry)
 
     with patch(
         "homeassistant.components.mqtt.async_wait_for_mqtt_client", return_value=False
