@@ -1,3 +1,43 @@
 {
-  "title": "Enigma2 MQTT"
+  "title": "Enigma2 MQTT",
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "confirm": {
+        "title": "Diesen Enigma2-Receiver hinzufügen",
+        "description": "Der Enigma2-Receiver {name} ({boxtype}, {image}) hat sich am Broker angemeldet.\n\nBeim Hinzufügen wechselt der Receiver in den Integrationsmodus: Das Plugin zieht die Entitäten zurück, die es selbst per MQTT-Discovery veröffentlicht, und Home Assistant baut stattdessen das Gerät auf. Der Receiver muss den Wechsel bestätigen, bevor er hinzugefügt wird."
+      },
+      "user": {
+        "title": "Enigma2-Receiver manuell hinzufügen",
+        "description": "Verwende dies, wenn die Anmeldung des Receivers Home Assistant nicht erreicht hat, etwa weil der Receiver über eine MQTT-Brücke veröffentlicht, die das Themenpräfix umschreibt.",
+        "data": {
+          "base_topic": "Basisthema",
+          "node_id": "Knoten-ID",
+          "name": "Name"
+        },
+        "data_description": {
+          "base_topic": "Das Präfix, unter dem der Receiver veröffentlicht, so wie Home Assistant es am Broker sieht. Die Voreinstellung des Plugins ist `enigma2`.",
+          "node_id": "Die Knoten-ID des Receivers, zu sehen im Einrichtungsbildschirm des Plugins. Sie besteht aus dem Boxtyp und den letzten sechs Stellen der MAC-Adresse, zum Beispiel `vuuno4kse_005301`.",
+          "name": "Wie dieser Receiver in Home Assistant heißen soll. Bleibt das Feld leer, wird der vom Plugin gemeldete Name verwendet."
+        }
+      }
+    },
+    "error": {
+      "no_ack": "Der Receiver hat den Moduswechsel nicht bestätigt. Prüfe, ob das Plugin läuft und ob sein Broker-Zugang in die Themen dieses Knotens schreiben darf.",
+      "not_found": "Unter diesem Thema wurde kein Receiver gefunden. Prüfe Basisthema und Knoten-ID im Einrichtungsbildschirm des Plugins.",
+      "invalid_topic": "Das ist kein brauchbares Thema. Basisthema und Knoten-ID dürfen die Platzhalter `+` und `#` nicht enthalten."
+    },
+    "abort": {
+      "already_configured": "Gerät ist bereits konfiguriert",
+      "already_in_progress": "Dieser Receiver wird bereits hinzugefügt.",
+      "mqtt_unavailable": "Die MQTT-Integration ist nicht verfügbar. Richte sie zuerst ein und füge dann den Receiver hinzu.",
+      "not_enigma2_announcement": "Diese Nachricht ist keine Anmeldung der Enigma2 MQTT Bridge.",
+      "retracted": "Der Receiver hat seine Anmeldung zurückgezogen."
+    }
+  },
+  "exceptions": {
+    "mqtt_not_available": {
+      "message": "Die MQTT-Integration ist nicht verfügbar, der Receiver ist daher nicht erreichbar."
+    }
+  }
 }

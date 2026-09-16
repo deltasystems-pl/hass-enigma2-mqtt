@@ -38,6 +38,7 @@ jobs:
           awk -v ver="$VERSION" '
             $0 ~ "^## \\[" ver "\\]" { inside = 1; next }
             inside && /^## \[/ { exit }
+            inside && /^\[/ { exit }
             inside { print }
           ' CHANGELOG.md > release-notes.md
           cat release-notes.md

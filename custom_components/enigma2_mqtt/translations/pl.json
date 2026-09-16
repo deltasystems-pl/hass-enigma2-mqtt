@@ -1,3 +1,43 @@
 {
-  "title": "Enigma2 MQTT"
+  "title": "Enigma2 MQTT",
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "confirm": {
+        "title": "Dodaj ten dekoder Enigma2",
+        "description": "Dekoder Enigma2 {name} ({boxtype}, {image}) zgłosił się na brokerze.\n\nDodanie go przełącza dekoder w tryb integracji: wtyczka wycofuje encje, które sama publikuje przez wykrywanie MQTT, a urządzenie buduje Home Assistant. Dekoder musi potwierdzić przełączenie, zanim zostanie dodany."
+      },
+      "user": {
+        "title": "Dodaj dekoder Enigma2 ręcznie",
+        "description": "Użyj tego, gdy zgłoszenie dekodera nie dotarło do Home Assistanta — na przykład dlatego, że dekoder publikuje przez mostek MQTT, który zmienia przedrostek tematów.",
+        "data": {
+          "base_topic": "Temat bazowy",
+          "node_id": "Identyfikator dekodera",
+          "name": "Nazwa"
+        },
+        "data_description": {
+          "base_topic": "Przedrostek, pod którym dekoder publikuje — tak, jak widzi go Home Assistant na brokerze. Domyślnie wtyczka używa `enigma2`.",
+          "node_id": "Identyfikator dekodera, widoczny na ekranie ustawień wtyczki. Składa się z typu dekodera i sześciu ostatnich znaków adresu MAC, na przykład `vuuno4kse_005301`.",
+          "name": "Jak nazwać ten dekoder w Home Assistancie. Pozostawione puste — użyta zostanie nazwa zgłoszona przez wtyczkę."
+        }
+      }
+    },
+    "error": {
+      "no_ack": "Dekoder nie odpowiedział na przełączenie trybu. Sprawdź, czy wtyczka działa i czy jej konto na brokerze ma prawo zapisu w tematach tego dekodera.",
+      "not_found": "Nie znaleziono dekodera pod tym tematem. Sprawdź temat bazowy i identyfikator dekodera na ekranie ustawień wtyczki.",
+      "invalid_topic": "To nie jest poprawny temat. Temat bazowy ani identyfikator dekodera nie mogą zawierać znaków wieloznacznych `+` i `#`."
+    },
+    "abort": {
+      "already_configured": "Urządzenie jest już skonfigurowane",
+      "already_in_progress": "Ten dekoder jest już dodawany.",
+      "mqtt_unavailable": "Integracja MQTT jest niedostępna. Skonfiguruj ją najpierw, a potem dodaj dekoder.",
+      "not_enigma2_announcement": "Ta wiadomość nie jest zgłoszeniem wtyczki Enigma2 MQTT Bridge.",
+      "retracted": "Dekoder wycofał swoje zgłoszenie."
+    }
+  },
+  "exceptions": {
+    "mqtt_not_available": {
+      "message": "Integracja MQTT jest niedostępna, więc nie można połączyć się z dekoderem."
+    }
+  }
 }

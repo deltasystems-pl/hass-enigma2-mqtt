@@ -12,12 +12,12 @@ by-effect check. The milestone column says when it is due.
 
 | Rule | Done | Milestone |
 |---|---|---|
-| `config-flow` — set up from the UI, no YAML | [ ] | M1 |
-| `config-flow-test-coverage` — the flow is fully tested | [ ] | M1 |
-| `unique-config-entry` — a box cannot be added twice (`node_id`) | [ ] | M1 |
-| `test-before-configure` — the flow fails early when the broker or the box is wrong | [ ] | M1 |
-| `test-before-setup` — setup raises `ConfigEntryNotReady` instead of half-working | [ ] | M1 |
-| `runtime-data` — entry state in `entry.runtime_data`, typed | [ ] | M1 |
+| `config-flow` — set up from the UI, no YAML | [x] | M1 |
+| `config-flow-test-coverage` — the flow is fully tested | [x] | M1 |
+| `unique-config-entry` — a box cannot be added twice (`node_id`) | [x] | M1 |
+| `test-before-configure` — the flow fails early when the broker or the box is wrong | [x] | M1 |
+| `test-before-setup` — setup raises `ConfigEntryNotReady` instead of half-working | [x] | M1 |
+| `runtime-data` — entry state in `entry.runtime_data`, typed | [x] | M1 |
 | `entity-unique-id` — every entity has one (`<node_id>_<key>`) | [ ] | M3 |
 | `has-entity-name` — entities use `_attr_has_entity_name` | [ ] | M3 |
 | `entity-event-setup` — subscriptions set up and torn down with the entity | [ ] | M3 |
@@ -27,15 +27,15 @@ by-effect check. The milestone column says when it is due.
 | `docs-actions` — every action documented | [ ] | M3 |
 | `docs-high-level-description` — what the integration is, in the README | [x] | M1 |
 | `docs-installation-instructions` — HACS and manual | [x] | M1 |
-| `docs-removal-instructions` — how to remove it cleanly, including `cmd/reset` | [ ] | M3 |
-| `brands` — icon and logo shipped in `brand/` | [ ] | M3 |
+| `docs-removal-instructions` — how to remove it cleanly, including `cmd/reset` | [x] | M1 |
+| `brands` — icon and logo shipped in `brand/` | [x] | M1 |
 | `dependency-transparency` — dependencies pinned, built from source, no blobs | [x] | M1 |
 
 ## Silver
 
 | Rule | Done | Milestone |
 |---|---|---|
-| `config-entry-unloading` — unload and reload without a restart | [ ] | M3 |
+| `config-entry-unloading` — unload and reload without a restart | [x] | M1 |
 | `entity-unavailable` — entities follow the box's availability topic | [ ] | M3 |
 | `log-when-unavailable` — logged once when it goes away, once when it returns | [ ] | M3 |
 | `action-exceptions` — actions raise `HomeAssistantError` / `ServiceValidationError` | [ ] | M3 |
@@ -49,7 +49,8 @@ by-effect check. The milestone column says when it is due.
 ## Beyond silver
 
 Not targeted for v1, but recorded so the decision is visible: `diagnostics` and
-`devices` (gold) land in M3 anyway because they are cheap and useful;
+`devices` (gold) landed in M1 anyway because they are cheap and useful — the diagnostics
+download grows with the entities in M3;
 `discovery` (gold) is inherent — the plugin announces itself over MQTT; `reconfiguration-flow`
 (gold) lands with the options in M3. `dynamic-devices`, `stale-devices`, `repair-issues`,
 `entity-translations` beyond en/pl/de, and the platinum async/typing rules are M5 or later.

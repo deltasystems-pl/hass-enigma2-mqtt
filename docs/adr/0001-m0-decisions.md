@@ -62,3 +62,18 @@ text, so even in v1.1 it will be an explicit, warned-about choice.
 - The installer's preflight must detect "SSH unavailable" and say what to do about it rather
   than failing with a connection error.
 - The lab's wiki pages keep their current location; no taxonomy change is needed.
+
+## Amendment 2026-09-16
+
+Decision 1 above put the EPG grid on one retained topic. Building it showed that one topic
+for every bouquet makes each consumer re-read every bouquet whenever any one of them moves
+on, so the grid is published as **one retained topic per configured bouquet**:
+`enigma2/<node_id>/epg_grid/<bouquet_slug>`. The slug is the bouquet's name lower-cased,
+transliterated to ASCII, with every run of non-alphanumeric characters collapsed to a single
+`_` and leading and trailing `_` trimmed — an addressable name, nothing more. The payload is
+unchanged and its `bouquet` field carries the **original** name, which is what a user is
+shown. `cmd/epg_grid` still regenerates every configured bouquet at once, and the plugin
+retracts the slugs it published for bouquets that are no longer configured, the same way it
+retracts a discovery component it no longer announces. A consumer that wants one bouquet
+subscribes to one topic; one that wants them all subscribes to `epg_grid/+`. The plugin
+repository carries the same amendment, and its `docs/TOPICS.md` is the normative version.
