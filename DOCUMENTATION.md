@@ -12,7 +12,7 @@ say so; nothing here is speculation about behaviour that has never run.
 ## 1. Concepts
 
 **One receiver is one device.** Everything the integration creates hangs off a single device
-identified by the plugin's `node_id` — `<boxtype>_<mac6>`, for example `vuuno4kse_1775fc`,
+identified by the plugin's `node_id` — `<boxtype>_<mac6>`, for example `vuuno4kse_005301`,
 stable across reinstalls of the plugin and of Home Assistant.
 
 **The broker is the only channel.** The plugin publishes state under
@@ -39,11 +39,33 @@ from M4 the integration can put it there over SSH.
 
 ## 3. Configuration
 
-*Arrives in M1.* The config flow will have three entries: a **discovered** box confirmed with
-one click, a **manual** box identified by base topic and node id, and the **installer**
-branch (M4). Options — screenshot policy, key events, deep-standby button visibility, the
-Wake-on-LAN MAC, which bouquets feed the channel list — follow in M3, together with
-reconfigure.
+The config flow has two entries today and a third in M4.
+
+**Discovered.** The plugin publishes a retained announcement on
+`enigma2mqtt/discovery/<node_id>/config`, and the integration's manifest subscribes to that
+prefix, so a configured box appears by itself in *Settings → Devices & Services*. The card
+names the box, its type and its image. Confirming publishes `cmd/ha_mode = integration` and
+waits up to ten seconds for the plugin to echo the new mode back on `info`; only then is the
+entry created. A box that does not answer leaves the form up with an error and the confirm
+can simply be pressed again — nothing has been changed on the Home Assistant side.
+
+**Manual.** *Add integration → Enigma2 MQTT* asks for the **base topic** (the plugin's
+default is `enigma2`), the **node ID** from the plugin's setup screen, for example
+`vuuno4kse_005301`, and an optional **name**. The flow subscribes to
+`<base topic>/<node ID>/info` and waits up to ten seconds; because that topic is retained, a
+box that is on the broker answers at once and one that is not reports "no receiver was found
+on this topic". It then switches the mode exactly as the discovered path does. This entry is
+for a box behind an MQTT bridge that rewrites the topic prefix, or for one whose announcement
+never arrived.
+
+**Install the plugin from here.** M4.
+
+The node id is the entry's unique id, so the same box cannot be added twice by either path,
+and a box that renames itself updates the entry it already owns.
+
+**Options and reconfigure arrive in M3** — screenshot policy, key events, deep-standby button
+visibility, the Wake-on-LAN MAC and which bouquets feed the channel list. Until then the two
+fields above are the whole configuration; to change one, remove the box and add it again.
 
 ## 4. Entities
 
@@ -118,6 +140,12 @@ carrying what the box reported on `last_error`.
 | `enigma2_mqtt.record` | `action`: `start` or `stop` |
 | `enigma2_mqtt.screenshot` | — |
 | `enigma2_mqtt.set_ha_mode` | `mode`: `discovery`, `integration` or `off` |
+| `enigma2_mqtt.get_epg_grid` | `bouquet` (M3; **returns a response**, see below) |
+
+`get_epg_grid` reads the plugin's retained `epg_grid/<bouquet_slug>` topic and returns the
+grid as the action's response. It is deliberately not a state attribute: a grid runs to tens
+of kilobytes per bouquet, and an attribute of that size is written to the recorder on every
+update.
 
 ## 6. Device triggers
 
@@ -128,9 +156,12 @@ a device trigger is written against that entity instead.
 
 ## 7. Diagnostics
 
-*Arrives in M3.* The device page will offer a diagnostics download: the announcement, the
-current retained state of every topic, the plugin's capability list and the integration's
-view of the entry. Broker and SSH credentials are redacted.
+The device page offers a diagnostics download: the config entry, the box's announcement, its
+last `info` payload, the availability flag, the capability list and the device as the registry
+holds it. It is meant to be attached to an issue, so the MAC address, the IP address and the
+configuration URL built from it are redacted, and so are the broker and SSH credential keys —
+those are named in the redaction list before the installer of M4 can create one, rather than
+after. M3 adds the retained state of the remaining topics.
 
 ## 8. Troubleshooting
 

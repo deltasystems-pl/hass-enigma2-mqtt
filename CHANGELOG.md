@@ -18,5 +18,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Continuous integration: hassfest, the HACS action, ruff and pytest on every push, every
   pull request and weekly; and a release workflow that checks the tag against the manifest
   version and the changelog before publishing the HACS zip.
+- A config flow for a receiver that announces itself on `enigma2mqtt/discovery/#`: the card
+  names the box, its type and its image, and confirming it switches the box into integration
+  mode and waits for the plugin to acknowledge the switch before the entry is created.
+- A manual config flow — base topic, node ID and an optional name — for a receiver behind an
+  MQTT bridge that rewrites the topic prefix, or one whose announcement never arrived. The
+  flow checks the receiver is really on that topic before it adds anything.
+- A device page per receiver, with the manufacturer derived from the box type, the model, the
+  image and plugin versions, and a link to the receiver's web interface; it follows the `info`
+  topic, so updating the plugin or moving the box to another address updates the page.
+- A diagnostics download that redacts the MAC address, the IP address, the configuration URL
+  and every credential key, including the ones the guided installer will add later.
+- Polish and German translations of everything the setup flow shows. German is a draft and
+  needs a native speaker.
+
+### Changed
+
+- The validation workflow also runs on a release tag, so hassfest, the HACS action, ruff and
+  pytest all have to pass before a release is published.
+- `requirements_test.txt` pins the test harness and the linter, so CI and a developer's
+  machine run the same Home Assistant release.
+
+### Fixed
+
+- The release workflow no longer put the changelog's link block into the release notes.
 
 [Unreleased]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/commits/main

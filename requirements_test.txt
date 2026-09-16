@@ -1,5 +1,7 @@
-# The test harness pins the Home Assistant release the tests run against.
-pytest-homeassistant-custom-component
+# The test harness pins the Home Assistant release the tests run against; this release
+# pins Home Assistant 2026.9.2. CI installs this file and nothing else, so a pin here is
+# the whole description of what "green" means.
+pytest-homeassistant-custom-component==0.13.365
 
 # Lint gate, run by the same CI job as the tests.
-ruff
+ruff==0.16.7

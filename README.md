@@ -19,9 +19,10 @@ inside enigma2 and publishes the moment something happens — a zap, a programme
 standby, a recording, a volume step, a key on the remote. This integration turns those
 topics into a native `media_player`, a `remote`, an OSD `notify` target and device triggers.
 
-> **Status — scaffold.** The repository is public from its first commit (M0/M1 of the
-> [roadmap](#roadmap)). What is described below is the agreed v1 contract; the entities
-> arrive in M3 and the guided installer in M4. Nothing here talks to a box yet.
+> **Status — M1.** The repository is public from its first commit. Setting a box up works:
+> a receiver is discovered or added by hand, switched into integration mode and shown as a
+> device with a diagnostics download. The entities described below arrive in M3 and the
+> guided installer in M4.
 
 ## What you get
 
@@ -44,7 +45,9 @@ One receiver becomes **one device** with these entities (display names are Polis
 | device triggers | red / green / yellow / blue × short / long | remote keys as automation triggers |
 
 Plus the actions `zap`, `send_key`, `message`, `add_timer`, `delete_timer`, `record`,
-`screenshot` and `set_ha_mode` — each verified by the plugin and answered on its state topic.
+`screenshot`, `set_ha_mode` and `get_epg_grid` — each verified by the plugin and answered on
+its state topic. `get_epg_grid` returns a bouquet's programme grid as a response, never as a
+state attribute, because a grid is tens of kilobytes and an attribute goes to the recorder.
 
 ## How it works
 
@@ -76,9 +79,9 @@ about 45 seconds instead of at the end of a poll cycle.
 - The **[enigma2-mqtt-bridge](https://github.com/deltasystems-pl/enigma2-mqtt-bridge)** plugin
   installed on the receiver
 
-| Integration | Plugin |
-|---|---|
-| 0.1.0 | 0.1.0 |
+| Integration | Plugin | Status |
+|---|---|---|
+| 0.1.0 | 0.1.0 | planned — neither is released yet |
 
 The integration refuses nothing when the versions differ, but the `update` entity tells you
 when the box runs a plugin older than the one this release bundles.
@@ -86,6 +89,9 @@ when the box runs a plugin older than the one this release bundles.
 ## Installation
 
 ### HACS (recommended)
+
+From **v0.1.0** (the repository is installed from release zips, so HACS has nothing to offer
+until the first release is tagged):
 
 1. HACS → ⋮ → *Custom repositories* → add `deltasystems-pl/hass-enigma2-mqtt`, category
    **Integration**
@@ -99,9 +105,11 @@ Copy `custom_components/enigma2_mqtt` into your `config/custom_components/` and 
 
 - **Discovered** — a box whose plugin is already configured announces itself on
   `enigma2mqtt/discovery/#`; Home Assistant offers it in *Settings → Devices & Services* and
-  one click confirms it.
+  one click confirms it. Confirming switches the box into integration mode and waits for it to
+  say so, so a box that cannot be reached is reported rather than added as a dead device.
 - **Manual** — *Add integration → Enigma2 MQTT*, then the base topic and the node id, for
-  boxes behind a bridged broker or with a custom prefix.
+  boxes behind a bridged broker or with a custom prefix. The node id is on the plugin's setup
+  screen; the flow checks the box is really on that topic before it adds anything.
 - **Install the plugin from here** (from M4) — host, SSH user and password; the flow runs a
   preflight over SSH, uploads the bundled IPK, installs it, writes the provisioning file and
   waits for the announcement. The SSH password is discarded afterwards unless you ask to keep
@@ -158,7 +166,7 @@ quality bar we hold ourselves to is [docs/QUALITY.md](docs/QUALITY.md).
 
 - [x] **M0** — product requirements approved ([ADR-0000](docs/adr/0000-prd.md),
       [ADR-0001](docs/adr/0001-m0-decisions.md))
-- [ ] **M1** — repositories and skeletons: config flow (discovered + manual), the device page
+- [x] **M1** — config flow (discovered + manual), the device page, diagnostics
 - [ ] **M2** — plugin state and discovery complete, commands with guards
 - [ ] **M3** — the entities above, actions, device triggers, diagnostics, translations
 - [ ] **M4** — the SSH installer with preflight and rollback, the bundled IPK, `update`
