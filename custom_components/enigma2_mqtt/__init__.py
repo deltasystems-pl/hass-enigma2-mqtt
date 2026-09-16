@@ -13,11 +13,16 @@ from __future__ import annotations
 import logging
 
 from homeassistant.core import HomeAssistant
+import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+# The integration takes no YAML configuration. Once boxes are added through the config
+# flow (M1) this becomes cv.config_entry_only_config_schema.
+CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
