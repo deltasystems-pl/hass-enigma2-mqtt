@@ -25,8 +25,11 @@ CONF_DANGEROUS_BUTTONS: Final = "dangerous_buttons"
 CONF_WOL_MAC: Final = "wol_mac"
 CONF_BOUQUETS: Final = "bouquets"
 CONF_PUBLISH_KEYS: Final = "publish_keys"
+CONF_RECEIVER_HOST: Final = "receiver_host"
 CONF_SCREENSHOT: Final = "screenshot"
 CONF_SCREENSHOT_INTERVAL: Final = "screenshot_interval"
+CONF_SCREENSHOT_DELAY: Final = "screenshot_delay"
+CONF_CAM_TELEMETRY: Final = "cam_telemetry"
 CONF_SSH_HOST: Final = "ssh_host"
 CONF_SSH_PORT: Final = "ssh_port"
 CONF_SSH_USERNAME: Final = "ssh_username"
@@ -41,8 +44,12 @@ SCREENSHOT_MODES: Final = (SCREENSHOT_OFF, SCREENSHOT_ON_ZAP, SCREENSHOT_INTERVA
 DEFAULT_PUBLISH_KEYS: Final = True
 DEFAULT_SCREENSHOT: Final = SCREENSHOT_ON_ZAP
 DEFAULT_SCREENSHOT_INTERVAL: Final = 60
+DEFAULT_SCREENSHOT_DELAY: Final = 4
+DEFAULT_CAM_TELEMETRY: Final = False
 MIN_SCREENSHOT_INTERVAL: Final = 5
 MAX_SCREENSHOT_INTERVAL: Final = 3600
+MIN_SCREENSHOT_DELAY: Final = 1
+MAX_SCREENSHOT_DELAY: Final = 30
 
 # How the plugin presents a box to Home Assistant, switchable with `cmd/ha_mode`.
 HA_MODE_DISCOVERY: Final = "discovery"
@@ -91,6 +98,7 @@ TOPIC_KEY: Final = "key"
 TOPIC_LAST_ERROR: Final = "last_error"
 TOPIC_CHANNELS: Final = "channels"
 TOPIC_EPG_GRID: Final = "epg_grid"
+TOPIC_CAM: Final = "cam"
 
 PAYLOAD_ONLINE: Final = "online"
 PAYLOAD_OFFLINE: Final = "offline"

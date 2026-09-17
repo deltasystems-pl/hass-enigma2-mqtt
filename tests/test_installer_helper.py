@@ -39,6 +39,17 @@ def _receiver_tree(root: Path) -> None:
     )
     _write(
         root,
+        "usr/lib/enigma2/python/Plugins/Extensions/WebInterface/WebChilds/External/MQTTBridge.py",
+        "old shim\n",
+    )
+    _write(
+        root,
+        "usr/lib/enigma2/python/Plugins/Extensions/WebInterface/"
+        "WebChilds/External/__pycache__/MQTTBridge.cpython-312.pyc",
+        "old bytecode\n",
+    )
+    _write(
+        root,
         "etc/enigma2/settings",
         "config.misc.keep=true\n"
         "config.plugins.mqttbridge.host=old-broker\n"
@@ -53,11 +64,14 @@ def test_restore_preserves_unrelated_package_and_settings(tmp_path: Path) -> Non
     _receiver_tree(root)
     metadata = snapshot(root, backup)
     assert metadata == {
+        "schema": 2,
         "plugin": True,
         "package_status": True,
         "opkg_info": True,
         "provisioning": True,
         "settings": True,
+        "webif_shim": True,
+        "webif_cache": True,
     }
 
     _write(
@@ -73,6 +87,16 @@ def test_restore_preserves_unrelated_package_and_settings(tmp_path: Path) -> Non
         "usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge/plugin.py",
         "new plugin\n",
     )
+    _write(
+        root,
+        "usr/lib/enigma2/python/Plugins/Extensions/WebInterface/WebChilds/External/MQTTBridge.py",
+        "new shim\n",
+    )
+    old_cache = (
+        root / "usr/lib/enigma2/python/Plugins/Extensions/WebInterface/"
+        "WebChilds/External/__pycache__/MQTTBridge.cpython-312.pyc"
+    )
+    old_cache.write_text("new bytecode\n", encoding="utf-8")
     _write(
         root,
         "etc/enigma2/settings",
@@ -92,11 +116,87 @@ def test_restore_preserves_unrelated_package_and_settings(tmp_path: Path) -> Non
     assert (
         root / "usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge/plugin.py"
     ).read_text() == "old plugin\n"
+    assert (
+        root / "usr/lib/enigma2/python/Plugins/Extensions/WebInterface/"
+        "WebChilds/External/MQTTBridge.py"
+    ).read_text() == "old shim\n"
+    assert old_cache.read_text(encoding="utf-8") == "old bytecode\n"
     settings = (root / "etc/enigma2/settings").read_text()
     assert "config.misc.keep=changed-concurrently" in settings
     assert "config.plugins.mqttbridge.host=old-broker" in settings
     assert "config.plugins.mqttbridge.host=new-broker" not in settings
     assert (root / "etc/enigma2/mqttbridge.json").read_text() == '{"old":true}\n'
+
+
+def test_restore_removes_only_new_openwebif_shim(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    backup = tmp_path / "backup"
+    _receiver_tree(root)
+    shim = (
+        root / "usr/lib/enigma2/python/Plugins/Extensions/WebInterface/"
+        "WebChilds/External/MQTTBridge.py"
+    )
+    shim.unlink()
+    for bytecode in shim.parent.joinpath("__pycache__").glob("MQTTBridge.*.pyc"):
+        bytecode.unlink()
+    sibling = _write(root, str(shim.parent.relative_to(root) / "OtherPlugin.py"), "keep\n")
+
+    metadata = snapshot(root, backup)
+    assert metadata["webif_shim"] is False
+    shim.write_text("new package shim\n", encoding="utf-8")
+    generated = _write(
+        root,
+        str(shim.parent.relative_to(root) / "__pycache__/MQTTBridge.cpython-312.pyc"),
+        "new bytecode\n",
+    )
+
+    restore(root, backup, restore_provisioning=True, restore_settings=True)
+
+    assert not shim.exists()
+    assert not generated.exists()
+    assert sibling.read_text(encoding="utf-8") == "keep\n"
+
+
+def test_snapshot_refuses_symlink_openwebif_shim(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    backup = tmp_path / "backup"
+    _receiver_tree(root)
+    shim = (
+        root / "usr/lib/enigma2/python/Plugins/Extensions/WebInterface/"
+        "WebChilds/External/MQTTBridge.py"
+    )
+    target = tmp_path / "outside-shim"
+    target.write_text("outside\n", encoding="utf-8")
+    shim.unlink()
+    shim.symlink_to(target)
+
+    with pytest.raises(ValueError, match="OpenWebif shim"):
+        snapshot(root, backup)
+
+
+def test_restore_refuses_unsafe_live_webif_cache_before_changes(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    backup = tmp_path / "backup"
+    _receiver_tree(root)
+    snapshot(root, backup)
+    status = root / "usr/lib/opkg/status"
+    status.write_text("Package: concurrent\nVersion: 1\n", encoding="utf-8")
+    before = status.read_bytes()
+    cache = (
+        root / "usr/lib/enigma2/python/Plugins/Extensions/WebInterface/"
+        "WebChilds/External/__pycache__"
+    )
+    shutil_target = tmp_path / "outside-cache"
+    shutil_target.mkdir()
+    for child in cache.iterdir():
+        child.unlink()
+    cache.rmdir()
+    cache.symlink_to(shutil_target, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="bytecode directory"):
+        restore(root, backup, restore_provisioning=True, restore_settings=True)
+
+    assert status.read_bytes() == before
 
 
 def test_incomplete_snapshot_is_rejected_before_live_files_change(tmp_path: Path) -> None:

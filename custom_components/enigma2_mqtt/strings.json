@@ -19,12 +19,14 @@
         "data": {
           "base_topic": "Base topic",
           "node_id": "Node ID",
-          "name": "Name"
+          "name": "Name",
+          "receiver_host": "Receiver address (optional)"
         },
         "data_description": {
           "base_topic": "The prefix the receiver publishes under, as Home Assistant sees it on the broker. The plugin's default is `enigma2`.",
           "node_id": "The receiver's node ID, shown on the plugin's setup screen. It is the box type and the last six digits of the MAC address, for example `vuuno4kse_005301`.",
-          "name": "What to call this receiver in Home Assistant. Left empty, the name the plugin reports is used."
+          "name": "What to call this receiver in Home Assistant. Left empty, the name the plugin reports is used.",
+          "receiver_host": "Hostname or IP address used only for the device link and as a suggestion when configuring SSH. MQTT-only setups may leave it empty."
         }
       },
       "install": {
@@ -52,12 +54,14 @@
         "data": {
           "base_topic": "Base topic",
           "node_id": "Node ID",
-          "name": "Name"
+          "name": "Name",
+          "receiver_host": "Receiver address (optional)"
         },
         "data_description": {
           "base_topic": "The prefix the receiver publishes under, as Home Assistant sees it on the broker.",
           "node_id": "The receiver's node ID, shown on the plugin's setup screen.",
-          "name": "What to call this receiver in Home Assistant."
+          "name": "What to call this receiver in Home Assistant.",
+          "receiver_host": "Changing this metadata does not replace pinned SSH credentials; re-enrol SSH separately when the receiver changes."
         }
       }
     },
@@ -113,7 +117,9 @@
           "bouquets": "Bouquets to offer",
           "publish_keys": "Publish remote key events",
           "screenshot": "Automatic screenshots",
-          "screenshot_interval": "Screenshot interval (seconds)"
+          "screenshot_interval": "Screenshot interval (seconds)",
+          "screenshot_delay": "Delay after changing channel (seconds)",
+          "cam_telemetry": "Publish conditional-access telemetry"
           ,"configure_ssh": "Configure SSH credentials for plugin updates"
           ,"keep_ssh_credentials": "Keep SSH credentials for updates"
         },
@@ -123,7 +129,9 @@
           "bouquets": "Which bouquets the channel list and the media browser offer. Leave empty for every bouquet the receiver publishes.",
           "publish_keys": "Remote key events can drive automations, but they also reveal what is pressed. Turn this off when no automation needs them.",
           "screenshot": "Off publishes no new screen images. On zap captures after a channel change. Interval captures repeatedly at the interval below.",
-          "screenshot_interval": "Used only in interval mode. The receiver enforces a minimum of five seconds."
+          "screenshot_interval": "Used only in interval mode. The receiver enforces a minimum of five seconds.",
+          "screenshot_delay": "Wait before an automatic screenshot after a channel change, so the new picture has time to appear.",
+          "cam_telemetry": "Expose the current service's encryption and ECM status. No server, account or card details are published."
         }
       }
       ,"ssh_host": {"title": "Connect to the receiver", "data": {"ssh_host": "Receiver host", "ssh_port": "SSH port"}}
@@ -141,6 +149,12 @@
       },
       "recording_disk": {
         "name": "Recording disk"
+      },
+      "cam_active": {
+        "name": "CAM active"
+      },
+      "service_encrypted": {
+        "name": "Service encrypted"
       }
     },
     "button": {
@@ -215,6 +229,12 @@
       },
       "uptime": {
         "name": "Uptime"
+      },
+      "cam_system": {
+        "name": "Conditional-access system"
+      },
+      "cam_ecm_time": {
+        "name": "ECM time"
       }
     },
     "switch": {

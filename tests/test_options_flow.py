@@ -16,11 +16,14 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry, async_
 from custom_components.enigma2_mqtt.const import (
     CONF_BASE_TOPIC,
     CONF_BOUQUETS,
+    CONF_CAM_TELEMETRY,
     CONF_DANGEROUS_BUTTONS,
     CONF_NAME,
     CONF_NODE_ID,
     CONF_PUBLISH_KEYS,
+    CONF_RECEIVER_HOST,
     CONF_SCREENSHOT,
+    CONF_SCREENSHOT_DELAY,
     CONF_SCREENSHOT_INTERVAL,
     CONF_WOL_MAC,
     DOMAIN,
@@ -44,6 +47,11 @@ PLUGIN_DEFAULT_SETTINGS = {
     CONF_PUBLISH_KEYS: True,
     CONF_SCREENSHOT: "on_zap",
     CONF_SCREENSHOT_INTERVAL: 60,
+}
+PLUGIN_MODERN_SETTINGS = {
+    **PLUGIN_DEFAULT_SETTINGS,
+    CONF_SCREENSHOT_DELAY: 4,
+    CONF_CAM_TELEMETRY: False,
 }
 
 
@@ -113,6 +121,73 @@ async def test_saving_the_options_reloads_the_entry(
         **PLUGIN_SETTINGS,
     }
     assert hass.states.get("button.dekoder_salon_reboot") is not None
+
+
+async def test_modern_plugin_offers_delay_and_accepts_ack_with_extra_settings(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Only advertised settings are sent and future ACK fields are harmless."""
+    await async_setup_box(hass, config_entry)
+    async_fire_mqtt_message(
+        hass, INFO_TOPIC, json.dumps({**INFO, "settings": PLUGIN_MODERN_SETTINGS})
+    )
+    await hass.async_block_till_done()
+    requested = {
+        **PLUGIN_SETTINGS,
+        CONF_SCREENSHOT_DELAY: 7,
+        CONF_CAM_TELEMETRY: True,
+    }
+    await _arm_config_ack(hass, {**requested, "future_setting": "supported"})
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    assert CONF_SCREENSHOT_DELAY in result["data_schema"].schema
+    assert CONF_CAM_TELEMETRY in result["data_schema"].schema
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_DANGEROUS_BUTTONS: False,
+            CONF_WOL_MAC: "",
+            CONF_BOUQUETS: [],
+            **requested,
+        },
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert config_entry.options[CONF_SCREENSHOT_DELAY] == 7
+
+
+async def test_future_plugin_setting_does_not_trigger_an_unchanged_config_write(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Unknown advertised settings are preserved when visible values did not move."""
+    await async_setup_box(hass, config_entry)
+    advertised = {**PLUGIN_MODERN_SETTINGS, "future_setting": "supported"}
+    async_fire_mqtt_message(
+        hass, INFO_TOPIC, json.dumps({**INFO, "settings": advertised})
+    )
+    await hass.async_block_till_done()
+    box = config_entry.runtime_data
+    box.async_command = AsyncMock()
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_DANGEROUS_BUTTONS: True,
+            CONF_WOL_MAC: "",
+            CONF_BOUQUETS: [],
+            **PLUGIN_MODERN_SETTINGS,
+        },
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    box.async_command.assert_not_awaited()
 
 
 async def test_the_options_open_on_a_box_that_never_loaded(
@@ -227,6 +302,14 @@ async def test_reconfigure_follows_a_new_base_topic(
 ) -> None:
     """Changing only the address keeps the device and everything on it."""
     await async_setup_box(hass, config_entry)
+    hass.config_entries.async_update_entry(
+        config_entry,
+        data={
+            **config_entry.data,
+            "ssh_host": "pinned-receiver.example",
+            "ssh_host_key": "ssh-ed25519 AAAApinned",
+        },
+    )
     device_id = _device_id(hass, config_entry)
     retained[f"dekodery/{NODE_ID}/info"] = json.dumps(INFO)
     await async_arm_ha_mode_ack(hass, base_topic="dekodery")
@@ -238,6 +321,7 @@ async def test_reconfigure_follows_a_new_base_topic(
             CONF_BASE_TOPIC: "dekodery",
             CONF_NODE_ID: NODE_ID,
             CONF_NAME: "Dekoder salon",
+            CONF_RECEIVER_HOST: "metadata-receiver.example",
         },
     )
     await hass.async_block_till_done()
@@ -245,6 +329,9 @@ async def test_reconfigure_follows_a_new_base_topic(
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
     assert config_entry.data[CONF_BASE_TOPIC] == "dekodery"
+    assert config_entry.data[CONF_RECEIVER_HOST] == "metadata-receiver.example"
+    assert config_entry.data["ssh_host"] == "pinned-receiver.example"
+    assert config_entry.data["ssh_host_key"] == "ssh-ed25519 AAAApinned"
     assert _device_id(hass, config_entry) == device_id
 
 

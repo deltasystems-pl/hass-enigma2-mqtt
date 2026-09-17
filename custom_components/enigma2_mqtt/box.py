@@ -23,8 +23,10 @@ from collections.abc import Callable, Iterable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime
+import ipaddress
 import json
 import logging
+import re
 from typing import Any
 
 from homeassistant.components import mqtt
@@ -46,6 +48,7 @@ from .const import (
     CONF_BOUQUETS,
     CONF_NAME,
     CONF_NODE_ID,
+    CONF_RECEIVER_HOST,
     CONF_WOL_MAC,
     DEFAULT_BASE_TOPIC,
     DEFAULT_MANUFACTURER,
@@ -62,6 +65,7 @@ from .const import (
     PROBE_TIMEOUT,
     SUBSCRIBE_TIMEOUT,
     TOPIC_AVAILABILITY,
+    TOPIC_CAM,
     TOPIC_CHANNELS,
     TOPIC_EPG,
     TOPIC_EPG_GRID,
@@ -80,12 +84,54 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Public conditional-access identifiers emitted by the plugin. Free-form strings are
+# deliberately not retained: ECM readers can expose server, account or card details.
+CAM_SYSTEMS = frozenset(
+    {
+        "BetaCrypt",
+        "BISS",
+        "BulCrypt",
+        "Conax",
+        "CryptoWorks",
+        "DRE-Crypt",
+        "Irdeto",
+        "Mediaguard",
+        "Nagra",
+        "Nagravision",
+        "PowerVu",
+        "SECA",
+        "Viaccess",
+        "VideoGuard",
+    }
+)
+_NO_PENDING_CAM = object()
+_CAM_TOMBSTONE = object()
+
 type Enigma2MqttConfigEntry = ConfigEntry[Enigma2Box]
 
 
 def state_topic(base_topic: str, node_id: str, suffix: str) -> str:
     """Return a state topic of one box."""
     return f"{base_topic}/{node_id}/{suffix}"
+
+
+def _configuration_url(host: Any) -> str | None:
+    """Build a receiver URL only from a plain IP address or hostname."""
+    if not isinstance(host, str) or not host or "%" in host:
+        return None
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        if len(host) > 253 or not re.fullmatch(
+            r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*"
+            r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?",
+            host,
+        ):
+            return None
+        url_host = host
+    else:
+        url_host = f"[{address}]" if address.version == 6 else str(address)
+    return f"http://{url_host}/"
 
 
 def command_topic(base_topic: str, node_id: str, name: str) -> str:
@@ -413,6 +459,7 @@ class Enigma2State:
     timers: list[Any] | None = None
     volume: dict[str, Any] | None = None
     hdd: dict[str, Any] | None = None
+    cam: dict[str, Any] | None = None
     channels: dict[str, Any] | None = None
     last_error: dict[str, Any] | None = None
     screen: bytes | None = None
@@ -442,6 +489,7 @@ class Enigma2Box:
         self._listeners: list[_Listener] = []
         self._key_listeners: list[Callable[[str, str], None]] = []
         self._pending: list[_Pending] = []
+        self._pending_cam: object = _NO_PENDING_CAM
         self._subscribed = asyncio.Event()
 
     # ------------------------------------------------------------------ properties
@@ -758,7 +806,11 @@ class Enigma2Box:
         source = {**self.state.announcement, **self.state.info}
         name = self.state.announcement.get("name") or self.name
         boxtype = source.get("boxtype")
-        ip_address = source.get("ip")
+        configuration_url = _configuration_url(source.get("ip"))
+        if configuration_url is None:
+            configuration_url = _configuration_url(
+                self.entry.data.get(CONF_RECEIVER_HOST)
+            )
         device = dr.async_get(self.hass).async_get_or_create(
             config_entry_id=self.entry.entry_id,
             identifiers={(DOMAIN, self.node_id)},
@@ -766,7 +818,7 @@ class Enigma2Box:
             manufacturer=manufacturer_for(boxtype),
             model=boxtype,
             sw_version=software_version(source),
-            configuration_url=f"http://{ip_address}/" if ip_address else None,
+            configuration_url=configuration_url,
         )
         self.device_id = device.id
         return device
@@ -798,7 +850,9 @@ class Enigma2Box:
         if suffix.startswith("cmd/"):
             # Our own commands, echoed back by the broker. Not state.
             return
-        if suffix.startswith(f"{TOPIC_EPG_GRID}/"):
+        if suffix == TOPIC_CAM:
+            self._cam_received(msg)
+        elif suffix.startswith(f"{TOPIC_EPG_GRID}/"):
             self._epg_grid_received(suffix[len(TOPIC_EPG_GRID) + 1 :], msg.payload)
         elif (attribute := self._OBJECT_TOPICS.get(suffix)) is not None:
             setattr(self.state, attribute, parse_json_payload(msg.payload))
@@ -846,8 +900,85 @@ class Enigma2Box:
         if (info := parse_json_payload(msg.payload)) is None:
             return
         self.state.info = info
+        if self._cam_enabled() and self._pending_cam is not _NO_PENDING_CAM:
+            pending, self._pending_cam = self._pending_cam, _NO_PENDING_CAM
+            if pending is _CAM_TOMBSTONE:
+                self._invalidate_cam()
+            elif isinstance(pending, dict):
+                self.state.cam = pending
+                self._async_updated(TOPIC_CAM)
+        elif not self._cam_enabled():
+            self._pending_cam = _NO_PENDING_CAM
+            if self.state.cam is not None or TOPIC_CAM in self.seen:
+                self._invalidate_cam()
         self.async_register_device()
         self._async_updated(TOPIC_INFO)
+
+    def _cam_enabled(self) -> bool:
+        """Return whether this box opted into supported CAM telemetry."""
+        settings = self.state.info.get("settings")
+        return (
+            "cam" in self.capabilities
+            and isinstance(settings, dict)
+            and settings.get("cam_telemetry") is True
+        )
+
+    @callback
+    def _cam_received(self, msg: ReceiveMessage) -> None:
+        """Cache only the bounded public CAM schema while explicitly enabled."""
+        if not (decode_payload(msg.payload) or "").strip():
+            if not self.state.info:
+                self._pending_cam = _CAM_TOMBSTONE
+            elif self._cam_enabled():
+                self._invalidate_cam()
+            return
+        payload = parse_json_payload(msg.payload)
+        if payload is None:
+            return
+        normalized = self._normalize_cam(payload)
+        if not self.state.info:
+            self._pending_cam = normalized
+            return
+        if not self._cam_enabled():
+            return
+        self.state.cam = normalized
+        self._async_updated(TOPIC_CAM)
+
+    @staticmethod
+    def _normalize_cam(payload: dict[str, Any]) -> dict[str, Any]:
+        """Strip an untrusted CAM payload to the bounded public contract."""
+        system = payload.get("system")
+        active = payload.get("active")
+        encrypted = payload.get("encrypted")
+        ecm_ms = payload.get("ecm_ms")
+        return {
+            "system": (
+                system
+                if system is None
+                or isinstance(system, str)
+                and system in CAM_SYSTEMS
+                else None
+            ),
+            "active": active if isinstance(active, bool) else None,
+            "encrypted": encrypted if isinstance(encrypted, bool) else None,
+            "ecm_ms": (
+                ecm_ms
+                if isinstance(ecm_ms, int)
+                and not isinstance(ecm_ms, bool)
+                and 0 <= ecm_ms <= 600_000
+                else None
+            ),
+        }
+
+    @callback
+    def _invalidate_cam(self) -> None:
+        """Forget CAM data after opt-out or a retained-topic retraction."""
+        self.state.cam = None
+        self.seen.discard(TOPIC_CAM)
+        self.updates[TOPIC_CAM] = self.updates.get(TOPIC_CAM, 0) + 1
+        for listener in list(self._listeners):
+            if listener.wants(TOPIC_CAM):
+                listener.callback()
 
     @callback
     def _announcement_received(self, msg: ReceiveMessage) -> None:

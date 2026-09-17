@@ -28,12 +28,21 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfTime
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
 import homeassistant.util.dt as dt_util
 
 from .box import Enigma2Box, Enigma2MqttConfigEntry, Enigma2State
-from .const import TOPIC_EPG, TOPIC_INFO, TOPIC_RECORDING, TOPIC_SERVICE, TOPIC_TUNER
+from .const import (
+    DOMAIN,
+    TOPIC_CAM,
+    TOPIC_EPG,
+    TOPIC_INFO,
+    TOPIC_RECORDING,
+    TOPIC_SERVICE,
+    TOPIC_TUNER,
+)
 from .entity import Enigma2Entity
 
 PARALLEL_UPDATES = 0
@@ -82,6 +91,14 @@ def _next_timer(state: Enigma2State) -> datetime | None:
     if not isinstance(begin, (int, float)):
         return None
     return dt_util.utc_from_timestamp(begin)
+
+
+def _cam_value(state: Enigma2State, key: str, expected: type) -> Any:
+    """Return one CAM value only when its JSON type is exact."""
+    value = (state.cam or {}).get(key)
+    if expected is int and isinstance(value, bool):
+        return None
+    return value if isinstance(value, expected) else None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -166,6 +183,19 @@ SENSORS: tuple[Enigma2SensorDescription, ...] = (
         entity_registry_enabled_default=False,
         value_fn=lambda state: state.info.get("uptime"),
     ),
+    Enigma2SensorDescription(
+        key="cam_system",
+        topics=(TOPIC_CAM,),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda state: _cam_value(state, "system", str),
+    ),
+    Enigma2SensorDescription(
+        key="cam_ecm_time",
+        topics=(TOPIC_CAM,),
+        native_unit_of_measurement=UnitOfTime.MILLISECONDS,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda state: _cam_value(state, "ecm_ms", int),
+    ),
 )
 
 
@@ -176,7 +206,15 @@ async def async_setup_entry(
 ) -> None:
     """Set up every sensor of one box."""
     box = entry.runtime_data
-    async_add_entities(Enigma2Sensor(box, description) for description in SENSORS)
+    descriptions = SENSORS if "cam" in box.capabilities else SENSORS[:-2]
+    async_add_entities(Enigma2Sensor(box, description) for description in descriptions)
+    if "cam" not in box.capabilities:
+        registry = er.async_get(hass)
+        for key in ("cam_system", "cam_ecm_time"):
+            if entity_id := registry.async_get_entity_id(
+                "sensor", DOMAIN, f"{box.node_id}_{key}"
+            ):
+                registry.async_remove(entity_id)
 
 
 class Enigma2Sensor(Enigma2Entity, SensorEntity):

@@ -104,8 +104,9 @@ Copy `custom_components/enigma2_mqtt` into your `config/custom_components/` and 
   one click confirms it. Confirming switches the box into integration mode and waits for it to
   say so, so a box that cannot be reached is reported rather than added as a dead device.
 - **Manual** — *Add integration → Enigma2 MQTT*, then the base topic and the node id, for
-  boxes behind a bridged broker or with a custom prefix. The node id is on the plugin's setup
-  screen; the flow checks the box is really on that topic before it adds anything.
+  boxes behind a bridged broker or with a custom prefix. A receiver hostname or IP address is
+  optional metadata for its device link and later SSH setup; MQTT-only bridges can leave it
+  blank. The flow checks the box is really on the MQTT topic before it adds anything.
 - **Install the plugin from here** — host, SSH user and password; the flow runs a
   preflight over SSH, uploads the bundled IPK, installs it, writes the provisioning file and
   waits for the announcement. The SSH password is discarded afterwards unless you ask to keep
@@ -155,8 +156,11 @@ recorder:
 ```
 
 The integration options can switch key publishing off, select `off`, `on_zap` or `interval`
-screenshots, and set the interval. The plugin validates and persists all three settings as one
-transaction; disabling screenshots also retracts the retained image.
+screenshots, set the interval and choose how long an on-zap capture waits for the new picture.
+The plugin validates and persists the settings as one transaction; disabling screenshots also
+retracts the retained image. Optional conditional-access telemetry publishes only the current
+service's system, encrypted/active result and ECM time. It never publishes server, account or
+card details, and creates no entities until explicitly enabled.
 
 ## Documentation
 

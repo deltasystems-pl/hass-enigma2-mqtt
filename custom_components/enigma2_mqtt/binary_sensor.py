@@ -18,11 +18,13 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
     BinarySensorEntityDescription,
 )
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .box import Enigma2Box, Enigma2MqttConfigEntry, Enigma2State
-from .const import TOPIC_HDD, TOPIC_RECORDING
+from .const import DOMAIN, TOPIC_CAM, TOPIC_HDD, TOPIC_RECORDING
 from .entity import Enigma2Entity
 
 PARALLEL_UPDATES = 0
@@ -33,6 +35,12 @@ def _is_recording(state: Enigma2State) -> bool:
     recording = state.recording or {}
     active = recording.get("active")
     return bool(active) if isinstance(active, list) else False
+
+
+def _cam_bool(state: Enigma2State, key: str) -> bool | None:
+    """Keep an unknown CAM result unknown rather than falsely healthy."""
+    value = (state.cam or {}).get(key)
+    return value if isinstance(value, bool) else None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -61,6 +69,18 @@ BINARY_SENSORS: tuple[Enigma2BinarySensorDescription, ...] = (
             "free_mb": (state.hdd or {}).get("free_mb"),
         },
     ),
+    Enigma2BinarySensorDescription(
+        key="cam_active",
+        topics=(TOPIC_CAM,),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda state: _cam_bool(state, "active"),
+    ),
+    Enigma2BinarySensorDescription(
+        key="service_encrypted",
+        topics=(TOPIC_CAM,),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda state: _cam_bool(state, "encrypted"),
+    ),
 )
 
 
@@ -71,9 +91,19 @@ async def async_setup_entry(
 ) -> None:
     """Set up the binary sensors of one box."""
     box = entry.runtime_data
-    async_add_entities(
-        Enigma2BinarySensor(box, description) for description in BINARY_SENSORS
+    descriptions = (
+        BINARY_SENSORS if "cam" in box.capabilities else BINARY_SENSORS[:-2]
     )
+    async_add_entities(
+        Enigma2BinarySensor(box, description) for description in descriptions
+    )
+    if "cam" not in box.capabilities:
+        registry = er.async_get(hass)
+        for key in ("cam_active", "service_encrypted"):
+            if entity_id := registry.async_get_entity_id(
+                "binary_sensor", DOMAIN, f"{box.node_id}_{key}"
+            ):
+                registry.async_remove(entity_id)
 
 
 class Enigma2BinarySensor(Enigma2Entity, BinarySensorEntity):

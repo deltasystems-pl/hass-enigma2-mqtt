@@ -51,7 +51,9 @@ can simply be pressed again — nothing has been changed on the Home Assistant s
 
 **Manual.** *Add integration → Enigma2 MQTT* asks for the **base topic** (the plugin's
 default is `enigma2`), the **node ID** from the plugin's setup screen, for example
-`vuuno4kse_005301`, and an optional **name**. The flow subscribes to
+`vuuno4kse_005301`, an optional **name**, and an optional receiver hostname or IP address.
+That address only supplies the device-page link and a later SSH suggestion; it is neither
+probed nor required, so MQTT-only and topic-rewriting bridges remain supported. The flow subscribes to
 `<base topic>/<node ID>/info` and waits up to ten seconds; because that topic is retained, a
 box that is on the broker answers at once and one that is not reports "no receiver was found
 on this topic". It then switches the mode exactly as the discovered path does. This entry is
@@ -75,8 +77,12 @@ effect without a restart.
 | **Wake-on-LAN MAC address** | the address the box reports on `info` | The target of the magic packet the „Obudź (WoL)" button and `media_player.turn_on` send. Set it when the receiver reports a different interface from the one that is plugged in — a box on Wi-Fi does not answer a packet sent to its cable port. |
 | **Bouquets to offer** | every bouquet the box publishes | Which bouquets feed the media player's channel list and the media browser. The choices are the bouquets on the `channels` topic, and a name can be typed for one the box has not published yet. This narrows the plugin's own `bouquets_for_select`; it cannot widen it. |
 
-The screenshot policy and key publishing are settings **on the box**, not here: they decide
-what is published at all, so they belong where the publishing happens.
+When a recent plugin advertises its configurable publishers, the same form also controls key
+events, screenshot mode and interval, and the delay before an on-zap screenshot. Older plugins
+simply omit controls they do not support. Enabling conditional-access telemetry adds four
+diagnostic entities for system, encryption, fresh ECM activity and ECM time. Values may be
+unknown, association on multi-tuner receivers is best effort, and server, account and card
+details are never accepted into integration state or diagnostics.
 
 ### Reconfigure
 

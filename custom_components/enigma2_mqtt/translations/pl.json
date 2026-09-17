@@ -14,12 +14,14 @@
         "data": {
           "base_topic": "Temat bazowy",
           "node_id": "Identyfikator dekodera",
-          "name": "Nazwa"
+          "name": "Nazwa",
+          "receiver_host": "Adres dekodera (opcjonalny)"
         },
         "data_description": {
           "base_topic": "Przedrostek, pod którym dekoder publikuje — tak, jak widzi go Home Assistant na brokerze. Domyślnie wtyczka używa `enigma2`.",
           "node_id": "Identyfikator dekodera, widoczny na ekranie ustawień wtyczki. Składa się z typu dekodera i sześciu ostatnich znaków adresu MAC, na przykład `vuuno4kse_005301`.",
-          "name": "Jak nazwać ten dekoder w Home Assistancie. Pozostawione puste — użyta zostanie nazwa zgłoszona przez wtyczkę."
+          "name": "Jak nazwać ten dekoder w Home Assistancie. Pozostawione puste — użyta zostanie nazwa zgłoszona przez wtyczkę.",
+          "receiver_host": "Nazwa hosta lub adres IP używany tylko do odnośnika urządzenia i jako podpowiedź przy konfiguracji SSH. Konfiguracja wyłącznie przez MQTT może pozostać pusta."
         }
       },
       "install": {"title": "Połącz z dekoderem", "description": "Home Assistant odczyta klucz hosta SSH przed zapytaniem o hasło.", "data": {"ssh_host": "Adres dekodera", "ssh_port": "Port SSH"}},
@@ -33,12 +35,14 @@
         "data": {
           "base_topic": "Temat bazowy",
           "node_id": "Identyfikator dekodera",
-          "name": "Nazwa"
+          "name": "Nazwa",
+          "receiver_host": "Adres dekodera (opcjonalny)"
         },
         "data_description": {
           "base_topic": "Przedrostek, pod którym dekoder publikuje — tak, jak widzi go Home Assistant na brokerze.",
           "node_id": "Identyfikator dekodera, widoczny na ekranie ustawień wtyczki.",
-          "name": "Jak nazwać ten dekoder w Home Assistancie."
+          "name": "Jak nazwać ten dekoder w Home Assistancie.",
+          "receiver_host": "Zmiana tych metadanych nie zastępuje przypiętych danych SSH; dla innego dekodera skonfiguruj SSH ponownie."
         }
       }
     },
@@ -95,6 +99,8 @@
           "publish_keys": "Publikuj zdarzenia klawiszy pilota",
           "screenshot": "Automatyczne zrzuty ekranu",
           "screenshot_interval": "Odstęp zrzutów ekranu (sekundy)",
+          "screenshot_delay": "Opóźnienie po zmianie kanału (sekundy)",
+          "cam_telemetry": "Publikuj telemetrię dostępu warunkowego",
           "configure_ssh": "Skonfiguruj dane SSH do aktualizacji wtyczki",
           "keep_ssh_credentials": "Zachowaj dane SSH do aktualizacji"
         },
@@ -104,7 +110,9 @@
           "bouquets": "Które bukiety trafiają na listę kanałów i do przeglądarki mediów. Puste — wszystkie, które publikuje dekoder.",
           "publish_keys": "Zdarzenia klawiszy mogą uruchamiać automatyzacje, ale ujawniają też, co jest naciskane. Wyłącz je, jeśli żadna automatyzacja ich nie potrzebuje.",
           "screenshot": "Wyłączone nie publikuje nowych obrazów. Po zmianie kanału robi zrzut po przełączeniu. Interwał robi zrzuty cyklicznie.",
-          "screenshot_interval": "Używane tylko w trybie interwału. Dekoder wymusza minimum pięć sekund."
+          "screenshot_interval": "Używane tylko w trybie interwału. Dekoder wymusza minimum pięć sekund.",
+          "screenshot_delay": "Czas oczekiwania przed automatycznym zrzutem po zmianie kanału, aby nowy obraz zdążył się pojawić.",
+          "cam_telemetry": "Udostępnia szyfrowanie bieżącej usługi i stan ECM. Dane serwera, konta ani karty nie są publikowane."
         }
       },
       "ssh_host": {"title": "Połącz z dekoderem", "data": {"ssh_host": "Adres dekodera", "ssh_port": "Port SSH"}},
@@ -122,6 +130,12 @@
       },
       "recording_disk": {
         "name": "Dysk nagrań"
+      },
+      "cam_active": {
+        "name": "Aktywny CAM"
+      },
+      "service_encrypted": {
+        "name": "Usługa szyfrowana"
       }
     },
     "button": {
@@ -196,6 +210,12 @@
       },
       "uptime": {
         "name": "Czas pracy"
+      },
+      "cam_system": {
+        "name": "System dostępu warunkowego"
+      },
+      "cam_ecm_time": {
+        "name": "Czas ECM"
       }
     },
     "switch": {

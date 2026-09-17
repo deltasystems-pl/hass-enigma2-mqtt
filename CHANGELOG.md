@@ -37,7 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refuses, rather than reporting success for a message that was merely sent.
 - **Options**: whether the deep standby and reboot buttons appear, which address a Wake-on-LAN
   packet goes to, which bouquets are worth browsing, key-event publishing and the screenshot
-  policy/interval. Receiver options are acknowledged by fresh plugin state before HA saves them.
+  policy, interval and post-zap delay. Receiver options are acknowledged by fresh plugin state
+  before HA saves them. Opt-in conditional-access diagnostics expose only the bounded current
+  service result and never retain reader, server, account or card details.
+- **Optional receiver address metadata** in manual setup and reconfigure, used for the device
+  link and as an SSH suggestion without making direct receiver access a requirement.
 - **A guided SSH installer** with host-key confirmation, recording/timer guards, pre-change
   backup, uploaded-file verification, guarded GUI restart and rollback. SSH credentials are
   opt-in for later updates and can be enrolled, refreshed or forgotten without unloading MQTT.

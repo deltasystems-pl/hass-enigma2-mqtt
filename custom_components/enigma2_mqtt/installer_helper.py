@@ -22,6 +22,9 @@ import time
 
 PACKAGE = "enigma2-plugin-extensions-mqttbridge"
 PLUGIN_DIR = "usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge"
+WEBIF_SHIM = (
+    "usr/lib/enigma2/python/Plugins/Extensions/WebInterface/WebChilds/External/MQTTBridge.py"
+)
 OPKG_STATUS = "usr/lib/opkg/status"
 OPKG_INFO = "usr/lib/opkg/info"
 SETTINGS = "etc/enigma2/settings"
@@ -76,7 +79,17 @@ def _lock(root: Path):
     return handle
 
 
-def snapshot(root: Path, backup: Path) -> dict[str, bool]:
+def _webif_cache_files(root: Path) -> list[Path]:
+    cache_dir = _path(root, WEBIF_SHIM).parent / "__pycache__"
+    if cache_dir.is_symlink() or (cache_dir.exists() and not cache_dir.is_dir()):
+        raise ValueError("OpenWebif bytecode directory is unsafe")
+    files = list(cache_dir.glob("MQTTBridge.*.pyc")) if cache_dir.is_dir() else []
+    if any(path.is_symlink() or not path.is_file() for path in files):
+        raise ValueError("OpenWebif bytecode must be regular files")
+    return files
+
+
+def snapshot(root: Path, backup: Path) -> dict[str, object]:
     """Snapshot only files owned or consumed by this package."""
     if backup.exists():
         raise FileExistsError(backup)
@@ -100,6 +113,17 @@ def snapshot(root: Path, backup: Path) -> dict[str, bool]:
             raise ValueError("plugin directory may not be a symlink")
         if plugin.is_dir():
             shutil.copytree(plugin, backup / "plugin", symlinks=True)
+        webif_shim = _path(root, WEBIF_SHIM)
+        if webif_shim.is_symlink() or (webif_shim.exists() and not webif_shim.is_file()):
+            raise ValueError("OpenWebif shim must be a regular file")
+        if webif_shim.is_file():
+            shutil.copy2(webif_shim, backup / "webif-shim")
+        webif_cache_files = _webif_cache_files(root)
+        if webif_cache_files:
+            cache_backup = backup / "webif-cache"
+            cache_backup.mkdir()
+            for source in webif_cache_files:
+                shutil.copy2(source, cache_backup / source.name)
         info_backup = backup / "opkg-info"
         info_files = [
             Path(name) for name in glob.glob(str(_path(root, OPKG_INFO) / f"{PACKAGE}.*"))
@@ -127,11 +151,14 @@ def snapshot(root: Path, backup: Path) -> dict[str, bool]:
         if provision.is_file():
             shutil.copy2(provision, backup / "provisioning")
         metadata = {
+            "schema": 2,
             "plugin": plugin.is_dir(),
             "package_status": package_stanza is not None,
             "opkg_info": bool(info_files),
             "provisioning": provision.is_file(),
             "settings": settings_path.is_file(),
+            "webif_shim": webif_shim.is_file(),
+            "webif_cache": bool(webif_cache_files),
         }
         (backup / "snapshot.json").write_text(
             json.dumps(metadata, sort_keys=True) + "\n", encoding="utf-8"
@@ -147,8 +174,20 @@ def restore(
 ) -> None:
     """Restore the snapshot while preserving unrelated package and user state."""
     metadata = json.loads((backup / "snapshot.json").read_text(encoding="utf-8"))
-    expected = {"plugin", "package_status", "opkg_info", "provisioning", "settings"}
-    if set(metadata) != expected or any(not isinstance(metadata[key], bool) for key in expected):
+    expected_flags = {
+        "plugin",
+        "package_status",
+        "opkg_info",
+        "provisioning",
+        "settings",
+        "webif_shim",
+        "webif_cache",
+    }
+    if (
+        set(metadata) != expected_flags | {"schema"}
+        or metadata["schema"] != 2
+        or any(not isinstance(metadata[key], bool) for key in expected_flags)
+    ):
         raise ValueError("invalid snapshot metadata")
     required = [backup / "plugin-settings"]
     if metadata["plugin"]:
@@ -159,17 +198,25 @@ def restore(
         required.append(backup / "opkg-info")
     if metadata["provisioning"]:
         required.append(backup / "provisioning")
+    if metadata["webif_shim"]:
+        required.append(backup / "webif-shim")
+    if metadata["webif_cache"]:
+        required.append(backup / "webif-cache")
     if any(not path.exists() for path in required):
         raise ValueError("snapshot is incomplete")
     status_path = _path(root, OPKG_STATUS)
     info_dir = _path(root, OPKG_INFO)
     plugin = _path(root, PLUGIN_DIR)
+    webif_shim = _path(root, WEBIF_SHIM)
     if not status_path.is_file() or status_path.is_symlink():
         raise ValueError("opkg status is unavailable or unsafe")
     if not info_dir.is_dir() or info_dir.is_symlink():
         raise ValueError("opkg metadata directory is unavailable or unsafe")
     if plugin.is_symlink():
         raise ValueError("live plugin directory may not be a symlink")
+    if webif_shim.is_symlink() or (webif_shim.exists() and not webif_shim.is_file()):
+        raise ValueError("live OpenWebif shim is unsafe")
+    live_cache_files = _webif_cache_files(root)
     if metadata["plugin"] and (
         (backup / "plugin").is_symlink() or not (backup / "plugin").is_dir()
     ):
@@ -188,6 +235,25 @@ def restore(
         (backup / "provisioning").is_symlink() or not (backup / "provisioning").is_file()
     ):
         raise ValueError("backed-up provisioning is unsafe")
+    if metadata["webif_shim"] and (
+        (backup / "webif-shim").is_symlink() or not (backup / "webif-shim").is_file()
+    ):
+        raise ValueError("backed-up OpenWebif shim is unsafe")
+    if metadata["webif_cache"]:
+        cache_backup = backup / "webif-cache"
+        if cache_backup.is_symlink() or not cache_backup.is_dir():
+            raise ValueError("backed-up OpenWebif bytecode is unsafe")
+        cache_sources = list(cache_backup.iterdir())
+        if not cache_sources or any(
+            source.is_symlink()
+            or not source.is_file()
+            or not source.name.startswith("MQTTBridge.")
+            or source.suffix != ".pyc"
+            for source in cache_sources
+        ):
+            raise ValueError("backed-up OpenWebif bytecode is unsafe")
+    else:
+        cache_sources = []
     with _lock(root):
         current = _stanzas(status_path.read_text(encoding="utf-8"))
         current = [stanza for stanza in current if _package_name(stanza) != PACKAGE]
@@ -209,6 +275,19 @@ def restore(
             shutil.rmtree(plugin)
         if metadata["plugin"]:
             shutil.copytree(backup / "plugin", plugin, symlinks=True)
+
+        if metadata["webif_shim"]:
+            webif_shim.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(backup / "webif-shim", webif_shim)
+        else:
+            webif_shim.unlink(missing_ok=True)
+        for cache_file in live_cache_files:
+            cache_file.unlink()
+        if metadata["webif_cache"]:
+            cache_dir = webif_shim.parent / "__pycache__"
+            cache_dir.mkdir(exist_ok=True)
+            for source in cache_sources:
+                shutil.copy2(source, cache_dir / source.name)
 
         if restore_settings:
             settings_path = _path(root, SETTINGS)

@@ -14,12 +14,14 @@
         "data": {
           "base_topic": "Basisthema",
           "node_id": "Knoten-ID",
-          "name": "Name"
+          "name": "Name",
+          "receiver_host": "Receiver-Adresse (optional)"
         },
         "data_description": {
           "base_topic": "Das Präfix, unter dem der Receiver veröffentlicht, so wie Home Assistant es am Broker sieht. Die Voreinstellung des Plugins ist `enigma2`.",
           "node_id": "Die Knoten-ID des Receivers, zu sehen im Einrichtungsbildschirm des Plugins. Sie besteht aus dem Boxtyp und den letzten sechs Stellen der MAC-Adresse, zum Beispiel `vuuno4kse_005301`.",
-          "name": "Wie dieser Receiver in Home Assistant heißen soll. Bleibt das Feld leer, wird der vom Plugin gemeldete Name verwendet."
+          "name": "Wie dieser Receiver in Home Assistant heißen soll. Bleibt das Feld leer, wird der vom Plugin gemeldete Name verwendet.",
+          "receiver_host": "Hostname oder IP-Adresse nur für den Gerätelink und als Vorschlag bei der SSH-Einrichtung. Reine MQTT-Konfigurationen können das Feld leer lassen."
         }
       },
       "install": {"title": "Mit dem Receiver verbinden", "description": "Home Assistant liest den SSH-Hostschlüssel vor der Passwortabfrage.", "data": {"ssh_host": "Receiver-Adresse", "ssh_port": "SSH-Port"}},
@@ -33,12 +35,14 @@
         "data": {
           "base_topic": "Basisthema",
           "node_id": "Knoten-ID",
-          "name": "Name"
+          "name": "Name",
+          "receiver_host": "Receiver-Adresse (optional)"
         },
         "data_description": {
           "base_topic": "Das Präfix, unter dem der Receiver veröffentlicht, so wie Home Assistant es am Broker sieht.",
           "node_id": "Die Knoten-ID des Receivers, zu sehen im Einrichtungsbildschirm des Plugins.",
-          "name": "Wie dieser Receiver in Home Assistant heißen soll."
+          "name": "Wie dieser Receiver in Home Assistant heißen soll.",
+          "receiver_host": "Diese Metadaten ändern keine angehefteten SSH-Zugangsdaten; richte SSH für einen anderen Receiver neu ein."
         }
       }
     },
@@ -95,6 +99,8 @@
           "publish_keys": "Fernbedienungstasten veröffentlichen",
           "screenshot": "Automatische Bildschirmfotos",
           "screenshot_interval": "Bildschirmfoto-Intervall (Sekunden)",
+          "screenshot_delay": "Verzögerung nach dem Kanalwechsel (Sekunden)",
+          "cam_telemetry": "Zugangsberechtigungs-Telemetrie veröffentlichen",
           "configure_ssh": "SSH-Zugangsdaten für Plugin-Updates einrichten",
           "keep_ssh_credentials": "SSH-Zugangsdaten für Updates behalten"
         },
@@ -104,7 +110,9 @@
           "bouquets": "Welche Bouquets die Senderliste und der Medienbrowser anbieten. Leer lassen für alle Bouquets, die der Receiver veröffentlicht.",
           "publish_keys": "Tastenereignisse können Automationen auslösen, zeigen aber auch, was gedrückt wird. Deaktiviere sie, wenn keine Automation sie benötigt.",
           "screenshot": "Aus veröffentlicht keine neuen Bilder. Bei Senderwechsel nimmt nach dem Umschalten auf. Intervall nimmt regelmäßig auf.",
-          "screenshot_interval": "Nur im Intervallmodus verwendet. Der Receiver erzwingt mindestens fünf Sekunden."
+          "screenshot_interval": "Nur im Intervallmodus verwendet. Der Receiver erzwingt mindestens fünf Sekunden.",
+          "screenshot_delay": "Wartezeit vor einem automatischen Bildschirmfoto nach dem Kanalwechsel, damit das neue Bild erscheinen kann.",
+          "cam_telemetry": "Zeigt Verschlüsselung und ECM-Status des aktuellen Dienstes. Server-, Konto- und Kartendaten werden nicht veröffentlicht."
         }
       },
       "ssh_host": {"title": "Mit dem Receiver verbinden", "data": {"ssh_host": "Receiver-Adresse", "ssh_port": "SSH-Port"}},
@@ -122,6 +130,12 @@
       },
       "recording_disk": {
         "name": "Aufnahmefestplatte"
+      },
+      "cam_active": {
+        "name": "CAM aktiv"
+      },
+      "service_encrypted": {
+        "name": "Dienst verschlüsselt"
       }
     },
     "button": {
@@ -196,6 +210,12 @@
       },
       "uptime": {
         "name": "Laufzeit"
+      },
+      "cam_system": {
+        "name": "Zugangsberechtigungssystem"
+      },
+      "cam_ecm_time": {
+        "name": "ECM-Zeit"
       }
     },
     "switch": {

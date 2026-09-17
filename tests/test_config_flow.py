@@ -17,6 +17,7 @@ from custom_components.enigma2_mqtt.const import (
     CONF_BASE_TOPIC,
     CONF_NAME,
     CONF_NODE_ID,
+    CONF_RECEIVER_HOST,
     DOMAIN,
 )
 
@@ -207,6 +208,52 @@ async def test_manual_flow_creates_the_entry(
     assert result["title"] == BOX_NAME
     assert result["data"][CONF_NODE_ID] == NODE_ID
     assert result["result"].unique_id == NODE_ID
+
+
+async def test_manual_flow_keeps_an_optional_receiver_address_as_metadata(
+    hass: HomeAssistant, mqtt_mock, retained: dict[str, str]
+) -> None:
+    """The address helps links and SSH but is not used to find the MQTT box."""
+    result = await _start_manual_flow(hass)
+    retained[INFO_TOPIC] = json.dumps(INFO)
+    await async_arm_ha_mode_ack(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            CONF_BASE_TOPIC: BASE_TOPIC,
+            CONF_NODE_ID: NODE_ID,
+            CONF_RECEIVER_HOST: "receiver.example",
+        },
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_RECEIVER_HOST] == "receiver.example"
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "http://receiver",
+        "user@receiver",
+        "receiver/path",
+        "bad host",
+        "fe80::1%foo]@example.com",
+    ],
+)
+async def test_manual_flow_rejects_a_url_or_credential_as_receiver_host(
+    hass: HomeAssistant, mqtt_mock, host: str
+) -> None:
+    result = await _start_manual_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            CONF_BASE_TOPIC: BASE_TOPIC,
+            CONF_NODE_ID: NODE_ID,
+            CONF_RECEIVER_HOST: host,
+        },
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_host"}
 
 
 async def test_manual_flow_reports_a_box_that_is_not_there(

@@ -17,7 +17,9 @@ which address a magic packet goes to, and which bouquets are worth browsing.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
+import re
 from typing import Any
 
 from homeassistant.components import mqtt
@@ -44,12 +46,15 @@ from .const import (
     ACK_TIMEOUT,
     CONF_BASE_TOPIC,
     CONF_BOUQUETS,
+    CONF_CAM_TELEMETRY,
     CONF_DANGEROUS_BUTTONS,
     CONF_KEEP_SSH_CREDENTIALS,
     CONF_NAME,
     CONF_NODE_ID,
     CONF_PUBLISH_KEYS,
+    CONF_RECEIVER_HOST,
     CONF_SCREENSHOT,
+    CONF_SCREENSHOT_DELAY,
     CONF_SCREENSHOT_INTERVAL,
     CONF_SSH_HOST,
     CONF_SSH_HOST_KEY,
@@ -58,13 +63,17 @@ from .const import (
     CONF_SSH_USERNAME,
     CONF_WOL_MAC,
     DEFAULT_BASE_TOPIC,
+    DEFAULT_CAM_TELEMETRY,
     DEFAULT_PUBLISH_KEYS,
     DEFAULT_SCREENSHOT,
+    DEFAULT_SCREENSHOT_DELAY,
     DEFAULT_SCREENSHOT_INTERVAL,
     DISCOVERY_PREFIX,
     DOMAIN,
     HA_MODE_INTEGRATION,
+    MAX_SCREENSHOT_DELAY,
     MAX_SCREENSHOT_INTERVAL,
+    MIN_SCREENSHOT_DELAY,
     MIN_SCREENSHOT_INTERVAL,
     PROBE_TIMEOUT,
     SCREENSHOT_MODES,
@@ -88,6 +97,7 @@ STEP_USER_SCHEMA = vol.Schema(
         vol.Required(CONF_BASE_TOPIC, default=DEFAULT_BASE_TOPIC): str,
         vol.Required(CONF_NODE_ID): str,
         vol.Optional(CONF_NAME): str,
+        vol.Optional(CONF_RECEIVER_HOST): str,
     }
 )
 
@@ -199,9 +209,12 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
             base_topic = user_input[CONF_BASE_TOPIC].strip().strip("/")
             node_id = user_input[CONF_NODE_ID].strip()
             name = (user_input.get(CONF_NAME) or "").strip()
+            receiver_host = (user_input.get(CONF_RECEIVER_HOST) or "").strip()
 
             if not _is_valid_topic(base_topic, node_id):
                 errors["base"] = "invalid_topic"
+            elif not _is_valid_host(receiver_host):
+                errors["base"] = "invalid_host"
             else:
                 await self.async_set_unique_id(node_id, raise_on_progress=False)
                 self._abort_if_unique_id_configured()
@@ -219,7 +232,7 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
                     self._boxtype = info.get("boxtype") or ""
                     self._image = info.get("image") or ""
                     if await self._async_take_over():
-                        return self._async_create_entry()
+                        return self._async_create_entry(receiver_host=receiver_host)
                     errors["base"] = "no_ack"
 
         return self.async_show_form(
@@ -413,6 +426,7 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
             CONF_NODE_ID: self._node_id,
             CONF_BASE_TOPIC: self._base_topic,
             CONF_NAME: self._name,
+            CONF_RECEIVER_HOST: self._install_host,
             CONF_SSH_HOST: self._install_host,
             CONF_SSH_PORT: self._install_port,
         }
@@ -447,15 +461,19 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
             CONF_BASE_TOPIC: entry.data.get(CONF_BASE_TOPIC, DEFAULT_BASE_TOPIC),
             CONF_NODE_ID: entry.data[CONF_NODE_ID],
             CONF_NAME: entry.data.get(CONF_NAME) or entry.title,
+            CONF_RECEIVER_HOST: entry.data.get(CONF_RECEIVER_HOST, ""),
         }
 
         if user_input is not None:
             base_topic = user_input[CONF_BASE_TOPIC].strip().strip("/")
             node_id = user_input[CONF_NODE_ID].strip()
             name = (user_input.get(CONF_NAME) or "").strip() or node_id
+            receiver_host = (user_input.get(CONF_RECEIVER_HOST) or "").strip()
 
             if not _is_valid_topic(base_topic, node_id):
                 errors["base"] = "invalid_topic"
+            elif not _is_valid_host(receiver_host):
+                errors["base"] = "invalid_host"
             elif any(
                 other.unique_id == node_id and other.entry_id != entry.entry_id
                 for other in self.hass.config_entries.async_entries(DOMAIN)
@@ -488,6 +506,7 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_BASE_TOPIC: base_topic,
                         CONF_NODE_ID: node_id,
                         CONF_NAME: name,
+                        CONF_RECEIVER_HOST: receiver_host,
                     },
                 )
 
@@ -625,15 +644,18 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
             is not None
         )
 
-    def _async_create_entry(self) -> ConfigFlowResult:
+    def _async_create_entry(self, *, receiver_host: str = "") -> ConfigFlowResult:
         """Create the config entry for the box that just acknowledged the take-over."""
+        data = {
+            CONF_NODE_ID: self._node_id,
+            CONF_BASE_TOPIC: self._base_topic,
+            CONF_NAME: self._name,
+        }
+        if receiver_host:
+            data[CONF_RECEIVER_HOST] = receiver_host
         return self.async_create_entry(
             title=self._name,
-            data={
-                CONF_NODE_ID: self._node_id,
-                CONF_BASE_TOPIC: self._base_topic,
-                CONF_NAME: self._name,
-            },
+            data=data,
         )
 
     def _placeholders(self) -> dict[str, str]:
@@ -677,6 +699,10 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                 if isinstance(current, dict)
                 else None
             )
+            if requested is not None and CONF_SCREENSHOT_DELAY in current:
+                requested[CONF_SCREENSHOT_DELAY] = user_input[CONF_SCREENSHOT_DELAY]
+            if requested is not None and CONF_CAM_TELEMETRY in current:
+                requested[CONF_CAM_TELEMETRY] = user_input[CONF_CAM_TELEMETRY]
             local_data = {
                 CONF_DANGEROUS_BUTTONS: user_input[CONF_DANGEROUS_BUTTONS],
                 CONF_WOL_MAC: (user_input.get(CONF_WOL_MAC) or "").strip(),
@@ -687,10 +713,12 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
             if user_input.get("configure_ssh"):
                 self._pending_options = local_data
                 self._pending_remote = (
-                    requested if requested is not None and requested != current else None
+                    requested
+                    if requested is not None and not _settings_match(current, requested)
+                    else None
                 )
                 return await self.async_step_ssh_host()
-            if requested is not None and requested != current:
+            if requested is not None and not _settings_match(current, requested):
                 before = box.updates.get("info", 0)
                 try:
                     await box.async_command(
@@ -698,7 +726,7 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                         json.dumps(requested, separators=(",", ":")),
                         effect=lambda: (
                             box.updates.get("info", 0) > before
-                            and box.info.get("settings") == requested
+                            and _settings_match(box.info.get("settings"), requested)
                         ),
                     )
                 except HomeAssistantError:
@@ -771,6 +799,34 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                     ),
                 }
             )
+            if CONF_SCREENSHOT_DELAY in settings:
+                schema = schema.extend(
+                    {
+                        vol.Required(
+                            CONF_SCREENSHOT_DELAY,
+                            default=settings.get(
+                                CONF_SCREENSHOT_DELAY, DEFAULT_SCREENSHOT_DELAY
+                            ),
+                        ): vol.All(
+                            vol.Coerce(int),
+                            vol.Range(
+                                min=MIN_SCREENSHOT_DELAY,
+                                max=MAX_SCREENSHOT_DELAY,
+                            ),
+                        )
+                    }
+                )
+            if CONF_CAM_TELEMETRY in settings:
+                schema = schema.extend(
+                    {
+                        vol.Required(
+                            CONF_CAM_TELEMETRY,
+                            default=settings.get(
+                                CONF_CAM_TELEMETRY, DEFAULT_CAM_TELEMETRY
+                            ),
+                        ): bool
+                    }
+                )
         if CONF_SSH_PASSWORD in self.config_entry.data:
             schema = schema.extend(
                 {vol.Required(CONF_KEEP_SSH_CREDENTIALS, default=True): bool}
@@ -811,13 +867,16 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                 return await self.async_step_ssh_confirm()
         return self.async_show_form(
             step_id="ssh_host",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_SSH_HOST): str,
-                    vol.Required(CONF_SSH_PORT, default=22): vol.All(
-                        vol.Coerce(int), vol.Range(min=1, max=65535)
-                    ),
-                }
+            data_schema=self.add_suggested_values_to_schema(
+                vol.Schema(
+                    {
+                        vol.Required(CONF_SSH_HOST): str,
+                        vol.Required(CONF_SSH_PORT, default=22): vol.All(
+                            vol.Coerce(int), vol.Range(min=1, max=65535)
+                        ),
+                    }
+                ),
+                {CONF_SSH_HOST: self.config_entry.data.get(CONF_RECEIVER_HOST, "")},
             ),
             errors=errors,
         )
@@ -853,7 +912,9 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                                 json.dumps(self._pending_remote, separators=(",", ":")),
                                 effect=lambda: (
                                     box.updates.get("info", 0) > before
-                                    and box.info.get("settings") == self._pending_remote
+                                    and _settings_match(
+                                        box.info.get("settings"), self._pending_remote
+                                    )
                                 ),
                             )
                         except HomeAssistantError:
@@ -912,3 +973,35 @@ def _is_valid_topic(base_topic: str, node_id: str) -> bool:
     except vol.Invalid:
         return False
     return "+" not in base_topic and "#" not in base_topic and "+" not in node_id
+
+
+def _settings_match(actual: Any, requested: dict[str, Any]) -> bool:
+    """Match only settings sent by this integration.
+
+    New plugin versions can advertise additional settings while an older
+    integration is still loaded. Those additions must not invalidate a fresh
+    acknowledgement for the subset this flow changed.
+    """
+    return isinstance(actual, dict) and all(
+        actual.get(key) == value for key, value in requested.items()
+    )
+
+
+def _is_valid_host(host: str) -> bool:
+    """Accept an optional hostname or IP address, never a URL or credential."""
+    if not host:
+        return True
+    if "%" in host:
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return bool(
+            len(host) <= 253
+            and re.fullmatch(
+                r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*"
+                r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?",
+                host,
+            )
+        )

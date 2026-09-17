@@ -62,9 +62,13 @@ actions, registered on the media player platform, which is where Home Assistant 
 entity action to be registered; the rule's intent — a schema on every action, validated before
 anything is published, and an action that exists whether or not a box is loaded — is met.
 
-`test-coverage` stays open on purpose. The current 222-test suite covers every platform, every
-action, the device triggers, both flows and the guarded installer, and measured 89% line
-coverage on Python 3.14.4. That is useful evidence, but it is still below the 95% target.
+`test-coverage` stays open on purpose. The current 241-test suite covers every platform, every
+action, the device triggers, both flows and the guarded installer. The local frozen-source
+run measured 89% statement coverage and 86% combined statement/branch coverage on Python
+3.14.4, below the 95% target. The first coverage run had an intermittent failure in
+`test_aborting_progress_cancels_the_transaction_and_clears_secrets`; it passed standalone
+and in the identical full rerun without source changes. This remains a test-reliability
+follow-up, not evidence that receiver installation or rollback has passed live acceptance.
 
 ## What CI enforces today
 

@@ -40,6 +40,7 @@ TO_REDACT = {
     "ip",
     "mac",
     "password",
+    "receiver_host",
     "ssh_password",
     "ssh_host",
     "ssh_host_key",
@@ -85,6 +86,7 @@ async def async_get_config_entry_diagnostics(
             "timers": state.timers,
             "volume": state.volume,
             "hdd": state.hdd,
+            "cam": state.cam,
             "channels": _summarise_channels(state.channels),
             "last_error": state.last_error,
             "screen": {

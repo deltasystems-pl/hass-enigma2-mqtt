@@ -76,6 +76,7 @@ async def test_diagnostics_redact_credentials_that_do_not_exist_yet(
             "ssh_host": "receiver.example",
             "ssh_host_key": "ssh-ed25519 AAAAprivateidentity",
             "ssh_username": "root",
+            "receiver_host": "receiver.example",
         },
     )
     await hass.async_block_till_done()
@@ -91,6 +92,7 @@ async def test_diagnostics_redact_credentials_that_do_not_exist_yet(
     assert entry_data["data"]["ssh_host"] == REDACTED
     assert entry_data["data"]["ssh_host_key"] == REDACTED
     assert entry_data["data"]["ssh_username"] == REDACTED
+    assert entry_data["data"]["receiver_host"] == REDACTED
     assert entry_data["data"]["node_id"] == NODE_ID
 
 
