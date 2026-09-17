@@ -343,7 +343,11 @@ async def async_setup_box(hass: HomeAssistant, entry: MockConfigEntry) -> None:
 
 
 async def async_arm_ha_mode_ack(
-    hass: HomeAssistant, info: dict[str, Any] | None = None
+    hass: HomeAssistant,
+    info: dict[str, Any] | None = None,
+    *,
+    base_topic: str = BASE_TOPIC,
+    node_id: str = NODE_ID,
 ) -> None:
     """Answer `cmd/ha_mode` with an `info` payload that echoes the new mode.
 
@@ -360,10 +364,14 @@ async def async_arm_ha_mode_ack(
         if isinstance(mode, (bytes, bytearray)):
             mode = mode.decode()
         async_fire_mqtt_message(
-            hass, INFO_TOPIC, json.dumps({**payload, "ha_mode": mode})
+            hass,
+            f"{base_topic}/{node_id}/info",
+            json.dumps({**payload, "ha_mode": mode}),
         )
 
-    await mqtt.async_subscribe(hass, HA_MODE_TOPIC, _command_received)
+    await mqtt.async_subscribe(
+        hass, f"{base_topic}/{node_id}/cmd/ha_mode", _command_received
+    )
 
 
 async def async_arm_box_reply(

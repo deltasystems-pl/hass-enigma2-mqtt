@@ -70,6 +70,17 @@ async def _start_discovered_flow(
     )
 
 
+async def _start_manual_flow(hass: HomeAssistant) -> dict[str, Any]:
+    """Choose the existing-plugin branch from the first-user menu."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    assert result["type"] is FlowResultType.MENU
+    return await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": "manual"}
+    )
+
+
 async def test_discovered_flow_creates_the_entry(
     hass: HomeAssistant, mqtt_mock
 ) -> None:
@@ -179,12 +190,10 @@ async def test_manual_flow_creates_the_entry(
     hass: HomeAssistant, mqtt_mock, retained: dict[str, str]
 ) -> None:
     """A box typed in by hand is probed on its retained `info` topic, then added."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": SOURCE_USER}
-    )
+    result = await _start_manual_flow(hass)
 
     assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "user"
+    assert result["step_id"] == "manual"
 
     retained[INFO_TOPIC] = json.dumps(INFO)
     await async_arm_ha_mode_ack(hass)
@@ -204,9 +213,7 @@ async def test_manual_flow_reports_a_box_that_is_not_there(
     hass: HomeAssistant, mqtt_mock, retained: dict[str, str]
 ) -> None:
     """Nothing retained on the topic means the box is not on this broker."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": SOURCE_USER}
-    )
+    result = await _start_manual_flow(hass)
 
     with patch("custom_components.enigma2_mqtt.config_flow.PROBE_TIMEOUT", 0.01):
         result = await hass.config_entries.flow.async_configure(
@@ -232,9 +239,7 @@ async def test_manual_flow_reports_a_box_that_does_not_acknowledge(
     hass: HomeAssistant, mqtt_mock, retained: dict[str, str]
 ) -> None:
     """The box is there, but it never confirms the mode switch."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": SOURCE_USER}
-    )
+    result = await _start_manual_flow(hass)
 
     retained[INFO_TOPIC] = json.dumps(INFO)
 
@@ -262,9 +267,7 @@ async def test_manual_flow_aborts_when_already_configured(
     """The node id is the unique id, whichever path added the box."""
     config_entry.add_to_hass(hass)
 
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": SOURCE_USER}
-    )
+    result = await _start_manual_flow(hass)
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
         {CONF_BASE_TOPIC: BASE_TOPIC, CONF_NODE_ID: NODE_ID},
@@ -286,9 +289,7 @@ async def test_manual_flow_rejects_a_wildcard_topic(
     node_id: str,
 ) -> None:
     """A wildcard would subscribe to every box on the broker at once."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": SOURCE_USER}
-    )
+    result = await _start_manual_flow(hass)
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
         {CONF_BASE_TOPIC: base_topic, CONF_NODE_ID: node_id},
@@ -311,9 +312,7 @@ async def test_manual_flow_falls_back_to_the_node_id_as_a_name(
     hass: HomeAssistant, mqtt_mock, retained: dict[str, str]
 ) -> None:
     """An empty name is not an empty device page."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": SOURCE_USER}
-    )
+    result = await _start_manual_flow(hass)
 
     retained[INFO_TOPIC] = json.dumps(INFO)
     await async_arm_ha_mode_ack(hass)
@@ -338,9 +337,7 @@ async def test_a_retained_info_is_not_an_acknowledgement(
     """
     retained[INFO_TOPIC] = json.dumps({**INFO, "ha_mode": "integration"})
 
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": SOURCE_USER}
-    )
+    result = await _start_manual_flow(hass)
     with patch("custom_components.enigma2_mqtt.config_flow.ACK_TIMEOUT", 0.05):
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
@@ -379,9 +376,7 @@ async def test_manual_flow_aborts_without_mqtt(hass: HomeAssistant, mqtt_mock) -
     with patch(
         "homeassistant.components.mqtt.async_wait_for_mqtt_client", return_value=False
     ):
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": SOURCE_USER}
-        )
+        result = await _start_manual_flow(hass)
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "mqtt_unavailable"

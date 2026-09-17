@@ -16,6 +16,8 @@ which address a magic packet goes to, and which bouquets are worth browsing.
 
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import Any
 
 from homeassistant.components import mqtt
@@ -27,6 +29,7 @@ from homeassistant.config_entries import (
     OptionsFlowWithReload,
 )
 from homeassistant.core import callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr, selector
 from homeassistant.helpers.service_info.mqtt import MqttServiceInfo
 import voluptuous as vol
@@ -42,14 +45,39 @@ from .const import (
     CONF_BASE_TOPIC,
     CONF_BOUQUETS,
     CONF_DANGEROUS_BUTTONS,
+    CONF_KEEP_SSH_CREDENTIALS,
     CONF_NAME,
     CONF_NODE_ID,
+    CONF_PUBLISH_KEYS,
+    CONF_SCREENSHOT,
+    CONF_SCREENSHOT_INTERVAL,
+    CONF_SSH_HOST,
+    CONF_SSH_HOST_KEY,
+    CONF_SSH_PASSWORD,
+    CONF_SSH_PORT,
+    CONF_SSH_USERNAME,
     CONF_WOL_MAC,
     DEFAULT_BASE_TOPIC,
+    DEFAULT_PUBLISH_KEYS,
+    DEFAULT_SCREENSHOT,
+    DEFAULT_SCREENSHOT_INTERVAL,
     DISCOVERY_PREFIX,
     DOMAIN,
     HA_MODE_INTEGRATION,
+    MAX_SCREENSHOT_INTERVAL,
+    MIN_SCREENSHOT_INTERVAL,
     PROBE_TIMEOUT,
+    SCREENSHOT_MODES,
+)
+from .installer import (
+    InstallerError,
+    InstallerErrorCode,
+    InstallRequest,
+    Provisioning,
+    SshCredentials,
+    async_install,
+    async_preflight,
+    async_probe_host_key,
 )
 
 # Shown in place of a field the box did not report.
@@ -82,6 +110,16 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
         self._name: str = ""
         self._boxtype: str = ""
         self._image: str = ""
+        self._reauth_input: dict[str, Any] | None = None
+        self._reauth_host_key: str = ""
+        self._install_host: str = ""
+        self._install_port: int = 22
+        self._install_host_key = None
+        self._install_task = None
+        self._install_request: InstallRequest | None = None
+        self._install_error: str | None = None
+        self._install_result = None
+        self._install_phase = "preflight"
 
     async def async_step_mqtt(
         self, discovery_info: MqttServiceInfo
@@ -146,6 +184,12 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        """Choose between an existing plugin and a guided installation."""
+        return self.async_show_menu(step_id="user", menu_options=["manual", "install"])
+
+    async def async_step_manual(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """Add a box by hand, for a prefix Home Assistant never saw announced."""
         if not await mqtt.async_wait_for_mqtt_client(self.hass):
             return self.async_abort(reason="mqtt_unavailable")
@@ -179,12 +223,210 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors["base"] = "no_ack"
 
         return self.async_show_form(
-            step_id="user",
+            step_id="manual",
             data_schema=self.add_suggested_values_to_schema(
                 STEP_USER_SCHEMA, user_input or {}
             ),
             errors=errors,
         )
+
+    async def async_step_install(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Probe SSH identity before asking for any credential."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            self._install_host = user_input[CONF_SSH_HOST].strip()
+            self._install_port = user_input[CONF_SSH_PORT]
+            if not self._install_host:
+                errors["base"] = "invalid_host"
+                return self._show_install_host(errors)
+            try:
+                self._install_host_key = await async_probe_host_key(
+                    self._install_host, self._install_port
+                )
+            except InstallerError as err:
+                errors["base"] = err.code.value
+            else:
+                return await self.async_step_install_confirm()
+        return self._show_install_host(errors)
+
+    def _show_install_host(self, errors: dict[str, str]) -> ConfigFlowResult:
+        """Render the non-secret receiver address form."""
+        return self.async_show_form(
+            step_id="install",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_SSH_HOST): str,
+                    vol.Required(CONF_SSH_PORT, default=22): vol.All(
+                        vol.Coerce(int), vol.Range(min=1, max=65535)
+                    ),
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_install_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Confirm the fingerprint, credentials, and provisioning in one explicit step."""
+        assert self._install_host_key is not None
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if not await mqtt.async_wait_for_mqtt_client(self.hass):
+                return self.async_abort(reason="mqtt_unavailable")
+            credentials = SshCredentials(
+                host=self._install_host,
+                port=self._install_port,
+                username=user_input[CONF_SSH_USERNAME].strip(),
+                password=user_input[CONF_SSH_PASSWORD],
+                host_key=self._install_host_key.public_key,
+            )
+            node_id = user_input[CONF_NODE_ID].strip()
+            base_topic = user_input[CONF_BASE_TOPIC].strip().strip("/")
+            broker_host = user_input["broker_host"].strip()
+            broker_username = user_input["broker_username"].strip()
+            if (
+                not _is_valid_topic(base_topic, node_id)
+                or not credentials.username
+                or not broker_host
+                or not broker_username
+            ):
+                errors["base"] = "invalid_topic"
+                return self._show_install_confirm(errors, user_input)
+            provisioning = Provisioning(
+                broker_host=broker_host,
+                broker_port=user_input["broker_port"],
+                broker_username=broker_username,
+                broker_password=user_input["broker_password"],
+                node_id=node_id,
+                base_topic=base_topic,
+                friendly_name=(user_input.get(CONF_NAME) or "").strip() or None,
+            )
+            self._install_request = InstallRequest(
+                credentials=credentials,
+                provisioning=provisioning,
+                keep_credentials=user_input[CONF_KEEP_SSH_CREDENTIALS],
+            )
+            self._node_id = provisioning.node_id
+            self._base_topic = provisioning.base_topic
+            self._name = provisioning.friendly_name or provisioning.node_id
+            await self.async_set_unique_id(self._node_id)
+            self._abort_if_unique_id_configured()
+            self._install_task = self.hass.async_create_task(self._async_run_install())
+            return await self.async_step_install_progress()
+
+        return self._show_install_confirm(errors, user_input)
+
+    def _show_install_confirm(
+        self, errors: dict[str, str], user_input: dict[str, Any] | None
+    ) -> ConfigFlowResult:
+        """Render provisioning fields while never suggesting passwords."""
+        password = selector.TextSelector(
+            selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+        )
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_SSH_USERNAME, default="root"): str,
+                vol.Required(CONF_SSH_PASSWORD): password,
+                vol.Required("broker_host"): str,
+                vol.Required("broker_port", default=1883): vol.All(
+                    vol.Coerce(int), vol.Range(min=1, max=65535)
+                ),
+                vol.Required("broker_username"): str,
+                vol.Required("broker_password"): password,
+                vol.Required(CONF_NODE_ID): str,
+                vol.Required(CONF_BASE_TOPIC, default=DEFAULT_BASE_TOPIC): str,
+                vol.Optional(CONF_NAME): str,
+                vol.Required(CONF_KEEP_SSH_CREDENTIALS, default=False): bool,
+            }
+        )
+        suggested = {
+            key: value
+            for key, value in (user_input or {}).items()
+            if key not in {CONF_SSH_PASSWORD, "broker_password"}
+        }
+        return self.async_show_form(
+            step_id="install_confirm",
+            data_schema=self.add_suggested_values_to_schema(schema, suggested),
+            errors=errors,
+            description_placeholders={
+                "fingerprint": self._install_host_key.fingerprint
+            },
+        )
+
+    async def _async_run_install(self) -> None:
+        assert self._install_request is not None
+        try:
+            self._install_result = await async_install(
+                self.hass, self._install_request, self._async_install_progress
+            )
+        except asyncio.CancelledError:
+            self._install_error = "install_cancelled"
+            raise
+        except InstallerError as err:
+            self._install_error = err.code.value
+        except Exception:
+            self._install_error = "unknown"
+
+    def _async_install_progress(self, phase: str) -> None:
+        """Remember the backend phase without recording any credential or address."""
+        self._install_phase = phase
+        phases = (
+            "preflight", "backup", "upload", "install", "provision",
+            "restart", "announcement", "done",
+        )
+        if phase in phases:
+            self.async_update_progress((phases.index(phase) + 1) / len(phases))
+        self.async_notify_flow_changed()
+
+    @callback
+    def async_remove(self) -> None:
+        """Drop credentials when Home Assistant finishes or aborts this flow."""
+        self._install_request = None
+        self._reauth_input = None
+
+    async def async_step_install_progress(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Keep the flow alive while the guarded transaction runs."""
+        assert self._install_task is not None
+        if self._install_task.done():
+            if not self._install_task.cancelled():
+                self._install_task.result()
+            return self.async_show_progress_done(next_step_id="install_finish")
+        return self.async_show_progress(
+            step_id="install_progress",
+            progress_action=self._install_phase,
+            progress_task=self._install_task,
+        )
+
+    async def async_step_install_finish(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Create the MQTT entry only after the backend proved its announcement."""
+        if self._install_error is not None or self._install_result is None:
+            self._install_request = None
+            return self.async_abort(reason=self._install_error or "unknown")
+        assert self._install_request is not None
+        data = {
+            CONF_NODE_ID: self._node_id,
+            CONF_BASE_TOPIC: self._base_topic,
+            CONF_NAME: self._name,
+            CONF_SSH_HOST: self._install_host,
+            CONF_SSH_PORT: self._install_port,
+        }
+        if self._install_request.keep_credentials:
+            data.update(
+                {
+                    CONF_SSH_USERNAME: self._install_request.credentials.username,
+                    CONF_SSH_PASSWORD: self._install_request.credentials.password,
+                    CONF_SSH_HOST_KEY: self._install_request.credentials.host_key,
+                    CONF_KEEP_SSH_CREDENTIALS: True,
+                }
+            )
+        self._install_request = None
+        return self.async_create_entry(title=self._name, data=data)
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
@@ -225,6 +467,16 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
                 await async_wait_for_info(self.hass, base_topic, node_id, PROBE_TIMEOUT)
             ) is None:
                 errors["base"] = "not_found"
+            elif (
+                await async_request_ha_mode(
+                    self.hass,
+                    base_topic,
+                    node_id,
+                    HA_MODE_INTEGRATION,
+                    ACK_TIMEOUT,
+                )
+            ) is None:
+                errors["base"] = "no_ack"
             else:
                 if node_id != entry.data[CONF_NODE_ID]:
                     self._async_forget_device(entry.data[CONF_NODE_ID], entry.entry_id)
@@ -246,6 +498,105 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
             ),
             errors=errors,
         )
+
+    async def async_step_reauth(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Refresh optional SSH credentials without disturbing the MQTT runtime."""
+        entry = self._get_reauth_entry()
+        errors: dict[str, str] = {}
+        if (
+            user_input is not None
+            and CONF_SSH_PASSWORD in user_input
+            and CONF_NODE_ID not in user_input
+        ):
+            host = entry.data.get(CONF_SSH_HOST, "")
+            port = entry.data.get(CONF_SSH_PORT, 22)
+            try:
+                found = await async_probe_host_key(host, port)
+            except InstallerError as err:
+                errors["base"] = err.code.value
+            else:
+                self._reauth_input = dict(user_input)
+                self._reauth_host_key = found.public_key
+                if found.public_key != entry.data.get(CONF_SSH_HOST_KEY):
+                    return self.async_show_form(
+                        step_id="reauth_confirm_host_key",
+                        data_schema=vol.Schema({}),
+                        description_placeholders={"fingerprint": found.fingerprint},
+                    )
+                return await self._async_finish_reauth(entry, found.public_key)
+
+        return self.async_show_form(
+            step_id="reauth",
+            data_schema=self.add_suggested_values_to_schema(
+                vol.Schema(
+                    {
+                        vol.Required(CONF_SSH_USERNAME): str,
+                        vol.Required(CONF_SSH_PASSWORD): selector.TextSelector(
+                            selector.TextSelectorConfig(
+                                type=selector.TextSelectorType.PASSWORD
+                            )
+                        ),
+                    }
+                ),
+                user_input
+                or {CONF_SSH_USERNAME: entry.data.get(CONF_SSH_USERNAME, "root")},
+            ),
+            errors=errors,
+        )
+
+    async def async_step_reauth_confirm_host_key(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Require an explicit click before replacing a changed SSH identity."""
+        if user_input is None:
+            return self.async_abort(reason="reauth_failed")
+        return await self._async_finish_reauth(
+            self._get_reauth_entry(), self._reauth_host_key
+        )
+
+    async def _async_finish_reauth(
+        self, entry: ConfigEntry, host_key: str
+    ) -> ConfigFlowResult:
+        """Authenticate the replacement password, then update only SSH data."""
+        assert self._reauth_input is not None
+        credentials = SshCredentials(
+            host=entry.data[CONF_SSH_HOST],
+            port=entry.data.get(CONF_SSH_PORT, 22),
+            username=self._reauth_input[CONF_SSH_USERNAME],
+            password=self._reauth_input[CONF_SSH_PASSWORD],
+            host_key=host_key,
+        )
+        try:
+            await async_preflight(self.hass, credentials)
+        except InstallerError as err:
+            if err.code is InstallerErrorCode.HOST_KEY_CHANGED:
+                return self.async_abort(reason="host_key_changed")
+            return self.async_show_form(
+                step_id="reauth",
+                data_schema=vol.Schema(
+                    {
+                        vol.Required(CONF_SSH_USERNAME): str,
+                        vol.Required(CONF_SSH_PASSWORD): selector.TextSelector(
+                            selector.TextSelectorConfig(
+                                type=selector.TextSelectorType.PASSWORD
+                            )
+                        ),
+                    }
+                ),
+                errors={"base": err.code.value},
+            )
+        self.hass.config_entries.async_update_entry(
+            entry,
+            data={
+                **entry.data,
+                CONF_SSH_USERNAME: credentials.username,
+                CONF_SSH_PASSWORD: credentials.password,
+                CONF_SSH_HOST_KEY: host_key,
+            },
+        )
+        return self.async_abort(reason="reauth_successful")
 
     @callback
     def _async_forget_device(self, node_id: str, entry_id: str) -> None:
@@ -299,20 +650,77 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
-    """The three preferences a receiver has on this side of the link."""
+    """Preferences for the entities and the privacy-sensitive plugin publishers."""
+
+    def __init__(self) -> None:
+        """Keep a pending local edit while SSH identity is confirmed."""
+        self._pending_options: dict[str, Any] | None = None
+        self._pending_remote: dict[str, Any] | None = None
+        self._ssh_host = ""
+        self._ssh_port = 22
+        self._ssh_host_key = None
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Show the options, and save them."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(
-                data={
-                    CONF_DANGEROUS_BUTTONS: user_input[CONF_DANGEROUS_BUTTONS],
-                    CONF_WOL_MAC: (user_input.get(CONF_WOL_MAC) or "").strip(),
-                    CONF_BOUQUETS: user_input.get(CONF_BOUQUETS) or [],
+            box = self._box()
+            current = box.info.get("settings") if box is not None else None
+            requested = (
+                {
+                    CONF_PUBLISH_KEYS: user_input[CONF_PUBLISH_KEYS],
+                    CONF_SCREENSHOT: user_input[CONF_SCREENSHOT],
+                    CONF_SCREENSHOT_INTERVAL: user_input[CONF_SCREENSHOT_INTERVAL],
                 }
+                if isinstance(current, dict)
+                else None
             )
+            local_data = {
+                CONF_DANGEROUS_BUTTONS: user_input[CONF_DANGEROUS_BUTTONS],
+                CONF_WOL_MAC: (user_input.get(CONF_WOL_MAC) or "").strip(),
+                CONF_BOUQUETS: user_input.get(CONF_BOUQUETS) or [],
+            }
+            if requested is not None:
+                local_data.update(requested)
+            if user_input.get("configure_ssh"):
+                self._pending_options = local_data
+                self._pending_remote = (
+                    requested if requested is not None and requested != current else None
+                )
+                return await self.async_step_ssh_host()
+            if requested is not None and requested != current:
+                before = box.updates.get("info", 0)
+                try:
+                    await box.async_command(
+                        "config",
+                        json.dumps(requested, separators=(",", ":")),
+                        effect=lambda: (
+                            box.updates.get("info", 0) > before
+                            and box.info.get("settings") == requested
+                        ),
+                    )
+                except HomeAssistantError:
+                    errors["base"] = "plugin_config_failed"
+            if not errors:
+                data = local_data
+                if (
+                    CONF_SSH_PASSWORD in self.config_entry.data
+                    and not user_input.get(CONF_KEEP_SSH_CREDENTIALS, True)
+                ):
+                    entry_data = dict(self.config_entry.data)
+                    for key in (
+                        CONF_SSH_USERNAME,
+                        CONF_SSH_PASSWORD,
+                        CONF_SSH_HOST_KEY,
+                        CONF_KEEP_SSH_CREDENTIALS,
+                    ):
+                        entry_data.pop(key, None)
+                    self.hass.config_entries.async_update_entry(
+                        self.config_entry, data=entry_data
+                    )
+                return self.async_create_entry(data=data)
 
         box = self._box()
         # Every bouquet the box published, not the ones the current option narrowed it
@@ -321,6 +729,7 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
         # and the selector still takes typed names.
         bouquets = box.bouquet_names if box is not None else []
         mac = box.info.get("mac") if box is not None else None
+        settings = box.info.get("settings") if box is not None else None
 
         schema = vol.Schema(
             {
@@ -337,13 +746,150 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                 ),
             }
         )
+        if isinstance(settings, dict):
+            schema = schema.extend(
+                {
+                    vol.Required(
+                        CONF_PUBLISH_KEYS,
+                        default=settings.get(CONF_PUBLISH_KEYS, DEFAULT_PUBLISH_KEYS),
+                    ): bool,
+                    vol.Required(
+                        CONF_SCREENSHOT,
+                        default=settings.get(CONF_SCREENSHOT, DEFAULT_SCREENSHOT),
+                    ): vol.In(SCREENSHOT_MODES),
+                    vol.Required(
+                        CONF_SCREENSHOT_INTERVAL,
+                        default=settings.get(
+                            CONF_SCREENSHOT_INTERVAL, DEFAULT_SCREENSHOT_INTERVAL
+                        ),
+                    ): vol.All(
+                        vol.Coerce(int),
+                        vol.Range(
+                            min=MIN_SCREENSHOT_INTERVAL,
+                            max=MAX_SCREENSHOT_INTERVAL,
+                        ),
+                    ),
+                }
+            )
+        if CONF_SSH_PASSWORD in self.config_entry.data:
+            schema = schema.extend(
+                {vol.Required(CONF_KEEP_SSH_CREDENTIALS, default=True): bool}
+            )
+        else:
+            schema = schema.extend(
+                {vol.Optional("configure_ssh", default=False): bool}
+            )
+
+        suggested = dict(self.config_entry.options)
+        if isinstance(settings, dict):
+            suggested.update(settings)
 
         return self.async_show_form(
             step_id="init",
             data_schema=self.add_suggested_values_to_schema(
-                schema, dict(self.config_entry.options)
+                schema, user_input or suggested
             ),
+            errors=errors,
             description_placeholders={"mac": mac or UNKNOWN_PLACEHOLDER},
+        )
+
+    async def async_step_ssh_host(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Probe an existing receiver's SSH identity without a password."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            self._ssh_host = user_input[CONF_SSH_HOST].strip()
+            self._ssh_port = user_input[CONF_SSH_PORT]
+            try:
+                self._ssh_host_key = await async_probe_host_key(
+                    self._ssh_host, self._ssh_port
+                )
+            except InstallerError as err:
+                errors["base"] = err.code.value
+            else:
+                return await self.async_step_ssh_confirm()
+        return self.async_show_form(
+            step_id="ssh_host",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_SSH_HOST): str,
+                    vol.Required(CONF_SSH_PORT, default=22): vol.All(
+                        vol.Coerce(int), vol.Range(min=1, max=65535)
+                    ),
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_ssh_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Confirm the fingerprint and verify credentials before retaining them."""
+        assert self._ssh_host_key is not None
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            credentials = SshCredentials(
+                host=self._ssh_host,
+                port=self._ssh_port,
+                username=user_input[CONF_SSH_USERNAME],
+                password=user_input[CONF_SSH_PASSWORD],
+                host_key=self._ssh_host_key.public_key,
+            )
+            try:
+                await async_preflight(self.hass, credentials)
+            except InstallerError as err:
+                errors["base"] = err.code.value
+            else:
+                if self._pending_remote is not None:
+                    box = self._box()
+                    if box is None:
+                        errors["base"] = "plugin_unavailable"
+                    else:
+                        before = box.updates.get("info", 0)
+                        try:
+                            await box.async_command(
+                                "config",
+                                json.dumps(self._pending_remote, separators=(",", ":")),
+                                effect=lambda: (
+                                    box.updates.get("info", 0) > before
+                                    and box.info.get("settings") == self._pending_remote
+                                ),
+                            )
+                        except HomeAssistantError:
+                            errors["base"] = "plugin_config_failed"
+                if errors:
+                    return self._show_ssh_confirm(errors)
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry,
+                    data={
+                        **self.config_entry.data,
+                        CONF_SSH_HOST: credentials.host,
+                        CONF_SSH_PORT: credentials.port,
+                        CONF_SSH_USERNAME: credentials.username,
+                        CONF_SSH_PASSWORD: credentials.password,
+                        CONF_SSH_HOST_KEY: credentials.host_key,
+                        CONF_KEEP_SSH_CREDENTIALS: True,
+                    },
+                )
+                return self.async_create_entry(data=self._pending_options or {})
+        return self._show_ssh_confirm(errors)
+
+    def _show_ssh_confirm(self, errors: dict[str, str]) -> ConfigFlowResult:
+        """Render the credential form without ever echoing a password."""
+        password = selector.TextSelector(
+            selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+        )
+        return self.async_show_form(
+            step_id="ssh_confirm",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_SSH_USERNAME, default="root"): str,
+                    vol.Required(CONF_SSH_PASSWORD): password,
+                }
+            ),
+            errors=errors,
+            description_placeholders={"fingerprint": self._ssh_host_key.fingerprint},
         )
 
     def _box(self) -> Enigma2Box | None:

@@ -7,7 +7,8 @@
         "title": "Dodaj ten dekoder Enigma2",
         "description": "Dekoder Enigma2 {name} ({boxtype}, {image}) zgłosił się na brokerze.\n\nDodanie go przełącza dekoder w tryb integracji: wtyczka wycofuje encje, które sama publikuje przez wykrywanie MQTT, a urządzenie buduje Home Assistant. Dekoder musi potwierdzić przełączenie, zanim zostanie dodany."
       },
-      "user": {
+      "user": {"menu_options": {"manual": "Użyj istniejącej wtyczki MQTT Bridge", "install": "Zainstaluj MQTT Bridge przez SSH"}},
+      "manual": {
         "title": "Dodaj dekoder Enigma2 ręcznie",
         "description": "Użyj tego, gdy zgłoszenie dekodera nie dotarło do Home Assistanta — na przykład dlatego, że dekoder publikuje przez mostek MQTT, który zmienia przedrostek tematów.",
         "data": {
@@ -21,6 +22,11 @@
           "name": "Jak nazwać ten dekoder w Home Assistancie. Pozostawione puste — użyta zostanie nazwa zgłoszona przez wtyczkę."
         }
       },
+      "install": {"title": "Połącz z dekoderem", "description": "Home Assistant odczyta klucz hosta SSH przed zapytaniem o hasło.", "data": {"ssh_host": "Adres dekodera", "ssh_port": "Port SSH"}},
+      "install_confirm": {"title": "Potwierdź tożsamość i zainstaluj", "description": "Potwierdź odcisk SSH `{fingerprint}` przed wysłaniem danych logowania.", "data": {"ssh_username": "Użytkownik SSH", "ssh_password": "Hasło SSH", "broker_host": "Adres brokera MQTT", "broker_port": "Port brokera MQTT", "broker_username": "Użytkownik MQTT", "broker_password": "Hasło MQTT", "node_id": "Identyfikator węzła", "base_topic": "Temat bazowy", "name": "Nazwa", "keep_ssh_credentials": "Zachowaj dane SSH do aktualizacji"}},
+      "install_progress": {"title": "Instalowanie MQTT Bridge"},
+      "reauth": {"title": "Zaktualizuj dane SSH", "data": {"ssh_username": "Użytkownik SSH", "ssh_password": "Hasło SSH"}},
+      "reauth_confirm_host_key": {"title": "Klucz hosta SSH zmienił się", "description": "Kontynuuj tylko, jeśli dekoder pokazuje odcisk `{fingerprint}`."},
       "reconfigure": {
         "title": "Zmień, gdzie publikuje ten dekoder",
         "description": "Użyj tego po zmianie identyfikatora dekodera lub tematu bazowego na ekranie ustawień wtyczki.\n\nZmiana identyfikatora zmienia tożsamość dekodera: jego encje powstaną na nowo z nowymi identyfikatorami, a historia zostanie przy starym urządzeniu, które zostanie usunięte. Zmiana samego tematu bazowego albo nazwy niczego nie narusza.",
@@ -36,7 +42,28 @@
         }
       }
     },
+    "progress": {"preflight": "Sprawdzanie bezpieczeństwa i zgodności dekodera", "backup": "Tworzenie kopii bieżącej instalacji", "upload": "Wysyłanie zweryfikowanego pakietu", "install": "Instalowanie wtyczki", "provision": "Zapisywanie konfiguracji MQTT", "restart": "Restartowanie interfejsu Enigma2", "announcement": "Oczekiwanie na świeże zgłoszenie MQTT", "done": "Instalacja zweryfikowana"},
     "error": {
+      "invalid_host": "Podaj adres dekodera.",
+      "ssh_unavailable": "Nie można połączyć się z usługą SSH dekodera.",
+      "auth_failed": "Uwierzytelnianie SSH nie powiodło się.",
+      "preflight_failed": "Kontrole wstępne dekodera nie powiodły się.",
+      "unsupported_python": "Wersja Pythona w dekoderze nie jest obsługiwana.",
+      "no_space": "W dekoderze brakuje wolnego miejsca.",
+      "recording": "Instalacja jest zablokowana podczas nagrywania.",
+      "timer_due": "Instalacja jest zablokowana, ponieważ wkrótce rozpocznie się nagrywanie.",
+      "bundle_missing": "Brakuje zweryfikowanego pakietu wtyczki.",
+      "bundle_invalid": "Pakiet wtyczki nie przeszedł weryfikacji.",
+      "upload_failed": "Wysyłanie wtyczki nie powiodło się.",
+      "install_failed": "Instalacja wtyczki nie powiodła się i została wycofana.",
+      "newer_installed": "Nowsza wersja wtyczki jest już zainstalowana.",
+      "provision_failed": "Zapis konfiguracji MQTT nie powiódł się.",
+      "restart_failed": "Interfejs Enigma2 nie uruchomił się ponownie bezpiecznie.",
+      "announcement_timeout": "Po restarcie wtyczka nie opublikowała świeżego zgłoszenia MQTT.",
+      "rollback_failed": "Instalacja i jej wycofanie nie powiodły się; sprawdź dekoder ręcznie.",
+      "busy": "Inna instalacja jest już uruchomiona.",
+      "identity_mismatch": "Dekoder zgłosił inną tożsamość MQTT.",
+      "host_key_changed": "Klucz hosta SSH dekodera zmienił się.",
       "no_ack": "Dekoder nie odpowiedział na przełączenie trybu. Sprawdź, czy wtyczka działa i czy jej konto na brokerze ma prawo zapisu w tematach tego dekodera.",
       "not_found": "Nie znaleziono dekodera pod tym tematem. Sprawdź temat bazowy i identyfikator dekodera na ekranie ustawień wtyczki.",
       "invalid_topic": "To nie jest poprawny temat. Temat bazowy ani identyfikator dekodera nie mogą zawierać znaków wieloznacznych `+` i `#`.",
@@ -48,7 +75,12 @@
       "mqtt_unavailable": "Integracja MQTT jest niedostępna. Skonfiguruj ją najpierw, a potem dodaj dekoder.",
       "not_enigma2_announcement": "Ta wiadomość nie jest zgłoszeniem wtyczki Enigma2 MQTT Bridge.",
       "retracted": "Dekoder wycofał swoje zgłoszenie.",
-      "reconfigure_successful": "Dekoder został zaktualizowany."
+      "reconfigure_successful": "Dekoder został zaktualizowany.",
+      "reauth_successful": "Dane SSH zaktualizowano bez przerywania encji MQTT.",
+      "reauth_failed": "Ponowne uwierzytelnianie SSH anulowano.",
+      "host_key_changed": "Klucz hosta SSH zmienił się i nie został zaakceptowany.",
+      "install_cancelled": "Instalację anulowano.",
+      "unknown": "Instalacja nieoczekiwanie nie powiodła się; wpisu nie utworzono."
     }
   },
   "options": {
@@ -59,14 +91,28 @@
         "data": {
           "dangerous_buttons": "Pokaż przyciski głębokiego uśpienia i restartu",
           "wol_mac": "Adres MAC do Wake-on-LAN",
-          "bouquets": "Bukiety do wyboru"
+          "bouquets": "Bukiety do wyboru",
+          "publish_keys": "Publikuj zdarzenia klawiszy pilota",
+          "screenshot": "Automatyczne zrzuty ekranu",
+          "screenshot_interval": "Odstęp zrzutów ekranu (sekundy)",
+          "configure_ssh": "Skonfiguruj dane SSH do aktualizacji wtyczki",
+          "keep_ssh_credentials": "Zachowaj dane SSH do aktualizacji"
         },
         "data_description": {
           "dangerous_buttons": "Głębokie uśpienie odcina dekoder od sieci, dopóki nie obudzi go pakiet budzący, a restart przerywa to, co dekoder właśnie robi. Oba są domyślnie ukryte, żeby na wspólnym panelu nie leżały o jedno nieuważne dotknięcie od głośności. Wtyczka i tak odmawia obu podczas nagrywania, niezależnie od tego ustawienia.",
           "wol_mac": "Puste — użyty zostanie adres zgłaszany przez dekoder. Wpisz własny, jeżeli dekoder zgłasza inny interfejs niż ten podłączony: pudełko na Wi-Fi nie odpowie na pakiet wysłany na port kablowy.",
-          "bouquets": "Które bukiety trafiają na listę kanałów i do przeglądarki mediów. Puste — wszystkie, które publikuje dekoder."
+          "bouquets": "Które bukiety trafiają na listę kanałów i do przeglądarki mediów. Puste — wszystkie, które publikuje dekoder.",
+          "publish_keys": "Zdarzenia klawiszy mogą uruchamiać automatyzacje, ale ujawniają też, co jest naciskane. Wyłącz je, jeśli żadna automatyzacja ich nie potrzebuje.",
+          "screenshot": "Wyłączone nie publikuje nowych obrazów. Po zmianie kanału robi zrzut po przełączeniu. Interwał robi zrzuty cyklicznie.",
+          "screenshot_interval": "Używane tylko w trybie interwału. Dekoder wymusza minimum pięć sekund."
         }
-      }
+      },
+      "ssh_host": {"title": "Połącz z dekoderem", "data": {"ssh_host": "Adres dekodera", "ssh_port": "Port SSH"}},
+      "ssh_confirm": {"title": "Potwierdź tożsamość SSH", "description": "Potwierdź odcisk dekodera `{fingerprint}` przed wysłaniem danych logowania.", "data": {"ssh_username": "Użytkownik SSH", "ssh_password": "Hasło SSH"}}
+    },
+    "error": {
+      "plugin_unavailable": "Dekoder nie jest połączony, więc jego ustawienia prywatności nie zostały zmienione. Spróbuj ponownie, gdy będzie dostępny.",
+      "plugin_config_failed": "Dekoder nie potwierdził nowych ustawień prywatności. Zachowano poprzednie ustawienia dekodera i opcje Home Assistanta."
     }
   },
   "entity": {
@@ -359,6 +405,10 @@
     },
     "no_mac": {
       "message": "Ten dekoder nie zgłosił adresu MAC, więc nie ma dokąd wysłać pakietu budzącego. Ustaw adres w opcjach integracji."
+    },
+    "update_version_unknown": {"message": "Dekoder nie zgłosił zainstalowanej wersji wtyczki."},
+    "update_downgrade": {"message": "Odmowa zastąpienia nowszej wtyczki starszą wersją z pakietu."},
+    "update_version_unavailable": {"message": "Żądana wersja nie jest dostępna w zweryfikowanym pakiecie integracji lub nie skonfigurowano danych SSH."},
+    "update_failed": {"message": "Aktualizacja wtyczki nie powiodła się: {reason}"}
     }
   }
-}

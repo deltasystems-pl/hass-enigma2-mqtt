@@ -29,7 +29,7 @@ by-effect check. The milestone column says when it is due.
 | `docs-installation-instructions` — HACS and manual | [x] | M1 |
 | `docs-removal-instructions` — how to remove it cleanly, including `cmd/reset` | [x] | M1 |
 | `brands` — icon and logo shipped in `brand/` | [x] | M1 |
-| `dependency-transparency` — dependencies pinned, built from source, no blobs | [x] | M1 |
+| `dependency-transparency` — dependencies pinned and auditable | [x] | M4 bundles the GPL IPK with its exact corresponding source archive; metadata pins commit, sizes and SHA-256 values, and CI reproduces both instead of trusting an opaque download. |
 
 ## Silver
 
@@ -40,7 +40,7 @@ by-effect check. The milestone column says when it is due.
 | `log-when-unavailable` — logged once when it goes away, once when it returns | [x] | M3 |
 | `action-exceptions` — actions raise `HomeAssistantError` / `ServiceValidationError` | [x] | M3 |
 | `parallel-updates` — `PARALLEL_UPDATES = 0`, the integration is push-only | [x] | M3 |
-| `reauthentication-flow` — re-enter the SSH password when it stops working | [ ] | M4 |
+| `reauthentication-flow` — re-enter the SSH password when it stops working | [x] | M4, covered by config-flow and update-action tests; live installer acceptance remains pending. |
 | `docs-configuration-parameters` — every option explained | [x] | M3 |
 | `docs-installation-parameters` — every setup field explained | [x] | M3 |
 | `integration-owner` — a codeowner in the manifest | [x] | M1 |
@@ -62,9 +62,9 @@ actions, registered on the media player platform, which is where Home Assistant 
 entity action to be registered; the rule's intent — a schema on every action, validated before
 anything is published, and an action that exists whether or not a box is loaded — is met.
 
-`test-coverage` stays open on purpose. The suite covers every platform, every action, the
-device triggers and both flows, but the number has not been measured and a rule is not ticked
-here on the strength of an impression.
+`test-coverage` stays open on purpose. The current 222-test suite covers every platform, every
+action, the device triggers, both flows and the guarded installer, and measured 89% line
+coverage on Python 3.14.4. That is useful evidence, but it is still below the 95% target.
 
 ## What CI enforces today
 

@@ -48,3 +48,40 @@ jobs:
         run: ruff check .
       - name: pytest
         run: pytest -q
+
+  plugin-bundle:
+    name: Reproduce bundled receiver plugin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the pinned source commit
+        id: bundle
+        run: |
+          commit=$(python3 -c "import json; print(json.load(open('custom_components/enigma2_mqtt/bundled/metadata.json'))['source_commit'])")
+          case "$commit" in
+            *[!0-9a-f]*|'') echo "::error::invalid plugin source commit"; exit 1 ;;
+          esac
+          test "${#commit}" -eq 40
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          repository: deltasystems-pl/enigma2-mqtt-bridge
+          ref: ${{ steps.bundle.outputs.commit }}
+          path: plugin-source
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install gettext
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends gettext
+
+      - name: Rebuild and compare every bundled byte
+        run: |
+          python3 tools/build-plugin-bundle.py --plugin-tree plugin-source --output /tmp/rebuilt
+          cmp custom_components/enigma2_mqtt/bundled/metadata.json /tmp/rebuilt/metadata.json
+          for file in custom_components/enigma2_mqtt/bundled/*.ipk custom_components/enigma2_mqtt/bundled/*.tar.gz; do
+            cmp "$file" "/tmp/rebuilt/$(basename "$file")"
+          done

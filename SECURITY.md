@@ -46,7 +46,10 @@ recorder exclusions; key publishing can be switched off on the box.
 
 ## Supply chain
 
-Releases are built by GitHub Actions from the tag. The bundled receiver plugin (from M4) is
-the IPK of a matching tagged release of
-[enigma2-mqtt-bridge](https://github.com/deltasystems-pl/enigma2-mqtt-bridge), whose SHA-256
-is recorded in the release notes and verified before the file is uploaded to a box.
+Releases are built by GitHub Actions from the tag. The bundled receiver plugin (from M4) is built
+reproducibly from the exact public commit recorded in package metadata. The integration artifact
+also carries the complete corresponding source archive and hashes both files. A development
+candidate may pin reviewed code newer than the last plugin tag without pretending it is that
+tagged release; a published release pins an immutable public commit of
+[enigma2-mqtt-bridge](https://github.com/deltasystems-pl/enigma2-mqtt-bridge). CI reproduces both
+archives before publishing, and the installer verifies the IPK again before uploading it.

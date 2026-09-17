@@ -31,7 +31,9 @@ from .box import Enigma2MqttConfigEntry
 from .const import DOMAIN
 
 TO_REDACT = {
+    "broker_host",
     "broker_password",
+    "broker_username",
     # The configuration URL is built from the box's address, so redacting `ip` alone
     # would only move the address one key to the right.
     "configuration_url",
@@ -39,6 +41,9 @@ TO_REDACT = {
     "mac",
     "password",
     "ssh_password",
+    "ssh_host",
+    "ssh_host_key",
+    "ssh_username",
     "username",
 }
 

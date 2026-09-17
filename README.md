@@ -19,10 +19,9 @@ inside enigma2 and publishes the moment something happens — a zap, a programme
 standby, a recording, a volume step, a key on the remote. This integration turns those
 topics into a native `media_player`, a `remote`, an OSD `notify` target and device triggers.
 
-> **Status — M3.** Everything below is built and tested: a receiver is discovered or added by
-> hand, switched into integration mode, and turns into twenty-six entities, nine actions and
-> eight device triggers. The guided installer — putting the plugin on the box over SSH, and
-> updating it from here — arrives in M4; until then install the plugin yourself.
+> **Status — M4 development candidate.** The entity and action surface is implemented and the
+> guided SSH installer, local verified plugin bundle and update action are now in code. They
+> have not completed live installation acceptance and are not a published release yet.
 
 ## What you get
 
@@ -41,7 +40,7 @@ One receiver becomes **one device** with these entities (display names are Polis
 | `switch` | *Zasilanie*, *Wyciszenie* | standby, mute |
 | `number` | *Głośność* | volume 0–100 |
 | `button` | *Głębokie uśpienie*, *Restart GUI*, *Restart*, *Obudź (WoL)*, *Zrzut ekranu*, *Odśwież discovery* | one-shot box actions; deep standby and reboot stay hidden until you enable them |
-| `update` | *Wtyczka MQTT Bridge* | the plugin version on the box against the one this release expects (installing from here is M4) |
+| `update` | *Wtyczka MQTT Bridge* | the installed plugin version and, when SSH credentials were retained, a guarded reinstall/update from the verified local bundle |
 | device triggers | red / green / yellow / blue × short / long | remote keys as automation triggers |
 
 Plus the actions `zap`, `send_key`, `message`, `add_timer`, `delete_timer`, `record`,
@@ -107,7 +106,7 @@ Copy `custom_components/enigma2_mqtt` into your `config/custom_components/` and 
 - **Manual** — *Add integration → Enigma2 MQTT*, then the base topic and the node id, for
   boxes behind a bridged broker or with a custom prefix. The node id is on the plugin's setup
   screen; the flow checks the box is really on that topic before it adds anything.
-- **Install the plugin from here** (from M4) — host, SSH user and password; the flow runs a
+- **Install the plugin from here** — host, SSH user and password; the flow runs a
   preflight over SSH, uploads the bundled IPK, installs it, writes the provisioning file and
   waits for the announcement. The SSH password is discarded afterwards unless you ask to keep
   it for updates.
@@ -131,8 +130,14 @@ password first, and treat the receiver as the least trusted device in the chain.
 
 If you let the installer keep the SSH password for later updates, it is stored in the config
 entry. Home Assistant's `.storage` is **not encrypted at rest**; leave the box unticked and
-the password is discarded as soon as the install finishes. It is never written to the log or
-to diagnostics.
+the password is discarded as soon as the install finishes. The options flow can add retained
+credentials later or forget them again. They are never written to the log or to diagnostics.
+
+The integration contains the GPL plugin IPK together with its exact corresponding source
+archive and provenance metadata; it does not fetch executable code at runtime. Installation
+takes a private receiver backup, verifies the uploaded package and rolls back a failed
+transaction where possible. A loss of receiver power or storage during the transaction can
+still require recovery from that backup.
 
 ## Privacy
 
@@ -149,7 +154,9 @@ recorder:
       - event.*_remote_key
 ```
 
-Key publishing can also be switched off on the box.
+The integration options can switch key publishing off, select `off`, `on_zap` or `interval`
+screenshots, and set the interval. The plugin validates and persists all three settings as one
+transaction; disabling screenshots also retracts the retained image.
 
 ## Documentation
 
@@ -166,7 +173,7 @@ quality bar we hold ourselves to is [docs/QUALITY.md](docs/QUALITY.md).
 - [x] **M1** — config flow (discovered + manual), the device page, diagnostics
 - [ ] **M2** — plugin state and discovery complete, commands with guards
 - [ ] **M3** — the entities above, actions, device triggers, diagnostics, translations
-- [ ] **M4** — the SSH installer with preflight and rollback, the bundled IPK, `update`
+- [ ] **M4** — SSH installer, bundled IPK and `update` implemented; live acceptance pending
 - [ ] **M5** — public beta `v0.x`: releases, HACS custom repository, call for testers
 - [ ] **M6** — `v1.0.0`: HACS default store, deep standby and Wake-on-LAN drilled
 - [ ] **M7** — afterwards: broker-login provisioning, further images

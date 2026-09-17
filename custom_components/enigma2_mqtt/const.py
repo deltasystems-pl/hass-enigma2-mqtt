@@ -24,6 +24,25 @@ CONF_NAME: Final = "name"
 CONF_DANGEROUS_BUTTONS: Final = "dangerous_buttons"
 CONF_WOL_MAC: Final = "wol_mac"
 CONF_BOUQUETS: Final = "bouquets"
+CONF_PUBLISH_KEYS: Final = "publish_keys"
+CONF_SCREENSHOT: Final = "screenshot"
+CONF_SCREENSHOT_INTERVAL: Final = "screenshot_interval"
+CONF_SSH_HOST: Final = "ssh_host"
+CONF_SSH_PORT: Final = "ssh_port"
+CONF_SSH_USERNAME: Final = "ssh_username"
+CONF_SSH_PASSWORD: Final = "ssh_password"
+CONF_SSH_HOST_KEY: Final = "ssh_host_key"
+CONF_KEEP_SSH_CREDENTIALS: Final = "keep_ssh_credentials"
+
+SCREENSHOT_OFF: Final = "off"
+SCREENSHOT_ON_ZAP: Final = "on_zap"
+SCREENSHOT_INTERVAL: Final = "interval"
+SCREENSHOT_MODES: Final = (SCREENSHOT_OFF, SCREENSHOT_ON_ZAP, SCREENSHOT_INTERVAL)
+DEFAULT_PUBLISH_KEYS: Final = True
+DEFAULT_SCREENSHOT: Final = SCREENSHOT_ON_ZAP
+DEFAULT_SCREENSHOT_INTERVAL: Final = 60
+MIN_SCREENSHOT_INTERVAL: Final = 5
+MAX_SCREENSHOT_INTERVAL: Final = 3600
 
 # How the plugin presents a box to Home Assistant, switchable with `cmd/ha_mode`.
 HA_MODE_DISCOVERY: Final = "discovery"

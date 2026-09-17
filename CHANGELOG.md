@@ -28,20 +28,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   screen grab, a Wake-on-LAN packet and a discovery refresh. Deep standby and reboot are there
   too, hidden until you turn them on, so neither sits one mis-tap from the volume.
 - **An image** of the last screen grab, and an **update entity** that says when the receiver
-  runs an older plugin than this release expects — the first thing to check when something is
-  missing. It cannot install anything yet.
+  runs an older plugin than this release expects. With explicitly retained SSH credentials it
+  can install the verified plugin bundled with the integration without replacing the box's
+  existing broker or plugin settings.
 - **Nine actions** — `zap`, `send_key`, `message`, `add_timer`, `delete_timer`, `record`,
   `screenshot`, `set_ha_mode` and `get_epg_grid` — each aimed at a receiver, a device or an
   area. They wait for the receiver to actually do the thing and report what it says when it
   refuses, rather than reporting success for a message that was merely sent.
 - **Options**: whether the deep standby and reboot buttons appear, which address a Wake-on-LAN
-  packet goes to, and which bouquets are worth browsing. Saving them takes effect at once.
+  packet goes to, which bouquets are worth browsing, key-event publishing and the screenshot
+  policy/interval. Receiver options are acknowledged by fresh plugin state before HA saves them.
+- **A guided SSH installer** with host-key confirmation, recording/timer guards, pre-change
+  backup, uploaded-file verification, guarded GUI restart and rollback. SSH credentials are
+  opt-in for later updates and can be enrolled, refreshed or forgotten without unloading MQTT.
+- **A reproducible local plugin bundle** with pinned commit metadata and the corresponding GPL
+  source archive. Runtime installation has no release-site or other network download path.
 - **Reconfigure**, for following a receiver whose node ID or base topic was changed on its own
   setup screen.
 - **Polish and German** names for every entity, action and trigger. German is still a draft
   and would welcome a native speaker.
 
 ### Changed
+
+- M4 remains a development candidate: the installer and update path are locally tested but
+  have not completed live receiver acceptance and are not a published release.
 
 - **The diagnostics download now carries the last payload of every state topic.** The screen
   grab appears as a size and a timestamp, the channel list as its shape, and the remote keys

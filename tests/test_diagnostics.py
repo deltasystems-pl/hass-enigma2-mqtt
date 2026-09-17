@@ -71,6 +71,11 @@ async def test_diagnostics_redact_credentials_that_do_not_exist_yet(
             "password": "hunter2",
             "ssh_password": "hunter2",
             "broker_password": "hunter2",
+            "broker_host": "broker.example",
+            "broker_username": "receiver",
+            "ssh_host": "receiver.example",
+            "ssh_host_key": "ssh-ed25519 AAAAprivateidentity",
+            "ssh_username": "root",
         },
     )
     await hass.async_block_till_done()
@@ -81,6 +86,11 @@ async def test_diagnostics_redact_credentials_that_do_not_exist_yet(
     assert entry_data["data"]["password"] == REDACTED
     assert entry_data["data"]["ssh_password"] == REDACTED
     assert entry_data["data"]["broker_password"] == REDACTED
+    assert entry_data["data"]["broker_host"] == REDACTED
+    assert entry_data["data"]["broker_username"] == REDACTED
+    assert entry_data["data"]["ssh_host"] == REDACTED
+    assert entry_data["data"]["ssh_host_key"] == REDACTED
+    assert entry_data["data"]["ssh_username"] == REDACTED
     assert entry_data["data"]["node_id"] == NODE_ID
 
 
