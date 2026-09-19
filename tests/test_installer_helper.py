@@ -5,12 +5,18 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import time
 
 import pytest
 
+from custom_components.enigma2_mqtt import installer_helper
 from custom_components.enigma2_mqtt.installer_helper import (
     PACKAGE,
+    STALE_LOCK_SECONDS,
+    boot_id,
+    claim_transaction,
     read_identity,
+    release_transaction,
     restore,
     snapshot,
     verify_manifest,
@@ -287,3 +293,120 @@ def test_snapshot_metadata_must_be_typed_and_complete(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="metadata"):
         restore(root, backup, restore_provisioning=True, restore_settings=True)
+
+
+def test_verify_manifest_ignores_files_the_image_added_beside_the_plugin(
+    tmp_path: Path,
+) -> None:
+    """The receiver byte-compiles what it imports, and that is not a tampered install.
+
+    The manifest lists the `.py` files the IPK ships. OpenViX writes `.pyc` files next
+    to them the first time the plugin loads, so an install that verified only by "these
+    files and nothing else" would fail on every healthy receiver. Verification proves
+    the listed bytes are the shipped bytes; it deliberately says nothing about extras.
+    """
+    root = tmp_path / "root"
+    installed = _write(root, "usr/lib/enigma2/plugin.py", "exact bytes")
+    digest = hashlib.sha256(installed.read_bytes()).hexdigest()
+    manifest = tmp_path / "manifest"
+    manifest.write_text(f"{digest}  /usr/lib/enigma2/plugin.py\n", encoding="ascii")
+    _write(root, "usr/lib/enigma2/__pycache__/plugin.cpython-312.pyc", "bytecode")
+    _write(root, "usr/lib/enigma2/plugin.pyc", "bytecode")
+
+    verify_manifest(root, manifest)
+
+
+def _owner(lock_dir: Path) -> dict:
+    return json.loads((lock_dir / "owner.json").read_text(encoding="ascii"))
+
+
+def test_the_durable_lock_refuses_a_second_live_transaction(tmp_path: Path) -> None:
+    """Two installs on one receiver would interleave two rollbacks."""
+    lock_dir = tmp_path / "lock"
+    claim_transaction(lock_dir)
+
+    with pytest.raises(FileExistsError):
+        claim_transaction(lock_dir)
+
+    release_transaction(lock_dir)
+    assert not lock_dir.exists()
+
+
+def test_a_lock_from_before_the_receiver_rebooted_is_reclaimed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A box pulled out of the wall mid-install must not be locked out for ever.
+
+    The lock is a directory on flash, so it survives the reboot that killed the process
+    holding it. The boot id says so without having to guess from a timestamp.
+    """
+    lock_dir = tmp_path / "lock"
+    claim_transaction(lock_dir)
+    stale = {**_owner(lock_dir), "boot_id": "00000000-0000-0000-0000-000000000000"}
+    (lock_dir / "owner.json").write_text(json.dumps(stale), encoding="ascii")
+
+    claim_transaction(lock_dir)
+
+    assert _owner(lock_dir)["boot_id"] == boot_id()
+    assert "reclaiming stale installer lock" in capsys.readouterr().err
+
+
+def test_a_lock_older_than_any_plausible_install_is_reclaimed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The boot id only helps across a reboot; a crashed process leaves the same wedge."""
+    lock_dir = tmp_path / "lock"
+    claim_transaction(lock_dir)
+    stale = {**_owner(lock_dir), "started": int(time.time()) - STALE_LOCK_SECONDS - 1}
+    (lock_dir / "owner.json").write_text(json.dumps(stale), encoding="ascii")
+
+    claim_transaction(lock_dir)
+
+    assert _owner(lock_dir)["started"] > stale["started"]
+    assert "reclaiming stale installer lock" in capsys.readouterr().err
+
+
+def test_a_lock_that_is_merely_slow_is_still_respected(tmp_path: Path) -> None:
+    """Reclaiming an install that is only taking its time would start a second one."""
+    lock_dir = tmp_path / "lock"
+    claim_transaction(lock_dir)
+    recent = {**_owner(lock_dir), "started": int(time.time()) - STALE_LOCK_SECONDS + 60}
+    (lock_dir / "owner.json").write_text(json.dumps(recent), encoding="ascii")
+
+    with pytest.raises(FileExistsError):
+        claim_transaction(lock_dir)
+
+
+@pytest.mark.parametrize("content", ["", "not json", json.dumps(["a list"]), json.dumps({})])
+def test_a_lock_with_no_usable_owner_record_is_reclaimed(tmp_path: Path, content: str) -> None:
+    """A half-written claim is a wedge with nobody behind it."""
+    lock_dir = tmp_path / "lock"
+    claim_transaction(lock_dir)
+    (lock_dir / "owner.json").write_text(content, encoding="ascii")
+
+    claim_transaction(lock_dir)
+
+    assert _owner(lock_dir)["boot_id"] == boot_id()
+
+
+def test_releasing_a_lock_without_an_owner_is_refused(tmp_path: Path) -> None:
+    """`release` removes an installer lock, not any directory it is pointed at."""
+    lock_dir = tmp_path / "lock"
+    lock_dir.mkdir()
+
+    with pytest.raises(ValueError, match="owner"):
+        release_transaction(lock_dir)
+
+
+def test_the_boot_id_is_empty_rather_than_fatal_on_a_kernel_without_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Then the age bound is the only staleness rule, which is still better than none."""
+    monkeypatch.setattr(installer_helper, "BOOT_ID_PATH", tmp_path / "nothing-here")
+
+    assert boot_id() == ""
+    lock_dir = tmp_path / "lock"
+    claim_transaction(lock_dir)
+    assert _owner(lock_dir)["boot_id"] == ""
+    with pytest.raises(FileExistsError):
+        claim_transaction(lock_dir)

@@ -31,6 +31,10 @@ SETTINGS = "etc/enigma2/settings"
 PROVISION = "etc/enigma2/mqttbridge.json"
 LOCK = "var/lock/opkg.lock"
 SETTINGS_PREFIX = "config.plugins.mqttbridge."
+BOOT_ID_PATH = Path("/proc/sys/kernel/random/boot_id")
+# Generous: the slowest measured install is minutes, and reclaiming too eagerly would
+# let a second transaction start on top of a first one that is merely slow.
+STALE_LOCK_SECONDS = 30 * 60
 
 
 def _path(root: Path, relative: str) -> Path:
@@ -345,11 +349,61 @@ def read_identity(root: Path) -> dict[str, object]:
     }
 
 
+def boot_id() -> str:
+    """Return this boot's identifier, or an empty string if the kernel has none."""
+    try:
+        return BOOT_ID_PATH.read_text(encoding="ascii").strip()
+    except OSError:
+        return ""
+
+
+def _is_stale(lock_dir: Path) -> str:
+    """Return why an existing lock may be reclaimed, or an empty string if it may not.
+
+    The lock is a directory on the receiver's flash, so it survives the one failure it
+    cannot survive: a box that is pulled out of the wall halfway through an install
+    comes back with a lock nobody holds and refuses every later attempt for ever. Two
+    facts settle it. A lock written under a different boot is held by a process that no
+    longer exists, and a lock older than any plausible install has outlived its owner
+    either way.
+    """
+    owner = lock_dir / "owner.json"
+    try:
+        recorded = json.loads(owner.read_text(encoding="ascii"))
+    except (OSError, ValueError):
+        return "its owner record is missing or unreadable"
+    if not isinstance(recorded, dict):
+        return "its owner record is not an object"
+    current = boot_id()
+    recorded_boot = recorded.get("boot_id")
+    if current and isinstance(recorded_boot, str) and recorded_boot and recorded_boot != current:
+        return "it was claimed before the receiver last rebooted"
+    started = recorded.get("started")
+    if not isinstance(started, int) or isinstance(started, bool):
+        return "its start time is missing or malformed"
+    age = int(time.time()) - started
+    if age > STALE_LOCK_SECONDS:
+        return f"it has been held for {age} seconds"
+    return ""
+
+
 def claim_transaction(lock_dir: Path) -> None:
     """Claim the durable per-receiver transaction lock or fail busy."""
-    lock_dir.mkdir(mode=0o700, parents=False)
+    try:
+        lock_dir.mkdir(mode=0o700, parents=False)
+    except FileExistsError:
+        reason = _is_stale(lock_dir)
+        if not reason:
+            raise
+        print(f"reclaiming stale installer lock: {reason}", file=sys.stderr)
+    _write_owner(lock_dir)
+
+
+def _write_owner(lock_dir: Path) -> None:
+    """Record who holds the lock, and under which boot of the receiver."""
     (lock_dir / "owner.json").write_text(
-        json.dumps({"pid": os.getpid(), "started": int(time.time())}) + "\n",
+        json.dumps({"pid": os.getpid(), "started": int(time.time()), "boot_id": boot_id()})
+        + "\n",
         encoding="ascii",
     )
 
