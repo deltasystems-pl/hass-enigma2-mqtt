@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_USER
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import EVENT_DATA_ENTRY_FLOW_PROGRESSED, FlowResultType
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.enigma2_mqtt.const import (
@@ -102,8 +103,14 @@ async def test_install_keeps_credentials_only_with_explicit_consent(
 
 
 async def test_unexpected_install_exception_never_creates_an_entry(
-    hass: HomeAssistant, mqtt_mock
+    hass: HomeAssistant, mqtt_mock, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """The screen can only say "unknown"; the log has to say more than that.
+
+    A bare `except Exception` that sets a string and drops the traceback turns every
+    bug in this path into an unreportable one. The message itself interpolates nothing,
+    so neither the SSH password nor the broker password can reach the log through it.
+    """
     result = await _install_form(hass)
     with patch(
         "custom_components.enigma2_mqtt.config_flow.async_install",
@@ -115,6 +122,12 @@ async def test_unexpected_install_exception_never_creates_an_entry(
         await hass.async_block_till_done()
 
     assert hass.config_entries.async_entries(DOMAIN) == []
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "unknown"
+    assert "Unexpected failure while installing the receiver plugin" in caplog.text
+    assert "RuntimeError: boom" in caplog.text
+    assert "secret" not in caplog.text
+    assert "broker-secret" not in caplog.text
 
 
 async def test_aborting_progress_cancels_the_transaction_and_clears_secrets(

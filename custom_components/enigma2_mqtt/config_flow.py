@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import json
+import logging
 import re
 from typing import Any
 
@@ -90,6 +91,8 @@ from .installer import (
     async_preflight,
     async_probe_host_key,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 # Shown in place of a field the box did not report.
 UNKNOWN_PLACEHOLDER = "—"
@@ -382,6 +385,10 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
         except InstallerError as err:
             self._install_error = err.code.value
         except Exception:
+            # The flow only ever shows "unknown", which is all a user can act on, but a
+            # bug report needs the traceback. The message carries no interpolation, so
+            # no credential or provisioning value can reach the log through it.
+            _LOGGER.exception("Unexpected failure while installing the receiver plugin")
             self._install_error = "unknown"
 
     def _async_install_progress(self, phase: str) -> None:
