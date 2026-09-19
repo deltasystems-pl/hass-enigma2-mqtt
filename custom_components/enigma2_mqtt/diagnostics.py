@@ -91,6 +91,7 @@ async def async_get_config_entry_diagnostics(
             "timers": state.timers,
             "volume": state.volume,
             "hdd": state.hdd,
+            "bouquet": state.bouquet,
             "cam": state.cam,
             "oscam": state.oscam,
             "channels": _summarise_channels(state.channels),

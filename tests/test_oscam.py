@@ -6,6 +6,8 @@ from homeassistant.helpers import entity_registry as er
 import pytest
 from pytest_homeassistant_custom_component.common import async_fire_mqtt_message
 
+from custom_components.enigma2_mqtt.box import OSCAM_VERSION, OSCAM_VERSION_MAX
+
 from .conftest import AVAILABILITY_TOPIC, INFO, INFO_TOPIC, async_setup_box
 
 OSCAM_TOPIC = "enigma2/vuuno4kse_005301/oscam"
@@ -370,3 +372,51 @@ async def test_a_box_that_has_said_nothing_keeps_the_source_entities_it_had(
     await hass.async_block_till_done()
 
     assert source_entity(hass, READER["id"], "status") == before
+
+
+async def test_an_endlessly_long_version_is_refused_before_it_is_matched(
+    hass, mqtt_mock, retained, config_entry
+):
+    """The pattern repeats a group, so what it accepts has no length of its own.
+
+    `1.20` followed by a megabyte of `_a` matches it perfectly well. A version is a
+    label on a bug report; anything this long is not one, and matching it is work done
+    on a receiver's say-so.
+    """
+    retained[AVAILABILITY_TOPIC] = "online"
+    retained[INFO_TOPIC] = json.dumps(
+        {
+            **INFO,
+            "capabilities": [*INFO["capabilities"], "oscam"],
+            "settings": {"oscam_telemetry": True},
+        }
+    )
+    long_but_valid = "1.20" + "_a" * 200
+    assert OSCAM_VERSION.fullmatch(long_but_valid), "the pattern itself accepts this"
+    retained[OSCAM_TOPIC] = json.dumps({**payload(READER), "version": long_but_valid})
+    await async_setup_box(hass, config_entry)
+
+    state = config_entry.runtime_data.state.oscam
+    assert state is not None
+    assert state["version"] is None
+    assert state["readers_configured"] == 1
+
+
+async def test_a_version_exactly_at_the_limit_is_still_published(
+    hass, mqtt_mock, retained, config_entry
+):
+    """The bound is generous: every version a real OSCam reports is far inside it."""
+    retained[AVAILABILITY_TOPIC] = "online"
+    retained[INFO_TOPIC] = json.dumps(
+        {
+            **INFO,
+            "capabilities": [*INFO["capabilities"], "oscam"],
+            "settings": {"oscam_telemetry": True},
+        }
+    )
+    version = "1.20" + "_a" * ((OSCAM_VERSION_MAX - 4) // 2)
+    assert len(version) == OSCAM_VERSION_MAX
+    retained[OSCAM_TOPIC] = json.dumps({**payload(READER), "version": version})
+    await async_setup_box(hass, config_entry)
+
+    assert config_entry.runtime_data.state.oscam["version"] == version

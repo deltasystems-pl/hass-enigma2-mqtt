@@ -84,6 +84,12 @@ diagnostic entities for system, encryption, fresh ECM activity and ECM time. Val
 unknown, association on multi-tuner receivers is best effort, and server, account and card
 details are never accepted into integration state or diagnostics.
 
+Only a stated „off" takes these entities away again. A receiver that stops advertising the
+capability — an older plugin, a reload before it has answered, a box that is simply not
+there — is saying nothing, and nothing leaves the per-source OSCam entities exactly as they
+are, with the names, areas and history they have been given. Switch the option off to remove
+them.
+
 ### Reconfigure
 
 *…→ Enigma2 MQTT → the receiver → Reconfigure.* This is for following a box whose **node ID**

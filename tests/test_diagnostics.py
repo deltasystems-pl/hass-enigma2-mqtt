@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import re
+from typing import Any
 
 from homeassistant.components.diagnostics import REDACTED
 from homeassistant.core import HomeAssistant
@@ -24,6 +26,24 @@ from .conftest import (
     SREF,
     async_setup_box,
 )
+
+# Fields whose value is a version. A version may be four dotted numbers — `6.6.0.1` is
+# an ordinary image or driver version — which is also the shape of an IPv4 address, so
+# the address sweep below skips them by name rather than hoping none ever appears.
+VERSION_KEYS = frozenset({"enigma", "image", "plugin", "sw_version", "version"})
+
+
+def _without_version_fields(value: Any) -> Any:
+    """Return the download with every version-valued field dropped."""
+    if isinstance(value, dict):
+        return {
+            key: _without_version_fields(item)
+            for key, item in value.items()
+            if key not in VERSION_KEYS
+        }
+    if isinstance(value, list):
+        return [_without_version_fields(item) for item in value]
+    return value
 
 
 async def test_diagnostics_redact_what_identifies_a_household(
@@ -177,16 +197,53 @@ async def test_no_address_at_all_survives_the_download(
     box_on_the_broker: dict[str, str],
     config_entry: MockConfigEntry,
 ) -> None:
-    """A single sweep for the shapes, rather than one assertion per known key."""
-    import re
+    """A single sweep for the shapes, rather than one assertion per known key.
 
+    Every value is visited except the ones that hold a version. `6.6.0.1` is a perfectly
+    ordinary image or driver version and is also four dotted numbers, so a blind sweep
+    would start failing the day a fixture grew one — and the honest fix for that failure
+    would have been to weaken the sweep. Excluding those fields by name keeps the sweep
+    strict everywhere it matters.
+    """
     config_entry.add_to_hass(hass)
     hass.config_entries.async_update_entry(
         config_entry, options={**config_entry.options, "wol_mac": "00:00:5e:00:53:01"}
     )
     await async_setup_box(hass, config_entry)
 
-    text = json.dumps(await async_get_config_entry_diagnostics(hass, config_entry))
+    diagnostics = await async_get_config_entry_diagnostics(hass, config_entry)
+    checked = _without_version_fields(diagnostics)
+    text = json.dumps(checked)
 
+    assert VERSION_KEYS, "the exclusion list must not be empty by accident"
     assert not re.findall(r"\b[0-9a-f]{2}(?::[0-9a-f]{2}){5}\b", text, re.I)
     assert not re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", text)
+    # The sweep still sees everything else, including what the receiver announced.
+    assert "vuuno4kse_005301" in text
+
+
+def test_the_sweep_would_catch_an_address_under_a_new_name() -> None:
+    """The exclusion is by key, so a new key carrying an address is still caught."""
+    text = json.dumps(_without_version_fields({"entry": {"some_new_mac": "00:00:5e:00:53:01"}}))
+
+    assert re.findall(r"\b[0-9a-f]{2}(?::[0-9a-f]{2}){5}\b", text, re.I)
+
+
+async def test_the_bouquet_context_is_in_the_download(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Every state topic belongs in a bug report, and this one was left out.
+
+    The `bouquet` topic arrived with bouquet activation and was not added to the list,
+    so the one piece of state that explains what channel up and down will do next was
+    the one thing a report about channel up and down did not carry.
+    """
+    await async_setup_box(hass, config_entry)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, config_entry)
+
+    assert "bouquet" in diagnostics["topics"]
+    assert diagnostics["topics"]["bouquet"] == config_entry.runtime_data.state.bouquet

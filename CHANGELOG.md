@@ -63,6 +63,19 @@ have not been accepted on a receiver, and no tag has been cut.
 - **Polish and German** names for every entity, action and trigger. German is still a draft
   and would welcome a native speaker.
 
+### Fixed
+
+Found by running this release against a real receiver rather than a test one.
+
+- **The per-source OSCam entities now appear.** A receiver answers after Home Assistant has
+  finished setting the integration up, and the entities for each reader and server were only
+  created for a box that had already answered — so on a real receiver they were never created
+  at all. They also survive a reload now: only switching the option off removes them.
+- **An OSCam version with a build suffix is shown** instead of nothing. Real builds report
+  versions like `1.20_svn build r11718-079`, which the version check had no room for.
+- **The Wake-on-LAN address is redacted** from the diagnostics download, like every other
+  hardware address in it.
+
 ### Changed
 
 - **The diagnostics download now carries the last payload of every state topic.** The screen
