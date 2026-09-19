@@ -278,6 +278,16 @@
         }
       }
     },
+    "select_bouquet": {
+      "name": "Select bouquet",
+      "description": "Makes a bouquet the receiver's active channel list. Channel up and down then follow that bouquet.",
+      "fields": {
+        "sref": {
+          "name": "Bouquet reference",
+          "description": "The service reference of a bouquet published by the receiver. If the current channel is outside it, the receiver tunes its first playable channel."
+        }
+      }
+    },
     "send_key": {
       "name": "Send key",
       "description": "Injects a remote control key into the receiver, as if somebody had pressed it.",
@@ -432,6 +442,12 @@
     },
     "unknown_bouquet": {
       "message": "The receiver has published no EPG grid for the bouquet {bouquet}."
+    },
+    "bouquet_not_published": {
+      "message": "The receiver does not offer the bouquet {bouquet}."
+    },
+    "bouquet_context_unsupported": {
+      "message": "This receiver plugin cannot activate a bouquet context. Update the plugin to use this action."
     },
     "unknown_channel": {
       "message": "No channel called {channel} is in the bouquets this receiver offers."

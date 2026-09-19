@@ -30,7 +30,7 @@ One receiver becomes **one device** with these entities (display names are Polis
 
 | Platform | Name | What it shows or does |
 |---|---|---|
-| `media_player` | *Dekoder salon* (the device name) | off or playing, the channel list of the bouquets you choose, `select_source`, `play_media` by service reference or channel name, `browse_media` through bouquets, volume and mute, channel ± , the screen grab as artwork |
+| `media_player` | *Dekoder salon* (the device name) | off or playing, the channel list of the bouquets you choose, `select_source`, `play_media` by service reference, channel name or active bouquet, `browse_media` through playable bouquets, volume and mute, channel ±, the screen grab as artwork |
 | `remote` | *Pilot* | `send_command` with `KEY_*` names; `hold_secs` makes it a long press |
 | `notify` | *Ekran OSD* | a message on the television screen |
 | `event` | *Pilot – klawisz* | every remote key as an event, with `press` = short or long |

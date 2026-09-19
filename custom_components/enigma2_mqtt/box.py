@@ -65,6 +65,7 @@ from .const import (
     PROBE_TIMEOUT,
     SUBSCRIBE_TIMEOUT,
     TOPIC_AVAILABILITY,
+    TOPIC_BOUQUET,
     TOPIC_CAM,
     TOPIC_CHANNELS,
     TOPIC_EPG,
@@ -458,6 +459,7 @@ class Enigma2State:
     volume: dict[str, Any] | None = None
     hdd: dict[str, Any] | None = None
     cam: dict[str, Any] | None = None
+    bouquet: dict[str, Any] | None = None
     channels: dict[str, Any] | None = None
     last_error: dict[str, Any] | None = None
     screen: bytes | None = None
@@ -821,6 +823,7 @@ class Enigma2Box:
         TOPIC_VOLUME: "volume",
         TOPIC_HDD: "hdd",
         TOPIC_CHANNELS: "channels",
+        TOPIC_BOUQUET: "bouquet",
     }
 
     @callback

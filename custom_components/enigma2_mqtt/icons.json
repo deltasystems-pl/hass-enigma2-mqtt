@@ -106,6 +106,9 @@
     }
   },
   "services": {
+    "select_bouquet": {
+      "service": "mdi:format-list-bulleted"
+    },
     "add_timer": {
       "service": "mdi:timer-plus"
     },

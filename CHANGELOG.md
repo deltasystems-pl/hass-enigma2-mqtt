@@ -31,10 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runs an older plugin than this release expects. With explicitly retained SSH credentials it
   can install the verified plugin bundled with the integration without replacing the box's
   existing broker or plugin settings.
-- **Nine actions** — `zap`, `send_key`, `message`, `add_timer`, `delete_timer`, `record`,
-  `screenshot`, `set_ha_mode` and `get_epg_grid` — each aimed at a receiver, a device or an
+- **Ten actions** — `zap`, `select_bouquet`, `send_key`, `message`, `add_timer`, `delete_timer`,
+  `record`, `screenshot`, `set_ha_mode` and `get_epg_grid` — each aimed at a receiver, a device or an
   area. They wait for the receiver to actually do the thing and report what it says when it
   refuses, rather than reporting success for a message that was merely sent.
+- A playable bouquet in the media browser activates the receiver's real channel-list context,
+  so subsequent channel-up and channel-down follow that list. The current channel is preserved
+  when it belongs to the bouquet; otherwise the receiver tunes the first playable channel.
 - **Options**: whether the deep standby and reboot buttons appear, which address a Wake-on-LAN
   packet goes to, which bouquets are worth browsing, key-event publishing and the screenshot
   policy, interval and post-zap delay. Receiver options are acknowledged by fresh plugin state

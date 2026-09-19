@@ -79,6 +79,7 @@ SCREEN_TOPIC = f"{BASE_TOPIC}/{NODE_ID}/screen"
 KEY_TOPIC = f"{BASE_TOPIC}/{NODE_ID}/key"
 LAST_ERROR_TOPIC = f"{BASE_TOPIC}/{NODE_ID}/last_error"
 CHANNELS_TOPIC = f"{BASE_TOPIC}/{NODE_ID}/channels"
+BOUQUET_TOPIC = f"{BASE_TOPIC}/{NODE_ID}/bouquet"
 EPG_GRID_TOPIC = f"{BASE_TOPIC}/{NODE_ID}/epg_grid/ulubione_tv"
 HA_MODE_TOPIC = f"{BASE_TOPIC}/{NODE_ID}/cmd/ha_mode"
 
@@ -210,6 +211,11 @@ CHANNELS: dict[str, Any] = {
             ],
         },
     ],
+}
+
+BOUQUET: dict[str, Any] = {
+    "name": "Ulubione TV",
+    "sref": CHANNELS["bouquets"][0]["sref"],
 }
 
 EPG_GRID: dict[str, Any] = {

@@ -99,6 +99,7 @@ TOPIC_LAST_ERROR: Final = "last_error"
 TOPIC_CHANNELS: Final = "channels"
 TOPIC_EPG_GRID: Final = "epg_grid"
 TOPIC_CAM: Final = "cam"
+TOPIC_BOUQUET: Final = "bouquet"
 
 PAYLOAD_ONLINE: Final = "online"
 PAYLOAD_OFFLINE: Final = "offline"

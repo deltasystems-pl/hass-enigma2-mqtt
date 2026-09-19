@@ -20,6 +20,18 @@ zap:
       selector:
         text:
 
+select_bouquet:
+  target:
+    entity:
+      - integration: enigma2_mqtt
+        domain: media_player
+  fields:
+    sref:
+      required: true
+      example: '1:7:1:0:0:0:0:0:0:0:FROM BOUQUET "userbouquet.favourites.tv" ORDER BY bouquet'
+      selector:
+        text:
+
 send_key:
   target:
     entity:

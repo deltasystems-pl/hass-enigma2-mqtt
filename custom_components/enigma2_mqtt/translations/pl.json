@@ -259,6 +259,16 @@
         }
       }
     },
+    "select_bouquet": {
+      "name": "Wybierz bukiet",
+      "description": "Ustawia bukiet jako aktywną listę kanałów dekodera. Następny i poprzedni kanał działają potem w tym bukiecie.",
+      "fields": {
+        "sref": {
+          "name": "Referencja bukietu",
+          "description": "Referencja bukietu opublikowanego przez dekoder. Jeśli bieżącego kanału w nim nie ma, dekoder przełączy się na pierwszy dostępny kanał."
+        }
+      }
+    },
     "send_key": {
       "name": "Wyślij klawisz",
       "description": "Wysyła do dekodera klawisz pilota — tak, jakby ktoś go nacisnął.",
@@ -413,6 +423,12 @@
     },
     "unknown_bouquet": {
       "message": "Dekoder nie opublikował siatki EPG dla bukietu {bouquet}."
+    },
+    "bouquet_not_published": {
+      "message": "Dekoder nie udostępnia bukietu {bouquet}."
+    },
+    "bouquet_context_unsupported": {
+      "message": "Ta wersja wtyczki dekodera nie potrafi ustawić aktywnego bukietu. Zaktualizuj wtyczkę, aby użyć tej akcji."
     },
     "unknown_channel": {
       "message": "W bukietach tego dekodera nie ma kanału o nazwie {channel}."

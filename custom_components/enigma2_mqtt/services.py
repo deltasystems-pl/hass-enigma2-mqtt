@@ -39,6 +39,7 @@ from .const import (
     MESSAGE_DEFAULT_TIMEOUT,
     MESSAGE_TYPES,
     RECORD_ACTIONS,
+    TOPIC_BOUQUET,
     TOPIC_EPG_GRID,
     TOPIC_SCREEN,
     TOPIC_TIMERS,
@@ -46,6 +47,7 @@ from .const import (
 from .notify import message_payload
 
 SERVICE_ZAP = "zap"
+SERVICE_SELECT_BOUQUET = "select_bouquet"
 SERVICE_SEND_KEY = "send_key"
 SERVICE_MESSAGE = "message"
 SERVICE_ADD_TIMER = "add_timer"
@@ -78,6 +80,7 @@ ZAP_SCHEMA = {
     vol.Optional(ATTR_SREF): cv.string,
     vol.Optional(ATTR_NAME): cv.string,
 }
+SELECT_BOUQUET_SCHEMA = {vol.Required(ATTR_SREF): cv.string}
 SEND_KEY_SCHEMA = {
     vol.Required(ATTR_KEY): cv.string,
     vol.Optional(ATTR_LONG, default=False): cv.boolean,
@@ -120,6 +123,23 @@ def _invalid(key: str, **placeholders: str) -> ServiceValidationError:
     )
 
 
+async def async_select_bouquet(box: Enigma2Box, sref: str) -> None:
+    """Activate a published bouquet and wait for a fresh context readback."""
+    if "bouquet_context" not in box.capabilities:
+        raise _invalid("bouquet_context_unsupported")
+    if box.bouquet_by_sref(sref) is None:
+        raise _invalid("bouquet_not_published", bouquet=sref)
+    before = box.updates.get(TOPIC_BOUQUET, 0)
+    await box.async_command(
+        "bouquet",
+        json.dumps({"sref": sref}),
+        effect=lambda: (
+            box.updates.get(TOPIC_BOUQUET, 0) > before
+            and (box.state.bouquet or {}).get("sref") == sref
+        ),
+    )
+
+
 class Enigma2Actions:
     """The action handlers, mixed into the media player they are registered on.
 
@@ -149,6 +169,10 @@ class Enigma2Actions:
             json.dumps({"name": name}),
             effect=lambda: (box.state.service or {}).get("name") == name,
         )
+
+    async def async_select_bouquet(self, sref: str) -> None:
+        """Make one published bouquet the active channel-up/down context."""
+        await async_select_bouquet(self.box, sref)
 
     async def async_send_key(self, key: str, long: bool = False) -> None:
         """Inject one remote key.
@@ -304,6 +328,11 @@ def async_setup_services() -> None:
     platform = entity_platform.async_get_current_platform()
 
     platform.async_register_entity_service(SERVICE_ZAP, ZAP_SCHEMA, "async_zap")
+    platform.async_register_entity_service(
+        SERVICE_SELECT_BOUQUET,
+        SELECT_BOUQUET_SCHEMA,
+        "async_select_bouquet",
+    )
     platform.async_register_entity_service(
         SERVICE_SEND_KEY, SEND_KEY_SCHEMA, "async_send_key"
     )

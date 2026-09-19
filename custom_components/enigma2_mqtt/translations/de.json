@@ -259,6 +259,16 @@
         }
       }
     },
+    "select_bouquet": {
+      "name": "Bouquet auswählen",
+      "description": "Legt ein Bouquet als aktive Senderliste des Receivers fest. Kanal vor und zurück folgen danach diesem Bouquet.",
+      "fields": {
+        "sref": {
+          "name": "Bouquet-Referenz",
+          "description": "Die Service-Referenz eines vom Receiver veröffentlichten Bouquets. Liegt der aktuelle Sender außerhalb, schaltet der Receiver auf den ersten abspielbaren Sender um."
+        }
+      }
+    },
     "send_key": {
       "name": "Taste senden",
       "description": "Sendet eine Fernbedienungstaste an den Receiver, als hätte jemand sie gedrückt.",
@@ -413,6 +423,12 @@
     },
     "unknown_bouquet": {
       "message": "Der Receiver hat kein EPG-Raster für das Bouquet {bouquet} veröffentlicht."
+    },
+    "bouquet_not_published": {
+      "message": "Der Receiver bietet das Bouquet {bouquet} nicht an."
+    },
+    "bouquet_context_unsupported": {
+      "message": "Diese Receiver-Plugin-Version kann keinen Bouquet-Kontext aktivieren. Aktualisieren Sie das Plugin, um diese Aktion zu verwenden."
     },
     "unknown_channel": {
       "message": "In den Bouquets dieses Receivers gibt es keinen Sender namens {channel}."
