@@ -6,7 +6,7 @@ import asyncio
 from unittest.mock import AsyncMock, patch
 
 from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_USER
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import EVENT_DATA_ENTRY_FLOW_PROGRESSED, FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -141,14 +141,25 @@ async def test_aborting_progress_cancels_the_transaction_and_clears_secrets(
         )
         await started.wait()
         flow = hass.config_entries.flow._progress[result["flow_id"]]
-        changed = []
-        hass.bus.async_listen(EVENT_DATA_ENTRY_FLOW_PROGRESSED, changed.append)
-        flow._async_install_progress("done")
-        await asyncio.sleep(0)
-        assert flow._install_phase == "done"
-        assert changed
+        progressed = asyncio.Event()
+
+        @callback
+        def progress_changed(event):
+            if event.data.get("flow_id") == result["flow_id"]:
+                progressed.set()
+
+        unsubscribe = hass.bus.async_listen(
+            EVENT_DATA_ENTRY_FLOW_PROGRESSED, progress_changed
+        )
+        try:
+            flow._async_install_progress("done")
+            await asyncio.wait_for(progressed.wait(), timeout=1)
+            assert flow._install_phase == "done"
+            assert progressed.is_set()
+        finally:
+            unsubscribe()
         hass.config_entries.flow.async_abort(result["flow_id"])
-        await cancelled.wait()
+        await asyncio.wait_for(cancelled.wait(), timeout=5)
 
     assert flow._install_request is None
     assert hass.config_entries.async_entries(DOMAIN) == []
