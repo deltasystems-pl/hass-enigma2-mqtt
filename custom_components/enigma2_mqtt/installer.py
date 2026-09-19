@@ -739,6 +739,14 @@ def _installed_hash_manifest(ipk: bytes) -> bytes:
     return ("\n".join(sorted(lines)) + "\n").encode()
 
 
+async def _async_remove_helper(session: InstallerSession, remote_helper: str) -> None:
+    """Delete the uploaded helper, treating a failure as untidy rather than fatal."""
+    try:
+        await session.run(f"rm -f {shlex.quote(remote_helper)}", timeout=30)
+    except Exception:
+        _LOGGER.warning("Installer helper left behind on the receiver at %s", remote_helper)
+
+
 async def _async_rollback(
     credentials: SshCredentials,
     backup: str,
@@ -820,6 +828,8 @@ async def _async_rollback(
         )
         if result.exit_status:
             raise InstallerError(InstallerErrorCode.ROLLBACK_FAILED)
+        # The helper had to outlive the restore that used it; nothing needs it now.
+        await _async_remove_helper(released, remote_helper)
     finally:
         await released.close()
 
@@ -1077,6 +1087,7 @@ async def _async_install_locked(
                     if result.exit_status:
                         raise InstallerError(InstallerErrorCode.ROLLBACK_FAILED)
                     remote_lock_claimed = False
+                    await _async_remove_helper(release, remote_helper)
                 finally:
                     await release.close()
             except Exception as release_err:

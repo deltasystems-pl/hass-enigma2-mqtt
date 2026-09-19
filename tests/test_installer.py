@@ -68,6 +68,7 @@ class FakeReceiver:
         }
     )
     restore_flags: list[str] = field(default_factory=list)
+    helper_removed: bool = False
 
     async def connect(self, credentials: SshCredentials) -> FakeSession:
         assert credentials.host_key == "ssh-ed25519 AAAATEST"
@@ -141,6 +142,8 @@ class FakeSession:
                 receiver.files["provisioning"] = "old"
             if "--settings" in receiver.restore_flags:
                 receiver.files["settings"] = "old"
+        if "rm -f /tmp/enigma2-mqtt-installer-" in command:
+            receiver.helper_removed = True
         if command == "pidof enigma2":
             return CommandResult(0, f"{receiver.enigma_pid}\n")
         if command == "init 3" or 'trap "init 3"' in command:
@@ -460,6 +463,9 @@ async def test_rollback_restores_a_receiver_whose_openwebif_died_at_the_restart(
         index for index, command in enumerate(receiver.commands) if " restore " in command
     )
     assert "init 3" in receiver.commands
+    assert receiver.helper_removed is True
+
+
 async def test_rollback_restarts_enigma_when_restore_transport_raises(
     credentials: SshCredentials,
 ) -> None:
