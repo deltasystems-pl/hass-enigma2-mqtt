@@ -37,6 +37,16 @@ See the [README](README.md#installation) for HACS and manual installation, and
 [§3 Configuration](#3-configuration) for what the flow asks. The plugin must be on the box;
 from M4 the integration can put it there over SSH.
 
+🔴 **Never keep a backup copy of this component inside `custom_components/`.** Home Assistant
+reads the `manifest.json` of every directory it finds there, and a copy declares the same
+`enigma2_mqtt` domain as the original — so which one is loaded is not decided by the name, the
+date or the order you would expect. A copy called something like `enigma2_mqtt.bak-2026-09-19`
+is worse still: it can win, and then it cannot be imported at all, because that is not a legal
+Python module name. The symptom is `Setup failed for custom integration 'enigma2_mqtt'` with a
+`ModuleNotFoundError` naming the backup, and every entity of the receiver going unavailable —
+from a directory that was only ever meant to be a safety net. Keep upgrade backups anywhere
+else: `/config/enigma2_mqtt-backups/` is one directory up and out of reach of the scan.
+
 ## 3. Configuration
 
 The config flow has two entries today and a third in M4.
