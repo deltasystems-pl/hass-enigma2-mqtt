@@ -62,10 +62,10 @@ actions, registered on the media player platform, which is where Home Assistant 
 entity action to be registered; the rule's intent — a schema on every action, validated before
 anything is published, and an action that exists whether or not a box is loaded — is met.
 
-`test-coverage` stays open on purpose. The current 359-test suite covers every platform, every
-action, the device triggers, both flows and the guarded installer, including its refusals and
-its rollback. The local frozen-source run measured 94% statement coverage on Python 3.14.4 —
-92% for `installer.py` — below the 95% target. What is still uncovered is concentrated in the
+`test-coverage` stays open on purpose. The current 372-test suite covers every platform, every
+action, the device triggers, both flows and the guarded installer, including its refusals, its
+rollback and the races its durable lock can lose. The local frozen-source run measured 93%
+statement coverage on Python 3.14.4 — 92% for `installer.py` — below the 95% target. What is still uncovered is concentrated in the
 asyncssh transport itself, which has no receiver to talk to here.
 
 The intermittent failure previously recorded against
