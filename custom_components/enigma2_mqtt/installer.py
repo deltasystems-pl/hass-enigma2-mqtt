@@ -766,6 +766,12 @@ async def _async_rollback(
     old_enigma_pid: int | None = None
     rollback_error: BaseException | None = None
     try:
+        # This one goes first and outside every condition. It is the file holding the
+        # broker password in cleartext, deleting it needs nothing stopped, and if it is
+        # left behind it is left on flash: a failure to stop Enigma below must not be
+        # able to orphan it.
+        with suppress(OSError, TimeoutError):
+            await session.run(f"rm -f {shlex.quote(remote_provision_tmp)}", timeout=30)
         if restart_started:
             # Re-measure the guard if it can still be measured, then stop Enigma before
             # restoring settings so shutdown cannot overwrite the old values.
@@ -784,10 +790,7 @@ async def _async_rollback(
             stopped = await session.run("init 4 || exit $?; sleep 3", timeout=30)
             if stopped.exit_status:
                 raise InstallerError(InstallerErrorCode.ROLLBACK_FAILED)
-        commands = [
-            f"rm -f {shlex.quote(remote_ipk)} {shlex.quote(remote_provision_tmp)} "
-            f"{shlex.quote(remote_manifest)}"
-        ]
+        commands = [f"rm -f {shlex.quote(remote_ipk)} {shlex.quote(remote_manifest)}"]
         if install_started:
             commands.append(
                 f"python3 {shlex.quote(remote_helper)} restore {shlex.quote(backup)}"
@@ -1027,7 +1030,7 @@ async def _async_install_locked(
             try:
                 await cleanup.run(
                     f"rm -f {shlex.quote(remote_ipk)} {shlex.quote(remote_helper)} "
-                    f"{shlex.quote(remote_manifest)}",
+                    f"{shlex.quote(remote_manifest)} {shlex.quote(remote_provision_tmp)}",
                     timeout=30,
                 )
             except BaseException:

@@ -50,6 +50,7 @@ async def _install(
     bundle: BundledPlugin,
     *,
     run: Any = None,
+    reach_restart: bool = False,
 ) -> InstallerErrorCode:
     """Run a transaction that is expected to fail, and return how."""
     original = FakeSession.run
@@ -60,7 +61,27 @@ async def _install(
             return CommandResult(0, bundle.sha256 + "\n")
         return await original(self, command, **kwargs)
 
+    async def established_watch(*args: Any, **kwargs: Any):
+        """A restart watch that subscribes without a broker behind it."""
+        del args, kwargs
+        loop = asyncio.get_running_loop()
+        watch = type("Watch", (), {})()
+        watch.established = loop.create_future()
+        watch.established.set_result(None)
+        watch.completed = loop.create_future()
+        watch.cancel = lambda: watch.completed.cancel()
+        watch.arm = lambda: None
+        return watch
+
+    if reach_restart:
+        watch_patch = patch(
+            "custom_components.enigma2_mqtt.installer._async_watch_restart", established_watch
+        )
+    else:
+        watch_patch = patch.object(FakeSession, "close", FakeSession.close)
+
     with (
+        watch_patch,
         patch("custom_components.enigma2_mqtt.installer.load_bundled_plugin", return_value=bundle),
         patch(
             "custom_components.enigma2_mqtt.installer._installed_hash_manifest",
@@ -339,6 +360,55 @@ async def test_provisioning_is_written_through_an_unguessable_name_that_is_not_a
     assert renamed.endswith(f"mv {temporary} /etc/enigma2/mqttbridge.json")
     # The nonce is the transaction's, so the rollback deletes the same file it wrote.
     assert any(nonce in command and command.startswith("rm -f ") for command in receiver.commands)
+
+
+async def test_the_provisioning_temp_is_removed_even_when_enigma_will_not_stop(
+    hass: HomeAssistant, install_request: InstallRequest, tmp_path: Path
+) -> None:
+    """That file is the broker password in cleartext, sitting on the receiver's flash.
+
+    It used to be deleted by the rollback's first command *after* Enigma had been
+    stopped, so a receiver that would not stop — which is a receiver in trouble, exactly
+    when a rollback runs — kept it. Deleting it needs nothing stopped, so it goes first
+    and outside every condition.
+    """
+    receiver = FakeReceiver()
+    bundle = _bundle(tmp_path)
+    original = FakeSession.run
+
+    async def stop_fails(self: FakeSession, command: str, **kwargs: Any):
+        if "sha256sum" in command:
+            self.receiver.commands.append(command)
+            return CommandResult(0, bundle.sha256 + "\n")
+        if command.startswith("init 4"):
+            self.receiver.commands.append(command)
+            raise OSError("the receiver stopped answering")
+        if 'trap "init 3"' in command:
+            self.receiver.commands.append(command)
+            return CommandResult(1, "", "restart failed")
+        return await original(self, command, **kwargs)
+
+    code = await _install(
+        hass, install_request, receiver, bundle, run=stop_fails, reach_restart=True
+    )
+
+    assert code is InstallerErrorCode.ROLLBACK_FAILED
+    written = next(
+        command
+        for command in receiver.commands
+        if "/etc/enigma2/mqttbridge.json.ha-" in command and "cat >" in command
+    )
+    temporary = written.rsplit("cat > ", 1)[1].strip()
+    removals = [
+        command
+        for command in receiver.commands
+        if command.startswith("rm -f ") and temporary in command
+    ]
+    assert removals, "the temporary provisioning file was left on the receiver"
+    # It went before the attempt to stop Enigma, not after it.
+    assert receiver.commands.index(removals[0]) < next(
+        index for index, command in enumerate(receiver.commands) if command.startswith("init 4")
+    )
 
 
 async def test_two_transactions_against_one_receiver_do_not_interleave(
