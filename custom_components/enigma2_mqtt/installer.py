@@ -773,17 +773,16 @@ async def _async_rollback(
         with suppress(OSError, TimeoutError):
             await session.run(f"rm -f {shlex.quote(remote_provision_tmp)}", timeout=30)
         if restart_started:
-            # Re-measure the guard if it can still be measured, then stop Enigma before
-            # restoring settings so shutdown cannot overwrite the old values.
+            # Stop Enigma before restoring settings, so its shutdown cannot write the
+            # new values back over the old ones.
             #
-            # Nothing measured here may veto the restore. The preflight needs OpenWebif,
-            # which is an Enigma plugin, so it is down in exactly the failure this
-            # rollback exists for — a half-restarted or non-booting receiver. Letting it
-            # raise meant the restore never ran at all and the box was left on the new
-            # plugin. A receiver whose interface is down is also not recording, so the
-            # recording guard has nothing left to protect.
-            with suppress(InstallerError):
-                await _async_measure_preflight(session)
+            # Nothing measured here may veto the restore, and the preflight is not
+            # measured at all: it needs OpenWebif, which is an Enigma plugin and so is
+            # down in exactly the failure this rollback exists for. Letting it raise
+            # meant the restore never ran and the box was left on the new plugin, and
+            # even suppressed it costs eight round trips against a receiver in its worst
+            # state. The pid is read because the restart proof below needs it, and its
+            # absence is not a reason to stop either.
             with suppress(InstallerError):
                 old_enigma_pid = await _async_enigma_pid(session)
             enigma_stopped = True
