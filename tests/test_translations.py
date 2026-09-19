@@ -17,6 +17,8 @@ import json
 from pathlib import Path
 import re
 
+from custom_components.enigma2_mqtt.installer import InstallerErrorCode
+
 COMPONENT = Path(__file__).parent.parent / "custom_components" / "enigma2_mqtt"
 SOURCE = COMPONENT / "strings.json"
 TRANSLATIONS = COMPONENT / "translations"
@@ -47,6 +49,28 @@ def test_every_language_covers_every_string() -> None:
         path = TRANSLATIONS / f"{language}.json"
         keys = set(_flatten(json.loads(path.read_text(encoding="utf-8"))))
         assert keys == expected, f"{language}.json does not carry the same keys"
+
+
+def test_every_installer_failure_has_an_abort_string() -> None:
+    """The guided install ends by aborting with the error code as the reason.
+
+    `config.error` and `config.abort` are different sections, and the installer's codes
+    only lived in the first one. A flow that aborted with `no_space` therefore put the
+    word `no_space` on the screen — a token, in English, where a sentence belonged, and
+    in every language at once.
+    """
+    for language in LANGUAGES:
+        path = TRANSLATIONS / f"{language}.json"
+        aborts = json.loads(path.read_text(encoding="utf-8"))["config"]["abort"]
+        for code in InstallerErrorCode:
+            assert code.value in aborts, f"{language}.json has no abort string for {code.value}"
+            assert aborts[code.value].strip(), f"{language}.json:{code.value} is empty"
+
+    source = json.loads(SOURCE.read_text(encoding="utf-8"))["config"]["abort"]
+    for code in InstallerErrorCode:
+        assert code.value in source
+    # A rollback that failed is the one outcome a user has to act on themselves.
+    assert "mqttbridge-backups" in source["rollback_failed"]
 
 
 def test_every_language_leaves_the_same_placeholders() -> None:
