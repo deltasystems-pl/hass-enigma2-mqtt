@@ -8,14 +8,25 @@ import json
 import pytest
 
 from custom_components.enigma2_mqtt import bundle
+from custom_components.enigma2_mqtt.const import SUPPORTED_PLUGIN_VERSION
 
 
 def test_the_committed_bundle_validates():
     found = bundle.load_bundled_plugin()
     assert found.path.is_file()
-    assert found.version == "0.1.0"
     assert len(found.sha256) == 64
     assert len(found.source_commit) == 40
+
+
+def test_the_bundle_is_the_version_this_release_expects():
+    """The constant is what the update entity falls back on when the bundle will not load.
+
+    If the two disagree, a receiver is offered a version the installer would then refuse,
+    because `async_install` only accepts the version that is actually in the bundle. Pinning
+    them to each other here means a bundle swap that forgets the constant fails in CI rather
+    than on somebody's receiver.
+    """
+    assert bundle.load_bundled_plugin().version == SUPPORTED_PLUGIN_VERSION
 
 
 def test_missing_metadata_fails_closed(monkeypatch, tmp_path):

@@ -218,7 +218,7 @@ RECORD_ACTIONS: Final = ("start", "stop")
 # The plugin release this version of the integration is written against. The update
 # entity compares it with `info.plugin`. M4 replaces the constant with the version of
 # the IPK the integration bundles, and grows an install step to go with it.
-SUPPORTED_PLUGIN_VERSION: Final = "0.1.0"
+SUPPORTED_PLUGIN_VERSION: Final = "0.2.0"
 PLUGIN_RELEASES_URL: Final = (
     "https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases"
 )

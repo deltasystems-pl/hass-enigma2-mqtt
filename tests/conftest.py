@@ -33,6 +33,7 @@ from custom_components.enigma2_mqtt.const import (
     CONF_NODE_ID,
     DISCOVERY_PREFIX,
     DOMAIN,
+    SUPPORTED_PLUGIN_VERSION,
 )
 
 NODE_ID = "vuuno4kse_005301"
@@ -42,7 +43,9 @@ BOXTYPE = "vuuno4kse"
 IMAGE = "OpenViX 6.6.007"
 MAC = "00:00:5e:00:53:01"
 IP = "192.0.2.12"
-PLUGIN_VERSION = "0.1.0"
+# The example box runs the plugin this release ships, so "nothing to install" is the
+# default state of the update entity and a lower version in a test means something.
+PLUGIN_VERSION = SUPPORTED_PLUGIN_VERSION
 
 # The entity id every entity of the example box is prefixed with: Home Assistant builds
 # it from the device name and the entity's English name.
