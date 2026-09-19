@@ -27,6 +27,10 @@ import tarfile
 import time
 from typing import Any, Protocol
 
+# asyncssh pulls in cryptography, which is slow to import and reads from disk. Importing
+# it here means that happens once, while Home Assistant is importing this module in an
+# executor, rather than inside a coroutine the first time somebody configures SSH.
+import asyncssh
 from homeassistant.components import mqtt
 from homeassistant.components.mqtt import ReceiveMessage
 from homeassistant.core import HomeAssistant, callback
@@ -230,8 +234,6 @@ class _AsyncSshSession:
 
 async def async_probe_host_key(host: str, port: int = 22) -> HostKey:
     """Read a host key without sending a username, password, or command."""
-    import asyncssh
-
     class _CaptureClient(asyncssh.SSHClient):
         key: Any = None
 
@@ -275,8 +277,6 @@ async def async_probe_host_key(host: str, port: int = 22) -> HostKey:
 
 async def _async_connect(credentials: SshCredentials) -> InstallerSession:
     """Connect with the exact key the user confirmed."""
-    import asyncssh
-
     try:
         key = asyncssh.import_public_key(credentials.host_key)
         known_hosts = ([key], [], [], [], [], [], [])
