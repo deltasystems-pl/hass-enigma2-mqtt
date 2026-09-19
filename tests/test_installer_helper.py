@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import time
 
@@ -19,6 +20,7 @@ from custom_components.enigma2_mqtt.installer_helper import (
     release_transaction,
     restore,
     snapshot,
+    uptime,
     verify_manifest,
 )
 
@@ -357,7 +359,11 @@ def test_a_lock_older_than_any_plausible_install_is_reclaimed(
     """The boot id only helps across a reboot; a crashed process leaves the same wedge."""
     lock_dir = tmp_path / "lock"
     claim_transaction(lock_dir)
-    stale = {**_owner(lock_dir), "started": int(time.time()) - STALE_LOCK_SECONDS - 1}
+    stale = {
+        **_owner(lock_dir),
+        "started": int(time.time()) - STALE_LOCK_SECONDS - 1,
+        "uptime": (uptime() or 0.0) - STALE_LOCK_SECONDS - 1,
+    }
     (lock_dir / "owner.json").write_text(json.dumps(stale), encoding="ascii")
 
     claim_transaction(lock_dir)
@@ -377,12 +383,31 @@ def test_a_lock_that_is_merely_slow_is_still_respected(tmp_path: Path) -> None:
         claim_transaction(lock_dir)
 
 
-@pytest.mark.parametrize("content", ["", "not json", json.dumps(["a list"]), json.dumps({})])
-def test_a_lock_with_no_usable_owner_record_is_reclaimed(tmp_path: Path, content: str) -> None:
-    """A half-written claim is a wedge with nobody behind it."""
+@pytest.mark.parametrize("content", ["", "not json", json.dumps(["a list"])])
+def test_a_lock_with_an_unreadable_owner_record_is_reclaimed_once_it_is_old(
+    tmp_path: Path, content: str
+) -> None:
+    """A claim that died mid-write is a wedge with nobody behind it.
+
+    Age has to come into it, because the same unreadable directory is what a claim that
+    started a millisecond ago looks like.
+    """
     lock_dir = tmp_path / "lock"
     claim_transaction(lock_dir)
     (lock_dir / "owner.json").write_text(content, encoding="ascii")
+    old = time.time() - STALE_LOCK_SECONDS - 60
+    os.utime(lock_dir, (old, old))
+
+    claim_transaction(lock_dir)
+
+    assert _owner(lock_dir)["boot_id"] == boot_id()
+
+
+def test_an_owner_record_that_is_not_an_object_is_reclaimed(tmp_path: Path) -> None:
+    """Valid JSON that is not a record cannot have been written by a claim."""
+    lock_dir = tmp_path / "lock"
+    claim_transaction(lock_dir)
+    (lock_dir / "owner.json").write_text(json.dumps({}), encoding="ascii")
 
     claim_transaction(lock_dir)
 
