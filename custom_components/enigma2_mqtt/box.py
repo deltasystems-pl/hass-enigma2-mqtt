@@ -149,7 +149,14 @@ OSCAM_STATUSES = frozenset(
         "unknown",
     }
 )
-OSCAM_VERSION = re.compile(r"^[0-9]{1,3}\.[0-9]{1,3}(?:[._-][A-Za-z0-9]+)*(?: build r[0-9]{1,8})?$")
+# Real OSCam builds put a patch suffix on the revision — `1.20_svn build r11718-079` is
+# what the receiver this was written against reports. A version that does not match is
+# dropped on its own, so the pattern being too narrow cost only the version field; it
+# still meant the one number a support question starts with was never shown.
+OSCAM_VERSION = re.compile(
+    r"^[0-9]{1,3}\.[0-9]{1,3}(?:[._-][A-Za-z0-9]+)*"
+    r"(?: build r[0-9]{1,8}(?:-[A-Za-z0-9]{1,8})?)?$"
+)
 
 type Enigma2MqttConfigEntry = ConfigEntry[Enigma2Box]
 

@@ -3,6 +3,7 @@
 import json
 
 from homeassistant.helpers import entity_registry as er
+import pytest
 from pytest_homeassistant_custom_component.common import async_fire_mqtt_message
 
 from .conftest import AVAILABILITY_TOPIC, INFO, INFO_TOPIC, async_setup_box
@@ -245,3 +246,64 @@ async def test_private_version_and_extra_reader_fields_never_enter_state(
     assert state["version"] is None
     assert "label" not in state["readers"][0]
     assert "password" not in state
+
+
+@pytest.mark.parametrize(
+    "version",
+    [
+        "1.20_svn build r11718-079",
+        "1.20_svn build r11718",
+        "1.20",
+        "1.20-unstable_svn build r12345",
+    ],
+)
+async def test_the_versions_oscam_really_reports_are_published(
+    hass, mqtt_mock, retained, config_entry, version
+):
+    """The receiver this was written against reports `1.20_svn build r11718-079`.
+
+    The pattern had no room for the patch suffix on the revision, so the one number a
+    support question starts with arrived as null.
+    """
+    retained[AVAILABILITY_TOPIC] = "online"
+    retained[INFO_TOPIC] = json.dumps(
+        {
+            **INFO,
+            "capabilities": [*INFO["capabilities"], "oscam"],
+            "settings": {"oscam_telemetry": True},
+        }
+    )
+    retained[OSCAM_TOPIC] = json.dumps({**payload(READER), "version": version})
+    await async_setup_box(hass, config_entry)
+
+    assert config_entry.runtime_data.state.oscam["version"] == version
+
+
+@pytest.mark.parametrize(
+    "version", ["'; DROP TABLE", "x" * 200, "not a version", 1.2, None, "1.20 build rXYZ"]
+)
+async def test_a_version_this_cannot_read_costs_only_the_version(
+    hass, mqtt_mock, retained, config_entry, version
+):
+    """Dropping the whole payload would take every OSCam entity with it.
+
+    A version is a label on a support question, not a fact anything depends on, so an
+    unreadable one is left out and the health that matters is still published.
+    """
+    retained[AVAILABILITY_TOPIC] = "online"
+    retained[INFO_TOPIC] = json.dumps(
+        {
+            **INFO,
+            "capabilities": [*INFO["capabilities"], "oscam"],
+            "settings": {"oscam_telemetry": True},
+        }
+    )
+    retained[OSCAM_TOPIC] = json.dumps({**payload(READER), "version": version})
+    await async_setup_box(hass, config_entry)
+
+    state = config_entry.runtime_data.state.oscam
+    assert state is not None, "the payload was rejected over its version string"
+    assert state["version"] is None
+    assert state["software_running"] is True
+    assert state["readers_configured"] == 1
+    assert len(state["readers"]) == 1
