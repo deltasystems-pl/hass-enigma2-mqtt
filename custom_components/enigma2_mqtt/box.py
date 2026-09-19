@@ -157,6 +157,10 @@ OSCAM_VERSION = re.compile(
     r"^[0-9]{1,3}\.[0-9]{1,3}(?:[._-][A-Za-z0-9]+)*"
     r"(?: build r[0-9]{1,8}(?:-[A-Za-z0-9]{1,8})?)?$"
 )
+# The pattern has a repeating group, so what it accepts has no length limit of its own:
+# a megabyte of `1.20_a_a_a…` would match, and it is a label for a bug report. The
+# longest version anyone has seen is a quarter of this.
+OSCAM_VERSION_MAX = 64
 
 type Enigma2MqttConfigEntry = ConfigEntry[Enigma2Box]
 
@@ -1127,7 +1131,9 @@ class Enigma2Box:
         return {
             "software": software if software in (None, "OSCam") else None,
             "version": version
-            if isinstance(version, str) and OSCAM_VERSION.fullmatch(version)
+            if isinstance(version, str)
+            and len(version) <= OSCAM_VERSION_MAX
+            and OSCAM_VERSION.fullmatch(version)
             else None,
             "software_running": payload.get("software_running")
             if isinstance(payload.get("software_running"), bool)
