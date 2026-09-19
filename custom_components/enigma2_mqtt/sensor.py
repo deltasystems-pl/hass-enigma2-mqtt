@@ -18,6 +18,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+import re
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -28,13 +29,25 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfTime
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
 import homeassistant.util.dt as dt_util
 
 from .box import Enigma2Box, Enigma2MqttConfigEntry, Enigma2State
-from .const import TOPIC_EPG, TOPIC_INFO, TOPIC_RECORDING, TOPIC_SERVICE, TOPIC_TUNER
-from .entity import Enigma2Entity
+from .const import (
+    CONF_CAM_TELEMETRY,
+    CONF_OSCAM_TELEMETRY,
+    DOMAIN,
+    TOPIC_CAM,
+    TOPIC_EPG,
+    TOPIC_INFO,
+    TOPIC_OSCAM,
+    TOPIC_RECORDING,
+    TOPIC_SERVICE,
+    TOPIC_TUNER,
+)
+from .entity import Enigma2Entity, OptionalEntities
 
 PARALLEL_UPDATES = 0
 
@@ -82,6 +95,14 @@ def _next_timer(state: Enigma2State) -> datetime | None:
     if not isinstance(begin, (int, float)):
         return None
     return dt_util.utc_from_timestamp(begin)
+
+
+def _cam_value(state: Enigma2State, key: str, expected: type) -> Any:
+    """Return one CAM value only when its JSON type is exact."""
+    value = (state.cam or {}).get(key)
+    if expected is int and isinstance(value, bool):
+        return None
+    return value if isinstance(value, expected) else None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -168,6 +189,69 @@ SENSORS: tuple[Enigma2SensorDescription, ...] = (
     ),
 )
 
+CAM_SENSORS: tuple[Enigma2SensorDescription, ...] = (
+    Enigma2SensorDescription(
+        key="cam_system",
+        topics=(TOPIC_CAM,),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda state: _cam_value(state, "system", str),
+    ),
+    Enigma2SensorDescription(
+        key="cam_ecm_time",
+        topics=(TOPIC_CAM,),
+        native_unit_of_measurement=UnitOfTime.MILLISECONDS,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda state: _cam_value(state, "ecm_ms", int),
+    ),
+)
+
+OSCAM_SENSORS: tuple[Enigma2SensorDescription, ...] = (
+    Enigma2SensorDescription(
+        key="oscam_status",
+        topics=(TOPIC_OSCAM,),
+        device_class=SensorDeviceClass.ENUM,
+        options=["running", "stopped"],
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda state: (
+            "running"
+            if (state.oscam or {}).get("software_running") is True
+            else "stopped"
+            if (state.oscam or {}).get("software_running") is False
+            else None
+        ),
+        attributes_fn=lambda state: {
+            "version": (state.oscam or {}).get("version"),
+            "api_access": (state.oscam or {}).get("api_access"),
+            "readonly": (state.oscam or {}).get("readonly"),
+        },
+    ),
+    *(
+        Enigma2SensorDescription(
+            key=f"oscam_{key}",
+            topics=(TOPIC_OSCAM,),
+            state_class=SensorStateClass.MEASUREMENT,
+            entity_category=EntityCategory.DIAGNOSTIC,
+            value_fn=lambda state, field=key: (state.oscam or {}).get(field),
+        )
+        for key in (
+            "readers_configured",
+            "readers_enabled",
+            "readers_healthy",
+            "cards_ready",
+            "servers_connected",
+            "shared_cards",
+        )
+    ),
+    Enigma2SensorDescription(
+        key="oscam_uptime",
+        topics=(TOPIC_OSCAM,),
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda state: (state.oscam or {}).get("uptime_s"),
+    ),
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -177,6 +261,40 @@ async def async_setup_entry(
     """Set up every sensor of one box."""
     box = entry.runtime_data
     async_add_entities(Enigma2Sensor(box, description) for description in SENSORS)
+
+    by_key = {description.key: description for description in (*CAM_SENSORS, *OSCAM_SENSORS)}
+    for keys, enabled, declared in (
+        (
+            [description.key for description in CAM_SENSORS],
+            lambda: box.cam_enabled,
+            lambda: box.telemetry_declared(CONF_CAM_TELEMETRY),
+        ),
+        (
+            [description.key for description in OSCAM_SENSORS],
+            lambda: box.oscam_enabled,
+            lambda: box.telemetry_declared(CONF_OSCAM_TELEMETRY),
+        ),
+    ):
+        entry.async_on_unload(
+            OptionalEntities(
+                hass,
+                box,
+                "sensor",
+                keys,
+                lambda key: Enigma2Sensor(box, by_key[key]),
+                enabled,
+                declared,
+                async_add_entities,
+            ).start()
+        )
+
+    if "oscam" in box.capabilities:
+        entry.async_on_unload(_OscamEntityManager(hass, box, async_add_entities).start())
+    else:
+        registry = er.async_get(hass)
+        for entry_ in er.async_entries_for_config_entry(registry, entry.entry_id):
+            if entry_.platform == DOMAIN and entry_.unique_id.startswith(f"{box.node_id}_oscam_"):
+                registry.async_remove(entry_.entity_id)
 
 
 class Enigma2Sensor(Enigma2Entity, SensorEntity):
@@ -188,9 +306,7 @@ class Enigma2Sensor(Enigma2Entity, SensorEntity):
     # quarter of an hour. The state is worth recording; these are not.
     _unrecorded_attributes = frozenset({"long", "recordings"})
 
-    def __init__(
-        self, box: Enigma2Box, description: Enigma2SensorDescription
-    ) -> None:
+    def __init__(self, box: Enigma2Box, description: Enigma2SensorDescription) -> None:
         """Set up the sensor from its description."""
         super().__init__(box, description.key, topics=description.topics)
         self.entity_description = description
@@ -201,6 +317,147 @@ class Enigma2Sensor(Enigma2Entity, SensorEntity):
         description = self.entity_description
         self._attr_native_value = description.value_fn(self.box.state)
         if description.attributes_fn is not None:
-            self._attr_extra_state_attributes = description.attributes_fn(
-                self.box.state
+            self._attr_extra_state_attributes = description.attributes_fn(self.box.state)
+
+
+class OscamSourceSensor(Enigma2Entity, SensorEntity):
+    """One privacy-neutral OSCam reader or server diagnostic."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, box: Enigma2Box, source_id: str, metric: str) -> None:
+        super().__init__(box, f"oscam_{source_id}_{metric}", topics=(TOPIC_OSCAM,))
+        self._source_id = source_id
+        self._metric = metric
+        self._attr_translation_key = f"oscam_source_{metric}"
+        self._attr_translation_placeholders = {"id": source_id.split("_", 1)[1]}
+        if metric == "status":
+            self._attr_device_class = SensorDeviceClass.ENUM
+            self._attr_options = [
+                "ready",
+                "connected",
+                "disabled",
+                "no_card",
+                "initializing",
+                "connecting",
+                "disconnected",
+                "sleeping",
+                "duplicate",
+                "error",
+                "unknown",
+            ]
+
+    @property
+    def available(self) -> bool:
+        payload = self.box.state.oscam or {}
+        return (
+            super().available
+            and payload.get("api_reachable") is True
+            and payload.get("api_access") == "granted"
+            and self._source() is not None
+        )
+
+    def _source(self) -> dict[str, Any] | None:
+        for source in (self.box.state.oscam or {}).get("readers") or []:
+            if isinstance(source, dict) and source.get("id") == self._source_id:
+                return source
+        return None
+
+    @callback
+    def _async_read_state(self) -> None:
+        source = self._source()
+        if source is None:
+            self._attr_native_value = None
+            self._attr_extra_state_attributes = None
+        elif self._metric == "status":
+            self._attr_native_value = source.get("status")
+            self._attr_extra_state_attributes = {
+                "kind": source.get("kind"),
+                "enabled": source.get("enabled"),
+                "protocol": source.get("protocol"),
+            }
+        elif self._metric == "ready_cards":
+            self._attr_native_value = (
+                1
+                if source.get("status") == "ready"
+                else 0
+                if source.get("status") in ("no_card", "disabled")
+                else None
             )
+        else:
+            self._attr_native_value = source.get("shared_cards")
+
+
+class _OscamEntityManager:
+    """Reconcile dynamic source entities only from authoritative snapshots."""
+
+    def __init__(self, hass, box, add_entities) -> None:
+        self.hass = hass
+        self.box = box
+        self.add_entities = add_entities
+        self.known: set[str] = self._registry_source_ids()
+        self.active: set[str] = set()
+
+    def _registry_source_ids(self) -> set[str]:
+        registry = er.async_get(self.hass)
+        prefix = f"{self.box.node_id}_oscam_"
+        found = set()
+        for entry in er.async_entries_for_config_entry(registry, self.box.entry.entry_id):
+            if entry.platform != DOMAIN or not entry.unique_id.startswith(prefix):
+                continue
+            match = re.fullmatch(
+                r"((?:reader|server|source)_[0-9a-f]{12})_"
+                r"(?:status|ready_cards|shared_cards)",
+                entry.unique_id[len(prefix) :],
+            )
+            if match:
+                found.add(match.group(1))
+        return found
+
+    def start(self):
+        unsubscribe = self.box.async_add_listener(self._update, (TOPIC_OSCAM, TOPIC_INFO))
+        self._update()
+        return unsubscribe
+
+    @callback
+    def _update(self) -> None:
+        payload = self.box.state.oscam
+        if payload is None:
+            if not self.box.oscam_enabled:
+                self._remove(self.known)
+            return
+        readers = payload.get("readers") or []
+        authoritative = (
+            payload.get("api_reachable") is True and payload.get("api_access") == "granted"
+        )
+        current = {source["id"] for source in readers if isinstance(source, dict)}
+        additions = current - self.active
+        entities = []
+        for source in readers:
+            kind = source["kind"]
+            source_id = source["id"]
+            if source_id not in additions:
+                continue
+            entities.append(OscamSourceSensor(self.box, source_id, "status"))
+            if kind == "reader":
+                entities.append(OscamSourceSensor(self.box, source_id, "ready_cards"))
+            elif kind == "server":
+                entities.append(OscamSourceSensor(self.box, source_id, "shared_cards"))
+        if entities:
+            self.add_entities(entities)
+        self.known.update(additions)
+        self.active.update(additions)
+        if authoritative:
+            self._remove(self.known - current)
+
+    def _remove(self, source_ids: set[str]) -> None:
+        if not source_ids:
+            return
+        registry = er.async_get(self.hass)
+        for source_id in set(source_ids):
+            for metric in ("status", "ready_cards", "shared_cards"):
+                unique_id = f"{self.box.node_id}_oscam_{source_id}_{metric}"
+                if entity_id := registry.async_get_entity_id("sensor", DOMAIN, unique_id):
+                    registry.async_remove(entity_id)
+            self.known.discard(source_id)
+            self.active.discard(source_id)

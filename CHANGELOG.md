@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Planned as 0.2.0. Everything below has landed since 0.1.0 and is not released yet: the
+guided installer, the update path and the new diagnostics have been tested locally but
+have not been accepted on a receiver, and no tag has been cut.
+
 ### Added
 
 - **The receiver as a media player.** What is on and what is next, the channel list of the
@@ -28,14 +32,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   screen grab, a Wake-on-LAN packet and a discovery refresh. Deep standby and reboot are there
   too, hidden until you turn them on, so neither sits one mis-tap from the volume.
 - **An image** of the last screen grab, and an **update entity** that says when the receiver
-  runs an older plugin than this release expects — the first thing to check when something is
-  missing. It cannot install anything yet.
-- **Nine actions** — `zap`, `send_key`, `message`, `add_timer`, `delete_timer`, `record`,
-  `screenshot`, `set_ha_mode` and `get_epg_grid` — each aimed at a receiver, a device or an
+  runs an older plugin than this release expects. With explicitly retained SSH credentials it
+  can install the verified plugin bundled with the integration without replacing the box's
+  existing broker or plugin settings.
+- **Ten actions** — `zap`, `select_bouquet`, `send_key`, `message`, `add_timer`, `delete_timer`,
+  `record`, `screenshot`, `set_ha_mode` and `get_epg_grid` — each aimed at a receiver, a device or an
   area. They wait for the receiver to actually do the thing and report what it says when it
   refuses, rather than reporting success for a message that was merely sent.
+- A playable bouquet in the media browser activates the receiver's real channel-list context,
+  so subsequent channel-up and channel-down follow that list. The current channel is preserved
+  when it belongs to the bouquet; otherwise the receiver tunes the first playable channel.
 - **Options**: whether the deep standby and reboot buttons appear, which address a Wake-on-LAN
-  packet goes to, and which bouquets are worth browsing. Saving them takes effect at once.
+  packet goes to, which bouquets are worth browsing, key-event publishing and the screenshot
+  policy, interval and post-zap delay. Receiver options are acknowledged by fresh plugin state
+  before HA saves them. Opt-in conditional-access diagnostics expose only the bounded current
+  service result and never retain reader, server, account or card details.
+- **Optional receiver address metadata** in manual setup and reconfigure, used for the device
+  link and as an SSH suggestion without making direct receiver access a requirement.
+- **Opt-in OSCam health diagnostics** from the plugin's privacy-bounded topic: process and API
+  health, aggregate reader/server counts, and dynamic per-source status under stable opaque IDs.
+  Reader labels, addresses, accounts and card identifiers never enter integration state or
+  diagnostics; API outages preserve customized entities as unavailable until a complete snapshot.
+- **A guided SSH installer** with host-key confirmation, recording/timer guards, pre-change
+  backup, uploaded-file verification, guarded GUI restart and rollback. SSH credentials are
+  opt-in for later updates and can be enrolled, refreshed or forgotten without unloading MQTT.
+- **A reproducible local plugin bundle** with pinned commit metadata and the corresponding GPL
+  source archive. Runtime installation has no release-site or other network download path.
 - **Reconfigure**, for following a receiver whose node ID or base topic was changed on its own
   setup screen.
 - **Polish and German** names for every entity, action and trigger. German is still a draft

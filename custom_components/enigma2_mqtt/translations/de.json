@@ -7,36 +7,67 @@
         "title": "Diesen Enigma2-Receiver hinzufügen",
         "description": "Der Enigma2-Receiver {name} ({boxtype}, {image}) hat sich am Broker angemeldet.\n\nBeim Hinzufügen wechselt der Receiver in den Integrationsmodus: Das Plugin zieht die Entitäten zurück, die es selbst per MQTT-Discovery veröffentlicht, und Home Assistant baut stattdessen das Gerät auf. Der Receiver muss den Wechsel bestätigen, bevor er hinzugefügt wird."
       },
-      "user": {
+      "user": {"menu_options": {"manual": "Vorhandenes MQTT-Bridge-Plugin verwenden", "install": "MQTT Bridge über SSH installieren"}},
+      "manual": {
         "title": "Enigma2-Receiver manuell hinzufügen",
         "description": "Verwende dies, wenn die Anmeldung des Receivers Home Assistant nicht erreicht hat, etwa weil der Receiver über eine MQTT-Brücke veröffentlicht, die das Themenpräfix umschreibt.",
         "data": {
           "base_topic": "Basisthema",
           "node_id": "Knoten-ID",
-          "name": "Name"
+          "name": "Name",
+          "receiver_host": "Receiver-Adresse (optional)"
         },
         "data_description": {
           "base_topic": "Das Präfix, unter dem der Receiver veröffentlicht, so wie Home Assistant es am Broker sieht. Die Voreinstellung des Plugins ist `enigma2`.",
           "node_id": "Die Knoten-ID des Receivers, zu sehen im Einrichtungsbildschirm des Plugins. Sie besteht aus dem Boxtyp und den letzten sechs Stellen der MAC-Adresse, zum Beispiel `vuuno4kse_005301`.",
-          "name": "Wie dieser Receiver in Home Assistant heißen soll. Bleibt das Feld leer, wird der vom Plugin gemeldete Name verwendet."
+          "name": "Wie dieser Receiver in Home Assistant heißen soll. Bleibt das Feld leer, wird der vom Plugin gemeldete Name verwendet.",
+          "receiver_host": "Hostname oder IP-Adresse nur für den Gerätelink und als Vorschlag bei der SSH-Einrichtung. Reine MQTT-Konfigurationen können das Feld leer lassen."
         }
       },
+      "install": {"title": "Mit dem Receiver verbinden", "description": "Home Assistant liest den SSH-Hostschlüssel vor der Passwortabfrage.", "data": {"ssh_host": "Receiver-Adresse", "ssh_port": "SSH-Port"}},
+      "install_confirm": {"title": "Identität bestätigen und installieren", "description": "Bestätige den SSH-Fingerabdruck `{fingerprint}` vor dem Senden der Zugangsdaten.", "data": {"ssh_username": "SSH-Benutzer", "ssh_password": "SSH-Passwort", "broker_host": "MQTT-Broker-Adresse", "broker_port": "MQTT-Broker-Port", "broker_username": "MQTT-Benutzer", "broker_password": "MQTT-Passwort", "node_id": "Knoten-ID", "base_topic": "Basis-Topic", "name": "Name", "keep_ssh_credentials": "SSH-Zugangsdaten für Updates behalten"}},
+      "install_progress": {"title": "MQTT Bridge wird installiert"},
+      "reauth": {"title": "SSH-Zugangsdaten aktualisieren", "data": {"ssh_username": "SSH-Benutzer", "ssh_password": "SSH-Passwort"}},
+      "reauth_confirm_host_key": {"title": "SSH-Hostschlüssel geändert", "description": "Nur fortfahren, wenn der Receiver den Fingerabdruck `{fingerprint}` zeigt."},
       "reconfigure": {
         "title": "Ändern, wo dieser Receiver veröffentlicht",
         "description": "Verwende dies, nachdem die Knoten-ID oder das Basisthema im Einrichtungsbildschirm des Plugins geändert wurde.\n\nEine geänderte Knoten-ID ändert die Identität des Receivers: Seine Entitäten werden mit neuen IDs neu aufgebaut, und der Verlauf bleibt beim alten Gerät, das entfernt wird. Wird nur das Basisthema oder der Name geändert, bleibt alles erhalten.",
         "data": {
           "base_topic": "Basisthema",
           "node_id": "Knoten-ID",
-          "name": "Name"
+          "name": "Name",
+          "receiver_host": "Receiver-Adresse (optional)"
         },
         "data_description": {
           "base_topic": "Das Präfix, unter dem der Receiver veröffentlicht, so wie Home Assistant es am Broker sieht.",
           "node_id": "Die Knoten-ID des Receivers, zu sehen im Einrichtungsbildschirm des Plugins.",
-          "name": "Wie dieser Receiver in Home Assistant heißen soll."
+          "name": "Wie dieser Receiver in Home Assistant heißen soll.",
+          "receiver_host": "Diese Metadaten ändern keine angehefteten SSH-Zugangsdaten; richte SSH für einen anderen Receiver neu ein."
         }
       }
     },
+    "progress": {"preflight": "Sicherheit und Kompatibilität des Receivers werden geprüft", "backup": "Aktuelle Installation wird gesichert", "upload": "Geprüftes Paket wird hochgeladen", "install": "Plugin wird installiert", "provision": "MQTT-Konfiguration wird geschrieben", "restart": "Enigma2-Oberfläche wird neu gestartet", "announcement": "Auf eine neue MQTT-Ankündigung wird gewartet", "done": "Installation verifiziert"},
     "error": {
+      "invalid_host": "Gib die Adresse des Receivers ein.",
+      "ssh_unavailable": "Der SSH-Dienst des Receivers ist nicht erreichbar.",
+      "auth_failed": "SSH-Authentifizierung fehlgeschlagen.",
+      "preflight_failed": "Die Vorprüfungen des Receivers sind fehlgeschlagen.",
+      "unsupported_python": "Die Python-Version des Receivers wird nicht unterstützt.",
+      "no_space": "Der Receiver hat nicht genug freien Speicherplatz.",
+      "recording": "Die Installation ist während einer Aufnahme gesperrt.",
+      "timer_due": "Die Installation ist gesperrt, weil bald eine Aufnahme beginnt.",
+      "bundle_missing": "Das geprüfte Plugin-Paket fehlt.",
+      "bundle_invalid": "Das Plugin-Paket hat die Prüfung nicht bestanden.",
+      "upload_failed": "Das Hochladen des Plugins ist fehlgeschlagen.",
+      "install_failed": "Die Plugin-Installation ist fehlgeschlagen und wurde zurückgesetzt.",
+      "newer_installed": "Eine neuere Plugin-Version ist bereits installiert.",
+      "provision_failed": "Die MQTT-Konfiguration konnte nicht geschrieben werden.",
+      "restart_failed": "Die Enigma2-Oberfläche wurde nicht sicher neu gestartet.",
+      "announcement_timeout": "Das Plugin hat nach dem Neustart keine neue MQTT-Ankündigung veröffentlicht.",
+      "rollback_failed": "Installation und Wiederherstellung sind fehlgeschlagen; prüfe den Receiver manuell.",
+      "busy": "Eine andere Installation läuft bereits.",
+      "identity_mismatch": "Der Receiver hat eine andere MQTT-Identität angekündigt.",
+      "host_key_changed": "Der SSH-Hostschlüssel des Receivers hat sich geändert.",
       "no_ack": "Der Receiver hat den Moduswechsel nicht bestätigt. Prüfe, ob das Plugin läuft und ob sein Broker-Zugang in die Themen dieses Knotens schreiben darf.",
       "not_found": "Unter diesem Thema wurde kein Receiver gefunden. Prüfe Basisthema und Knoten-ID im Einrichtungsbildschirm des Plugins.",
       "invalid_topic": "Das ist kein brauchbares Thema. Basisthema und Knoten-ID dürfen die Platzhalter `+` und `#` nicht enthalten.",
@@ -48,7 +79,30 @@
       "mqtt_unavailable": "Die MQTT-Integration ist nicht verfügbar. Richte sie zuerst ein und füge dann den Receiver hinzu.",
       "not_enigma2_announcement": "Diese Nachricht ist keine Anmeldung der Enigma2 MQTT Bridge.",
       "retracted": "Der Receiver hat seine Anmeldung zurückgezogen.",
-      "reconfigure_successful": "Der Receiver wurde aktualisiert."
+      "reconfigure_successful": "Der Receiver wurde aktualisiert.",
+      "reauth_successful": "SSH-Zugangsdaten wurden ohne Unterbrechung der MQTT-Entitäten aktualisiert.",
+      "reauth_failed": "SSH-Neuanmeldung wurde abgebrochen.",
+      "host_key_changed": "Der SSH-Hostschlüssel wurde geändert und nicht akzeptiert.",
+      "install_cancelled": "Installation wurde abgebrochen.",
+      "ssh_unavailable": "Der SSH-Dienst des Receivers war nicht erreichbar, es wurde nichts installiert.",
+      "auth_failed": "Die SSH-Authentifizierung ist fehlgeschlagen, es wurde nichts installiert.",
+      "preflight_failed": "Die Prüfungen des Receivers konnten nicht abgeschlossen werden, es wurde nichts installiert.",
+      "unsupported_python": "Die Python-Version des Receivers ist für dieses Plugin zu alt. Es wurde nichts installiert.",
+      "no_space": "Auf dem Receiver ist zu wenig freier Speicherplatz. Es wurde nichts installiert.",
+      "recording": "Der Receiver nimmt auf. Es wurde nichts installiert; versuche es nach der Aufnahme erneut.",
+      "timer_due": "Auf dem Receiver beginnt demnächst eine Aufnahme. Es wurde nichts installiert; versuche es danach erneut.",
+      "bundle_missing": "Das mitgelieferte Plugin-Paket fehlt. Installiere die Integration neu.",
+      "bundle_invalid": "Das mitgelieferte Plugin-Paket hat die Prüfung nicht bestanden. Installiere die Integration neu.",
+      "upload_failed": "Das Plugin konnte nicht auf den Receiver übertragen werden. Es wurde nichts geändert.",
+      "install_failed": "Das Plugin konnte nicht installiert werden. Der Receiver wurde zurückgesetzt.",
+      "newer_installed": "Auf dem Receiver läuft bereits ein neueres Plugin als das mitgelieferte. Es wurde nichts geändert.",
+      "provision_failed": "Die MQTT-Einstellungen konnten nicht geschrieben werden. Der Receiver wurde zurückgesetzt.",
+      "restart_failed": "Die Oberfläche des Receivers ist nicht sicher neu gestartet. Der Receiver wurde zurückgesetzt.",
+      "announcement_timeout": "Das Plugin hat sich nach dem Neustart nicht angekündigt. Der Receiver wurde zurückgesetzt.",
+      "rollback_failed": "Die Installation ist fehlgeschlagen und der Receiver konnte nicht zurückgesetzt werden. Prüfe den Receiver von Hand: Die Sicherung von vor der Änderung liegt in /home/root/mqttbridge-backups.",
+      "busy": "Auf diesem Receiver läuft bereits eine andere Installation.",
+      "identity_mismatch": "Der Receiver ist für eine andere Knoten-ID oder ein anderes Basisthema konfiguriert. Es wurde nichts geändert.",
+      "unknown": "Installation ist unerwartet fehlgeschlagen; es wurde kein Eintrag erstellt."
     }
   },
   "options": {
@@ -59,14 +113,34 @@
         "data": {
           "dangerous_buttons": "Schaltflächen für Tiefschlaf und Neustart anzeigen",
           "wol_mac": "MAC-Adresse für Wake-on-LAN",
-          "bouquets": "Angebotene Bouquets"
+          "bouquets": "Angebotene Bouquets",
+          "publish_keys": "Fernbedienungstasten veröffentlichen",
+          "screenshot": "Automatische Bildschirmfotos",
+          "screenshot_interval": "Bildschirmfoto-Intervall (Sekunden)",
+          "screenshot_delay": "Verzögerung nach dem Kanalwechsel (Sekunden)",
+          "cam_telemetry": "Zugangsberechtigungs-Telemetrie veröffentlichen",
+          "oscam_telemetry": "OSCam-Zustandstelemetrie veröffentlichen",
+          "configure_ssh": "SSH-Zugangsdaten für Plugin-Updates einrichten",
+          "keep_ssh_credentials": "SSH-Zugangsdaten für Updates behalten"
         },
         "data_description": {
           "dangerous_buttons": "Der Tiefschlaf nimmt den Receiver vom Netz, bis ihn ein Magic Packet weckt, und der Neustart unterbricht, was er gerade tut. Beide sind voreingestellt ausgeblendet, damit sie auf einem gemeinsamen Dashboard nicht einen Fehlgriff neben der Lautstärke liegen. Das Plugin verweigert beide während einer Aufnahme, unabhängig von dieser Einstellung.",
           "wol_mac": "Leer lassen, um die vom Receiver gemeldete Adresse zu verwenden. Setze sie, wenn der Receiver eine andere Schnittstelle meldet als die angeschlossene — eine Box im WLAN antwortet nicht auf ein Magic Packet an ihren Kabelanschluss.",
-          "bouquets": "Welche Bouquets die Senderliste und der Medienbrowser anbieten. Leer lassen für alle Bouquets, die der Receiver veröffentlicht."
+          "bouquets": "Welche Bouquets die Senderliste und der Medienbrowser anbieten. Leer lassen für alle Bouquets, die der Receiver veröffentlicht.",
+          "publish_keys": "Tastenereignisse können Automationen auslösen, zeigen aber auch, was gedrückt wird. Deaktiviere sie, wenn keine Automation sie benötigt.",
+          "screenshot": "Aus veröffentlicht keine neuen Bilder. Bei Senderwechsel nimmt nach dem Umschalten auf. Intervall nimmt regelmäßig auf.",
+          "screenshot_interval": "Nur im Intervallmodus verwendet. Der Receiver erzwingt mindestens fünf Sekunden.",
+          "screenshot_delay": "Wartezeit vor einem automatischen Bildschirmfoto nach dem Kanalwechsel, damit das neue Bild erscheinen kann.",
+          "cam_telemetry": "Zeigt Verschlüsselung und ECM-Status des aktuellen Dienstes. Server-, Konto- und Kartendaten werden nicht veröffentlicht.",
+          "oscam_telemetry": "Zeigt den neutralisierten Zustand von OSCam-Prozess, API, Lesern und Servern. Leserbezeichnungen, Adressen, Konten und Kartenkennungen werden nie veröffentlicht."
         }
-      }
+      },
+      "ssh_host": {"title": "Mit dem Receiver verbinden", "data": {"ssh_host": "Receiver-Adresse", "ssh_port": "SSH-Port"}},
+      "ssh_confirm": {"title": "SSH-Identität bestätigen", "description": "Bestätige den Receiver-Fingerabdruck `{fingerprint}` vor dem Senden der Zugangsdaten.", "data": {"ssh_username": "SSH-Benutzer", "ssh_password": "SSH-Passwort"}}
+    },
+    "error": {
+      "plugin_unavailable": "Der Receiver ist nicht verbunden; seine Datenschutzeinstellungen wurden nicht geändert. Versuche es erneut, wenn er online ist.",
+      "plugin_config_failed": "Der Receiver hat die neuen Datenschutzeinstellungen nicht bestätigt. Die bisherigen Receiver-Einstellungen und Home-Assistant-Optionen wurden beibehalten."
     }
   },
   "entity": {
@@ -76,7 +150,17 @@
       },
       "recording_disk": {
         "name": "Aufnahmefestplatte"
-      }
+      },
+      "cam_active": {
+        "name": "CAM aktiv"
+      },
+      "service_encrypted": {
+        "name": "Dienst verschlüsselt"
+      },
+      "oscam_software_running": {"name": "OSCam läuft"},
+      "oscam_api_reachable": {"name": "OSCam-API erreichbar"},
+      "oscam_readonly": {"name": "OSCam-API schreibgeschützt"},
+      "oscam_api_access": {"name": "OSCam-API-Zugriff"}
     },
     "button": {
       "deep_standby": {
@@ -150,7 +234,42 @@
       },
       "uptime": {
         "name": "Laufzeit"
-      }
+      },
+      "cam_system": {
+        "name": "Zugangsberechtigungssystem"
+      },
+      "cam_ecm_time": {
+        "name": "ECM-Zeit"
+      },
+      "oscam_status": {
+        "name": "OSCam",
+        "state": {"running": "Läuft", "stopped": "Gestoppt"}
+      },
+      "oscam_readers_configured": {"name": "Konfigurierte OSCam-Quellen"},
+      "oscam_readers_enabled": {"name": "Aktivierte OSCam-Quellen"},
+      "oscam_readers_healthy": {"name": "Fehlerfreie OSCam-Quellen"},
+      "oscam_cards_ready": {"name": "Bereite lokale OSCam-Leser"},
+      "oscam_servers_connected": {"name": "Verbundene OSCam-Server"},
+      "oscam_shared_cards": {"name": "Gemeldete freigegebene OSCam-Karten"},
+      "oscam_uptime": {"name": "OSCam-Laufzeit"},
+      "oscam_source_status": {
+        "name": "Status der OSCam-Quelle {id}",
+        "state": {
+          "ready": "Bereit",
+          "connected": "Verbunden",
+          "disabled": "Deaktiviert",
+          "no_card": "Keine Karte",
+          "initializing": "Initialisierung",
+          "connecting": "Verbindung wird hergestellt",
+          "disconnected": "Getrennt",
+          "sleeping": "Im Ruhezustand",
+          "duplicate": "Duplikat",
+          "error": "Fehler",
+          "unknown": "Unbekannt"
+        }
+      },
+      "oscam_source_ready_cards": {"name": "Bereite Leser der OSCam-Quelle {id}"},
+      "oscam_source_shared_cards": {"name": "Gemeldete Karten der OSCam-Quelle {id}"}
     },
     "switch": {
       "power": {
@@ -190,6 +309,16 @@
         "name": {
           "name": "Sendername",
           "description": "Der Name des Senders, wie ihn das Bouquet schreibt. Der Receiver lehnt ab, wenn mehr als ein Sender in seinen Bouquets so heißt."
+        }
+      }
+    },
+    "select_bouquet": {
+      "name": "Bouquet auswählen",
+      "description": "Legt ein Bouquet als aktive Senderliste des Receivers fest. Kanal vor und zurück folgen danach diesem Bouquet.",
+      "fields": {
+        "sref": {
+          "name": "Bouquet-Referenz",
+          "description": "Die Service-Referenz eines vom Receiver veröffentlichten Bouquets. Liegt der aktuelle Sender außerhalb, schaltet der Receiver auf den ersten abspielbaren Sender um."
         }
       }
     },
@@ -348,6 +477,12 @@
     "unknown_bouquet": {
       "message": "Der Receiver hat kein EPG-Raster für das Bouquet {bouquet} veröffentlicht."
     },
+    "bouquet_not_published": {
+      "message": "Der Receiver bietet das Bouquet {bouquet} nicht an."
+    },
+    "bouquet_context_unsupported": {
+      "message": "Diese Receiver-Plugin-Version kann keinen Bouquet-Kontext aktivieren. Aktualisieren Sie das Plugin, um diese Aktion zu verwenden."
+    },
     "unknown_channel": {
       "message": "In den Bouquets dieses Receivers gibt es keinen Sender namens {channel}."
     },
@@ -359,6 +494,11 @@
     },
     "no_mac": {
       "message": "Dieser Receiver hat keine MAC-Adresse gemeldet, es gibt also kein Ziel für ein Magic Packet. Trage eine in den Optionen der Integration ein."
+    },
+    "update_version_unknown": {"message": "Der Receiver hat seine installierte Plugin-Version nicht gemeldet."},
+    "update_downgrade": {"message": "Ein neueres Plugin wird nicht durch eine ältere gebündelte Version ersetzt."},
+    "update_version_unavailable": {"message": "Die angeforderte Version ist nicht im geprüften Integrationspaket verfügbar."},
+    "update_no_credentials": {"message": "Für diesen Receiver sind keine SSH-Zugangsdaten gespeichert. Richte ihn neu ein, setze den Haken bei „SSH-Zugangsdaten für Updates behalten“ und versuche es erneut."},
+    "update_failed": {"message": "Plugin-Aktualisierung fehlgeschlagen: {reason}"}
     }
   }
-}

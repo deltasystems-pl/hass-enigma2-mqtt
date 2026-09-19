@@ -15,7 +15,7 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from custom_components.enigma2_mqtt.box import manufacturer_for
-from custom_components.enigma2_mqtt.const import DOMAIN
+from custom_components.enigma2_mqtt.const import CONF_RECEIVER_HOST, DOMAIN
 
 from .conftest import (
     AVAILABILITY_TOPIC,
@@ -70,6 +70,45 @@ async def test_setup_without_the_box_still_registers_the_device(
     assert device.manufacturer == "Enigma2"
     assert device.sw_version is None
     assert config_entry.runtime_data.available is False
+
+
+async def test_receiver_host_is_a_configuration_url_fallback(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Manual metadata links an offline box without becoming a requirement."""
+    config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        config_entry,
+        data={**config_entry.data, CONF_RECEIVER_HOST: "2001:db8::12"},
+    )
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, NODE_ID), config_entry.entry_id
+    )
+    assert device is not None
+    assert device.configuration_url == "http://[2001:db8::12]/"
+
+
+async def test_malformed_reported_ip_does_not_become_a_device_link(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Untrusted MQTT metadata must not inject URL authority components."""
+    retained[INFO_TOPIC] = json.dumps({**INFO, "ip": "x]@example.com:80"})
+    await async_setup_box(hass, config_entry)
+
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, NODE_ID), config_entry.entry_id
+    )
+    assert device is not None
+    assert device.configuration_url is None
 
 
 async def test_availability_follows_the_last_will(

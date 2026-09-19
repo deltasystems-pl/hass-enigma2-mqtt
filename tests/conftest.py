@@ -33,6 +33,7 @@ from custom_components.enigma2_mqtt.const import (
     CONF_NODE_ID,
     DISCOVERY_PREFIX,
     DOMAIN,
+    SUPPORTED_PLUGIN_VERSION,
 )
 
 NODE_ID = "vuuno4kse_005301"
@@ -42,7 +43,9 @@ BOXTYPE = "vuuno4kse"
 IMAGE = "OpenViX 6.6.007"
 MAC = "00:00:5e:00:53:01"
 IP = "192.0.2.12"
-PLUGIN_VERSION = "0.1.0"
+# The example box runs the plugin this release ships, so "nothing to install" is the
+# default state of the update entity and a lower version in a test means something.
+PLUGIN_VERSION = SUPPORTED_PLUGIN_VERSION
 
 # The entity id every entity of the example box is prefixed with: Home Assistant builds
 # it from the device name and the entity's English name.
@@ -79,6 +82,7 @@ SCREEN_TOPIC = f"{BASE_TOPIC}/{NODE_ID}/screen"
 KEY_TOPIC = f"{BASE_TOPIC}/{NODE_ID}/key"
 LAST_ERROR_TOPIC = f"{BASE_TOPIC}/{NODE_ID}/last_error"
 CHANNELS_TOPIC = f"{BASE_TOPIC}/{NODE_ID}/channels"
+BOUQUET_TOPIC = f"{BASE_TOPIC}/{NODE_ID}/bouquet"
 EPG_GRID_TOPIC = f"{BASE_TOPIC}/{NODE_ID}/epg_grid/ulubione_tv"
 HA_MODE_TOPIC = f"{BASE_TOPIC}/{NODE_ID}/cmd/ha_mode"
 
@@ -212,6 +216,11 @@ CHANNELS: dict[str, Any] = {
     ],
 }
 
+BOUQUET: dict[str, Any] = {
+    "name": "Ulubione TV",
+    "sref": CHANNELS["bouquets"][0]["sref"],
+}
+
 EPG_GRID: dict[str, Any] = {
     "bouquet": "Ulubione TV",
     "generated": 1789459200,
@@ -343,7 +352,11 @@ async def async_setup_box(hass: HomeAssistant, entry: MockConfigEntry) -> None:
 
 
 async def async_arm_ha_mode_ack(
-    hass: HomeAssistant, info: dict[str, Any] | None = None
+    hass: HomeAssistant,
+    info: dict[str, Any] | None = None,
+    *,
+    base_topic: str = BASE_TOPIC,
+    node_id: str = NODE_ID,
 ) -> None:
     """Answer `cmd/ha_mode` with an `info` payload that echoes the new mode.
 
@@ -360,10 +373,14 @@ async def async_arm_ha_mode_ack(
         if isinstance(mode, (bytes, bytearray)):
             mode = mode.decode()
         async_fire_mqtt_message(
-            hass, INFO_TOPIC, json.dumps({**payload, "ha_mode": mode})
+            hass,
+            f"{base_topic}/{node_id}/info",
+            json.dumps({**payload, "ha_mode": mode}),
         )
 
-    await mqtt.async_subscribe(hass, HA_MODE_TOPIC, _command_received)
+    await mqtt.async_subscribe(
+        hass, f"{base_topic}/{node_id}/cmd/ha_mode", _command_received
+    )
 
 
 async def async_arm_box_reply(

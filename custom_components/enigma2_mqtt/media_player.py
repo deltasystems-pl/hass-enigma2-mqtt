@@ -53,13 +53,14 @@ from .const import (
     TOPIC_VOLUME,
 )
 from .entity import Enigma2Entity
-from .services import Enigma2Actions, async_setup_services
+from .services import Enigma2Actions, async_select_bouquet, async_setup_services
 
 PARALLEL_UPDATES = 0
 
 # What `play_media` accepts besides a service reference, so that an automation can name
 # a channel the way a person would.
 MEDIA_TYPE_CHANNEL_NAME = "channel_name"
+MEDIA_TYPE_BOUQUET = "bouquet"
 
 # The media browser's root. Anything else is `bouquet:<service reference>`.
 BROWSE_ROOT = "bouquets"
@@ -222,6 +223,14 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
         if media_type == MEDIA_TYPE_CHANNEL_NAME:
             await async_zap_to_name(self.box, media_id)
             return
+        if media_type == MEDIA_TYPE_BOUQUET:
+            sref = (
+                media_id[len(BROWSE_BOUQUET_PREFIX) :]
+                if media_id.startswith(BROWSE_BOUQUET_PREFIX)
+                else media_id
+            )
+            await async_select_bouquet(self.box, sref)
+            return
         raise ServiceValidationError(
             translation_domain=DOMAIN,
             translation_key="unsupported_media_type",
@@ -262,9 +271,9 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
                 BrowseMedia(
                     media_class=MediaClass.DIRECTORY,
                     media_content_id=f"{BROWSE_BOUQUET_PREFIX}{bouquet.get('sref', '')}",
-                    media_content_type=MediaType.CHANNELS,
+                    media_content_type=MEDIA_TYPE_BOUQUET,
                     title=bouquet.get("name") or "",
-                    can_play=False,
+                    can_play="bouquet_context" in self.box.capabilities,
                     can_expand=True,
                 )
                 for bouquet in bouquets
@@ -289,9 +298,9 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
         return BrowseMedia(
             media_class=MediaClass.DIRECTORY,
             media_content_id=f"{BROWSE_BOUQUET_PREFIX}{bouquet.get('sref', '')}",
-            media_content_type=MediaType.CHANNELS,
+            media_content_type=MEDIA_TYPE_BOUQUET,
             title=bouquet.get("name") or "",
-            can_play=False,
+            can_play="bouquet_context" in self.box.capabilities,
             can_expand=True,
             children_media_class=MediaClass.CHANNEL,
             children=children,

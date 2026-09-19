@@ -3,23 +3,50 @@
   "config": {
     "flow_title": "{name}",
     "step": {
+      "user": {
+        "menu_options": {
+          "manual": "Use an existing MQTT Bridge plugin",
+          "install": "Install MQTT Bridge over SSH"
+        }
+      },
       "confirm": {
         "title": "Add this Enigma2 receiver",
         "description": "Enigma2 box {name} ({boxtype}, {image}) has announced itself on the broker.\n\nAdding it switches the box into integration mode: the plugin withdraws the MQTT discovery entities it publishes on its own, and Home Assistant builds the device instead. The box has to confirm the switch before it is added."
       },
-      "user": {
+      "manual": {
         "title": "Add an Enigma2 receiver by hand",
         "description": "Use this when the receiver's announcement never reached Home Assistant, for example because the box publishes through an MQTT bridge that rewrites the topic prefix.",
         "data": {
           "base_topic": "Base topic",
           "node_id": "Node ID",
-          "name": "Name"
+          "name": "Name",
+          "receiver_host": "Receiver address (optional)"
         },
         "data_description": {
           "base_topic": "The prefix the receiver publishes under, as Home Assistant sees it on the broker. The plugin's default is `enigma2`.",
           "node_id": "The receiver's node ID, shown on the plugin's setup screen. It is the box type and the last six digits of the MAC address, for example `vuuno4kse_005301`.",
-          "name": "What to call this receiver in Home Assistant. Left empty, the name the plugin reports is used."
+          "name": "What to call this receiver in Home Assistant. Left empty, the name the plugin reports is used.",
+          "receiver_host": "Hostname or IP address used only for the device link and as a suggestion when configuring SSH. MQTT-only setups may leave it empty."
         }
+      },
+      "install": {
+        "title": "Connect to the receiver",
+        "description": "Home Assistant reads the SSH host key before asking for a password.",
+        "data": {"ssh_host": "Receiver host", "ssh_port": "SSH port"}
+      },
+      "install_confirm": {
+        "title": "Confirm receiver identity and install",
+        "description": "Confirm SSH fingerprint `{fingerprint}` before sending credentials. The plugin is installed from the bundle shipped with this integration.",
+        "data": {"ssh_username": "SSH username", "ssh_password": "SSH password", "broker_host": "MQTT broker host", "broker_port": "MQTT broker port", "broker_username": "MQTT username", "broker_password": "MQTT password", "node_id": "Node ID", "base_topic": "Base topic", "name": "Name", "keep_ssh_credentials": "Keep SSH credentials for updates"}
+      },
+      "install_progress": {"title": "Installing MQTT Bridge"},
+      "reauth": {
+        "title": "Update SSH credentials",
+        "data": {"ssh_username": "SSH username", "ssh_password": "SSH password"}
+      },
+      "reauth_confirm_host_key": {
+        "title": "SSH host key changed",
+        "description": "Only continue if the receiver now shows fingerprint `{fingerprint}`."
       },
       "reconfigure": {
         "title": "Change where this receiver publishes",
@@ -27,16 +54,39 @@
         "data": {
           "base_topic": "Base topic",
           "node_id": "Node ID",
-          "name": "Name"
+          "name": "Name",
+          "receiver_host": "Receiver address (optional)"
         },
         "data_description": {
           "base_topic": "The prefix the receiver publishes under, as Home Assistant sees it on the broker.",
           "node_id": "The receiver's node ID, shown on the plugin's setup screen.",
-          "name": "What to call this receiver in Home Assistant."
+          "name": "What to call this receiver in Home Assistant.",
+          "receiver_host": "Changing this metadata does not replace pinned SSH credentials; re-enrol SSH separately when the receiver changes."
         }
       }
     },
+    "progress": {"preflight": "Checking receiver safety and compatibility", "backup": "Backing up the current installation", "upload": "Uploading the verified bundle", "install": "Installing the plugin", "provision": "Writing MQTT configuration", "restart": "Restarting the Enigma2 interface", "announcement": "Waiting for a fresh MQTT announcement", "done": "Installation verified"},
     "error": {
+      "invalid_host": "Enter a receiver host.",
+      "ssh_unavailable": "The receiver's SSH service could not be reached.",
+      "auth_failed": "SSH authentication failed.",
+      "preflight_failed": "The receiver preflight checks failed.",
+      "unsupported_python": "The receiver's Python version is not supported.",
+      "no_space": "The receiver does not have enough free space.",
+      "recording": "Installation is blocked while recording.",
+      "timer_due": "Installation is blocked because a recording timer is due soon.",
+      "bundle_missing": "The verified plugin bundle is missing.",
+      "bundle_invalid": "The plugin bundle failed verification.",
+      "upload_failed": "The plugin upload failed.",
+      "install_failed": "The plugin installation failed and was rolled back.",
+      "newer_installed": "A newer plugin is already installed.",
+      "provision_failed": "Writing the MQTT configuration failed.",
+      "restart_failed": "The Enigma2 interface did not restart safely.",
+      "announcement_timeout": "The plugin did not publish a fresh MQTT announcement after restart.",
+      "rollback_failed": "Installation failed and rollback also failed; inspect the receiver manually.",
+      "busy": "Another installation is already running.",
+      "identity_mismatch": "The receiver announced a different MQTT identity.",
+      "host_key_changed": "The receiver's SSH host key changed.",
       "no_ack": "The receiver did not confirm the mode switch. Check that the plugin is running and that its broker login may write to this node's topics.",
       "not_found": "No receiver was found on this topic. Check the base topic and the node ID on the plugin's setup screen.",
       "invalid_topic": "That is not a usable topic. The base topic and the node ID must not contain the `+` or `#` wildcards.",
@@ -49,6 +99,29 @@
       "not_enigma2_announcement": "That message is not an Enigma2 MQTT Bridge announcement.",
       "retracted": "The receiver has withdrawn its announcement.",
       "reconfigure_successful": "The receiver was updated."
+      ,"reauth_successful": "SSH credentials were updated without interrupting MQTT entities."
+      ,"reauth_failed": "SSH reauthentication was cancelled."
+      ,"host_key_changed": "The receiver's SSH host key changed and was not accepted."
+      ,"install_cancelled": "Installation was cancelled."
+      ,"ssh_unavailable": "The receiver's SSH service could not be reached, so nothing was installed."
+      ,"auth_failed": "SSH authentication failed, so nothing was installed."
+      ,"preflight_failed": "The receiver's checks could not be completed, so nothing was installed."
+      ,"unsupported_python": "The receiver's Python version is too old for this plugin. Nothing was installed."
+      ,"no_space": "The receiver does not have enough free space. Nothing was installed."
+      ,"recording": "The receiver is recording. Nothing was installed; try again when the recording has finished."
+      ,"timer_due": "A recording is due to start on the receiver. Nothing was installed; try again afterwards."
+      ,"bundle_missing": "The plugin bundle shipped with this integration is missing. Reinstall the integration."
+      ,"bundle_invalid": "The plugin bundle shipped with this integration failed verification. Reinstall the integration."
+      ,"upload_failed": "The plugin could not be transferred to the receiver. Nothing was changed."
+      ,"install_failed": "The plugin could not be installed. The receiver was put back as it was."
+      ,"newer_installed": "The receiver already runs a newer plugin than this integration ships. Nothing was changed."
+      ,"provision_failed": "The receiver's MQTT settings could not be written. The receiver was put back as it was."
+      ,"restart_failed": "The receiver's interface did not restart safely. The receiver was put back as it was."
+      ,"announcement_timeout": "The plugin did not announce itself after the restart. The receiver was put back as it was."
+      ,"rollback_failed": "The installation failed and the receiver could not be put back as it was. Check the receiver by hand: the backup taken before the change is in /home/root/mqttbridge-backups."
+      ,"busy": "Another installation is already running on this receiver."
+      ,"identity_mismatch": "The receiver is configured for a different node ID or base topic. Nothing was changed."
+      ,"unknown": "Installation failed unexpectedly; no entry was created."
     }
   },
   "options": {
@@ -59,14 +132,34 @@
         "data": {
           "dangerous_buttons": "Show the deep standby and reboot buttons",
           "wol_mac": "Wake-on-LAN MAC address",
-          "bouquets": "Bouquets to offer"
+          "bouquets": "Bouquets to offer",
+          "publish_keys": "Publish remote key events",
+          "screenshot": "Automatic screenshots",
+          "screenshot_interval": "Screenshot interval (seconds)",
+          "screenshot_delay": "Delay after changing channel (seconds)",
+          "cam_telemetry": "Publish conditional-access telemetry",
+          "oscam_telemetry": "Publish OSCam health telemetry"
+          ,"configure_ssh": "Configure SSH credentials for plugin updates"
+          ,"keep_ssh_credentials": "Keep SSH credentials for updates"
         },
         "data_description": {
           "dangerous_buttons": "Deep standby takes the receiver off the network until a magic packet wakes it, and reboot interrupts whatever it is doing. Both are hidden by default so that neither is one mis-tap away on a shared dashboard. The plugin refuses both while a recording is running, whatever is set here.",
           "wol_mac": "Leave empty to use the address the receiver reports. Set it when the receiver reports a different interface from the one that is plugged in — a box on Wi-Fi does not answer a magic packet sent to its cable port.",
-          "bouquets": "Which bouquets the channel list and the media browser offer. Leave empty for every bouquet the receiver publishes."
+          "bouquets": "Which bouquets the channel list and the media browser offer. Leave empty for every bouquet the receiver publishes.",
+          "publish_keys": "Remote key events can drive automations, but they also reveal what is pressed. Turn this off when no automation needs them.",
+          "screenshot": "Off publishes no new screen images. On zap captures after a channel change. Interval captures repeatedly at the interval below.",
+          "screenshot_interval": "Used only in interval mode. The receiver enforces a minimum of five seconds.",
+          "screenshot_delay": "Wait before an automatic screenshot after a channel change, so the new picture has time to appear.",
+          "cam_telemetry": "Expose the current service's encryption and ECM status. No server, account or card details are published.",
+          "oscam_telemetry": "Expose privacy-neutral OSCam process, API, reader and server health. Reader labels, addresses, accounts and card identifiers are never published."
         }
       }
+      ,"ssh_host": {"title": "Connect to the receiver", "data": {"ssh_host": "Receiver host", "ssh_port": "SSH port"}}
+      ,"ssh_confirm": {"title": "Confirm SSH identity", "description": "Confirm receiver fingerprint `{fingerprint}` before sending credentials.", "data": {"ssh_username": "SSH username", "ssh_password": "SSH password"}}
+    },
+    "error": {
+      "plugin_unavailable": "The receiver is not connected, so its privacy settings were not changed. Try again when it is online.",
+      "plugin_config_failed": "The receiver did not confirm the new privacy settings. Its previous settings and these Home Assistant options were kept."
     }
   },
   "entity": {
@@ -76,7 +169,17 @@
       },
       "recording_disk": {
         "name": "Recording disk"
-      }
+      },
+      "cam_active": {
+        "name": "CAM active"
+      },
+      "service_encrypted": {
+        "name": "Service encrypted"
+      },
+      "oscam_software_running": {"name": "OSCam running"},
+      "oscam_api_reachable": {"name": "OSCam API reachable"},
+      "oscam_readonly": {"name": "OSCam API read-only"},
+      "oscam_api_access": {"name": "OSCam API access"}
     },
     "button": {
       "deep_standby": {
@@ -150,7 +253,42 @@
       },
       "uptime": {
         "name": "Uptime"
-      }
+      },
+      "cam_system": {
+        "name": "Conditional-access system"
+      },
+      "cam_ecm_time": {
+        "name": "ECM time"
+      },
+      "oscam_status": {
+        "name": "OSCam",
+        "state": {"running": "Running", "stopped": "Stopped"}
+      },
+      "oscam_readers_configured": {"name": "OSCam configured sources"},
+      "oscam_readers_enabled": {"name": "OSCam enabled sources"},
+      "oscam_readers_healthy": {"name": "OSCam healthy sources"},
+      "oscam_cards_ready": {"name": "OSCam ready local readers"},
+      "oscam_servers_connected": {"name": "OSCam connected servers"},
+      "oscam_shared_cards": {"name": "OSCam reported shared cards"},
+      "oscam_uptime": {"name": "OSCam uptime"},
+      "oscam_source_status": {
+        "name": "OSCam source {id} status",
+        "state": {
+          "ready": "Ready",
+          "connected": "Connected",
+          "disabled": "Disabled",
+          "no_card": "No card",
+          "initializing": "Initializing",
+          "connecting": "Connecting",
+          "disconnected": "Disconnected",
+          "sleeping": "Sleeping",
+          "duplicate": "Duplicate",
+          "error": "Error",
+          "unknown": "Unknown"
+        }
+      },
+      "oscam_source_ready_cards": {"name": "OSCam source {id} ready readers"},
+      "oscam_source_shared_cards": {"name": "OSCam source {id} reported shared cards"}
     },
     "switch": {
       "power": {
@@ -190,6 +328,16 @@
         "name": {
           "name": "Channel name",
           "description": "The channel's name as the bouquet spells it. Refused by the receiver when more than one channel in its configured bouquets has that name."
+        }
+      }
+    },
+    "select_bouquet": {
+      "name": "Select bouquet",
+      "description": "Makes a bouquet the receiver's active channel list. Channel up and down then follow that bouquet.",
+      "fields": {
+        "sref": {
+          "name": "Bouquet reference",
+          "description": "The service reference of a bouquet published by the receiver. If the current channel is outside it, the receiver tunes its first playable channel."
         }
       }
     },
@@ -348,6 +496,12 @@
     "unknown_bouquet": {
       "message": "The receiver has published no EPG grid for the bouquet {bouquet}."
     },
+    "bouquet_not_published": {
+      "message": "The receiver does not offer the bouquet {bouquet}."
+    },
+    "bouquet_context_unsupported": {
+      "message": "This receiver plugin cannot activate a bouquet context. Update the plugin to use this action."
+    },
     "unknown_channel": {
       "message": "No channel called {channel} is in the bouquets this receiver offers."
     },
@@ -359,6 +513,11 @@
     },
     "no_mac": {
       "message": "This receiver has not reported a MAC address, so there is nowhere to send a magic packet. Set one in the integration's options."
+    },
+    "update_version_unknown": {"message": "The receiver has not reported its installed plugin version."},
+    "update_downgrade": {"message": "Refusing to replace a newer plugin with an older bundled version."},
+    "update_version_unavailable": {"message": "The requested version is not available from this integration’s verified bundle."},
+    "update_no_credentials": {"message": "No SSH credentials are stored for this receiver. Reconfigure it and tick “Keep SSH credentials for updates”, then try again."},
+    "update_failed": {"message": "Plugin update failed: {reason}"}
     }
   }
-}

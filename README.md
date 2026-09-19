@@ -19,10 +19,9 @@ inside enigma2 and publishes the moment something happens — a zap, a programme
 standby, a recording, a volume step, a key on the remote. This integration turns those
 topics into a native `media_player`, a `remote`, an OSD `notify` target and device triggers.
 
-> **Status — M3.** Everything below is built and tested: a receiver is discovered or added by
-> hand, switched into integration mode, and turns into twenty-six entities, nine actions and
-> eight device triggers. The guided installer — putting the plugin on the box over SSH, and
-> updating it from here — arrives in M4; until then install the plugin yourself.
+> **Status — M4 development candidate.** The entity and action surface is implemented and the
+> guided SSH installer, local verified plugin bundle and update action are now in code. They
+> have not completed live installation acceptance and are not a published release yet.
 
 ## What you get
 
@@ -31,7 +30,7 @@ One receiver becomes **one device** with these entities (display names are Polis
 
 | Platform | Name | What it shows or does |
 |---|---|---|
-| `media_player` | *Dekoder salon* (the device name) | off or playing, the channel list of the bouquets you choose, `select_source`, `play_media` by service reference or channel name, `browse_media` through bouquets, volume and mute, channel ± , the screen grab as artwork |
+| `media_player` | *Dekoder salon* (the device name) | off or playing, the channel list of the bouquets you choose, `select_source`, `play_media` by service reference, channel name or active bouquet, `browse_media` through playable bouquets, volume and mute, channel ±, the screen grab as artwork |
 | `remote` | *Pilot* | `send_command` with `KEY_*` names; `hold_secs` makes it a long press |
 | `notify` | *Ekran OSD* | a message on the television screen |
 | `event` | *Pilot – klawisz* | every remote key as an event, with `press` = short or long |
@@ -41,10 +40,16 @@ One receiver becomes **one device** with these entities (display names are Polis
 | `switch` | *Zasilanie*, *Wyciszenie* | standby, mute |
 | `number` | *Głośność* | volume 0–100 |
 | `button` | *Głębokie uśpienie*, *Restart GUI*, *Restart*, *Obudź (WoL)*, *Zrzut ekranu*, *Odśwież discovery* | one-shot box actions; deep standby and reboot stay hidden until you enable them |
-| `update` | *Wtyczka MQTT Bridge* | the plugin version on the box against the one this release expects (installing from here is M4) |
+| `update` | *Wtyczka MQTT Bridge* | the installed plugin version and, when SSH credentials were retained, a guarded reinstall/update from the verified local bundle |
 | device triggers | red / green / yellow / blue × short / long | remote keys as automation triggers |
 
-Plus the actions `zap`, `send_key`, `message`, `add_timer`, `delete_timer`, `record`,
+OSCam health is optional and off by default. When the receiver plugin advertises support, the
+options page can expose neutral process/API health, ready local-reader counts, connected servers
+and server-reported shared-card counts. Per-source entities use stable opaque IDs; private reader
+labels, server addresses, accounts and card identifiers are neither published nor retained by
+the integration.
+
+Plus the actions `zap`, `select_bouquet`, `send_key`, `message`, `add_timer`, `delete_timer`, `record`,
 `screenshot`, `set_ha_mode` and `get_epg_grid` — each verified by the plugin and answered on
 its state topic. `get_epg_grid` returns a bouquet's programme grid as a response, never as a
 state attribute, because a grid is tens of kilobytes and an attribute goes to the recorder.
@@ -81,7 +86,11 @@ about 45 seconds instead of at the end of a poll cycle.
 
 | Integration | Plugin | Status |
 |---|---|---|
-| 0.1.0 | 0.1.0 | current |
+| 0.2.0 (unreleased) | 0.2.0 (unreleased) | in development |
+| 0.1.0 | 0.1.0 | current release |
+
+The integration ships the plugin it was built against, so the two move together. The bundled
+build of an unreleased integration is an unreleased plugin build.
 
 The integration refuses nothing when the versions differ, but the `update` entity tells you
 when the box runs a plugin older than the one this release was written against.
@@ -105,9 +114,10 @@ Copy `custom_components/enigma2_mqtt` into your `config/custom_components/` and 
   one click confirms it. Confirming switches the box into integration mode and waits for it to
   say so, so a box that cannot be reached is reported rather than added as a dead device.
 - **Manual** — *Add integration → Enigma2 MQTT*, then the base topic and the node id, for
-  boxes behind a bridged broker or with a custom prefix. The node id is on the plugin's setup
-  screen; the flow checks the box is really on that topic before it adds anything.
-- **Install the plugin from here** (from M4) — host, SSH user and password; the flow runs a
+  boxes behind a bridged broker or with a custom prefix. A receiver hostname or IP address is
+  optional metadata for its device link and later SSH setup; MQTT-only bridges can leave it
+  blank. The flow checks the box is really on the MQTT topic before it adds anything.
+- **Install the plugin from here** — host, SSH user and password; the flow runs a
   preflight over SSH, uploads the bundled IPK, installs it, writes the provisioning file and
   waits for the announcement. The SSH password is discarded afterwards unless you ask to keep
   it for updates.
@@ -131,8 +141,14 @@ password first, and treat the receiver as the least trusted device in the chain.
 
 If you let the installer keep the SSH password for later updates, it is stored in the config
 entry. Home Assistant's `.storage` is **not encrypted at rest**; leave the box unticked and
-the password is discarded as soon as the install finishes. It is never written to the log or
-to diagnostics.
+the password is discarded as soon as the install finishes. The options flow can add retained
+credentials later or forget them again. They are never written to the log or to diagnostics.
+
+The integration contains the GPL plugin IPK together with its exact corresponding source
+archive and provenance metadata; it does not fetch executable code at runtime. Installation
+takes a private receiver backup, verifies the uploaded package and rolls back a failed
+transaction where possible. A loss of receiver power or storage during the transaction can
+still require recovery from that backup.
 
 ## Privacy
 
@@ -149,7 +165,12 @@ recorder:
       - event.*_remote_key
 ```
 
-Key publishing can also be switched off on the box.
+The integration options can switch key publishing off, select `off`, `on_zap` or `interval`
+screenshots, set the interval and choose how long an on-zap capture waits for the new picture.
+The plugin validates and persists the settings as one transaction; disabling screenshots also
+retracts the retained image. Optional conditional-access telemetry publishes only the current
+service's system, encrypted/active result and ECM time. It never publishes server, account or
+card details, and creates no entities until explicitly enabled.
 
 ## Documentation
 
@@ -166,7 +187,7 @@ quality bar we hold ourselves to is [docs/QUALITY.md](docs/QUALITY.md).
 - [x] **M1** — config flow (discovered + manual), the device page, diagnostics
 - [ ] **M2** — plugin state and discovery complete, commands with guards
 - [ ] **M3** — the entities above, actions, device triggers, diagnostics, translations
-- [ ] **M4** — the SSH installer with preflight and rollback, the bundled IPK, `update`
+- [ ] **M4** — SSH installer, bundled IPK and `update` implemented; live acceptance pending
 - [ ] **M5** — public beta `v0.x`: releases, HACS custom repository, call for testers
 - [ ] **M6** — `v1.0.0`: HACS default store, deep standby and Wake-on-LAN drilled
 - [ ] **M7** — afterwards: broker-login provisioning, further images

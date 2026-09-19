@@ -31,14 +31,20 @@ from .box import Enigma2MqttConfigEntry
 from .const import DOMAIN
 
 TO_REDACT = {
+    "broker_host",
     "broker_password",
+    "broker_username",
     # The configuration URL is built from the box's address, so redacting `ip` alone
     # would only move the address one key to the right.
     "configuration_url",
     "ip",
     "mac",
     "password",
+    "receiver_host",
     "ssh_password",
+    "ssh_host",
+    "ssh_host_key",
+    "ssh_username",
     "username",
 }
 
@@ -80,6 +86,8 @@ async def async_get_config_entry_diagnostics(
             "timers": state.timers,
             "volume": state.volume,
             "hdd": state.hdd,
+            "cam": state.cam,
+            "oscam": state.oscam,
             "channels": _summarise_channels(state.channels),
             "last_error": state.last_error,
             "screen": {

@@ -23,8 +23,10 @@ from collections.abc import Callable, Iterable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime
+import ipaddress
 import json
 import logging
+import re
 from typing import Any
 
 from homeassistant.components import mqtt
@@ -46,6 +48,7 @@ from .const import (
     CONF_BOUQUETS,
     CONF_NAME,
     CONF_NODE_ID,
+    CONF_RECEIVER_HOST,
     CONF_WOL_MAC,
     DEFAULT_BASE_TOPIC,
     DEFAULT_MANUFACTURER,
@@ -62,6 +65,8 @@ from .const import (
     PROBE_TIMEOUT,
     SUBSCRIBE_TIMEOUT,
     TOPIC_AVAILABILITY,
+    TOPIC_BOUQUET,
+    TOPIC_CAM,
     TOPIC_CHANNELS,
     TOPIC_EPG,
     TOPIC_EPG_GRID,
@@ -69,6 +74,7 @@ from .const import (
     TOPIC_INFO,
     TOPIC_KEY,
     TOPIC_LAST_ERROR,
+    TOPIC_OSCAM,
     TOPIC_POWER,
     TOPIC_RECORDING,
     TOPIC_SCREEN,
@@ -80,12 +86,96 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Public conditional-access identifiers emitted by the plugin. Free-form strings are
+# deliberately not retained: ECM readers can expose server, account or card details.
+CAM_SYSTEMS = frozenset(
+    {
+        "BetaCrypt",
+        "BISS",
+        "BulCrypt",
+        "Conax",
+        "CryptoWorks",
+        "DRE-Crypt",
+        "Irdeto",
+        "Mediaguard",
+        "Nagra",
+        "Nagravision",
+        "PowerVu",
+        "SECA",
+        "Viaccess",
+        "VideoGuard",
+    }
+)
+_NO_PENDING_CAM = object()
+_CAM_TOMBSTONE = object()
+_NO_PENDING_OSCAM = object()
+_OSCAM_TOMBSTONE = object()
+OSCAM_PROTOCOLS = frozenset(
+    {
+        "camd33",
+        "camd35",
+        "camd35_tcp",
+        "cccam",
+        "constcw",
+        "gbox",
+        "ghttp",
+        "internal",
+        "mouse",
+        "mp35",
+        "newcamd",
+        "pcsc",
+        "phoenix",
+        "radegast",
+        "scam",
+        "sc8in1",
+        "serial",
+        "smartreader",
+        "stapi",
+        "stapi5",
+    }
+)
+OSCAM_STATUSES = frozenset(
+    {
+        "ready",
+        "no_card",
+        "initializing",
+        "connected",
+        "disconnected",
+        "connecting",
+        "error",
+        "sleeping",
+        "duplicate",
+        "disabled",
+        "unknown",
+    }
+)
+OSCAM_VERSION = re.compile(r"^[0-9]{1,3}\.[0-9]{1,3}(?:[._-][A-Za-z0-9]+)*(?: build r[0-9]{1,8})?$")
+
 type Enigma2MqttConfigEntry = ConfigEntry[Enigma2Box]
 
 
 def state_topic(base_topic: str, node_id: str, suffix: str) -> str:
     """Return a state topic of one box."""
     return f"{base_topic}/{node_id}/{suffix}"
+
+
+def _configuration_url(host: Any) -> str | None:
+    """Build a receiver URL only from a plain IP address or hostname."""
+    if not isinstance(host, str) or not host or "%" in host:
+        return None
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        if len(host) > 253 or not re.fullmatch(
+            r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*"
+            r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?",
+            host,
+        ):
+            return None
+        url_host = host
+    else:
+        url_host = f"[{address}]" if address.version == 6 else str(address)
+    return f"http://{url_host}/"
 
 
 def command_topic(base_topic: str, node_id: str, name: str) -> str:
@@ -276,9 +366,7 @@ class _InfoWatch:
     established: asyncio.Future[None]
     cancel: CALLBACK_TYPE
 
-    async def async_wait_until_established(
-        self, timeout: float = SUBSCRIBE_TIMEOUT
-    ) -> None:
+    async def async_wait_until_established(self, timeout: float = SUBSCRIBE_TIMEOUT) -> None:
         """Wait until the broker is actually sending this topic to us.
 
         Degrades rather than hangs: if the confirmation never comes, the caller goes
@@ -413,6 +501,9 @@ class Enigma2State:
     timers: list[Any] | None = None
     volume: dict[str, Any] | None = None
     hdd: dict[str, Any] | None = None
+    cam: dict[str, Any] | None = None
+    oscam: dict[str, Any] | None = None
+    bouquet: dict[str, Any] | None = None
     channels: dict[str, Any] | None = None
     last_error: dict[str, Any] | None = None
     screen: bytes | None = None
@@ -442,6 +533,8 @@ class Enigma2Box:
         self._listeners: list[_Listener] = []
         self._key_listeners: list[Callable[[str, str], None]] = []
         self._pending: list[_Pending] = []
+        self._pending_cam: object = _NO_PENDING_CAM
+        self._pending_oscam: object = _NO_PENDING_OSCAM
         self._subscribed = asyncio.Event()
 
     # ------------------------------------------------------------------ properties
@@ -590,9 +683,7 @@ class Enigma2Box:
         has to go unavailable when the box does, and a box that goes offline publishes
         nothing else to say so.
         """
-        filtered = (
-            None if topics is None else frozenset({*topics, TOPIC_AVAILABILITY})
-        )
+        filtered = None if topics is None else frozenset({*topics, TOPIC_AVAILABILITY})
         entry = _Listener(callback=listener, topics=filtered)
         self._listeners.append(entry)
 
@@ -603,9 +694,7 @@ class Enigma2Box:
         return _remove
 
     @callback
-    def async_add_key_listener(
-        self, listener: Callable[[str, str], None]
-    ) -> CALLBACK_TYPE:
+    def async_add_key_listener(self, listener: Callable[[str, str], None]) -> CALLBACK_TYPE:
         """Register a callback for key presses, and return its remover."""
         self._key_listeners.append(listener)
 
@@ -638,9 +727,7 @@ class Enigma2Box:
             )
         )
         self._unsubscribes.append(
-            await mqtt.async_subscribe(
-                self.hass, wildcard, self._message_received, encoding=None
-            )
+            await mqtt.async_subscribe(self.hass, wildcard, self._message_received, encoding=None)
         )
         self._unsubscribes.append(
             await mqtt.async_subscribe(
@@ -669,9 +756,7 @@ class Enigma2Box:
 
     # ----------------------------------------------------------------- commands
 
-    async def async_publish_cmd(
-        self, name: str, payload: str, qos: int = 1
-    ) -> None:
+    async def async_publish_cmd(self, name: str, payload: str, qos: int = 1) -> None:
         """Send a command to the box and do not wait for anything.
 
         Commands are never retained: a retained command is delivered again the instant
@@ -736,14 +821,10 @@ class Enigma2Box:
                 self._pending.remove(pending)
             _discard(pending.future)
 
-    async def async_request_ha_mode(
-        self, mode: str, timeout: float = ACK_TIMEOUT
-    ) -> bool:
+    async def async_request_ha_mode(self, mode: str, timeout: float = ACK_TIMEOUT) -> bool:
         """Switch the box's Home Assistant mode and wait for the acknowledgement."""
         await self.async_wait_subscribed()
-        info = await async_request_ha_mode(
-            self.hass, self.base_topic, self.node_id, mode, timeout
-        )
+        info = await async_request_ha_mode(self.hass, self.base_topic, self.node_id, mode, timeout)
         if info is None:
             return False
         self.state.info = info
@@ -758,7 +839,9 @@ class Enigma2Box:
         source = {**self.state.announcement, **self.state.info}
         name = self.state.announcement.get("name") or self.name
         boxtype = source.get("boxtype")
-        ip_address = source.get("ip")
+        configuration_url = _configuration_url(source.get("ip"))
+        if configuration_url is None:
+            configuration_url = _configuration_url(self.entry.data.get(CONF_RECEIVER_HOST))
         device = dr.async_get(self.hass).async_get_or_create(
             config_entry_id=self.entry.entry_id,
             identifiers={(DOMAIN, self.node_id)},
@@ -766,7 +849,7 @@ class Enigma2Box:
             manufacturer=manufacturer_for(boxtype),
             model=boxtype,
             sw_version=software_version(source),
-            configuration_url=f"http://{ip_address}/" if ip_address else None,
+            configuration_url=configuration_url,
         )
         self.device_id = device.id
         return device
@@ -785,6 +868,7 @@ class Enigma2Box:
         TOPIC_VOLUME: "volume",
         TOPIC_HDD: "hdd",
         TOPIC_CHANNELS: "channels",
+        TOPIC_BOUQUET: "bouquet",
     }
 
     @callback
@@ -798,7 +882,11 @@ class Enigma2Box:
         if suffix.startswith("cmd/"):
             # Our own commands, echoed back by the broker. Not state.
             return
-        if suffix.startswith(f"{TOPIC_EPG_GRID}/"):
+        if suffix == TOPIC_CAM:
+            self._cam_received(msg)
+        elif suffix == TOPIC_OSCAM:
+            self._oscam_received(msg)
+        elif suffix.startswith(f"{TOPIC_EPG_GRID}/"):
             self._epg_grid_received(suffix[len(TOPIC_EPG_GRID) + 1 :], msg.payload)
         elif (attribute := self._OBJECT_TOPICS.get(suffix)) is not None:
             setattr(self.state, attribute, parse_json_payload(msg.payload))
@@ -846,8 +934,222 @@ class Enigma2Box:
         if (info := parse_json_payload(msg.payload)) is None:
             return
         self.state.info = info
+        if self.cam_enabled and self._pending_cam is not _NO_PENDING_CAM:
+            pending, self._pending_cam = self._pending_cam, _NO_PENDING_CAM
+            if pending is _CAM_TOMBSTONE:
+                self._invalidate_cam()
+            elif isinstance(pending, dict):
+                self.state.cam = pending
+                self._async_updated(TOPIC_CAM)
+        elif not self.cam_enabled:
+            self._pending_cam = _NO_PENDING_CAM
+            if self.state.cam is not None or TOPIC_CAM in self.seen:
+                self._invalidate_cam()
+        if self.oscam_enabled and self._pending_oscam is not _NO_PENDING_OSCAM:
+            pending, self._pending_oscam = self._pending_oscam, _NO_PENDING_OSCAM
+            if pending is _OSCAM_TOMBSTONE:
+                self._invalidate_oscam()
+            elif isinstance(pending, dict):
+                self.state.oscam = pending
+                self._async_updated(TOPIC_OSCAM)
+        elif not self.oscam_enabled:
+            self._pending_oscam = _NO_PENDING_OSCAM
+            if self.state.oscam is not None or TOPIC_OSCAM in self.seen:
+                self._invalidate_oscam()
         self.async_register_device()
         self._async_updated(TOPIC_INFO)
+
+    def telemetry_declared(self, setting: str) -> bool:
+        """Return whether the box has stated this opt-in either way.
+
+        An absent setting is not "off": it is a plugin that does not have the option, or
+        one that has not said yet. The difference matters to anything that would remove
+        entities on "off".
+        """
+        settings = self.state.info.get("settings")
+        return isinstance(settings, dict) and setting in settings
+
+    @property
+    def cam_enabled(self) -> bool:
+        """Return whether this box opted into supported CAM telemetry."""
+        settings = self.state.info.get("settings")
+        return (
+            "cam" in self.capabilities
+            and isinstance(settings, dict)
+            and settings.get("cam_telemetry") is True
+        )
+
+    @callback
+    def _cam_received(self, msg: ReceiveMessage) -> None:
+        """Cache only the bounded public CAM schema while explicitly enabled."""
+        if not (decode_payload(msg.payload) or "").strip():
+            if not self.state.info:
+                self._pending_cam = _CAM_TOMBSTONE
+            elif self.cam_enabled:
+                self._invalidate_cam()
+            return
+        payload = parse_json_payload(msg.payload)
+        if payload is None:
+            return
+        normalized = self._normalize_cam(payload)
+        if not self.state.info:
+            self._pending_cam = normalized
+            return
+        if not self.cam_enabled:
+            return
+        self.state.cam = normalized
+        self._async_updated(TOPIC_CAM)
+
+    @staticmethod
+    def _normalize_cam(payload: dict[str, Any]) -> dict[str, Any]:
+        """Strip an untrusted CAM payload to the bounded public contract."""
+        system = payload.get("system")
+        active = payload.get("active")
+        encrypted = payload.get("encrypted")
+        ecm_ms = payload.get("ecm_ms")
+        return {
+            "system": (
+                system
+                if system is None or isinstance(system, str) and system in CAM_SYSTEMS
+                else None
+            ),
+            "active": active if isinstance(active, bool) else None,
+            "encrypted": encrypted if isinstance(encrypted, bool) else None,
+            "ecm_ms": (
+                ecm_ms
+                if isinstance(ecm_ms, int)
+                and not isinstance(ecm_ms, bool)
+                and 0 <= ecm_ms <= 600_000
+                else None
+            ),
+        }
+
+    @callback
+    def _invalidate_cam(self) -> None:
+        """Forget CAM data after opt-out or a retained-topic retraction."""
+        self.state.cam = None
+        self.seen.discard(TOPIC_CAM)
+        self.updates[TOPIC_CAM] = self.updates.get(TOPIC_CAM, 0) + 1
+        for listener in list(self._listeners):
+            if listener.wants(TOPIC_CAM):
+                listener.callback()
+
+    @property
+    def oscam_enabled(self) -> bool:
+        """Return whether this box opted into supported OSCam telemetry."""
+        settings = self.state.info.get("settings")
+        return (
+            "oscam" in self.capabilities
+            and isinstance(settings, dict)
+            and settings.get("oscam_telemetry") is True
+        )
+
+    @callback
+    def _oscam_received(self, msg: ReceiveMessage) -> None:
+        """Cache only normalized OSCam health while explicitly opted in."""
+        if not (decode_payload(msg.payload) or "").strip():
+            if not self.state.info:
+                self._pending_oscam = _OSCAM_TOMBSTONE
+            elif self.oscam_enabled:
+                self._invalidate_oscam()
+            return
+        payload = parse_json_payload(msg.payload)
+        if payload is None:
+            return
+        normalized = self._normalize_oscam(payload)
+        if normalized is None:
+            return
+        if not self.state.info:
+            self._pending_oscam = normalized
+            return
+        if not self.oscam_enabled:
+            return
+        self.state.oscam = normalized
+        self._async_updated(TOPIC_OSCAM)
+
+    @staticmethod
+    def _normalize_oscam(payload: dict[str, Any]) -> dict[str, Any] | None:
+        """Strip OSCam input to the exact bounded public schema."""
+        readers = payload.get("readers")
+        if not isinstance(readers, list) or len(readers) > 64:
+            return None
+
+        def bounded(value: Any, maximum: int = 65535) -> int | None:
+            return (
+                value
+                if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= maximum
+                else None
+            )
+
+        normalized_readers: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        for reader in readers:
+            if not isinstance(reader, dict):
+                return None
+            source_id = reader.get("id")
+            kind = reader.get("kind")
+            if (
+                not isinstance(source_id, str)
+                or not re.fullmatch(r"(?:reader|server|source)_[0-9a-f]{12}", source_id)
+                or source_id in seen_ids
+                or kind not in ("reader", "server", "unknown")
+                or not source_id.startswith(
+                    {"reader": "reader_", "server": "server_", "unknown": "source_"}[kind]
+                )
+            ):
+                return None
+            seen_ids.add(source_id)
+            status = reader.get("status")
+            protocol = reader.get("protocol")
+            enabled = reader.get("enabled")
+            normalized_readers.append(
+                {
+                    "id": source_id,
+                    "kind": kind,
+                    "enabled": enabled if isinstance(enabled, bool) else None,
+                    "status": status if status in OSCAM_STATUSES else "unknown",
+                    "protocol": protocol
+                    if protocol is None or protocol in OSCAM_PROTOCOLS
+                    else None,
+                    "shared_cards": bounded(reader.get("shared_cards")),
+                }
+            )
+        access = payload.get("api_access")
+        software = payload.get("software")
+        version = payload.get("version")
+        return {
+            "software": software if software in (None, "OSCam") else None,
+            "version": version
+            if isinstance(version, str) and OSCAM_VERSION.fullmatch(version)
+            else None,
+            "software_running": payload.get("software_running")
+            if isinstance(payload.get("software_running"), bool)
+            else None,
+            "api_reachable": payload.get("api_reachable")
+            if isinstance(payload.get("api_reachable"), bool)
+            else None,
+            "api_access": access if access in (None, "granted", "denied") else None,
+            "readonly": payload.get("readonly")
+            if isinstance(payload.get("readonly"), bool)
+            else None,
+            "uptime_s": bounded(payload.get("uptime_s"), 315_360_000),
+            "readers_configured": bounded(payload.get("readers_configured")),
+            "readers_enabled": bounded(payload.get("readers_enabled")),
+            "readers_healthy": bounded(payload.get("readers_healthy")),
+            "cards_ready": bounded(payload.get("cards_ready")),
+            "servers_connected": bounded(payload.get("servers_connected")),
+            "shared_cards": bounded(payload.get("shared_cards")),
+            "readers": normalized_readers,
+        }
+
+    @callback
+    def _invalidate_oscam(self) -> None:
+        self.state.oscam = None
+        self.seen.discard(TOPIC_OSCAM)
+        self.updates[TOPIC_OSCAM] = self.updates.get(TOPIC_OSCAM, 0) + 1
+        for listener in list(self._listeners):
+            if listener.wants(TOPIC_OSCAM):
+                listener.callback()
 
     @callback
     def _announcement_received(self, msg: ReceiveMessage) -> None:
@@ -961,9 +1263,7 @@ async def async_send_magic_packet(box: Enigma2Box) -> None:
     from homeassistant.setup import async_setup_component  # noqa: PLC0415
 
     if not (mac := box.mac_address):
-        raise ServiceValidationError(
-            translation_domain=DOMAIN, translation_key="no_mac"
-        )
+        raise ServiceValidationError(translation_domain=DOMAIN, translation_key="no_mac")
     hass = box.hass
     if not hass.services.has_service("wake_on_lan", "send_magic_packet"):
         await async_setup_component(hass, "wake_on_lan", {})
@@ -971,6 +1271,4 @@ async def async_send_magic_packet(box: Enigma2Box) -> None:
         raise HomeAssistantError(
             translation_domain=DOMAIN, translation_key="wake_on_lan_unavailable"
         )
-    await hass.services.async_call(
-        "wake_on_lan", "send_magic_packet", {"mac": mac}, blocking=True
-    )
+    await hass.services.async_call("wake_on_lan", "send_magic_packet", {"mac": mac}, blocking=True)

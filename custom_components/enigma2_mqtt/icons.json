@@ -1,6 +1,36 @@
 {
   "entity": {
     "binary_sensor": {
+      "oscam_api_access": {
+        "default": "mdi:key-variant",
+        "state": {
+          "off": "mdi:key-remove"
+        }
+      },
+      "oscam_api_reachable": {
+        "default": "mdi:api",
+        "state": {
+          "off": "mdi:api-off"
+        }
+      },
+      "oscam_readonly": {
+        "default": "mdi:lock",
+        "state": {
+          "off": "mdi:lock-open-variant"
+        }
+      },
+      "oscam_software_running": {
+        "default": "mdi:cog-play",
+        "state": {
+          "off": "mdi:cog-off"
+        }
+      },
+      "cam_active": {
+        "default": "mdi:smart-card",
+        "state": {
+          "off": "mdi:smart-card-off"
+        }
+      },
       "recording": {
         "default": "mdi:record-rec",
         "state": {
@@ -11,6 +41,12 @@
         "default": "mdi:harddisk",
         "state": {
           "off": "mdi:harddisk-remove"
+        }
+      },
+      "service_encrypted": {
+        "default": "mdi:lock",
+        "state": {
+          "off": "mdi:lock-open-variant"
         }
       }
     },
@@ -69,6 +105,12 @@
       "ber": {
         "default": "mdi:alert-decagram-outline"
       },
+      "cam_ecm_time": {
+        "default": "mdi:timer-sand"
+      },
+      "cam_system": {
+        "default": "mdi:smart-card"
+      },
       "channel": {
         "default": "mdi:television-classic"
       },
@@ -77,6 +119,43 @@
       },
       "next_timer": {
         "default": "mdi:timer-outline"
+      },
+      "oscam_cards_ready": {
+        "default": "mdi:credit-card-check-outline"
+      },
+      "oscam_readers_configured": {
+        "default": "mdi:card-multiple-outline"
+      },
+      "oscam_readers_enabled": {
+        "default": "mdi:card-multiple"
+      },
+      "oscam_readers_healthy": {
+        "default": "mdi:heart-pulse"
+      },
+      "oscam_servers_connected": {
+        "default": "mdi:server-network"
+      },
+      "oscam_shared_cards": {
+        "default": "mdi:share-variant"
+      },
+      "oscam_source_ready_cards": {
+        "default": "mdi:credit-card-check-outline"
+      },
+      "oscam_source_shared_cards": {
+        "default": "mdi:share-variant-outline"
+      },
+      "oscam_source_status": {
+        "default": "mdi:card-account-details-outline"
+      },
+      "oscam_status": {
+        "default": "mdi:shield-key",
+        "state": {
+          "running": "mdi:shield-check",
+          "stopped": "mdi:shield-off"
+        }
+      },
+      "oscam_uptime": {
+        "default": "mdi:clock-start"
       },
       "program": {
         "default": "mdi:television-guide"
@@ -106,6 +185,9 @@
     }
   },
   "services": {
+    "select_bouquet": {
+      "service": "mdi:format-list-bulleted"
+    },
     "add_timer": {
       "service": "mdi:timer-plus"
     },

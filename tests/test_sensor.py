@@ -13,16 +13,24 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_mqtt_message,
 )
 
+from custom_components.enigma2_mqtt.diagnostics import (
+    async_get_config_entry_diagnostics,
+)
+
 from .conftest import (
     AVAILABILITY_TOPIC,
     EPG,
     EPG_TOPIC,
+    INFO,
+    INFO_TOPIC,
     RECORDING_ACTIVE,
     RECORDING_TOPIC,
     SREF,
     TUNER_TOPIC,
     async_setup_box,
 )
+
+CAM_TOPIC = "enigma2/vuuno4kse_005301/cam"
 
 
 async def test_the_channel_sensor_carries_the_service(
@@ -173,3 +181,183 @@ async def test_everything_goes_unavailable_when_the_box_does(
     await hass.async_block_till_done()
 
     assert hass.states.get("sensor.dekoder_salon_channel").state == STATE_UNAVAILABLE
+
+
+async def test_cam_telemetry_is_opt_in_bounded_and_removed_when_disabled(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Only the public CAM schema survives, and disabling removes its entities."""
+    enabled_info = {
+        **INFO,
+        "capabilities": [*INFO["capabilities"], "cam"],
+        "settings": {"cam_telemetry": True},
+    }
+    box_on_the_broker[INFO_TOPIC] = json.dumps(enabled_info)
+    box_on_the_broker[CAM_TOPIC] = json.dumps(
+        {
+            "system": "Irdeto",
+            "active": True,
+            "encrypted": True,
+            "ecm_ms": 184,
+            "server": "private.example",
+            "reader": "household-card",
+            "password": "must-not-survive",
+        }
+    )
+    await async_setup_box(hass, config_entry)
+
+    assert (
+        hass.states.get("sensor.dekoder_salon_conditional_access_system").state
+        == "Irdeto"
+    )
+    assert hass.states.get("sensor.dekoder_salon_ecm_time").state == "184"
+    assert hass.states.get("binary_sensor.dekoder_salon_cam_active").state == "on"
+    assert (
+        hass.states.get("binary_sensor.dekoder_salon_service_encrypted").state
+        == "on"
+    )
+    diagnostics = await async_get_config_entry_diagnostics(hass, config_entry)
+    assert diagnostics["topics"]["cam"] == {
+        "system": "Irdeto",
+        "active": True,
+        "encrypted": True,
+        "ecm_ms": 184,
+    }
+
+    async_fire_mqtt_message(hass, CAM_TOPIC, "")
+    await hass.async_block_till_done()
+    assert config_entry.runtime_data.state.cam is None
+    assert CAM_TOPIC.rsplit("/", 1)[-1] not in config_entry.runtime_data.seen
+
+    async_fire_mqtt_message(hass, CAM_TOPIC, box_on_the_broker[CAM_TOPIC])
+    await hass.async_block_till_done()
+    assert config_entry.runtime_data.state.cam is not None
+
+    disabled_info = {
+        **INFO,
+        "settings": {"cam_telemetry": False},
+    }
+    box_on_the_broker[INFO_TOPIC] = json.dumps(disabled_info)
+    async_fire_mqtt_message(hass, INFO_TOPIC, json.dumps(disabled_info))
+    await hass.async_block_till_done()
+    assert config_entry.runtime_data.state.cam is None
+    await hass.config_entries.async_reload(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    registry = er.async_get(hass)
+    for entity_id in (
+        "sensor.dekoder_salon_conditional_access_system",
+        "sensor.dekoder_salon_ecm_time",
+        "binary_sensor.dekoder_salon_cam_active",
+        "binary_sensor.dekoder_salon_service_encrypted",
+    ):
+        assert hass.states.get(entity_id) is None
+        assert registry.async_get(entity_id) is None
+
+
+async def test_stray_cam_topic_is_ignored_without_opt_in(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """An old retained CAM payload cannot populate disabled telemetry."""
+    box_on_the_broker[CAM_TOPIC] = json.dumps(
+        {"system": "Irdeto", "active": True, "encrypted": True, "ecm_ms": 100}
+    )
+    await async_setup_box(hass, config_entry)
+
+    assert config_entry.runtime_data.state.cam is None
+    assert CAM_TOPIC.rsplit("/", 1)[-1] not in config_entry.runtime_data.seen
+    assert hass.states.get("sensor.dekoder_salon_conditional_access_system") is None
+
+
+async def test_retained_cam_before_info_is_applied_only_after_confirmed_opt_in(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Wildcard retained order cannot lose safe telemetry or bypass opt-in."""
+    box_on_the_broker.pop(INFO_TOPIC)
+    box_on_the_broker[CAM_TOPIC] = json.dumps(
+        {
+            "system": "Viaccess",
+            "active": True,
+            "encrypted": True,
+            "ecm_ms": 91,
+            "password": "discard-before-pending",
+        }
+    )
+    box_on_the_broker[INFO_TOPIC] = json.dumps(
+        {
+            **INFO,
+            "capabilities": [*INFO["capabilities"], "cam"],
+            "settings": {"cam_telemetry": True},
+        }
+    )
+
+    await async_setup_box(hass, config_entry)
+
+    assert config_entry.runtime_data.state.cam == {
+        "system": "Viaccess",
+        "active": True,
+        "encrypted": True,
+        "ecm_ms": 91,
+    }
+    assert (
+        hass.states.get("sensor.dekoder_salon_conditional_access_system").state
+        == "Viaccess"
+    )
+
+
+@pytest.mark.parametrize("cam_payload", ["", json.dumps({"system": "Irdeto"})])
+async def test_retained_cam_before_info_is_discarded_on_tombstone_or_opt_out(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    cam_payload: str,
+) -> None:
+    """A pending tombstone stays empty and explicit opt-out never creates state."""
+    box_on_the_broker.pop(INFO_TOPIC)
+    box_on_the_broker[CAM_TOPIC] = cam_payload
+    box_on_the_broker[INFO_TOPIC] = json.dumps(
+        {**INFO, "settings": {"cam_telemetry": False}}
+    )
+
+    await async_setup_box(hass, config_entry)
+
+    assert config_entry.runtime_data.state.cam is None
+    assert CAM_TOPIC.rsplit("/", 1)[-1] not in config_entry.runtime_data.seen
+    assert hass.states.get("sensor.dekoder_salon_conditional_access_system") is None
+
+
+async def test_retained_cam_tombstone_before_enabled_info_remains_empty(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """An early retained retraction must not turn into CAM state."""
+    box_on_the_broker.pop(INFO_TOPIC)
+    box_on_the_broker[CAM_TOPIC] = ""
+    box_on_the_broker[INFO_TOPIC] = json.dumps(
+        {
+            **INFO,
+            "capabilities": [*INFO["capabilities"], "cam"],
+            "settings": {"cam_telemetry": True},
+        }
+    )
+
+    await async_setup_box(hass, config_entry)
+
+    assert config_entry.runtime_data.state.cam is None
+    assert CAM_TOPIC.rsplit("/", 1)[-1] not in config_entry.runtime_data.seen
+    assert (
+        hass.states.get("sensor.dekoder_salon_conditional_access_system").state
+        == STATE_UNAVAILABLE
+    )

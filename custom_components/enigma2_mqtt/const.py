@@ -24,6 +24,34 @@ CONF_NAME: Final = "name"
 CONF_DANGEROUS_BUTTONS: Final = "dangerous_buttons"
 CONF_WOL_MAC: Final = "wol_mac"
 CONF_BOUQUETS: Final = "bouquets"
+CONF_PUBLISH_KEYS: Final = "publish_keys"
+CONF_RECEIVER_HOST: Final = "receiver_host"
+CONF_SCREENSHOT: Final = "screenshot"
+CONF_SCREENSHOT_INTERVAL: Final = "screenshot_interval"
+CONF_SCREENSHOT_DELAY: Final = "screenshot_delay"
+CONF_CAM_TELEMETRY: Final = "cam_telemetry"
+CONF_OSCAM_TELEMETRY: Final = "oscam_telemetry"
+CONF_SSH_HOST: Final = "ssh_host"
+CONF_SSH_PORT: Final = "ssh_port"
+CONF_SSH_USERNAME: Final = "ssh_username"
+CONF_SSH_PASSWORD: Final = "ssh_password"
+CONF_SSH_HOST_KEY: Final = "ssh_host_key"
+CONF_KEEP_SSH_CREDENTIALS: Final = "keep_ssh_credentials"
+
+SCREENSHOT_OFF: Final = "off"
+SCREENSHOT_ON_ZAP: Final = "on_zap"
+SCREENSHOT_INTERVAL: Final = "interval"
+SCREENSHOT_MODES: Final = (SCREENSHOT_OFF, SCREENSHOT_ON_ZAP, SCREENSHOT_INTERVAL)
+DEFAULT_PUBLISH_KEYS: Final = True
+DEFAULT_SCREENSHOT: Final = SCREENSHOT_ON_ZAP
+DEFAULT_SCREENSHOT_INTERVAL: Final = 60
+DEFAULT_SCREENSHOT_DELAY: Final = 4
+DEFAULT_CAM_TELEMETRY: Final = False
+DEFAULT_OSCAM_TELEMETRY: Final = False
+MIN_SCREENSHOT_INTERVAL: Final = 5
+MAX_SCREENSHOT_INTERVAL: Final = 3600
+MIN_SCREENSHOT_DELAY: Final = 1
+MAX_SCREENSHOT_DELAY: Final = 30
 
 # How the plugin presents a box to Home Assistant, switchable with `cmd/ha_mode`.
 HA_MODE_DISCOVERY: Final = "discovery"
@@ -72,6 +100,9 @@ TOPIC_KEY: Final = "key"
 TOPIC_LAST_ERROR: Final = "last_error"
 TOPIC_CHANNELS: Final = "channels"
 TOPIC_EPG_GRID: Final = "epg_grid"
+TOPIC_CAM: Final = "cam"
+TOPIC_BOUQUET: Final = "bouquet"
+TOPIC_OSCAM: Final = "oscam"
 
 PAYLOAD_ONLINE: Final = "online"
 PAYLOAD_OFFLINE: Final = "offline"
@@ -187,7 +218,7 @@ RECORD_ACTIONS: Final = ("start", "stop")
 # The plugin release this version of the integration is written against. The update
 # entity compares it with `info.plugin`. M4 replaces the constant with the version of
 # the IPK the integration bundles, and grows an install step to go with it.
-SUPPORTED_PLUGIN_VERSION: Final = "0.1.0"
+SUPPORTED_PLUGIN_VERSION: Final = "0.2.0"
 PLUGIN_RELEASES_URL: Final = (
     "https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases"
 )

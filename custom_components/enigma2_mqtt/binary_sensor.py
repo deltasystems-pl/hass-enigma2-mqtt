@@ -18,12 +18,20 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
     BinarySensorEntityDescription,
 )
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .box import Enigma2Box, Enigma2MqttConfigEntry, Enigma2State
-from .const import TOPIC_HDD, TOPIC_RECORDING
-from .entity import Enigma2Entity
+from .const import (
+    CONF_CAM_TELEMETRY,
+    CONF_OSCAM_TELEMETRY,
+    TOPIC_CAM,
+    TOPIC_HDD,
+    TOPIC_OSCAM,
+    TOPIC_RECORDING,
+)
+from .entity import Enigma2Entity, OptionalEntities
 
 PARALLEL_UPDATES = 0
 
@@ -33,6 +41,12 @@ def _is_recording(state: Enigma2State) -> bool:
     recording = state.recording or {}
     active = recording.get("active")
     return bool(active) if isinstance(active, list) else False
+
+
+def _cam_bool(state: Enigma2State, key: str) -> bool | None:
+    """Keep an unknown CAM result unknown rather than falsely healthy."""
+    value = (state.cam or {}).get(key)
+    return value if isinstance(value, bool) else None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -63,6 +77,48 @@ BINARY_SENSORS: tuple[Enigma2BinarySensorDescription, ...] = (
     ),
 )
 
+CAM_BINARY_SENSORS: tuple[Enigma2BinarySensorDescription, ...] = (
+    Enigma2BinarySensorDescription(
+        key="cam_active",
+        topics=(TOPIC_CAM,),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda state: _cam_bool(state, "active"),
+    ),
+    Enigma2BinarySensorDescription(
+        key="service_encrypted",
+        topics=(TOPIC_CAM,),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda state: _cam_bool(state, "encrypted"),
+    ),
+)
+
+OSCAM_BINARY_SENSORS: tuple[Enigma2BinarySensorDescription, ...] = tuple(
+    Enigma2BinarySensorDescription(
+        key=f"oscam_{key}",
+        topics=(TOPIC_OSCAM,),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda state, field=key: (
+            (state.oscam or {}).get(field)
+            if isinstance((state.oscam or {}).get(field), bool)
+            else None
+        ),
+    )
+    for key in ("software_running", "api_reachable", "readonly")
+) + (
+    Enigma2BinarySensorDescription(
+        key="oscam_api_access",
+        topics=(TOPIC_OSCAM,),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda state: (
+            True
+            if (state.oscam or {}).get("api_access") == "granted"
+            else False
+            if (state.oscam or {}).get("api_access") == "denied"
+            else None
+        ),
+    ),
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -71,9 +127,36 @@ async def async_setup_entry(
 ) -> None:
     """Set up the binary sensors of one box."""
     box = entry.runtime_data
-    async_add_entities(
-        Enigma2BinarySensor(box, description) for description in BINARY_SENSORS
-    )
+    async_add_entities(Enigma2BinarySensor(box, description) for description in BINARY_SENSORS)
+
+    by_key = {
+        description.key: description
+        for description in (*CAM_BINARY_SENSORS, *OSCAM_BINARY_SENSORS)
+    }
+    for keys, enabled, declared in (
+        (
+            [description.key for description in CAM_BINARY_SENSORS],
+            lambda: box.cam_enabled,
+            lambda: box.telemetry_declared(CONF_CAM_TELEMETRY),
+        ),
+        (
+            [description.key for description in OSCAM_BINARY_SENSORS],
+            lambda: box.oscam_enabled,
+            lambda: box.telemetry_declared(CONF_OSCAM_TELEMETRY),
+        ),
+    ):
+        entry.async_on_unload(
+            OptionalEntities(
+                hass,
+                box,
+                "binary_sensor",
+                keys,
+                lambda key: Enigma2BinarySensor(box, by_key[key]),
+                enabled,
+                declared,
+                async_add_entities,
+            ).start()
+        )
 
 
 class Enigma2BinarySensor(Enigma2Entity, BinarySensorEntity):
@@ -81,9 +164,7 @@ class Enigma2BinarySensor(Enigma2Entity, BinarySensorEntity):
 
     entity_description: Enigma2BinarySensorDescription
 
-    def __init__(
-        self, box: Enigma2Box, description: Enigma2BinarySensorDescription
-    ) -> None:
+    def __init__(self, box: Enigma2Box, description: Enigma2BinarySensorDescription) -> None:
         """Set up the binary sensor from its description."""
         super().__init__(box, description.key, topics=description.topics)
         self.entity_description = description
@@ -94,6 +175,4 @@ class Enigma2BinarySensor(Enigma2Entity, BinarySensorEntity):
         description = self.entity_description
         self._attr_is_on = description.value_fn(self.box.state)
         if description.attributes_fn is not None:
-            self._attr_extra_state_attributes = description.attributes_fn(
-                self.box.state
-            )
+            self._attr_extra_state_attributes = description.attributes_fn(self.box.state)

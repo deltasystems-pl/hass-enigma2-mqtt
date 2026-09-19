@@ -20,9 +20,12 @@ to it.
   License:  GPL-2.0-or-later
   Source:   https://github.com/deltasystems-pl/enigma2-mqtt-bridge
 
-The complete corresponding source code of every bundled plugin version is available at that
-repository, tagged with the version of the IPK, and each release records the SHA-256 of the
-package it ships.
+Every integration artifact that contains the IPK also contains its complete corresponding source
+archive, including the GPL license. `bundled/metadata.json` records the exact source commit and
+the SHA-256 and size of both archives. Development builds may deliberately bundle a reviewed,
+pinned commit newer than the last plugin tag while both still report `0.1.0`; they do not claim
+that commit is the tagged release. Published integration releases pin an immutable public plugin
+commit, and their CI rebuilds and byte-compares the IPK and source archive before publishing.
 
 Trademarks
 ----------

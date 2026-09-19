@@ -23,8 +23,12 @@ from custom_components.enigma2_mqtt.box import Enigma2CommandError
 from custom_components.enigma2_mqtt.const import DOMAIN, TOPIC_SCREEN
 
 from .conftest import (
+    BOUQUET,
+    BOUQUET_TOPIC,
     EPG_GRID,
     EPG_GRID_TOPIC,
+    INFO,
+    INFO_TOPIC,
     LAST_ERROR_TOPIC,
     NODE_ID,
     RECORDING_ACTIVE,
@@ -71,6 +75,47 @@ async def test_zapping_by_reference_waits_for_the_service_topic(
     await _call(hass, "zap", sref=other)
 
     assert_published(mqtt_mock, command_topic("zap"), other)
+
+
+async def test_select_bouquet_action_waits_for_fresh_context(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    box_on_the_broker[INFO_TOPIC] = json.dumps(
+        {**INFO, "capabilities": [*INFO["capabilities"], "bouquet_context"]}
+    )
+    box_on_the_broker[BOUQUET_TOPIC] = json.dumps(BOUQUET)
+    await async_setup_box(hass, config_entry)
+    await async_arm_box_reply(hass, "bouquet", BOUQUET_TOPIC, json.dumps(BOUQUET))
+
+    await _call(hass, "select_bouquet", sref=BOUQUET["sref"])
+
+    assert_published(
+        mqtt_mock,
+        command_topic("bouquet"),
+        json.dumps({"sref": BOUQUET["sref"]}),
+    )
+
+
+async def test_selecting_a_bouquet_the_box_never_published_is_refused(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Nothing is sent to the receiver, and the complaint names the bouquet."""
+    box_on_the_broker[INFO_TOPIC] = json.dumps(
+        {**INFO, "capabilities": [*INFO["capabilities"], "bouquet_context"]}
+    )
+    await async_setup_box(hass, config_entry)
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await _call(hass, "select_bouquet", sref="1:7:1:0:0:0:0:0:0:0:FROM BOGUS")
+
+    assert raised.value.translation_key == "bouquet_not_published"
+    assert published_payloads(mqtt_mock, command_topic("bouquet")) == []
 
 
 async def test_zapping_by_name(
@@ -555,7 +600,7 @@ async def test_reading_a_bouquet_the_box_never_published(
     box_on_the_broker[EPG_GRID_TOPIC] = json.dumps(EPG_GRID)
     await async_setup_box(hass, config_entry)
 
-    with pytest.raises(ServiceValidationError):
+    with pytest.raises(ServiceValidationError) as raised:
         await hass.services.async_call(
             DOMAIN,
             "get_epg_grid",
@@ -563,6 +608,8 @@ async def test_reading_a_bouquet_the_box_never_published(
             blocking=True,
             return_response=True,
         )
+
+    assert raised.value.translation_key == "unknown_bouquet"
 
 
 async def test_an_empty_epg_grid_is_rebuilt_on_demand(

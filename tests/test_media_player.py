@@ -40,6 +40,11 @@ from custom_components.enigma2_mqtt.const import CONF_BOUQUETS
 
 from .conftest import (
     AVAILABILITY_TOPIC,
+    BOUQUET,
+    BOUQUET_TOPIC,
+    CHANNELS,
+    INFO,
+    INFO_TOPIC,
     MAC,
     PICON_URL,
     POWER_TOPIC,
@@ -48,6 +53,7 @@ from .conftest import (
     SREF,
     SREF_TWO,
     assert_published,
+    async_arm_box_reply,
     async_setup_box,
     command_topic,
 )
@@ -231,6 +237,58 @@ async def test_playing_a_channel_name(
     )
 
 
+async def test_playing_a_bouquet_waits_for_a_fresh_context_readback(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A retained matching context is not an acknowledgement for a new command."""
+    capabilities = [*INFO["capabilities"], "bouquet_context"]
+    box_on_the_broker[INFO_TOPIC] = json.dumps({**INFO, "capabilities": capabilities})
+    box_on_the_broker[BOUQUET_TOPIC] = json.dumps(BOUQUET)
+    await async_setup_box(hass, config_entry)
+    await async_arm_box_reply(hass, "bouquet", BOUQUET_TOPIC, json.dumps(BOUQUET))
+
+    await _call(
+        hass,
+        SERVICE_PLAY_MEDIA,
+        **{
+            ATTR_MEDIA_CONTENT_TYPE: "bouquet",
+            ATTR_MEDIA_CONTENT_ID: BOUQUET["sref"],
+        },
+    )
+
+    assert_published(
+        mqtt_mock,
+        command_topic("bouquet"),
+        json.dumps({"sref": BOUQUET["sref"]}),
+    )
+
+
+async def test_playing_a_bouquet_is_hidden_from_an_older_plugin(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    await async_setup_box(hass, config_entry)
+
+    with pytest.raises(ServiceValidationError):
+        await _call(
+            hass,
+            SERVICE_PLAY_MEDIA,
+            **{
+                ATTR_MEDIA_CONTENT_TYPE: "bouquet",
+                ATTR_MEDIA_CONTENT_ID: CHANNELS["bouquets"][0]["sref"],
+            },
+        )
+    assert not any(
+        call.args[0] == command_topic("bouquet")
+        for call in mqtt_mock.async_publish.call_args_list
+    )
+
+
 async def test_playing_anything_else_is_refused(
     hass: HomeAssistant,
     mqtt_mock,
@@ -330,6 +388,38 @@ async def test_browsing_the_root_lists_bouquets(
     assert [child.title for child in browse.children] == ["Ulubione TV", "Sport"]
     assert all(child.can_expand for child in browse.children)
     assert not any(child.can_play for child in browse.children)
+
+
+async def test_bouquets_are_playable_when_the_plugin_can_activate_the_context(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    box_on_the_broker[INFO_TOPIC] = json.dumps(
+        {**INFO, "capabilities": [*INFO["capabilities"], "bouquet_context"]}
+    )
+    await async_setup_box(hass, config_entry)
+
+    browse = await _player(hass).async_browse_media()
+    assert all(child.can_play for child in browse.children)
+    assert all(child.media_content_type == "bouquet" for child in browse.children)
+
+    selected = browse.children[0]
+    await async_arm_box_reply(hass, "bouquet", BOUQUET_TOPIC, json.dumps(BOUQUET))
+    await _call(
+        hass,
+        SERVICE_PLAY_MEDIA,
+        **{
+            ATTR_MEDIA_CONTENT_TYPE: selected.media_content_type,
+            ATTR_MEDIA_CONTENT_ID: selected.media_content_id,
+        },
+    )
+    assert_published(
+        mqtt_mock,
+        command_topic("bouquet"),
+        json.dumps({"sref": CHANNELS["bouquets"][0]["sref"]}),
+    )
 
 
 async def test_browsing_a_bouquet_lists_playable_channels_with_picons(
