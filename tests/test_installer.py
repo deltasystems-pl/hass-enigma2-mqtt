@@ -53,6 +53,8 @@ class FakeReceiver:
     ha_mode: str = "discovery"
     closed: int = 0
     close_raises_on: set[int] = field(default_factory=set)
+    free_bytes: int = 50_000_000
+    python_version: str = "3.12.8"
     # OpenWebif is an Enigma plugin, so it goes down with the interface. A receiver whose
     # restart went wrong answers SSH and nothing on 127.0.0.1.
     webif_ok: bool = True
@@ -92,9 +94,9 @@ class FakeSession:
         if "cat /etc/image-version" in command:
             return CommandResult(0, "OpenViX 6.6\n")
         if "sys.version_info" in command:
-            return CommandResult(0, "3.12.8\n")
+            return CommandResult(0, f"{receiver.python_version}\n")
         if "df -Pk" in command:
-            return CommandResult(0, "50000000\n50000000\n50000000\n")
+            return CommandResult(0, f"{receiver.free_bytes}\n" * 3)
         if "du -sk" in command:
             return CommandResult(0, "500000\n")
         if command.endswith(" identity"):
