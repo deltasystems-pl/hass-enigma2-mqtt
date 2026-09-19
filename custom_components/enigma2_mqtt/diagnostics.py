@@ -46,6 +46,11 @@ TO_REDACT = {
     "ssh_host_key",
     "ssh_username",
     "username",
+    # The address a magic packet goes to is a hardware address of the same household as
+    # the one `mac` is redacted for, and it is redacted for the same reason. It arrives
+    # from a different direction — the user types it into the options rather than the
+    # box announcing it — which is exactly how it was missed.
+    "wol_mac",
 }
 
 
