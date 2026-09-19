@@ -62,13 +62,21 @@ actions, registered on the media player platform, which is where Home Assistant 
 entity action to be registered; the rule's intent — a schema on every action, validated before
 anything is published, and an action that exists whether or not a box is loaded — is met.
 
-`test-coverage` stays open on purpose. The current 241-test suite covers every platform, every
-action, the device triggers, both flows and the guarded installer. The local frozen-source
-run measured 89% statement coverage and 86% combined statement/branch coverage on Python
-3.14.4, below the 95% target. The first coverage run had an intermittent failure in
-`test_aborting_progress_cancels_the_transaction_and_clears_secrets`; it passed standalone
-and in the identical full rerun without source changes. This remains a test-reliability
-follow-up, not evidence that receiver installation or rollback has passed live acceptance.
+`test-coverage` stays open on purpose. The current 359-test suite covers every platform, every
+action, the device triggers, both flows and the guarded installer, including its refusals and
+its rollback. The local frozen-source run measured 94% statement coverage on Python 3.14.4 —
+92% for `installer.py` — below the 95% target. What is still uncovered is concentrated in the
+asyncssh transport itself, which has no receiver to talk to here.
+
+The intermittent failure previously recorded against
+`test_aborting_progress_cancels_the_transaction_and_clears_secrets` is fixed. Its cause was in
+the test, not the flow: it registered a plain function as a bus listener, so Home Assistant
+classified it as an executor job and ran it in a worker thread, where it set an
+`asyncio.Event` off the loop and the waiter missed the wakeup. It failed 19 times in 40 runs
+before the fix and 0 times in 60 after it.
+
+None of this is evidence that receiver installation or rollback has passed live acceptance. It
+has not.
 
 ## What CI enforces today
 
