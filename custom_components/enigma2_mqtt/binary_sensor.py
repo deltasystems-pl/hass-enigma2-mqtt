@@ -24,7 +24,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .box import Enigma2Box, Enigma2MqttConfigEntry, Enigma2State
-from .const import DOMAIN, TOPIC_CAM, TOPIC_HDD, TOPIC_RECORDING
+from .const import DOMAIN, TOPIC_CAM, TOPIC_HDD, TOPIC_OSCAM, TOPIC_RECORDING
 from .entity import Enigma2Entity
 
 PARALLEL_UPDATES = 0
@@ -83,6 +83,33 @@ BINARY_SENSORS: tuple[Enigma2BinarySensorDescription, ...] = (
     ),
 )
 
+OSCAM_BINARY_SENSORS: tuple[Enigma2BinarySensorDescription, ...] = tuple(
+    Enigma2BinarySensorDescription(
+        key=f"oscam_{key}",
+        topics=(TOPIC_OSCAM,),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda state, field=key: (
+            (state.oscam or {}).get(field)
+            if isinstance((state.oscam or {}).get(field), bool)
+            else None
+        ),
+    )
+    for key in ("software_running", "api_reachable", "readonly")
+) + (
+    Enigma2BinarySensorDescription(
+        key="oscam_api_access",
+        topics=(TOPIC_OSCAM,),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda state: (
+            True
+            if (state.oscam or {}).get("api_access") == "granted"
+            else False
+            if (state.oscam or {}).get("api_access") == "denied"
+            else None
+        ),
+    ),
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -91,17 +118,22 @@ async def async_setup_entry(
 ) -> None:
     """Set up the binary sensors of one box."""
     box = entry.runtime_data
-    descriptions = (
-        BINARY_SENSORS if "cam" in box.capabilities else BINARY_SENSORS[:-2]
-    )
-    async_add_entities(
-        Enigma2BinarySensor(box, description) for description in descriptions
-    )
+    descriptions = BINARY_SENSORS if "cam" in box.capabilities else BINARY_SENSORS[:-2]
+    if "oscam" in box.capabilities:
+        descriptions = (*descriptions, *OSCAM_BINARY_SENSORS)
+    async_add_entities(Enigma2BinarySensor(box, description) for description in descriptions)
     if "cam" not in box.capabilities:
         registry = er.async_get(hass)
         for key in ("cam_active", "service_encrypted"):
             if entity_id := registry.async_get_entity_id(
                 "binary_sensor", DOMAIN, f"{box.node_id}_{key}"
+            ):
+                registry.async_remove(entity_id)
+    if "oscam" not in box.capabilities:
+        registry = er.async_get(hass)
+        for description in OSCAM_BINARY_SENSORS:
+            if entity_id := registry.async_get_entity_id(
+                "binary_sensor", DOMAIN, f"{box.node_id}_{description.key}"
             ):
                 registry.async_remove(entity_id)
 

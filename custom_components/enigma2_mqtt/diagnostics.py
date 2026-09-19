@@ -87,6 +87,7 @@ async def async_get_config_entry_diagnostics(
             "volume": state.volume,
             "hdd": state.hdd,
             "cam": state.cam,
+            "oscam": state.oscam,
             "channels": _summarise_channels(state.channels),
             "last_error": state.last_error,
             "screen": {

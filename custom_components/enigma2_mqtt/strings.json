@@ -119,7 +119,8 @@
           "screenshot": "Automatic screenshots",
           "screenshot_interval": "Screenshot interval (seconds)",
           "screenshot_delay": "Delay after changing channel (seconds)",
-          "cam_telemetry": "Publish conditional-access telemetry"
+          "cam_telemetry": "Publish conditional-access telemetry",
+          "oscam_telemetry": "Publish OSCam health telemetry"
           ,"configure_ssh": "Configure SSH credentials for plugin updates"
           ,"keep_ssh_credentials": "Keep SSH credentials for updates"
         },
@@ -131,7 +132,8 @@
           "screenshot": "Off publishes no new screen images. On zap captures after a channel change. Interval captures repeatedly at the interval below.",
           "screenshot_interval": "Used only in interval mode. The receiver enforces a minimum of five seconds.",
           "screenshot_delay": "Wait before an automatic screenshot after a channel change, so the new picture has time to appear.",
-          "cam_telemetry": "Expose the current service's encryption and ECM status. No server, account or card details are published."
+          "cam_telemetry": "Expose the current service's encryption and ECM status. No server, account or card details are published.",
+          "oscam_telemetry": "Expose privacy-neutral OSCam process, API, reader and server health. Reader labels, addresses, accounts and card identifiers are never published."
         }
       }
       ,"ssh_host": {"title": "Connect to the receiver", "data": {"ssh_host": "Receiver host", "ssh_port": "SSH port"}}
@@ -155,7 +157,11 @@
       },
       "service_encrypted": {
         "name": "Service encrypted"
-      }
+      },
+      "oscam_software_running": {"name": "OSCam running"},
+      "oscam_api_reachable": {"name": "OSCam API reachable"},
+      "oscam_readonly": {"name": "OSCam API read-only"},
+      "oscam_api_access": {"name": "OSCam API access"}
     },
     "button": {
       "deep_standby": {
@@ -235,7 +241,36 @@
       },
       "cam_ecm_time": {
         "name": "ECM time"
-      }
+      },
+      "oscam_status": {
+        "name": "OSCam",
+        "state": {"running": "Running", "stopped": "Stopped"}
+      },
+      "oscam_readers_configured": {"name": "OSCam configured sources"},
+      "oscam_readers_enabled": {"name": "OSCam enabled sources"},
+      "oscam_readers_healthy": {"name": "OSCam healthy sources"},
+      "oscam_cards_ready": {"name": "OSCam ready local readers"},
+      "oscam_servers_connected": {"name": "OSCam connected servers"},
+      "oscam_shared_cards": {"name": "OSCam reported shared cards"},
+      "oscam_uptime": {"name": "OSCam uptime"},
+      "oscam_source_status": {
+        "name": "OSCam source {id} status",
+        "state": {
+          "ready": "Ready",
+          "connected": "Connected",
+          "disabled": "Disabled",
+          "no_card": "No card",
+          "initializing": "Initializing",
+          "connecting": "Connecting",
+          "disconnected": "Disconnected",
+          "sleeping": "Sleeping",
+          "duplicate": "Duplicate",
+          "error": "Error",
+          "unknown": "Unknown"
+        }
+      },
+      "oscam_source_ready_cards": {"name": "OSCam source {id} ready readers"},
+      "oscam_source_shared_cards": {"name": "OSCam source {id} reported shared cards"}
     },
     "switch": {
       "power": {

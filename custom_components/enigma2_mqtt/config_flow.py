@@ -51,6 +51,7 @@ from .const import (
     CONF_KEEP_SSH_CREDENTIALS,
     CONF_NAME,
     CONF_NODE_ID,
+    CONF_OSCAM_TELEMETRY,
     CONF_PUBLISH_KEYS,
     CONF_RECEIVER_HOST,
     CONF_SCREENSHOT,
@@ -64,6 +65,7 @@ from .const import (
     CONF_WOL_MAC,
     DEFAULT_BASE_TOPIC,
     DEFAULT_CAM_TELEMETRY,
+    DEFAULT_OSCAM_TELEMETRY,
     DEFAULT_PUBLISH_KEYS,
     DEFAULT_SCREENSHOT,
     DEFAULT_SCREENSHOT_DELAY,
@@ -703,6 +705,8 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                 requested[CONF_SCREENSHOT_DELAY] = user_input[CONF_SCREENSHOT_DELAY]
             if requested is not None and CONF_CAM_TELEMETRY in current:
                 requested[CONF_CAM_TELEMETRY] = user_input[CONF_CAM_TELEMETRY]
+            if requested is not None and CONF_OSCAM_TELEMETRY in current:
+                requested[CONF_OSCAM_TELEMETRY] = user_input[CONF_OSCAM_TELEMETRY]
             local_data = {
                 CONF_DANGEROUS_BUTTONS: user_input[CONF_DANGEROUS_BUTTONS],
                 CONF_WOL_MAC: (user_input.get(CONF_WOL_MAC) or "").strip(),
@@ -823,6 +827,17 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                             CONF_CAM_TELEMETRY,
                             default=settings.get(
                                 CONF_CAM_TELEMETRY, DEFAULT_CAM_TELEMETRY
+                            ),
+                        ): bool
+                    }
+                )
+            if CONF_OSCAM_TELEMETRY in settings:
+                schema = schema.extend(
+                    {
+                        vol.Required(
+                            CONF_OSCAM_TELEMETRY,
+                            default=settings.get(
+                                CONF_OSCAM_TELEMETRY, DEFAULT_OSCAM_TELEMETRY
                             ),
                         ): bool
                     }

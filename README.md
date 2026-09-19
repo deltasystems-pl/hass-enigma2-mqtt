@@ -43,7 +43,13 @@ One receiver becomes **one device** with these entities (display names are Polis
 | `update` | *Wtyczka MQTT Bridge* | the installed plugin version and, when SSH credentials were retained, a guarded reinstall/update from the verified local bundle |
 | device triggers | red / green / yellow / blue × short / long | remote keys as automation triggers |
 
-Plus the actions `zap`, `send_key`, `message`, `add_timer`, `delete_timer`, `record`,
+OSCam health is optional and off by default. When the receiver plugin advertises support, the
+options page can expose neutral process/API health, ready local-reader counts, connected servers
+and server-reported shared-card counts. Per-source entities use stable opaque IDs; private reader
+labels, server addresses, accounts and card identifiers are neither published nor retained by
+the integration.
+
+Plus the actions `zap`, `select_bouquet`, `send_key`, `message`, `add_timer`, `delete_timer`, `record`,
 `screenshot`, `set_ha_mode` and `get_epg_grid` — each verified by the plugin and answered on
 its state topic. `get_epg_grid` returns a bouquet's programme grid as a response, never as a
 state attribute, because a grid is tens of kilobytes and an attribute goes to the recorder.

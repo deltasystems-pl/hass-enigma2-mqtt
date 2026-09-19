@@ -74,6 +74,7 @@ from .const import (
     TOPIC_INFO,
     TOPIC_KEY,
     TOPIC_LAST_ERROR,
+    TOPIC_OSCAM,
     TOPIC_POWER,
     TOPIC_RECORDING,
     TOPIC_SCREEN,
@@ -107,6 +108,48 @@ CAM_SYSTEMS = frozenset(
 )
 _NO_PENDING_CAM = object()
 _CAM_TOMBSTONE = object()
+_NO_PENDING_OSCAM = object()
+_OSCAM_TOMBSTONE = object()
+OSCAM_PROTOCOLS = frozenset(
+    {
+        "camd33",
+        "camd35",
+        "camd35_tcp",
+        "cccam",
+        "constcw",
+        "gbox",
+        "ghttp",
+        "internal",
+        "mouse",
+        "mp35",
+        "newcamd",
+        "pcsc",
+        "phoenix",
+        "radegast",
+        "scam",
+        "sc8in1",
+        "serial",
+        "smartreader",
+        "stapi",
+        "stapi5",
+    }
+)
+OSCAM_STATUSES = frozenset(
+    {
+        "ready",
+        "no_card",
+        "initializing",
+        "connected",
+        "disconnected",
+        "connecting",
+        "error",
+        "sleeping",
+        "duplicate",
+        "disabled",
+        "unknown",
+    }
+)
+OSCAM_VERSION = re.compile(r"^[0-9]{1,3}\.[0-9]{1,3}(?:[._-][A-Za-z0-9]+)*(?: build r[0-9]{1,8})?$")
 
 type Enigma2MqttConfigEntry = ConfigEntry[Enigma2Box]
 
@@ -459,6 +502,7 @@ class Enigma2State:
     volume: dict[str, Any] | None = None
     hdd: dict[str, Any] | None = None
     cam: dict[str, Any] | None = None
+    oscam: dict[str, Any] | None = None
     bouquet: dict[str, Any] | None = None
     channels: dict[str, Any] | None = None
     last_error: dict[str, Any] | None = None
@@ -490,6 +534,7 @@ class Enigma2Box:
         self._key_listeners: list[Callable[[str, str], None]] = []
         self._pending: list[_Pending] = []
         self._pending_cam: object = _NO_PENDING_CAM
+        self._pending_oscam: object = _NO_PENDING_OSCAM
         self._subscribed = asyncio.Event()
 
     # ------------------------------------------------------------------ properties
@@ -839,6 +884,8 @@ class Enigma2Box:
             return
         if suffix == TOPIC_CAM:
             self._cam_received(msg)
+        elif suffix == TOPIC_OSCAM:
+            self._oscam_received(msg)
         elif suffix.startswith(f"{TOPIC_EPG_GRID}/"):
             self._epg_grid_received(suffix[len(TOPIC_EPG_GRID) + 1 :], msg.payload)
         elif (attribute := self._OBJECT_TOPICS.get(suffix)) is not None:
@@ -898,6 +945,17 @@ class Enigma2Box:
             self._pending_cam = _NO_PENDING_CAM
             if self.state.cam is not None or TOPIC_CAM in self.seen:
                 self._invalidate_cam()
+        if self.oscam_enabled and self._pending_oscam is not _NO_PENDING_OSCAM:
+            pending, self._pending_oscam = self._pending_oscam, _NO_PENDING_OSCAM
+            if pending is _OSCAM_TOMBSTONE:
+                self._invalidate_oscam()
+            elif isinstance(pending, dict):
+                self.state.oscam = pending
+                self._async_updated(TOPIC_OSCAM)
+        elif not self.oscam_enabled:
+            self._pending_oscam = _NO_PENDING_OSCAM
+            if self.state.oscam is not None or TOPIC_OSCAM in self.seen:
+                self._invalidate_oscam()
         self.async_register_device()
         self._async_updated(TOPIC_INFO)
 
@@ -963,6 +1021,123 @@ class Enigma2Box:
         self.updates[TOPIC_CAM] = self.updates.get(TOPIC_CAM, 0) + 1
         for listener in list(self._listeners):
             if listener.wants(TOPIC_CAM):
+                listener.callback()
+
+    @property
+    def oscam_enabled(self) -> bool:
+        """Return whether this box opted into supported OSCam telemetry."""
+        settings = self.state.info.get("settings")
+        return (
+            "oscam" in self.capabilities
+            and isinstance(settings, dict)
+            and settings.get("oscam_telemetry") is True
+        )
+
+    @callback
+    def _oscam_received(self, msg: ReceiveMessage) -> None:
+        """Cache only normalized OSCam health while explicitly opted in."""
+        if not (decode_payload(msg.payload) or "").strip():
+            if not self.state.info:
+                self._pending_oscam = _OSCAM_TOMBSTONE
+            elif self.oscam_enabled:
+                self._invalidate_oscam()
+            return
+        payload = parse_json_payload(msg.payload)
+        if payload is None:
+            return
+        normalized = self._normalize_oscam(payload)
+        if normalized is None:
+            return
+        if not self.state.info:
+            self._pending_oscam = normalized
+            return
+        if not self.oscam_enabled:
+            return
+        self.state.oscam = normalized
+        self._async_updated(TOPIC_OSCAM)
+
+    @staticmethod
+    def _normalize_oscam(payload: dict[str, Any]) -> dict[str, Any] | None:
+        """Strip OSCam input to the exact bounded public schema."""
+        readers = payload.get("readers")
+        if not isinstance(readers, list) or len(readers) > 64:
+            return None
+
+        def bounded(value: Any, maximum: int = 65535) -> int | None:
+            return (
+                value
+                if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= maximum
+                else None
+            )
+
+        normalized_readers: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        for reader in readers:
+            if not isinstance(reader, dict):
+                return None
+            source_id = reader.get("id")
+            kind = reader.get("kind")
+            if (
+                not isinstance(source_id, str)
+                or not re.fullmatch(r"(?:reader|server|source)_[0-9a-f]{12}", source_id)
+                or source_id in seen_ids
+                or kind not in ("reader", "server", "unknown")
+                or not source_id.startswith(
+                    {"reader": "reader_", "server": "server_", "unknown": "source_"}[kind]
+                )
+            ):
+                return None
+            seen_ids.add(source_id)
+            status = reader.get("status")
+            protocol = reader.get("protocol")
+            enabled = reader.get("enabled")
+            normalized_readers.append(
+                {
+                    "id": source_id,
+                    "kind": kind,
+                    "enabled": enabled if isinstance(enabled, bool) else None,
+                    "status": status if status in OSCAM_STATUSES else "unknown",
+                    "protocol": protocol
+                    if protocol is None or protocol in OSCAM_PROTOCOLS
+                    else None,
+                    "shared_cards": bounded(reader.get("shared_cards")),
+                }
+            )
+        access = payload.get("api_access")
+        software = payload.get("software")
+        version = payload.get("version")
+        return {
+            "software": software if software in (None, "OSCam") else None,
+            "version": version
+            if isinstance(version, str) and OSCAM_VERSION.fullmatch(version)
+            else None,
+            "software_running": payload.get("software_running")
+            if isinstance(payload.get("software_running"), bool)
+            else None,
+            "api_reachable": payload.get("api_reachable")
+            if isinstance(payload.get("api_reachable"), bool)
+            else None,
+            "api_access": access if access in (None, "granted", "denied") else None,
+            "readonly": payload.get("readonly")
+            if isinstance(payload.get("readonly"), bool)
+            else None,
+            "uptime_s": bounded(payload.get("uptime_s"), 315_360_000),
+            "readers_configured": bounded(payload.get("readers_configured")),
+            "readers_enabled": bounded(payload.get("readers_enabled")),
+            "readers_healthy": bounded(payload.get("readers_healthy")),
+            "cards_ready": bounded(payload.get("cards_ready")),
+            "servers_connected": bounded(payload.get("servers_connected")),
+            "shared_cards": bounded(payload.get("shared_cards")),
+            "readers": normalized_readers,
+        }
+
+    @callback
+    def _invalidate_oscam(self) -> None:
+        self.state.oscam = None
+        self.seen.discard(TOPIC_OSCAM)
+        self.updates[TOPIC_OSCAM] = self.updates.get(TOPIC_OSCAM, 0) + 1
+        for listener in list(self._listeners):
+            if listener.wants(TOPIC_OSCAM):
                 listener.callback()
 
     @callback

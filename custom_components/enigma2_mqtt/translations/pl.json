@@ -101,6 +101,7 @@
           "screenshot_interval": "Odstęp zrzutów ekranu (sekundy)",
           "screenshot_delay": "Opóźnienie po zmianie kanału (sekundy)",
           "cam_telemetry": "Publikuj telemetrię dostępu warunkowego",
+          "oscam_telemetry": "Publikuj telemetrię stanu OSCam",
           "configure_ssh": "Skonfiguruj dane SSH do aktualizacji wtyczki",
           "keep_ssh_credentials": "Zachowaj dane SSH do aktualizacji"
         },
@@ -112,7 +113,8 @@
           "screenshot": "Wyłączone nie publikuje nowych obrazów. Po zmianie kanału robi zrzut po przełączeniu. Interwał robi zrzuty cyklicznie.",
           "screenshot_interval": "Używane tylko w trybie interwału. Dekoder wymusza minimum pięć sekund.",
           "screenshot_delay": "Czas oczekiwania przed automatycznym zrzutem po zmianie kanału, aby nowy obraz zdążył się pojawić.",
-          "cam_telemetry": "Udostępnia szyfrowanie bieżącej usługi i stan ECM. Dane serwera, konta ani karty nie są publikowane."
+          "cam_telemetry": "Udostępnia szyfrowanie bieżącej usługi i stan ECM. Dane serwera, konta ani karty nie są publikowane.",
+          "oscam_telemetry": "Udostępnia stan procesu, API, czytników i serwerów OSCam bez danych prywatnych. Nazwy czytników, adresy, konta i identyfikatory kart nie są publikowane."
         }
       },
       "ssh_host": {"title": "Połącz z dekoderem", "data": {"ssh_host": "Adres dekodera", "ssh_port": "Port SSH"}},
@@ -136,7 +138,11 @@
       },
       "service_encrypted": {
         "name": "Usługa szyfrowana"
-      }
+      },
+      "oscam_software_running": {"name": "OSCam działa"},
+      "oscam_api_reachable": {"name": "API OSCam dostępne"},
+      "oscam_readonly": {"name": "API OSCam tylko do odczytu"},
+      "oscam_api_access": {"name": "Dostęp do API OSCam"}
     },
     "button": {
       "deep_standby": {
@@ -216,7 +222,36 @@
       },
       "cam_ecm_time": {
         "name": "Czas ECM"
-      }
+      },
+      "oscam_status": {
+        "name": "OSCam",
+        "state": {"running": "Działa", "stopped": "Zatrzymany"}
+      },
+      "oscam_readers_configured": {"name": "Skonfigurowane źródła OSCam"},
+      "oscam_readers_enabled": {"name": "Włączone źródła OSCam"},
+      "oscam_readers_healthy": {"name": "Sprawne źródła OSCam"},
+      "oscam_cards_ready": {"name": "Gotowe czytniki lokalne OSCam"},
+      "oscam_servers_connected": {"name": "Połączone serwery OSCam"},
+      "oscam_shared_cards": {"name": "Zgłoszone karty współdzielone OSCam"},
+      "oscam_uptime": {"name": "Czas działania OSCam"},
+      "oscam_source_status": {
+        "name": "Stan źródła OSCam {id}",
+        "state": {
+          "ready": "Gotowe",
+          "connected": "Połączone",
+          "disabled": "Wyłączone",
+          "no_card": "Brak karty",
+          "initializing": "Inicjalizacja",
+          "connecting": "Łączenie",
+          "disconnected": "Rozłączone",
+          "sleeping": "Uśpione",
+          "duplicate": "Duplikat",
+          "error": "Błąd",
+          "unknown": "Nieznane"
+        }
+      },
+      "oscam_source_ready_cards": {"name": "Gotowe czytniki źródła OSCam {id}"},
+      "oscam_source_shared_cards": {"name": "Zgłoszone karty źródła OSCam {id}"}
     },
     "switch": {
       "power": {

@@ -20,6 +20,7 @@ from custom_components.enigma2_mqtt.const import (
     CONF_DANGEROUS_BUTTONS,
     CONF_NAME,
     CONF_NODE_ID,
+    CONF_OSCAM_TELEMETRY,
     CONF_PUBLISH_KEYS,
     CONF_RECEIVER_HOST,
     CONF_SCREENSHOT,
@@ -52,6 +53,7 @@ PLUGIN_MODERN_SETTINGS = {
     **PLUGIN_DEFAULT_SETTINGS,
     CONF_SCREENSHOT_DELAY: 4,
     CONF_CAM_TELEMETRY: False,
+    CONF_OSCAM_TELEMETRY: False,
 }
 
 
@@ -137,12 +139,14 @@ async def test_modern_plugin_offers_delay_and_accepts_ack_with_extra_settings(
         **PLUGIN_SETTINGS,
         CONF_SCREENSHOT_DELAY: 7,
         CONF_CAM_TELEMETRY: True,
+        CONF_OSCAM_TELEMETRY: True,
     }
     await _arm_config_ack(hass, {**requested, "future_setting": "supported"})
 
     result = await hass.config_entries.options.async_init(config_entry.entry_id)
     assert CONF_SCREENSHOT_DELAY in result["data_schema"].schema
     assert CONF_CAM_TELEMETRY in result["data_schema"].schema
+    assert CONF_OSCAM_TELEMETRY in result["data_schema"].schema
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {

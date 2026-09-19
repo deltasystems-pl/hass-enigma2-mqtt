@@ -45,6 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   service result and never retain reader, server, account or card details.
 - **Optional receiver address metadata** in manual setup and reconfigure, used for the device
   link and as an SSH suggestion without making direct receiver access a requirement.
+- **Opt-in OSCam health diagnostics** from the plugin's privacy-bounded topic: process and API
+  health, aggregate reader/server counts, and dynamic per-source status under stable opaque IDs.
+  Reader labels, addresses, accounts and card identifiers never enter integration state or
+  diagnostics; API outages preserve customized entities as unavailable until a complete snapshot.
 - **A guided SSH installer** with host-key confirmation, recording/timer guards, pre-change
   backup, uploaded-file verification, guarded GUI restart and rollback. SSH credentials are
   opt-in for later updates and can be enrolled, refreshed or forgotten without unloading MQTT.
