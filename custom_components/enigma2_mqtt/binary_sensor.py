@@ -20,12 +20,11 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .box import Enigma2Box, Enigma2MqttConfigEntry, Enigma2State
-from .const import DOMAIN, TOPIC_CAM, TOPIC_HDD, TOPIC_OSCAM, TOPIC_RECORDING
-from .entity import Enigma2Entity
+from .const import TOPIC_CAM, TOPIC_HDD, TOPIC_OSCAM, TOPIC_RECORDING
+from .entity import Enigma2Entity, OptionalEntities
 
 PARALLEL_UPDATES = 0
 
@@ -69,6 +68,9 @@ BINARY_SENSORS: tuple[Enigma2BinarySensorDescription, ...] = (
             "free_mb": (state.hdd or {}).get("free_mb"),
         },
     ),
+)
+
+CAM_BINARY_SENSORS: tuple[Enigma2BinarySensorDescription, ...] = (
     Enigma2BinarySensorDescription(
         key="cam_active",
         topics=(TOPIC_CAM,),
@@ -118,24 +120,27 @@ async def async_setup_entry(
 ) -> None:
     """Set up the binary sensors of one box."""
     box = entry.runtime_data
-    descriptions = BINARY_SENSORS if "cam" in box.capabilities else BINARY_SENSORS[:-2]
-    if "oscam" in box.capabilities:
-        descriptions = (*descriptions, *OSCAM_BINARY_SENSORS)
-    async_add_entities(Enigma2BinarySensor(box, description) for description in descriptions)
-    if "cam" not in box.capabilities:
-        registry = er.async_get(hass)
-        for key in ("cam_active", "service_encrypted"):
-            if entity_id := registry.async_get_entity_id(
-                "binary_sensor", DOMAIN, f"{box.node_id}_{key}"
-            ):
-                registry.async_remove(entity_id)
-    if "oscam" not in box.capabilities:
-        registry = er.async_get(hass)
-        for description in OSCAM_BINARY_SENSORS:
-            if entity_id := registry.async_get_entity_id(
-                "binary_sensor", DOMAIN, f"{box.node_id}_{description.key}"
-            ):
-                registry.async_remove(entity_id)
+    async_add_entities(Enigma2BinarySensor(box, description) for description in BINARY_SENSORS)
+
+    by_key = {
+        description.key: description
+        for description in (*CAM_BINARY_SENSORS, *OSCAM_BINARY_SENSORS)
+    }
+    for keys, enabled in (
+        ([description.key for description in CAM_BINARY_SENSORS], lambda: box.cam_enabled),
+        ([description.key for description in OSCAM_BINARY_SENSORS], lambda: box.oscam_enabled),
+    ):
+        entry.async_on_unload(
+            OptionalEntities(
+                hass,
+                box,
+                "binary_sensor",
+                keys,
+                lambda key: Enigma2BinarySensor(box, by_key[key]),
+                enabled,
+                async_add_entities,
+            ).start()
+        )
 
 
 class Enigma2BinarySensor(Enigma2Entity, BinarySensorEntity):

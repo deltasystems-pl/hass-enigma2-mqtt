@@ -45,7 +45,7 @@ from .const import (
     TOPIC_SERVICE,
     TOPIC_TUNER,
 )
-from .entity import Enigma2Entity
+from .entity import Enigma2Entity, OptionalEntities
 
 PARALLEL_UPDATES = 0
 
@@ -185,6 +185,9 @@ SENSORS: tuple[Enigma2SensorDescription, ...] = (
         entity_registry_enabled_default=False,
         value_fn=lambda state: state.info.get("uptime"),
     ),
+)
+
+CAM_SENSORS: tuple[Enigma2SensorDescription, ...] = (
     Enigma2SensorDescription(
         key="cam_system",
         topics=(TOPIC_CAM,),
@@ -255,15 +258,25 @@ async def async_setup_entry(
 ) -> None:
     """Set up every sensor of one box."""
     box = entry.runtime_data
-    descriptions = SENSORS if "cam" in box.capabilities else SENSORS[:-2]
-    if "oscam" in box.capabilities:
-        descriptions = (*descriptions, *OSCAM_SENSORS)
-    async_add_entities(Enigma2Sensor(box, description) for description in descriptions)
-    if "cam" not in box.capabilities:
-        registry = er.async_get(hass)
-        for key in ("cam_system", "cam_ecm_time"):
-            if entity_id := registry.async_get_entity_id("sensor", DOMAIN, f"{box.node_id}_{key}"):
-                registry.async_remove(entity_id)
+    async_add_entities(Enigma2Sensor(box, description) for description in SENSORS)
+
+    by_key = {description.key: description for description in (*CAM_SENSORS, *OSCAM_SENSORS)}
+    for keys, enabled in (
+        ([description.key for description in CAM_SENSORS], lambda: box.cam_enabled),
+        ([description.key for description in OSCAM_SENSORS], lambda: box.oscam_enabled),
+    ):
+        entry.async_on_unload(
+            OptionalEntities(
+                hass,
+                box,
+                "sensor",
+                keys,
+                lambda key: Enigma2Sensor(box, by_key[key]),
+                enabled,
+                async_add_entities,
+            ).start()
+        )
+
     if "oscam" in box.capabilities:
         entry.async_on_unload(_OscamEntityManager(hass, box, async_add_entities).start())
     else:

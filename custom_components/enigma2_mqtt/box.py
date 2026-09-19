@@ -934,14 +934,14 @@ class Enigma2Box:
         if (info := parse_json_payload(msg.payload)) is None:
             return
         self.state.info = info
-        if self._cam_enabled() and self._pending_cam is not _NO_PENDING_CAM:
+        if self.cam_enabled and self._pending_cam is not _NO_PENDING_CAM:
             pending, self._pending_cam = self._pending_cam, _NO_PENDING_CAM
             if pending is _CAM_TOMBSTONE:
                 self._invalidate_cam()
             elif isinstance(pending, dict):
                 self.state.cam = pending
                 self._async_updated(TOPIC_CAM)
-        elif not self._cam_enabled():
+        elif not self.cam_enabled:
             self._pending_cam = _NO_PENDING_CAM
             if self.state.cam is not None or TOPIC_CAM in self.seen:
                 self._invalidate_cam()
@@ -959,7 +959,8 @@ class Enigma2Box:
         self.async_register_device()
         self._async_updated(TOPIC_INFO)
 
-    def _cam_enabled(self) -> bool:
+    @property
+    def cam_enabled(self) -> bool:
         """Return whether this box opted into supported CAM telemetry."""
         settings = self.state.info.get("settings")
         return (
@@ -974,7 +975,7 @@ class Enigma2Box:
         if not (decode_payload(msg.payload) or "").strip():
             if not self.state.info:
                 self._pending_cam = _CAM_TOMBSTONE
-            elif self._cam_enabled():
+            elif self.cam_enabled:
                 self._invalidate_cam()
             return
         payload = parse_json_payload(msg.payload)
@@ -984,7 +985,7 @@ class Enigma2Box:
         if not self.state.info:
             self._pending_cam = normalized
             return
-        if not self._cam_enabled():
+        if not self.cam_enabled:
             return
         self.state.cam = normalized
         self._async_updated(TOPIC_CAM)

@@ -25,6 +25,12 @@
           "off": "mdi:cog-off"
         }
       },
+      "cam_active": {
+        "default": "mdi:smart-card",
+        "state": {
+          "off": "mdi:smart-card-off"
+        }
+      },
       "recording": {
         "default": "mdi:record-rec",
         "state": {
@@ -35,6 +41,12 @@
         "default": "mdi:harddisk",
         "state": {
           "off": "mdi:harddisk-remove"
+        }
+      },
+      "service_encrypted": {
+        "default": "mdi:lock",
+        "state": {
+          "off": "mdi:lock-open-variant"
         }
       }
     },
@@ -92,6 +104,12 @@
       },
       "ber": {
         "default": "mdi:alert-decagram-outline"
+      },
+      "cam_ecm_time": {
+        "default": "mdi:timer-sand"
+      },
+      "cam_system": {
+        "default": "mdi:smart-card"
       },
       "channel": {
         "default": "mdi:television-classic"

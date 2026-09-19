@@ -21,14 +21,15 @@ moment the topic appears.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Sequence
 
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
 
 from .box import Enigma2Box
-from .const import DOMAIN
+from .const import DOMAIN, TOPIC_INFO
 
 
 class Enigma2Entity(Entity):
@@ -92,3 +93,63 @@ class Enigma2Entity(Entity):
         derived values — a parsed timestamp, a media image hash — do the work here, once
         per message, rather than on every read of every property.
         """
+
+
+class OptionalEntities:
+    """Entities that exist only while the receiver option behind them is on.
+
+    A box can advertise that it *can* report conditional-access or OSCam health and
+    still have that reporting switched off, which is the default. Creating the entities
+    anyway leaves a device page full of diagnostics that read `unknown` for ever and
+    cannot be made to say anything — a fault indication where there is no fault. So
+    they follow the option instead of the capability: created when it is turned on, and
+    removed from the registry when it is turned off, which is what the dynamic OSCam
+    source entities already do.
+
+    The option arrives on `info`, which may land after setup, so this listens rather
+    than reading once.
+    """
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        box: Enigma2Box,
+        platform: str,
+        keys: Sequence[str],
+        factory: Callable[[str], Entity],
+        enabled: Callable[[], bool],
+        add_entities: Callable[[list[Entity]], None],
+    ) -> None:
+        """Remember what to create, when, and how to take it away again."""
+        self.hass = hass
+        self.box = box
+        self.platform = platform
+        self.keys = tuple(keys)
+        self.factory = factory
+        self.enabled = enabled
+        self.add_entities = add_entities
+        self.live = False
+
+    def start(self):
+        """Reconcile once, then on every `info`, and return the unsubscribe."""
+        unsubscribe = self.box.async_add_listener(self._update, (TOPIC_INFO,))
+        self._update()
+        return unsubscribe
+
+    @callback
+    def _update(self) -> None:
+        """Create or retire the whole set to match the option."""
+        if self.enabled():
+            if not self.live:
+                self.live = True
+                self.add_entities([self.factory(key) for key in self.keys])
+            return
+        if self.live:
+            # The entities were added in this session; Home Assistant removes them when
+            # the entry reloads, and turning the option off reloads it.
+            self.live = False
+        registry = er.async_get(self.hass)
+        for key in self.keys:
+            unique_id = f"{self.box.node_id}_{key}"
+            if entity_id := registry.async_get_entity_id(self.platform, DOMAIN, unique_id):
+                registry.async_remove(entity_id)
