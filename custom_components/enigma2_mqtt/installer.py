@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import StrEnum
 import hashlib
@@ -757,10 +758,19 @@ async def _async_rollback(
     rollback_error: BaseException | None = None
     try:
         if restart_started:
-            # Guard while OpenWebif is still available, then stop Enigma before
+            # Re-measure the guard if it can still be measured, then stop Enigma before
             # restoring settings so shutdown cannot overwrite the old values.
-            await _async_measure_preflight(session)
-            old_enigma_pid = await _async_enigma_pid(session)
+            #
+            # Nothing measured here may veto the restore. The preflight needs OpenWebif,
+            # which is an Enigma plugin, so it is down in exactly the failure this
+            # rollback exists for — a half-restarted or non-booting receiver. Letting it
+            # raise meant the restore never ran at all and the box was left on the new
+            # plugin. A receiver whose interface is down is also not recording, so the
+            # recording guard has nothing left to protect.
+            with suppress(InstallerError):
+                await _async_measure_preflight(session)
+            with suppress(InstallerError):
+                old_enigma_pid = await _async_enigma_pid(session)
             enigma_stopped = True
             stopped = await session.run("init 4 || exit $?; sleep 3", timeout=30)
             if stopped.exit_status:
@@ -786,7 +796,12 @@ async def _async_rollback(
                 restart = await session.run("init 3", timeout=30)
                 if restart.exit_status:
                     raise InstallerError(InstallerErrorCode.ROLLBACK_FAILED)
-                if old_enigma_pid is None or await _async_enigma_pid(session) == old_enigma_pid:
+                # `_async_enigma_pid` refuses anything but one running Enigma, so this
+                # proves the receiver came back. A pid that never changed means it never
+                # went down; no pid beforehand means Enigma was already stopped when the
+                # rollback began, and any single live process is then the proof.
+                restarted_pid = await _async_enigma_pid(session)
+                if old_enigma_pid is not None and restarted_pid == old_enigma_pid:
                     raise InstallerError(InstallerErrorCode.ROLLBACK_FAILED)
             except BaseException as restart_err:
                 if rollback_error is None:

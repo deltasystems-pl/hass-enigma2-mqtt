@@ -53,6 +53,21 @@ class FakeReceiver:
     ha_mode: str = "discovery"
     closed: int = 0
     close_raises_on: set[int] = field(default_factory=set)
+    # OpenWebif is an Enigma plugin, so it goes down with the interface. A receiver whose
+    # restart went wrong answers SSH and nothing on 127.0.0.1.
+    webif_ok: bool = True
+    webif_dies_at_restart: bool = False
+    # What is actually on the box, so a rollback can be checked by what it put back
+    # rather than by which command was sent.
+    files: dict[str, str] = field(
+        default_factory=lambda: {
+            "plugin": "old",
+            "opkg": "old",
+            "settings": "old",
+            "provisioning": "old",
+        }
+    )
+    restore_flags: list[str] = field(default_factory=list)
 
     async def connect(self, credentials: SshCredentials) -> FakeSession:
         assert credentials.host_key == "ssh-ed25519 AAAATEST"
@@ -102,19 +117,40 @@ class FakeSession:
                 else "",
             )
         if "/api/statusinfo" in command:
+            if not receiver.webif_ok:
+                return CommandResult(1, "", "wget: can't connect to remote host")
             return CommandResult(0, json.dumps({"isRecording": receiver.recording}))
         if "/api/timerlist" in command:
+            if not receiver.webif_ok:
+                return CommandResult(1, "", "wget: can't connect to remote host")
             return CommandResult(0, json.dumps({"timers": receiver.timers}))
         if " snapshot " in command:
             receiver.backup_exists = True
         if command.startswith("opkg install"):
             receiver.installed = True
+            receiver.files["plugin"] = "new"
+            receiver.files["opkg"] = "new"
+        if command.startswith("set -eu; if [ -L ") and " mv " in command:
+            receiver.files["provisioning"] = "new"
         if " restore " in command:
             receiver.rolled_back = True
+            receiver.restore_flags = [word for word in command.split() if word.startswith("--")]
+            receiver.files["plugin"] = "old"
+            receiver.files["opkg"] = "old"
+            if "--provisioning" in receiver.restore_flags:
+                receiver.files["provisioning"] = "old"
+            if "--settings" in receiver.restore_flags:
+                receiver.files["settings"] = "old"
         if command == "pidof enigma2":
             return CommandResult(0, f"{receiver.enigma_pid}\n")
         if command == "init 3" or 'trap "init 3"' in command:
             receiver.enigma_pid += 1
+        if 'trap "init 3"' in command:
+            # Enigma writes its settings out on the way down, which is why a rollback
+            # has to stop it before restoring them.
+            receiver.files["settings"] = "new"
+            if receiver.webif_dies_at_restart:
+                receiver.webif_ok = False
         if "sha256sum" in command:
             return CommandResult(0, "a" * 64 + "\n")
         return CommandResult(0)
@@ -356,6 +392,74 @@ async def test_cancellation_runs_rollback_and_remains_cancelled(
     assert receiver.backup_exists is True
 
 
+async def test_rollback_restores_a_receiver_whose_openwebif_died_at_the_restart(
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+) -> None:
+    """The failure the rollback exists for is the one that used to disable it.
+
+    The receiver's interface does not come back, so OpenWebif — which is an Enigma
+    plugin — stops answering and the announcement never arrives. The rollback re-measured
+    the install guards over that same dead OpenWebif, the measurement failed, and the
+    restore was abandoned before a single command was sent: the box was left running the
+    new plugin with the old one nowhere. The guards may inform the rollback; they may
+    not veto it.
+    """
+    artifact = tmp_path / "plugin.ipk"
+    artifact.write_bytes(b"ipk bytes")
+    digest = __import__("hashlib").sha256(artifact.read_bytes()).hexdigest()
+    bundle = BundledPlugin(artifact, "0.1.0", digest, "1" * 40)
+    receiver = FakeReceiver(webif_dies_at_restart=True)
+    original_run = FakeSession.run
+
+    async def hash_aware_run(self: FakeSession, command: str, **kwargs: Any):
+        if "sha256sum" in command:
+            self.receiver.commands.append(command)
+            return CommandResult(0, digest + "\n")
+        return await original_run(self, command, **kwargs)
+
+    async def never_announced(*args: Any, **kwargs: Any):
+        del args, kwargs
+        loop = asyncio.get_running_loop()
+        watch = type("Watch", (), {})()
+        watch.established = loop.create_future()
+        watch.established.set_result(None)
+        watch.completed = loop.create_future()
+        watch.cancel = lambda: watch.completed.cancel()
+        watch.arm = lambda: None
+        return watch
+
+    with (
+        patch("custom_components.enigma2_mqtt.installer.load_bundled_plugin", return_value=bundle),
+        patch(
+            "custom_components.enigma2_mqtt.installer._installed_hash_manifest",
+            return_value=b"hash  /file\n",
+        ),
+        patch("custom_components.enigma2_mqtt.installer._async_watch_restart", never_announced),
+        patch("custom_components.enigma2_mqtt.installer.ANNOUNCEMENT_TIMEOUT", 0.01),
+        patch.object(FakeSession, "run", hash_aware_run),
+    ):
+        with pytest.raises(InstallerError) as raised:
+            await async_install(hass, install_request, _connector=receiver.connect)
+
+    # The caller is told what actually went wrong, not that the recovery went wrong.
+    assert raised.value.code is InstallerErrorCode.ANNOUNCEMENT_TIMEOUT
+    assert receiver.rolled_back is True
+    assert sorted(receiver.restore_flags) == ["--provisioning", "--settings"]
+    # Everything the transaction touched is back as it was.
+    assert receiver.files == {
+        "plugin": "old",
+        "opkg": "old",
+        "settings": "old",
+        "provisioning": "old",
+    }
+    # Enigma was stopped before the settings were restored and started again afterwards.
+    assert "init 4 || exit $?; sleep 3" in receiver.commands
+    assert receiver.commands.index("init 4 || exit $?; sleep 3") < next(
+        index for index, command in enumerate(receiver.commands) if " restore " in command
+    )
+    assert "init 3" in receiver.commands
 async def test_rollback_restarts_enigma_when_restore_transport_raises(
     credentials: SshCredentials,
 ) -> None:
