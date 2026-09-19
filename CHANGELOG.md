@@ -72,7 +72,8 @@ Found by running this release against a real receiver rather than a test one.
   created for a box that had already answered — so on a real receiver they were never created
   at all. They also survive a reload now: only switching the option off removes them.
 - **An OSCam version with a build suffix is shown** instead of nothing. Real builds report
-  versions like `1.20_svn build r11718-079`, which the version check had no room for.
+  versions like `1.20_svn build r11718-079`, which the version check had no room for. A
+  receiver installed from the bundle shipped here now reports that version too.
 - **The Wake-on-LAN address is redacted** from the diagnostics download, like every other
   hardware address in it.
 
