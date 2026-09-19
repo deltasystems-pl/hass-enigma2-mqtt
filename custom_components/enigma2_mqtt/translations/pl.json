@@ -497,7 +497,8 @@
     },
     "update_version_unknown": {"message": "Dekoder nie zgłosił zainstalowanej wersji wtyczki."},
     "update_downgrade": {"message": "Odmowa zastąpienia nowszej wtyczki starszą wersją z pakietu."},
-    "update_version_unavailable": {"message": "Żądana wersja nie jest dostępna w zweryfikowanym pakiecie integracji lub nie skonfigurowano danych SSH."},
+    "update_version_unavailable": {"message": "Żądana wersja nie jest dostępna w zweryfikowanym pakiecie integracji."},
+    "update_no_credentials": {"message": "Dla tego dekodera nie zapisano danych SSH. Skonfiguruj go ponownie i zaznacz „Zachowaj dane SSH do aktualizacji”, a potem spróbuj jeszcze raz."},
     "update_failed": {"message": "Aktualizacja wtyczki nie powiodła się: {reason}"}
     }
   }

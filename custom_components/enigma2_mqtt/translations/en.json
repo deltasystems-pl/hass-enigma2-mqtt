@@ -516,7 +516,8 @@
     },
     "update_version_unknown": {"message": "The receiver has not reported its installed plugin version."},
     "update_downgrade": {"message": "Refusing to replace a newer plugin with an older bundled version."},
-    "update_version_unavailable": {"message": "The requested version is not available from this integration's verified bundle or SSH credentials are not configured."},
+    "update_version_unavailable": {"message": "The requested version is not available from this integration’s verified bundle."},
+    "update_no_credentials": {"message": "No SSH credentials are stored for this receiver. Reconfigure it and tick “Keep SSH credentials for updates”, then try again."},
     "update_failed": {"message": "Plugin update failed: {reason}"}
     }
   }

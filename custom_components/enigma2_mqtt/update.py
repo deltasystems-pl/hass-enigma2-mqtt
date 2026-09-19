@@ -37,6 +37,19 @@ from .installer import (
 
 PARALLEL_UPDATES = 0
 
+# The installer's phases, in the order it reports them. The update card has one bar, so
+# the phase becomes a percentage; the config flow shows the same phases as words.
+INSTALL_PHASES = (
+    "preflight",
+    "backup",
+    "upload",
+    "install",
+    "provision",
+    "restart",
+    "announcement",
+    "done",
+)
+
 
 def _version(value: str | None) -> Version | None:
     """Parse a plugin version without guessing how an unknown version sorts."""
@@ -97,19 +110,26 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         self._bundled_version = bundled_version
         self._refresh_install_feature()
 
+    def _has_credentials(self) -> bool:
+        """Return whether a complete pinned SSH identity is retained for this box.
+
+        The password is checked the same way as the rest: an empty string is a value
+        Home Assistant will happily store, and advertising an install that is certain
+        to fail authentication is worse than not offering one.
+        """
+        data = self._entry.data
+        return all(
+            isinstance(data.get(key), str) and data[key]
+            for key in (CONF_SSH_HOST, CONF_SSH_USERNAME, CONF_SSH_HOST_KEY, CONF_SSH_PASSWORD)
+        )
+
     def _refresh_install_feature(self) -> None:
         """Expose install only when a complete pinned SSH identity is retained."""
-        data = self._entry.data
-        nonempty = (
-            CONF_SSH_HOST,
-            CONF_SSH_USERNAME,
-            CONF_SSH_HOST_KEY,
-        )
         self._attr_supported_features = (
-            UpdateEntityFeature.INSTALL | UpdateEntityFeature.SPECIFIC_VERSION
-            if self._bundled_version is not None
-            and all(isinstance(data.get(key), str) and data[key] for key in nonempty)
-            and isinstance(data.get(CONF_SSH_PASSWORD), str)
+            UpdateEntityFeature.INSTALL
+            | UpdateEntityFeature.SPECIFIC_VERSION
+            | UpdateEntityFeature.PROGRESS
+            if self._bundled_version is not None and self._has_credentials()
             else UpdateEntityFeature(0)
         )
 
@@ -150,7 +170,11 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         if not self.supported_features & UpdateEntityFeature.INSTALL:
             raise HomeAssistantError(
                 translation_domain="enigma2_mqtt",
-                translation_key="update_version_unavailable",
+                translation_key=(
+                    "update_no_credentials"
+                    if self._bundled_version is not None
+                    else "update_version_unavailable"
+                ),
             )
         request = InstallRequest(
             credentials=SshCredentials(
@@ -165,8 +189,11 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             node_id=data[CONF_NODE_ID],
             base_topic=data.get(CONF_BASE_TOPIC, DEFAULT_BASE_TOPIC),
         )
+        self._attr_in_progress = True
+        self._attr_update_percentage = None
+        self.async_write_ha_state()
         try:
-            await async_install(self.hass, request)
+            await async_install(self.hass, request, self._async_installer_phase)
         except InstallerError as err:
             if err.code in (
                 InstallerErrorCode.AUTH_FAILED,
@@ -178,3 +205,19 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
                 translation_key="update_failed",
                 translation_placeholders={"reason": err.code.value},
             ) from err
+        finally:
+            # A spinner that never stops is worse than none: whatever happened, the
+            # entity has to stop claiming an install is still running.
+            self._attr_in_progress = False
+            self._attr_update_percentage = None
+            self.async_write_ha_state()
+
+    @callback
+    def _async_installer_phase(self, phase: str) -> None:
+        """Turn the installer's named phase into a percentage for the update card."""
+        if phase not in INSTALL_PHASES:
+            return
+        self._attr_update_percentage = (INSTALL_PHASES.index(phase) + 1) * 100 // len(
+            INSTALL_PHASES
+        )
+        self.async_write_ha_state()

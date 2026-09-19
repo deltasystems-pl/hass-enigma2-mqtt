@@ -19,7 +19,7 @@ from homeassistant.components.remote import (
     DOMAIN as REMOTE_DOMAIN,
     SERVICE_SEND_COMMAND,
 )
-from homeassistant.components.update import ATTR_VERSION
+from homeassistant.components.update import ATTR_VERSION, UpdateEntityFeature
 from homeassistant.const import ATTR_ENTITY_ID, STATE_OFF, STATE_ON, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -45,6 +45,7 @@ from custom_components.enigma2_mqtt.update import latest_version
 from .conftest import (
     INFO,
     INFO_TOPIC,
+    PLUGIN_VERSION,
     POWER_TOPIC,
     SCREEN,
     SCREEN_TOPIC,
@@ -265,8 +266,8 @@ async def test_the_plugin_version_entity(
 
     state = hass.states.get(PLUGIN)
     assert state.state == STATE_OFF
-    assert state.attributes["installed_version"] == "0.1.0"
-    assert state.attributes["latest_version"] == "0.1.0"
+    assert state.attributes["installed_version"] == PLUGIN_VERSION
+    assert state.attributes["latest_version"] == PLUGIN_VERSION
     assert "enigma2-mqtt-bridge/releases" in state.attributes["release_url"]
 
 
@@ -331,7 +332,7 @@ async def test_update_installs_bundle_without_reprovisioning(
         await hass.services.async_call(
             "update",
             "install",
-            {ATTR_ENTITY_ID: PLUGIN, ATTR_VERSION: "0.1.0"},
+            {ATTR_ENTITY_ID: PLUGIN, ATTR_VERSION: PLUGIN_VERSION},
             blocking=True,
         )
 
@@ -370,7 +371,7 @@ async def test_missing_bundle_keeps_diagnostic_entity_without_install(
         await async_setup_box(hass, config_entry)
 
     state = hass.states.get(PLUGIN)
-    assert state.attributes["installed_version"] == "0.1.0"
+    assert state.attributes["installed_version"] == PLUGIN_VERSION
     assert state.attributes["supported_features"] == 0
 
 
@@ -404,7 +405,7 @@ async def test_auth_failure_starts_isolated_reauth(
             await hass.services.async_call(
                 "update",
                 "install",
-                {ATTR_ENTITY_ID: PLUGIN, ATTR_VERSION: "0.1.0"},
+                {ATTR_ENTITY_ID: PLUGIN, ATTR_VERSION: PLUGIN_VERSION},
                 blocking=True,
             )
 
@@ -425,7 +426,7 @@ async def test_unparseable_installed_version_cannot_be_overwritten(
             **config_entry.data,
             CONF_SSH_HOST: "192.0.2.12",
             CONF_SSH_USERNAME: "root",
-            CONF_SSH_PASSWORD: "",
+            CONF_SSH_PASSWORD: "example-only",
             CONF_SSH_HOST_KEY: "ssh-ed25519 example-only",
         },
     )
@@ -439,3 +440,118 @@ async def test_unparseable_installed_version_cannot_be_overwritten(
         await hass.services.async_call(
             "update", "install", {ATTR_ENTITY_ID: PLUGIN}, blocking=True
         )
+
+
+async def test_an_empty_stored_password_does_not_advertise_an_install(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """An empty string is a value Home Assistant will store just as happily as a password.
+
+    The other three fields were checked for emptiness and the password only for being a
+    string, so an entry with a blank password offered an install that was certain to
+    fail authentication — and failing authentication starts a reauth flow at somebody
+    who never asked for one.
+    """
+    config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        config_entry,
+        data={
+            **config_entry.data,
+            CONF_SSH_HOST: "192.0.2.12",
+            CONF_SSH_USERNAME: "root",
+            CONF_SSH_PASSWORD: "",
+            CONF_SSH_HOST_KEY: "ssh-ed25519 example-only",
+        },
+    )
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.states.get(PLUGIN).attributes["supported_features"] == 0
+
+
+async def test_an_install_without_credentials_says_which_setting_is_missing(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """„The requested version is not available" is true and useless; this is actionable."""
+    config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        config_entry,
+        data={
+            **config_entry.data,
+            CONF_SSH_HOST: "192.0.2.12",
+            CONF_SSH_USERNAME: "root",
+            CONF_SSH_PASSWORD: "example-only",
+            CONF_SSH_HOST_KEY: "ssh-ed25519 example-only",
+        },
+    )
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+    entity = hass.data["entity_components"]["update"].get_entity(PLUGIN)
+    hass.config_entries.async_update_entry(
+        config_entry,
+        data={key: value for key, value in config_entry.data.items() if key != CONF_SSH_PASSWORD},
+    )
+
+    with pytest.raises(HomeAssistantError) as raised:
+        await entity.async_install(version=None, backup=False)
+
+    assert raised.value.translation_key == "update_no_credentials"
+
+
+async def test_an_install_reports_progress_and_always_stops_reporting_it(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """An install takes minutes; a card that shows nothing looks like a card that failed.
+
+    The spinner also has to stop when the install does not succeed, or the entity claims
+    for ever that something is still running.
+    """
+    config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        config_entry,
+        data={
+            **config_entry.data,
+            CONF_SSH_HOST: "192.0.2.12",
+            CONF_SSH_USERNAME: "root",
+            CONF_SSH_PASSWORD: "example-only",
+            CONF_SSH_HOST_KEY: "ssh-ed25519 example-only",
+        },
+    )
+    seen: list[tuple[bool, int | None]] = []
+
+    async def reporting_install(hass_, request, progress_cb=None):
+        del hass_, request
+        for phase in ("preflight", "install", "done"):
+            progress_cb(phase)
+            state = hass.states.get(PLUGIN)
+            seen.append((state.attributes["in_progress"], state.attributes["update_percentage"]))
+        raise InstallerError(InstallerErrorCode.RESTART_FAILED)
+
+    with patch("custom_components.enigma2_mqtt.update.async_install", reporting_install):
+        assert await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+        assert (
+            hass.states.get(PLUGIN).attributes["supported_features"]
+            & UpdateEntityFeature.PROGRESS
+        )
+        with pytest.raises(HomeAssistantError, match="restart_failed"):
+            await hass.services.async_call(
+                "update",
+                "install",
+                {ATTR_ENTITY_ID: PLUGIN, ATTR_VERSION: PLUGIN_VERSION},
+                blocking=True,
+            )
+
+    assert seen == [(True, 12), (True, 50), (True, 100)]
+    final = hass.states.get(PLUGIN)
+    assert final.attributes["in_progress"] is False
+    assert final.attributes["update_percentage"] is None

@@ -497,7 +497,8 @@
     },
     "update_version_unknown": {"message": "Der Receiver hat seine installierte Plugin-Version nicht gemeldet."},
     "update_downgrade": {"message": "Ein neueres Plugin wird nicht durch eine ältere gebündelte Version ersetzt."},
-    "update_version_unavailable": {"message": "Die angeforderte Version ist nicht im geprüften Integrationspaket verfügbar oder SSH-Zugangsdaten sind nicht eingerichtet."},
+    "update_version_unavailable": {"message": "Die angeforderte Version ist nicht im geprüften Integrationspaket verfügbar."},
+    "update_no_credentials": {"message": "Für diesen Receiver sind keine SSH-Zugangsdaten gespeichert. Richte ihn neu ein, setze den Haken bei „SSH-Zugangsdaten für Updates behalten“ und versuche es erneut."},
     "update_failed": {"message": "Plugin-Aktualisierung fehlgeschlagen: {reason}"}
     }
   }
