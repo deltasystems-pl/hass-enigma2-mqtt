@@ -3,7 +3,12 @@
   "config": {
     "flow_title": "{name}",
     "step": {
-      "user": {"menu_options": {"manual": "Use an existing MQTT Bridge plugin", "install": "Install MQTT Bridge over SSH"}},
+      "user": {
+        "menu_options": {
+          "manual": "Use an existing MQTT Bridge plugin",
+          "install": "Install MQTT Bridge over SSH"
+        }
+      },
       "confirm": {
         "title": "Add this Enigma2 receiver",
         "description": "Enigma2 box {name} ({boxtype}, {image}) has announced itself on the broker.\n\nAdding it switches the box into integration mode: the plugin withdraws the MQTT discovery entities it publishes on its own, and Home Assistant builds the device instead. The box has to confirm the switch before it is added."
@@ -24,11 +29,25 @@
           "receiver_host": "Hostname or IP address used only for the device link and as a suggestion when configuring SSH. MQTT-only setups may leave it empty."
         }
       },
-      "install": {"title": "Connect to the receiver", "description": "Home Assistant reads the SSH host key before asking for a password.", "data": {"ssh_host": "Receiver host", "ssh_port": "SSH port"}},
-      "install_confirm": {"title": "Confirm receiver identity and install", "description": "Confirm SSH fingerprint `{fingerprint}` before sending credentials.", "data": {"ssh_username": "SSH username", "ssh_password": "SSH password", "broker_host": "MQTT broker host", "broker_port": "MQTT broker port", "broker_username": "MQTT username", "broker_password": "MQTT password", "node_id": "Node ID", "base_topic": "Base topic", "name": "Name", "keep_ssh_credentials": "Keep SSH credentials for updates"}},
+      "install": {
+        "title": "Connect to the receiver",
+        "description": "Home Assistant reads the SSH host key before asking for a password.",
+        "data": {"ssh_host": "Receiver host", "ssh_port": "SSH port"}
+      },
+      "install_confirm": {
+        "title": "Confirm receiver identity and install",
+        "description": "Confirm SSH fingerprint `{fingerprint}` before sending credentials. The plugin is installed from the bundle shipped with this integration.",
+        "data": {"ssh_username": "SSH username", "ssh_password": "SSH password", "broker_host": "MQTT broker host", "broker_port": "MQTT broker port", "broker_username": "MQTT username", "broker_password": "MQTT password", "node_id": "Node ID", "base_topic": "Base topic", "name": "Name", "keep_ssh_credentials": "Keep SSH credentials for updates"}
+      },
       "install_progress": {"title": "Installing MQTT Bridge"},
-      "reauth": {"title": "Update SSH credentials", "data": {"ssh_username": "SSH username", "ssh_password": "SSH password"}},
-      "reauth_confirm_host_key": {"title": "SSH host key changed", "description": "Only continue if the receiver now shows fingerprint `{fingerprint}`."},
+      "reauth": {
+        "title": "Update SSH credentials",
+        "data": {"ssh_username": "SSH username", "ssh_password": "SSH password"}
+      },
+      "reauth_confirm_host_key": {
+        "title": "SSH host key changed",
+        "description": "Only continue if the receiver now shows fingerprint `{fingerprint}`."
+      },
       "reconfigure": {
         "title": "Change where this receiver publishes",
         "description": "Use this after changing the node ID or the base topic on the receiver's own setup screen.\n\nChanging the node ID changes the receiver's identity: its entities are rebuilt with new IDs and their history stays with the old device, which is removed. Changing only the base topic or the name keeps everything.",
