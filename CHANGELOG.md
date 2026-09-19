@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Planned as 0.2.0. Everything below has landed since 0.1.0 and is not released yet: the
+guided installer, the update path and the new diagnostics have been tested locally but
+have not been accepted on a receiver, and no tag has been cut.
+
 ### Added
 
 - **The receiver as a media player.** What is on and what is next, the channel list of the
@@ -60,9 +64,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and would welcome a native speaker.
 
 ### Changed
-
-- M4 remains a development candidate: the installer and update path are locally tested but
-  have not completed live receiver acceptance and are not a published release.
 
 - **The diagnostics download now carries the last payload of every state topic.** The screen
   grab appears as a size and a timestamp, the channel list as its shape, and the remote keys

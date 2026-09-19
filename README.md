@@ -86,7 +86,8 @@ about 45 seconds instead of at the end of a poll cycle.
 
 | Integration | Plugin | Status |
 |---|---|---|
-| 0.1.0 | 0.1.0 | current |
+| 0.2.0 (unreleased) | 0.2.0 (unreleased) | in development |
+| 0.1.0 | 0.1.0 | current release |
 
 The integration refuses nothing when the versions differ, but the `update` entity tells you
 when the box runs a plugin older than the one this release was written against.
