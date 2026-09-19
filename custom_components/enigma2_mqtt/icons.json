@@ -1,0 +1,137 @@
+{
+  "entity": {
+    "binary_sensor": {
+      "recording": {
+        "default": "mdi:record-rec",
+        "state": {
+          "off": "mdi:radiobox-blank"
+        }
+      },
+      "recording_disk": {
+        "default": "mdi:harddisk",
+        "state": {
+          "off": "mdi:harddisk-remove"
+        }
+      }
+    },
+    "button": {
+      "deep_standby": {
+        "default": "mdi:power-off"
+      },
+      "reboot": {
+        "default": "mdi:restart-alert"
+      },
+      "refresh_discovery": {
+        "default": "mdi:cloud-refresh-variant"
+      },
+      "restart_gui": {
+        "default": "mdi:restart"
+      },
+      "screenshot": {
+        "default": "mdi:camera"
+      },
+      "wake": {
+        "default": "mdi:sleep-off"
+      }
+    },
+    "event": {
+      "key": {
+        "default": "mdi:remote"
+      }
+    },
+    "image": {
+      "screen": {
+        "default": "mdi:television-play"
+      }
+    },
+    "notify": {
+      "osd": {
+        "default": "mdi:message-text"
+      }
+    },
+    "number": {
+      "volume": {
+        "default": "mdi:volume-high"
+      }
+    },
+    "remote": {
+      "remote": {
+        "default": "mdi:remote-tv"
+      }
+    },
+    "sensor": {
+      "active_recordings": {
+        "default": "mdi:record-rec"
+      },
+      "agc": {
+        "default": "mdi:signal-variant"
+      },
+      "ber": {
+        "default": "mdi:alert-decagram-outline"
+      },
+      "channel": {
+        "default": "mdi:television-classic"
+      },
+      "next_program": {
+        "default": "mdi:skip-next-circle-outline"
+      },
+      "next_timer": {
+        "default": "mdi:timer-outline"
+      },
+      "program": {
+        "default": "mdi:television-guide"
+      },
+      "snr": {
+        "default": "mdi:signal"
+      },
+      "uptime": {
+        "default": "mdi:clock-start"
+      }
+    },
+    "switch": {
+      "mute": {
+        "default": "mdi:volume-high",
+        "state": {
+          "on": "mdi:volume-off"
+        }
+      },
+      "power": {
+        "default": "mdi:power"
+      }
+    },
+    "update": {
+      "plugin": {
+        "default": "mdi:puzzle"
+      }
+    }
+  },
+  "services": {
+    "add_timer": {
+      "service": "mdi:timer-plus"
+    },
+    "delete_timer": {
+      "service": "mdi:timer-remove"
+    },
+    "get_epg_grid": {
+      "service": "mdi:television-guide"
+    },
+    "message": {
+      "service": "mdi:message-text"
+    },
+    "record": {
+      "service": "mdi:record-rec"
+    },
+    "screenshot": {
+      "service": "mdi:camera"
+    },
+    "send_key": {
+      "service": "mdi:remote"
+    },
+    "set_ha_mode": {
+      "service": "mdi:home-assistant"
+    },
+    "zap": {
+      "service": "mdi:television-classic"
+    }
+  }
+}

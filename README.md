@@ -19,10 +19,10 @@ inside enigma2 and publishes the moment something happens — a zap, a programme
 standby, a recording, a volume step, a key on the remote. This integration turns those
 topics into a native `media_player`, a `remote`, an OSD `notify` target and device triggers.
 
-> **Status — M1.** The repository is public from its first commit. Setting a box up works:
-> a receiver is discovered or added by hand, switched into integration mode and shown as a
-> device with a diagnostics download. The entities described below arrive in M3 and the
-> guided installer in M4.
+> **Status — M3.** Everything below is built and tested: a receiver is discovered or added by
+> hand, switched into integration mode, and turns into twenty-six entities, nine actions and
+> eight device triggers. The guided installer — putting the plugin on the box over SSH, and
+> updating it from here — arrives in M4; until then install the plugin yourself.
 
 ## What you get
 
@@ -31,7 +31,7 @@ One receiver becomes **one device** with these entities (display names are Polis
 
 | Platform | Name | What it shows or does |
 |---|---|---|
-| `media_player` | *Dekoder salon* (the device name) | off / standby / playing, the channel list of the bouquets you choose, `select_source`, `play_media` by service reference or channel name, `browse_media` through bouquets, volume and mute, channel ± , the screen grab as artwork |
+| `media_player` | *Dekoder salon* (the device name) | off or playing, the channel list of the bouquets you choose, `select_source`, `play_media` by service reference or channel name, `browse_media` through bouquets, volume and mute, channel ± , the screen grab as artwork |
 | `remote` | *Pilot* | `send_command` with `KEY_*` names; `hold_secs` makes it a long press |
 | `notify` | *Ekran OSD* | a message on the television screen |
 | `event` | *Pilot – klawisz* | every remote key as an event, with `press` = short or long |
@@ -41,7 +41,7 @@ One receiver becomes **one device** with these entities (display names are Polis
 | `switch` | *Zasilanie*, *Wyciszenie* | standby, mute |
 | `number` | *Głośność* | volume 0–100 |
 | `button` | *Głębokie uśpienie*, *Restart GUI*, *Restart*, *Obudź (WoL)*, *Zrzut ekranu*, *Odśwież discovery* | one-shot box actions; deep standby and reboot stay hidden until you enable them |
-| `update` | *Wtyczka MQTT Bridge* | the plugin version on the box against the one this release bundles |
+| `update` | *Wtyczka MQTT Bridge* | the plugin version on the box against the one this release expects (installing from here is M4) |
 | device triggers | red / green / yellow / blue × short / long | remote keys as automation triggers |
 
 Plus the actions `zap`, `send_key`, `message`, `add_timer`, `delete_timer`, `record`,
@@ -84,7 +84,7 @@ about 45 seconds instead of at the end of a poll cycle.
 | 0.1.0 | 0.1.0 | current |
 
 The integration refuses nothing when the versions differ, but the `update` entity tells you
-when the box runs a plugin older than the one this release bundles.
+when the box runs a plugin older than the one this release was written against.
 
 ## Installation
 

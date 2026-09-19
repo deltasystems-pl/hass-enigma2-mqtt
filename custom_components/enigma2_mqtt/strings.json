@@ -20,24 +20,345 @@
           "node_id": "The receiver's node ID, shown on the plugin's setup screen. It is the box type and the last six digits of the MAC address, for example `vuuno4kse_005301`.",
           "name": "What to call this receiver in Home Assistant. Left empty, the name the plugin reports is used."
         }
+      },
+      "reconfigure": {
+        "title": "Change where this receiver publishes",
+        "description": "Use this after changing the node ID or the base topic on the receiver's own setup screen.\n\nChanging the node ID changes the receiver's identity: its entities are rebuilt with new IDs and their history stays with the old device, which is removed. Changing only the base topic or the name keeps everything.",
+        "data": {
+          "base_topic": "Base topic",
+          "node_id": "Node ID",
+          "name": "Name"
+        },
+        "data_description": {
+          "base_topic": "The prefix the receiver publishes under, as Home Assistant sees it on the broker.",
+          "node_id": "The receiver's node ID, shown on the plugin's setup screen.",
+          "name": "What to call this receiver in Home Assistant."
+        }
       }
     },
     "error": {
       "no_ack": "The receiver did not confirm the mode switch. Check that the plugin is running and that its broker login may write to this node's topics.",
       "not_found": "No receiver was found on this topic. Check the base topic and the node ID on the plugin's setup screen.",
-      "invalid_topic": "That is not a usable topic. The base topic and the node ID must not contain the `+` or `#` wildcards."
+      "invalid_topic": "That is not a usable topic. The base topic and the node ID must not contain the `+` or `#` wildcards.",
+      "already_configured": "Another receiver is already configured with that node ID."
     },
     "abort": {
       "already_configured": "Device is already configured",
       "already_in_progress": "This receiver is already being added.",
       "mqtt_unavailable": "The MQTT integration is not available. Set it up first, then add the receiver.",
       "not_enigma2_announcement": "That message is not an Enigma2 MQTT Bridge announcement.",
-      "retracted": "The receiver has withdrawn its announcement."
+      "retracted": "The receiver has withdrawn its announcement.",
+      "reconfigure_successful": "The receiver was updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Receiver options",
+        "description": "The receiver reports the MAC address {mac}. Magic packets go there unless another one is given below.",
+        "data": {
+          "dangerous_buttons": "Show the deep standby and reboot buttons",
+          "wol_mac": "Wake-on-LAN MAC address",
+          "bouquets": "Bouquets to offer"
+        },
+        "data_description": {
+          "dangerous_buttons": "Deep standby takes the receiver off the network until a magic packet wakes it, and reboot interrupts whatever it is doing. Both are hidden by default so that neither is one mis-tap away on a shared dashboard. The plugin refuses both while a recording is running, whatever is set here.",
+          "wol_mac": "Leave empty to use the address the receiver reports. Set it when the receiver reports a different interface from the one that is plugged in — a box on Wi-Fi does not answer a magic packet sent to its cable port.",
+          "bouquets": "Which bouquets the channel list and the media browser offer. Leave empty for every bouquet the receiver publishes."
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "recording": {
+        "name": "Recording"
+      },
+      "recording_disk": {
+        "name": "Recording disk"
+      }
+    },
+    "button": {
+      "deep_standby": {
+        "name": "Deep standby"
+      },
+      "restart_gui": {
+        "name": "Restart GUI"
+      },
+      "reboot": {
+        "name": "Reboot"
+      },
+      "wake": {
+        "name": "Wake"
+      },
+      "screenshot": {
+        "name": "Screenshot"
+      },
+      "refresh_discovery": {
+        "name": "Refresh discovery"
+      }
+    },
+    "event": {
+      "key": {
+        "name": "Key"
+      }
+    },
+    "image": {
+      "screen": {
+        "name": "Screen"
+      }
+    },
+    "notify": {
+      "osd": {
+        "name": "OSD"
+      }
+    },
+    "number": {
+      "volume": {
+        "name": "Volume"
+      }
+    },
+    "remote": {
+      "remote": {
+        "name": "Remote"
+      }
+    },
+    "sensor": {
+      "channel": {
+        "name": "Channel"
+      },
+      "program": {
+        "name": "Program"
+      },
+      "next_program": {
+        "name": "Next program"
+      },
+      "active_recordings": {
+        "name": "Active recordings"
+      },
+      "next_timer": {
+        "name": "Next timer"
+      },
+      "snr": {
+        "name": "SNR"
+      },
+      "agc": {
+        "name": "AGC"
+      },
+      "ber": {
+        "name": "BER"
+      },
+      "uptime": {
+        "name": "Uptime"
+      }
+    },
+    "switch": {
+      "power": {
+        "name": "Power"
+      },
+      "mute": {
+        "name": "Mute"
+      }
+    },
+    "update": {
+      "plugin": {
+        "name": "Plugin"
+      }
+    }
+  },
+  "device_automation": {
+    "trigger_type": {
+      "red_short": "Red button pressed",
+      "red_long": "Red button held",
+      "green_short": "Green button pressed",
+      "green_long": "Green button held",
+      "yellow_short": "Yellow button pressed",
+      "yellow_long": "Yellow button held",
+      "blue_short": "Blue button pressed",
+      "blue_long": "Blue button held"
+    }
+  },
+  "services": {
+    "zap": {
+      "name": "Zap",
+      "description": "Tunes the receiver to a channel, by service reference or by name. Give exactly one of the two.",
+      "fields": {
+        "sref": {
+          "name": "Service reference",
+          "description": "The channel's service reference, trailing colon included. This is the identifier that never changes."
+        },
+        "name": {
+          "name": "Channel name",
+          "description": "The channel's name as the bouquet spells it. Refused by the receiver when more than one channel in its configured bouquets has that name."
+        }
+      }
+    },
+    "send_key": {
+      "name": "Send key",
+      "description": "Injects a remote control key into the receiver, as if somebody had pressed it.",
+      "fields": {
+        "key": {
+          "name": "Key",
+          "description": "The key name, such as `KEY_RED`. `red` works too."
+        },
+        "long": {
+          "name": "Long press",
+          "description": "Send it as a held button rather than a tap."
+        }
+      }
+    },
+    "message": {
+      "name": "Show message",
+      "description": "Puts a popup on the television. The receiver cuts the text at 500 characters.",
+      "fields": {
+        "text": {
+          "name": "Text",
+          "description": "What the popup says."
+        },
+        "type": {
+          "name": "Type",
+          "description": "Which icon and colour the popup uses."
+        },
+        "timeout": {
+          "name": "Timeout",
+          "description": "How long the popup stays on screen, in seconds."
+        }
+      }
+    },
+    "add_timer": {
+      "name": "Add timer",
+      "description": "Adds a recording timer, either from an EPG event or from a start and end time. Give the event ID, or both times — not both forms.",
+      "fields": {
+        "sref": {
+          "name": "Service reference",
+          "description": "The channel to record."
+        },
+        "event_id": {
+          "name": "Event ID",
+          "description": "The EPG event to record. Prefer this: the receiver resolves the event itself, so the timer gets the programme's name and the padding the box is set up with."
+        },
+        "begin": {
+          "name": "Start",
+          "description": "When to start recording, for a manual window."
+        },
+        "end": {
+          "name": "End",
+          "description": "When to stop recording, for a manual window."
+        },
+        "name": {
+          "name": "Name",
+          "description": "What to call the recording, for a manual window."
+        }
+      }
+    },
+    "delete_timer": {
+      "name": "Delete timer",
+      "description": "Deletes a recording timer. enigma2 identifies a timer by its channel, start and end, so all three are needed.",
+      "fields": {
+        "sref": {
+          "name": "Service reference",
+          "description": "The timer's channel."
+        },
+        "begin": {
+          "name": "Start",
+          "description": "The timer's start time."
+        },
+        "end": {
+          "name": "End",
+          "description": "The timer's end time."
+        }
+      }
+    },
+    "record": {
+      "name": "Record",
+      "description": "Starts or stops an instant recording of whatever is on.",
+      "fields": {
+        "action": {
+          "name": "Action",
+          "description": "Start or stop the recording."
+        }
+      }
+    },
+    "screenshot": {
+      "name": "Take a screenshot",
+      "description": "Captures what is on the television now and publishes it, which is what refreshes the Screen image entity."
+    },
+    "set_ha_mode": {
+      "name": "Set Home Assistant mode",
+      "description": "Switches how the receiver presents itself: through this integration, through MQTT discovery, or not at all. Switching away from integration mode leaves this integration's entities without anything updating them.",
+      "fields": {
+        "mode": {
+          "name": "Mode",
+          "description": "Which mode the plugin should run in."
+        }
+      }
+    },
+    "get_epg_grid": {
+      "name": "Get the EPG grid",
+      "description": "Returns what is on, per bouquet, as the receiver last published it. Use it in a template or a script; it is deliberately not an entity attribute, because a grid is tens of kilobytes per bouquet and would be written to the recorder database on every refresh.",
+      "fields": {
+        "bouquet": {
+          "name": "Bouquet",
+          "description": "One bouquet, by name or by slug. Left empty, every published bouquet is returned."
+        }
+      }
+    }
+  },
+  "selector": {
+    "message_type": {
+      "options": {
+        "info": "Information",
+        "warning": "Warning",
+        "error": "Error"
+      }
+    },
+    "record_action": {
+      "options": {
+        "start": "Start",
+        "stop": "Stop"
+      }
+    },
+    "ha_mode": {
+      "options": {
+        "discovery": "MQTT discovery",
+        "integration": "This integration",
+        "off": "Neither"
+      }
     }
   },
   "exceptions": {
     "mqtt_not_available": {
       "message": "The MQTT integration is not available, so the receiver cannot be reached."
+    },
+    "command_failed": {
+      "message": "The receiver refused `{command}`: {error}"
+    },
+    "command_timeout": {
+      "message": "The receiver did not carry out `{command}`. Check that it is on and that the plugin is running."
+    },
+    "zap_needs_one": {
+      "message": "Give either a service reference or a channel name, not both and not neither."
+    },
+    "timer_needs_event_or_window": {
+      "message": "A timer needs either an event ID or both a start and an end time."
+    },
+    "timer_takes_one_form": {
+      "message": "Give an event ID or a start and end time, not both."
+    },
+    "unknown_bouquet": {
+      "message": "The receiver has published no EPG grid for the bouquet {bouquet}."
+    },
+    "unknown_channel": {
+      "message": "No channel called {channel} is in the bouquets this receiver offers."
+    },
+    "unsupported_media_type": {
+      "message": "A receiver can play a channel, not {media_type}."
+    },
+    "wake_on_lan_unavailable": {
+      "message": "The Wake on LAN integration is not set up, so no magic packet can be sent. Add it from Settings, then try again."
+    },
+    "no_mac": {
+      "message": "This receiver has not reported a MAC address, so there is nowhere to send a magic packet. Set one in the integration's options."
     }
   }
 }

@@ -63,105 +63,247 @@ never arrived.
 The node id is the entry's unique id, so the same box cannot be added twice by either path,
 and a box that renames itself updates the entry it already owns.
 
-**Options and reconfigure arrive in M3** — screenshot policy, key events, deep-standby button
-visibility, the Wake-on-LAN MAC and which bouquets feed the channel list. Until then the two
-fields above are the whole configuration; to change one, remove the box and add it again.
+### Options
+
+*Settings → Devices & Services → Enigma2 MQTT → Configure.* Three preferences, all about this
+end of the link rather than about the box; saving them reloads the entry, so a change takes
+effect without a restart.
+
+| Option | Default | What it does |
+|---|---|---|
+| **Show the deep standby and reboot buttons** | off | Creates the „Głębokie uśpienie" and „Restart" buttons. Turning it off again removes them from the entity registry rather than leaving them behind unavailable. This is about what appears on a dashboard, **not** a safety mechanism: the plugin refuses both commands while a recording is running whatever is set here. |
+| **Wake-on-LAN MAC address** | the address the box reports on `info` | The target of the magic packet the „Obudź (WoL)" button and `media_player.turn_on` send. Set it when the receiver reports a different interface from the one that is plugged in — a box on Wi-Fi does not answer a packet sent to its cable port. |
+| **Bouquets to offer** | every bouquet the box publishes | Which bouquets feed the media player's channel list and the media browser. The choices are the bouquets on the `channels` topic, and a name can be typed for one the box has not published yet. This narrows the plugin's own `bouquets_for_select`; it cannot widen it. |
+
+The screenshot policy and key publishing are settings **on the box**, not here: they decide
+what is published at all, so they belong where the publishing happens.
+
+### Reconfigure
+
+*…→ Enigma2 MQTT → the receiver → Reconfigure.* This is for following a box whose **node ID**
+or **base topic** was changed on the plugin's own setup screen. The flow checks that a box
+really answers on the new topic before it saves anything.
+
+🔴 **A changed node ID is a changed identity.** Every unique id is `<node_id>_<key>`, so a box
+with a new node ID is, as far as Home Assistant can tell, a different device doing the same
+job. The old device is removed — with its entities and their history — and the reload builds
+the box again under its new name. Changing only the base topic or the display name keeps
+everything.
 
 ## 4. Entities
 
-*Arrives in M3.* Unique ids follow one scheme: `<node_id>_<key>`, where the key is the
-English translation key of the entity. Entity ids derive from the same key, so they are
-stable in every language; only the display name changes.
+Twenty-six entities on one device. Unique ids follow one scheme: `<node_id>_<key>`, where the
+key is the English translation key of the entity. Entity ids derive from the same key, so
+`sensor.dekoder_salon_channel` is `sensor.dekoder_salon_channel` in every language and only
+the display name changes.
+
+Two rules run through the table. **An entity is unavailable when the box is offline, and also
+when the topic it reads has never arrived** — an image that gave the plugin no tuner hook
+publishes no `tuner` topic, and three sensors that say nothing are better than three that
+invent a zero. **The media player and the wake button are the exceptions**: they stay usable
+while the box is unreachable, because that is precisely when somebody wants to wake it.
 
 ### 4.1 Media player
 
-| Key | Polish name | unique_id |
-|---|---|---|
-| (the device itself) | *Dekoder salon* | `<node_id>_media_player` |
+| Key | Polish name | unique_id | Topics |
+|---|---|---|---|
+| (the device itself) | *Dekoder salon* | `<node_id>_media_player` | `power`, `service`, `epg`, `volume`, `screen`, `channels` |
+
+- **State** — `playing` when `power` is `on` and the box is online, `off` otherwise. Standby
+  and deep standby are both `off`: `MediaPlayerState.STANDBY` was deprecated in Home Assistant
+  2026.8, and what the household sees is a dark television either way. The „Zasilanie" switch
+  and the device's availability tell the two apart for anyone who needs it.
+- **Source** — the current channel name; the source list is the channels of the selected
+  bouquets, in bouquet order, with a duplicate name listed once. Selecting one publishes
+  `cmd/zap {"name": …}` when that name is unique, and the service reference when it is not —
+  the plugin refuses an ambiguous name, and rightly, but a person picking a name off a list
+  has already made the choice it is refusing to make.
+- **Browsing** — bouquets, then channels, each with the picon the box's own web interface
+  serves at `http://<ip>/picon/<sref>.png`. Picons are not published over MQTT; no address on
+  `info` simply means no thumbnail.
+- **Playing** — `media_content_type: channel` takes a service reference, and `channel_name`
+  takes a name. The browser sends the first.
+- **Volume** — set, step and mute, on the box's own 0–100 scale underneath.
+- **Turning on** — `cmd/power on` when the box is listening, a Wake-on-LAN magic packet when
+  it is not. Turning off is always `cmd/power standby`; nothing here sends deep standby.
+- **Picture** — the retained `screen` JPEG is both the media image and the entity picture, and
+  its hash changes with every frame so the browser fetches the new one.
+- **Position** — from `epg.now`, so the progress bar is the programme, not a stream.
 
 ### 4.2 Remote, notify, event, image
 
-| Key | Polish name | unique_id |
-|---|---|---|
-| `remote` | *Pilot* | `<node_id>_remote` |
-| `osd` | *Ekran OSD* | `<node_id>_osd` |
-| `remote_key` | *Pilot – klawisz* | `<node_id>_remote_key` |
-| `screen` | *Ekran* | `<node_id>_screen` |
+| Key | Polish name | unique_id | Source |
+|---|---|---|---|
+| `remote` | *Pilot* | `<node_id>_remote` | `power` / `cmd/key` |
+| `osd` | *Ekran OSD* | `<node_id>_osd` | `cmd/message` |
+| `key` | *Pilot – klawisz* | `<node_id>_key` | `key` |
+| `screen` | *Ekran* | `<node_id>_screen` | `screen` |
+
+- **Pilot** — `remote.send_command` takes `KEY_RED` and `red` alike; spaces are dropped, since
+  the Linux names run the words together (`channel up` is `KEY_CHANNELUP`). `hold_secs`
+  greater than zero sends a long press, `delay_secs` spaces a sequence out, `num_repeats`
+  repeats it. A key name this integration has never heard of is passed through: the box is the
+  side that knows which keys it has, and it answers on `last_error` when it does not.
+- **Ekran OSD** — `notify.send_message` puts a popup on the television. The popup has one text
+  field, so a title becomes the first thing in it rather than being dropped; the text is cut
+  at 500 characters, where the plugin cuts it.
+- **Pilot – klawisz** — fires for every key the box reports, with the key name as the event
+  type and `press` (`short` or `long`) as an attribute. An event entity may only fire types it
+  declared, so a key outside the declared list is logged at debug and dropped here — the bus
+  event below still carries it.
+- **Ekran** — the last screenshot, with the moment it was taken as the state. It is a
+  snapshot, not a live view, and it is unavailable until the first frame arrives.
 
 ### 4.3 Sensors
 
-| Key | Polish name | unique_id |
-|---|---|---|
-| `channel` | *Kanał* | `<node_id>_channel` |
-| `program` | *Program* | `<node_id>_program` |
-| `next_program` | *Następny program* | `<node_id>_next_program` |
-| `active_recordings` | *Aktywne nagrania* | `<node_id>_active_recordings` |
-| `next_timer` | *Następny timer* | `<node_id>_next_timer` |
-| `snr` | *SNR* | `<node_id>_snr` |
-| `agc` | *AGC* | `<node_id>_agc` |
-| `ber` | *BER* | `<node_id>_ber` |
-| `uptime` | *Czas pracy* | `<node_id>_uptime` |
+| Key | Polish name | unique_id | Topic | Notes |
+|---|---|---|---|---|
+| `channel` | *Kanał* | `<node_id>_channel` | `service` | attributes `sref`, `bouquet`, `provider`, `width`, `height` |
+| `program` | *Program* | `<node_id>_program` | `epg` | `epg.now.title`; attributes `begin`, `end` (ISO 8601), `event_id`, `short`, `long` |
+| `next_program` | *Następny program* | `<node_id>_next_program` | `epg` | the same, for `epg.next` |
+| `active_recordings` | *Aktywne nagrania* | `<node_id>_active_recordings` | `recording` | the count; attribute `recordings` is the list |
+| `next_timer` | *Następny timer* | `<node_id>_next_timer` | `recording` | a timestamp, `unknown` when nothing is due |
+| `snr` | *SNR* | `<node_id>_snr` | `tuner` | % · diagnostic · **disabled by default** |
+| `agc` | *AGC* | `<node_id>_agc` | `tuner` | % · diagnostic · **disabled by default** |
+| `ber` | *BER* | `<node_id>_ber` | `tuner` | count · diagnostic · **disabled by default** |
+| `uptime` | *Czas pracy* | `<node_id>_uptime` | `info` | seconds · diagnostic · **disabled by default** |
+
+Times in attributes are ISO 8601 strings rather than the epoch seconds the topics carry,
+because a template can read one and not the other. The long programme description and the list
+of running recordings are excluded from the recorder: they are kilobytes that change every
+quarter of an hour, and a database is not where a plot summary belongs.
 
 ### 4.4 Binary sensors, switches, number
 
-| Key | Polish name | unique_id |
-|---|---|---|
-| `recording` | *Nagrywanie* | `<node_id>_recording` |
-| `hdd` | *Dysk nagrań* | `<node_id>_hdd` |
-| `power` | *Zasilanie* | `<node_id>_power` |
-| `mute` | *Wyciszenie* | `<node_id>_mute` |
-| `volume` | *Głośność* | `<node_id>_volume` |
+| Key | Polish name | unique_id | Topic | Notes |
+|---|---|---|---|---|
+| `recording` | *Nagrywanie* | `<node_id>_recording` | `recording` | device class `running` — what to check before rebooting anything |
+| `recording_disk` | *Dysk nagrań* | `<node_id>_recording_disk` | `hdd` | device class `connectivity`; attributes `path`, `free_mb` |
+| `power` | *Zasilanie* | `<node_id>_power` | `power` | ↔ `cmd/power on\|standby` |
+| `mute` | *Wyciszenie* | `<node_id>_mute` | `volume` | ↔ `cmd/mute ON\|OFF` |
+| `volume` | *Głośność* | `<node_id>_volume` | `volume` | 0–100, the box's own scale ↔ `cmd/volume` |
+
+The switches and the number are optimistic: they move the moment they are pressed and the
+state topic confirms a moment later. That is not `assumed_state` — the box does report back —
+it is the opposite: the answer is coming, and the dashboard should not sit still until it does.
 
 ### 4.5 Buttons and update
 
-| Key | Polish name | unique_id |
-|---|---|---|
-| `deep_standby` | *Głębokie uśpienie* | `<node_id>_deep_standby` |
-| `restart_gui` | *Restart GUI* | `<node_id>_restart_gui` |
-| `reboot` | *Restart* | `<node_id>_reboot` |
-| `wake_on_lan` | *Obudź (WoL)* | `<node_id>_wake_on_lan` |
-| `screenshot` | *Zrzut ekranu* | `<node_id>_screenshot` |
-| `refresh_discovery` | *Odśwież discovery* | `<node_id>_refresh_discovery` |
-| `plugin_update` | *Wtyczka MQTT Bridge* | `<node_id>_plugin_update` |
+| Key | Polish name | unique_id | Command |
+|---|---|---|---|
+| `deep_standby` | *Głębokie uśpienie* | `<node_id>_deep_standby` | `cmd/deep_standby` · **hidden unless the option asks for it** |
+| `restart_gui` | *Restart GUI* | `<node_id>_restart_gui` | `cmd/restart_gui` |
+| `reboot` | *Restart* | `<node_id>_reboot` | `cmd/reboot` · **hidden unless the option asks for it** |
+| `wake` | *Obudź (WoL)* | `<node_id>_wake` | `wake_on_lan.send_magic_packet` — no MQTT, and available while the box is not |
+| `screenshot` | *Zrzut ekranu* | `<node_id>_screenshot` | `cmd/screenshot` |
+| `refresh_discovery` | *Odśwież discovery* | `<node_id>_refresh_discovery` | `cmd/discovery` |
+| `plugin` | *Wtyczka MQTT Bridge* | `<node_id>_plugin` | an `update` entity: installed = `info.plugin`, latest = the plugin release this version was written against |
+
+The version entity **cannot install anything yet** — the installer is M4. It is there because a
+box running an older plugin than the integration expects is the first thing to check when
+something is missing, and the device page is where that should be visible without reading a
+log. A box running a *newer* plugin is reported as up to date: the constant is what this code
+was written against, not what exists.
 
 ## 5. Actions
 
-*Arrives in M3.* Every action takes a device or an entity as its target, and every one is
-answered by the plugin on the matching state topic — a failure raises `HomeAssistantError`
-carrying what the box reported on `last_error`.
+Every action targets the receiver's **media player**, which is how a device, an area or an
+entity all resolve to the same box — Home Assistant expands a device target to the entities of
+the platform an action was registered on, and one box has exactly one media player.
 
 | Action | Fields |
 |---|---|
-| `enigma2_mqtt.zap` | `sref` **or** `name` (a channel name, refused when it is not unique) |
-| `enigma2_mqtt.send_key` | `key` (a `KEY_*` name), `long` (boolean) |
-| `enigma2_mqtt.message` | `text` (≤ 500 characters), `type`, `timeout` |
+| `enigma2_mqtt.zap` | `sref` **or** `name` — exactly one |
+| `enigma2_mqtt.send_key` | `key` (`KEY_RED` or `red`), `long` |
+| `enigma2_mqtt.message` | `text` (cut at 500 characters), `type` (`info`\|`warning`\|`error`), `timeout` |
 | `enigma2_mqtt.add_timer` | `sref` + `event_id`, **or** `sref` + `begin` + `end` + `name` |
 | `enigma2_mqtt.delete_timer` | `sref`, `begin`, `end` |
 | `enigma2_mqtt.record` | `action`: `start` or `stop` |
 | `enigma2_mqtt.screenshot` | — |
 | `enigma2_mqtt.set_ha_mode` | `mode`: `discovery`, `integration` or `off` |
-| `enigma2_mqtt.get_epg_grid` | `bouquet` (M3; **returns a response**, see below) |
+| `enigma2_mqtt.get_epg_grid` | `bouquet` (optional) · **returns a response** |
 
-`get_epg_grid` reads the plugin's retained `epg_grid/<bouquet_slug>` topic and returns the
-grid as the action's response. It is deliberately not a state attribute: a grid runs to tens
-of kilobytes per bouquet, and an attribute of that size is written to the recorder on every
-update.
+`begin` and `end` take a date and time or the epoch seconds the topics use; both end up as
+epoch seconds on the wire.
+
+### How an action knows it worked
+
+The contract has **no acknowledgement topic**: a command is proved by the state topic it moves
+and disproved by `last_error`. So every action that changes something waits up to ten seconds
+for whichever comes first, and raises `HomeAssistantError` carrying the box's own words when
+the box refuses. A retained `last_error` is ignored — that is the complaint the broker had
+before the command was sent, not an answer to it.
+
+| Action | What proves it |
+|---|---|
+| `zap` | `service` names the requested channel |
+| `record` | `recording.active` becomes non-empty, or empty |
+| `add_timer`, `delete_timer` | `timers` is republished |
+| `screenshot` | `screen` is republished |
+| `set_ha_mode` | `info.ha_mode` echoes the new mode |
+| `get_epg_grid` | the grid is already retained; a box with none is asked once |
+
+Two commands move nothing at all — `send_key` and `message` — and for those the only answer
+the contract offers is silence. They wait a second for a complaint and then report success; a
+plugin that clears `last_error` on success ends the wait immediately.
+
+Zapping to the channel that is already on is still sent, but nothing is waited for: there is
+no change coming, and pretending otherwise would mean waiting out the whole timeout.
+
+### `get_epg_grid`
+
+Returns `{"bouquets": [...]}`, assembled from the retained `epg_grid/<bouquet_slug>` topics the
+box publishes, each entry carrying the bouquet's real name and the slug it is addressed by. An
+optional `bouquet` selects one, by either. Like every entity action's response it is keyed by
+the entity it came from:
+
+```yaml
+action: enigma2_mqtt.get_epg_grid
+target:
+  entity_id: media_player.dekoder_salon
+data:
+  bouquet: Ulubione TV
+response_variable: grid
+```
+
+…and then `grid['media_player.dekoder_salon'].bouquets[0].channels`.
+
+It is deliberately not a state attribute anywhere: a grid runs to tens of kilobytes per
+bouquet, and an attribute of that size is written to the recorder database on every refresh.
 
 ## 6. Device triggers
 
-*Arrives in M3.* The colour keys — red, green, yellow, blue — each as a short and a long
-press, offered in the automation editor as device triggers on the receiver. They are built on
-the `event` entity, which carries every key the box reports, so an automation on a key without
-a device trigger is written against that entity instead.
+The colour keys — red, green, yellow, blue — each as a short and a long press: eight triggers
+on the receiver in the automation editor.
+
+| Trigger type | Fires on |
+|---|---|
+| `red_short` … `blue_short` | a tap of that colour key |
+| `red_long` … `blue_long` | that colour key held |
+
+They listen to the `enigma2_mqtt_key` bus event, which carries `device_id`, `node_id`, `key`
+and `press` and is fired for **every** key the box reports. The event is fired by the
+integration itself rather than by the „Pilot – klawisz" entity, so the triggers keep working
+when that entity is disabled — a household that only wants the colour keys in the automation
+editor should not have to keep an entity it never looks at.
+
+Any other key is still reachable: either through the event entity, or through a plain event
+trigger on `enigma2_mqtt_key` with the key name in its event data.
 
 ## 7. Diagnostics
 
 The device page offers a diagnostics download: the config entry, the box's announcement, its
-last `info` payload, the availability flag, the capability list and the device as the registry
-holds it. It is meant to be attached to an issue, so the MAC address, the IP address and the
-configuration URL built from it are redacted, and so are the broker and SSH credential keys —
-those are named in the redaction list before the installer of M4 can create one, rather than
-after. M3 adds the retained state of the remaining topics.
+last `info` payload, the availability flag, the capability list, the last payload of every
+state topic, and the device as the registry holds it. It is meant to be attached to an issue,
+so the MAC address, the IP address and the configuration URL built from it are redacted, and so
+are the broker and SSH credential keys — those are named in the redaction list before the
+installer of M4 can create one, rather than after.
+
+Three things are summarised rather than included, because their contents answer no question a
+bug report asks and describe a household instead. **`screen`** appears as a size and the moment
+it was taken, never as the picture of somebody's television. **`channels`** appears as the
+bouquet names and how many services each holds, not as the channel list. **`key`** does not
+appear at all: it is who pressed what a moment ago, which is not state.
 
 ## 8. Troubleshooting
 

@@ -3,9 +3,10 @@
 Consumes the topics published by the `enigma2-mqtt-bridge` plugin that runs inside
 enigma2 on the receiver, and turns them into a Home Assistant device.
 
-M1 sets up the device and the MQTT plumbing behind it. The entity platforms land in M3;
-`PLATFORMS` is deliberately empty rather than absent, so that milestone only appends to
-a list instead of rewriting the setup.
+The integration takes a box over: on setup it switches the plugin into `integration`
+mode, which makes the plugin retract the MQTT discovery payloads it would otherwise
+publish. From then on the entities below are the only ones the box has, which is why
+this list is long — there is no core MQTT integration filling in the gaps.
 """
 
 from __future__ import annotations
@@ -30,7 +31,21 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = []
+PLATFORMS: list[Platform] = [
+    # The media player first: it is the platform the actions are registered on, and
+    # the one a user opens the device page to find.
+    Platform.MEDIA_PLAYER,
+    Platform.BINARY_SENSOR,
+    Platform.BUTTON,
+    Platform.EVENT,
+    Platform.IMAGE,
+    Platform.NOTIFY,
+    Platform.NUMBER,
+    Platform.REMOTE,
+    Platform.SENSOR,
+    Platform.SWITCH,
+    Platform.UPDATE,
+]
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -54,8 +69,8 @@ async def async_setup_entry(
 
     box = Enigma2Box(hass, entry)
     entry.runtime_data = box
-    await box.async_start()
     box.async_register_device()
+    await box.async_start()
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
