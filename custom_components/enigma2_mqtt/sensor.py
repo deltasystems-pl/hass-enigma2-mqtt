@@ -288,13 +288,15 @@ async def async_setup_entry(
             ).start()
         )
 
-    if "oscam" in box.capabilities:
-        entry.async_on_unload(_OscamEntityManager(hass, box, async_add_entities).start())
-    else:
-        registry = er.async_get(hass)
-        for entry_ in er.async_entries_for_config_entry(registry, entry.entry_id):
-            if entry_.platform == DOMAIN and entry_.unique_id.startswith(f"{box.node_id}_oscam_"):
-                registry.async_remove(entry_.entity_id)
+    # The manager is started whatever the box has said so far, because at this point it
+    # has usually said nothing: `async_setup_entry` subscribes and returns, and the
+    # retained burst that carries `info` — and with it the capability list — arrives
+    # after the platforms have been set up. Reading the capability here meant that on
+    # every real receiver the per-source entities were never created at all, and that
+    # the branch taken instead deleted every `oscam_` registration the box had. The
+    # manager already listens to `info`, so it can decide when there is something to
+    # decide from.
+    entry.async_on_unload(_OscamEntityManager(hass, box, async_add_entities).start())
 
 
 class Enigma2Sensor(Enigma2Entity, SensorEntity):
@@ -423,7 +425,10 @@ class _OscamEntityManager:
     def _update(self) -> None:
         payload = self.box.state.oscam
         if payload is None:
-            if not self.box.oscam_enabled:
+            # Only a stated "off" removes anything, the same rule the fixed optional
+            # entities follow. Before `info` arrives the box has not said "off"; it has
+            # said nothing, and nothing is not a reason to delete somebody's entities.
+            if self.box.telemetry_declared(CONF_OSCAM_TELEMETRY) and not self.box.oscam_enabled:
                 self._remove(self.known)
             return
         readers = payload.get("readers") or []

@@ -307,3 +307,66 @@ async def test_a_version_this_cannot_read_costs_only_the_version(
     assert state["software_running"] is True
     assert state["readers_configured"] == 1
     assert len(state["readers"]) == 1
+
+
+async def test_source_entities_appear_when_the_receiver_answers_after_setup(
+    hass, mqtt_mock, retained, config_entry
+):
+    """This is the order a real receiver uses, and it produced no entities at all.
+
+    `async_setup_entry` subscribes and returns; the retained burst that carries `info`,
+    and with it the capability list, arrives after the platforms have already been set
+    up. The per-source entities were gated on that capability at setup time, so on a
+    live box they were never created — while the aggregate OSCam sensors, which follow
+    `info` rather than reading it once, appeared exactly as expected. The branch taken
+    instead also deleted every `oscam_` registration the box had.
+    """
+    retained[AVAILABILITY_TOPIC] = "online"
+    await async_setup_box(hass, config_entry)
+
+    async_fire_mqtt_message(
+        hass,
+        INFO_TOPIC,
+        json.dumps(
+            {
+                **INFO,
+                "capabilities": [*INFO["capabilities"], "oscam"],
+                "settings": {"oscam_telemetry": True},
+            }
+        ),
+    )
+    async_fire_mqtt_message(hass, OSCAM_TOPIC, json.dumps(payload(READER, SERVER)))
+    await hass.async_block_till_done()
+
+    assert source_entity(hass, READER["id"], "status") is not None
+    assert source_entity(hass, READER["id"], "ready_cards") is not None
+    assert source_entity(hass, SERVER["id"], "status") is not None
+    assert source_entity(hass, SERVER["id"], "shared_cards") is not None
+    assert hass.states.get(source_entity(hass, SERVER["id"], "shared_cards")).state == "4"
+
+
+async def test_a_box_that_has_said_nothing_keeps_the_source_entities_it_had(
+    hass, mqtt_mock, retained, config_entry
+):
+    """A reload is a moment of silence, not an answer of "no".
+
+    Deleting the registrations then would lose every name, area and icon the household
+    had given these entities, on every restart.
+    """
+    retained[AVAILABILITY_TOPIC] = "online"
+    retained[INFO_TOPIC] = json.dumps(
+        {
+            **INFO,
+            "capabilities": [*INFO["capabilities"], "oscam"],
+            "settings": {"oscam_telemetry": True},
+        }
+    )
+    retained[OSCAM_TOPIC] = json.dumps(payload(READER, SERVER))
+    await async_setup_box(hass, config_entry)
+    before = source_entity(hass, READER["id"], "status")
+    assert before is not None
+
+    await hass.config_entries.async_reload(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert source_entity(hass, READER["id"], "status") == before
