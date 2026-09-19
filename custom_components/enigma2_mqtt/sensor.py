@@ -211,9 +211,7 @@ async def async_setup_entry(
     if "cam" not in box.capabilities:
         registry = er.async_get(hass)
         for key in ("cam_system", "cam_ecm_time"):
-            if entity_id := registry.async_get_entity_id(
-                "sensor", DOMAIN, f"{box.node_id}_{key}"
-            ):
+            if entity_id := registry.async_get_entity_id("sensor", DOMAIN, f"{box.node_id}_{key}"):
                 registry.async_remove(entity_id)
 
 
@@ -226,9 +224,7 @@ class Enigma2Sensor(Enigma2Entity, SensorEntity):
     # quarter of an hour. The state is worth recording; these are not.
     _unrecorded_attributes = frozenset({"long", "recordings"})
 
-    def __init__(
-        self, box: Enigma2Box, description: Enigma2SensorDescription
-    ) -> None:
+    def __init__(self, box: Enigma2Box, description: Enigma2SensorDescription) -> None:
         """Set up the sensor from its description."""
         super().__init__(box, description.key, topics=description.topics)
         self.entity_description = description

@@ -322,9 +322,7 @@ class _InfoWatch:
     established: asyncio.Future[None]
     cancel: CALLBACK_TYPE
 
-    async def async_wait_until_established(
-        self, timeout: float = SUBSCRIBE_TIMEOUT
-    ) -> None:
+    async def async_wait_until_established(self, timeout: float = SUBSCRIBE_TIMEOUT) -> None:
         """Wait until the broker is actually sending this topic to us.
 
         Degrades rather than hangs: if the confirmation never comes, the caller goes
@@ -638,9 +636,7 @@ class Enigma2Box:
         has to go unavailable when the box does, and a box that goes offline publishes
         nothing else to say so.
         """
-        filtered = (
-            None if topics is None else frozenset({*topics, TOPIC_AVAILABILITY})
-        )
+        filtered = None if topics is None else frozenset({*topics, TOPIC_AVAILABILITY})
         entry = _Listener(callback=listener, topics=filtered)
         self._listeners.append(entry)
 
@@ -651,9 +647,7 @@ class Enigma2Box:
         return _remove
 
     @callback
-    def async_add_key_listener(
-        self, listener: Callable[[str, str], None]
-    ) -> CALLBACK_TYPE:
+    def async_add_key_listener(self, listener: Callable[[str, str], None]) -> CALLBACK_TYPE:
         """Register a callback for key presses, and return its remover."""
         self._key_listeners.append(listener)
 
@@ -686,9 +680,7 @@ class Enigma2Box:
             )
         )
         self._unsubscribes.append(
-            await mqtt.async_subscribe(
-                self.hass, wildcard, self._message_received, encoding=None
-            )
+            await mqtt.async_subscribe(self.hass, wildcard, self._message_received, encoding=None)
         )
         self._unsubscribes.append(
             await mqtt.async_subscribe(
@@ -717,9 +709,7 @@ class Enigma2Box:
 
     # ----------------------------------------------------------------- commands
 
-    async def async_publish_cmd(
-        self, name: str, payload: str, qos: int = 1
-    ) -> None:
+    async def async_publish_cmd(self, name: str, payload: str, qos: int = 1) -> None:
         """Send a command to the box and do not wait for anything.
 
         Commands are never retained: a retained command is delivered again the instant
@@ -784,14 +774,10 @@ class Enigma2Box:
                 self._pending.remove(pending)
             _discard(pending.future)
 
-    async def async_request_ha_mode(
-        self, mode: str, timeout: float = ACK_TIMEOUT
-    ) -> bool:
+    async def async_request_ha_mode(self, mode: str, timeout: float = ACK_TIMEOUT) -> bool:
         """Switch the box's Home Assistant mode and wait for the acknowledgement."""
         await self.async_wait_subscribed()
-        info = await async_request_ha_mode(
-            self.hass, self.base_topic, self.node_id, mode, timeout
-        )
+        info = await async_request_ha_mode(self.hass, self.base_topic, self.node_id, mode, timeout)
         if info is None:
             return False
         self.state.info = info
@@ -808,9 +794,7 @@ class Enigma2Box:
         boxtype = source.get("boxtype")
         configuration_url = _configuration_url(source.get("ip"))
         if configuration_url is None:
-            configuration_url = _configuration_url(
-                self.entry.data.get(CONF_RECEIVER_HOST)
-            )
+            configuration_url = _configuration_url(self.entry.data.get(CONF_RECEIVER_HOST))
         device = dr.async_get(self.hass).async_get_or_create(
             config_entry_id=self.entry.entry_id,
             identifiers={(DOMAIN, self.node_id)},
@@ -954,9 +938,7 @@ class Enigma2Box:
         return {
             "system": (
                 system
-                if system is None
-                or isinstance(system, str)
-                and system in CAM_SYSTEMS
+                if system is None or isinstance(system, str) and system in CAM_SYSTEMS
                 else None
             ),
             "active": active if isinstance(active, bool) else None,
@@ -1092,9 +1074,7 @@ async def async_send_magic_packet(box: Enigma2Box) -> None:
     from homeassistant.setup import async_setup_component  # noqa: PLC0415
 
     if not (mac := box.mac_address):
-        raise ServiceValidationError(
-            translation_domain=DOMAIN, translation_key="no_mac"
-        )
+        raise ServiceValidationError(translation_domain=DOMAIN, translation_key="no_mac")
     hass = box.hass
     if not hass.services.has_service("wake_on_lan", "send_magic_packet"):
         await async_setup_component(hass, "wake_on_lan", {})
@@ -1102,6 +1082,4 @@ async def async_send_magic_packet(box: Enigma2Box) -> None:
         raise HomeAssistantError(
             translation_domain=DOMAIN, translation_key="wake_on_lan_unavailable"
         )
-    await hass.services.async_call(
-        "wake_on_lan", "send_magic_packet", {"mac": mac}, blocking=True
-    )
+    await hass.services.async_call("wake_on_lan", "send_magic_packet", {"mac": mac}, blocking=True)

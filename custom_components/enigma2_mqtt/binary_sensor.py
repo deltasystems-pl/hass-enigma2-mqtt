@@ -111,9 +111,7 @@ class Enigma2BinarySensor(Enigma2Entity, BinarySensorEntity):
 
     entity_description: Enigma2BinarySensorDescription
 
-    def __init__(
-        self, box: Enigma2Box, description: Enigma2BinarySensorDescription
-    ) -> None:
+    def __init__(self, box: Enigma2Box, description: Enigma2BinarySensorDescription) -> None:
         """Set up the binary sensor from its description."""
         super().__init__(box, description.key, topics=description.topics)
         self.entity_description = description
@@ -124,6 +122,4 @@ class Enigma2BinarySensor(Enigma2Entity, BinarySensorEntity):
         description = self.entity_description
         self._attr_is_on = description.value_fn(self.box.state)
         if description.attributes_fn is not None:
-            self._attr_extra_state_attributes = description.attributes_fn(
-                self.box.state
-            )
+            self._attr_extra_state_attributes = description.attributes_fn(self.box.state)

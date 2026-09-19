@@ -58,9 +58,7 @@ PLUGIN_MODERN_SETTINGS = {
 async def _arm_config_ack(hass: HomeAssistant, settings=PLUGIN_SETTINGS) -> None:
     @callback
     def _command_received(_msg: ReceiveMessage) -> None:
-        async_fire_mqtt_message(
-            hass, INFO_TOPIC, json.dumps({**INFO, "settings": settings})
-        )
+        async_fire_mqtt_message(hass, INFO_TOPIC, json.dumps({**INFO, "settings": settings}))
 
     await mqtt.async_subscribe(hass, command_topic("config"), _command_received)
 
@@ -168,9 +166,7 @@ async def test_future_plugin_setting_does_not_trigger_an_unchanged_config_write(
     """Unknown advertised settings are preserved when visible values did not move."""
     await async_setup_box(hass, config_entry)
     advertised = {**PLUGIN_MODERN_SETTINGS, "future_setting": "supported"}
-    async_fire_mqtt_message(
-        hass, INFO_TOPIC, json.dumps({**INFO, "settings": advertised})
-    )
+    async_fire_mqtt_message(hass, INFO_TOPIC, json.dumps({**INFO, "settings": advertised}))
     await hass.async_block_till_done()
     box = config_entry.runtime_data
     box.async_command = AsyncMock()
