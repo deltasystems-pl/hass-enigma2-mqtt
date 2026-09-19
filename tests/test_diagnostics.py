@@ -145,3 +145,48 @@ async def test_diagnostics_summarise_the_screenshot_and_the_channel_list(
     assert "key" not in topics
     # A channel that is only in the list, never on the screen, does not appear at all.
     assert "Eurosport" not in json.dumps(diagnostics, default=str)
+
+
+async def test_the_wake_on_lan_address_is_redacted_too(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str],
+    config_entry: MockConfigEntry,
+) -> None:
+    """It is a hardware address of the same household the box's own MAC is hidden for.
+
+    Found in a real download: every address the receiver announces was redacted and the
+    one the user had typed into the options was printed in full, because it arrives from
+    the other direction and under a different key.
+    """
+    config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        config_entry, options={**config_entry.options, "wol_mac": "00:00:5e:00:53:01"}
+    )
+    await async_setup_box(hass, config_entry)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, config_entry)
+
+    assert diagnostics["entry"]["options"]["wol_mac"] == REDACTED
+    assert "00:00:5e:00:53:01" not in json.dumps(diagnostics)
+
+
+async def test_no_address_at_all_survives_the_download(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A single sweep for the shapes, rather than one assertion per known key."""
+    import re
+
+    config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        config_entry, options={**config_entry.options, "wol_mac": "00:00:5e:00:53:01"}
+    )
+    await async_setup_box(hass, config_entry)
+
+    text = json.dumps(await async_get_config_entry_diagnostics(hass, config_entry))
+
+    assert not re.findall(r"\b[0-9a-f]{2}(?::[0-9a-f]{2}){5}\b", text, re.I)
+    assert not re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", text)
