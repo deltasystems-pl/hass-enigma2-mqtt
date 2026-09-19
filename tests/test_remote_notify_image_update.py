@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -555,3 +556,64 @@ async def test_an_install_reports_progress_and_always_stops_reporting_it(
     final = hass.states.get(PLUGIN)
     assert final.attributes["in_progress"] is False
     assert final.attributes["update_percentage"] is None
+
+
+async def test_a_refused_second_install_does_not_stop_the_first_one_s_spinner(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The installer refuses a concurrent transaction, and that refusal is not an ending.
+
+    The second call reached the same `finally` as the first and cleared `in_progress`
+    while the first was still uploading. The card then showed an idle entity through the
+    rest of a real install — and the next thing it showed was the restart.
+    """
+    config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        config_entry,
+        data={
+            **config_entry.data,
+            CONF_SSH_HOST: "192.0.2.12",
+            CONF_SSH_USERNAME: "root",
+            CONF_SSH_PASSWORD: "example-only",
+            CONF_SSH_HOST_KEY: "ssh-ed25519 example-only",
+        },
+    )
+    release = asyncio.Event()
+    running = asyncio.Event()
+    refused: list[str] = []
+
+    async def first_install(hass_, request, progress_cb=None):
+        del hass_, request
+        progress_cb("install")
+        running.set()
+        await release.wait()
+
+    with patch("custom_components.enigma2_mqtt.update.async_install", first_install):
+        assert await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+        entity = hass.data["entity_components"]["update"].get_entity(PLUGIN)
+        first = hass.async_create_task(entity.async_install(version=None, backup=False))
+        await running.wait()
+        assert entity.in_progress is True
+        assert entity.update_percentage == 50
+
+        with patch(
+            "custom_components.enigma2_mqtt.update.async_install",
+            AsyncMock(side_effect=InstallerError(InstallerErrorCode.BUSY)),
+        ):
+            with pytest.raises(HomeAssistantError) as raised:
+                await entity.async_install(version=None, backup=False)
+            refused.append(raised.value.translation_placeholders["reason"])
+
+        # The refusal changed nothing about the install that is still running.
+        assert entity.in_progress is True
+        assert entity.update_percentage == 50
+        release.set()
+        await first
+
+    assert refused == ["busy"]
+    assert entity.in_progress is False
+    assert entity.update_percentage is None

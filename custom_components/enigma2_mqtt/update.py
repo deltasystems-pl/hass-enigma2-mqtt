@@ -108,6 +108,7 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         super().__init__(box, "plugin", topics=(TOPIC_INFO,))
         self._entry = entry
         self._bundled_version = bundled_version
+        self._installing = False
         self._refresh_install_feature()
 
     def _has_credentials(self) -> bool:
@@ -189,9 +190,15 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             node_id=data[CONF_NODE_ID],
             base_topic=data.get(CONF_BASE_TOPIC, DEFAULT_BASE_TOPIC),
         )
-        self._attr_in_progress = True
-        self._attr_update_percentage = None
-        self.async_write_ha_state()
+        # A second `update.install` on the same entity is refused by the installer as
+        # busy, and it must not take the first one's spinner down with it on the way
+        # out. Only the call that raised the flag lowers it.
+        mine = not self._installing
+        if mine:
+            self._installing = True
+            self._attr_in_progress = True
+            self._attr_update_percentage = None
+            self.async_write_ha_state()
         try:
             await async_install(self.hass, request, self._async_installer_phase)
         except InstallerError as err:
@@ -207,15 +214,17 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             ) from err
         finally:
             # A spinner that never stops is worse than none: whatever happened, the
-            # entity has to stop claiming an install is still running.
-            self._attr_in_progress = False
-            self._attr_update_percentage = None
-            self.async_write_ha_state()
+            # call that started this install has to stop claiming it is still running.
+            if mine:
+                self._installing = False
+                self._attr_in_progress = False
+                self._attr_update_percentage = None
+                self.async_write_ha_state()
 
     @callback
     def _async_installer_phase(self, phase: str) -> None:
         """Turn the installer's named phase into a percentage for the update card."""
-        if phase not in INSTALL_PHASES:
+        if not self._installing or phase not in INSTALL_PHASES:
             return
         self._attr_update_percentage = (INSTALL_PHASES.index(phase) + 1) * 100 // len(
             INSTALL_PHASES
