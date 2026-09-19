@@ -745,6 +745,7 @@ async def _async_rollback(
     remote_ipk: str,
     remote_helper: str,
     remote_manifest: str,
+    remote_provision_tmp: str,
     remote_lock: str,
     install_started: bool,
     provision_started: bool,
@@ -776,7 +777,7 @@ async def _async_rollback(
             if stopped.exit_status:
                 raise InstallerError(InstallerErrorCode.ROLLBACK_FAILED)
         commands = [
-            f"rm -f {shlex.quote(remote_ipk)} {PROVISION_PATH}.ha-new "
+            f"rm -f {shlex.quote(remote_ipk)} {shlex.quote(remote_provision_tmp)} "
             f"{shlex.quote(remote_manifest)}"
         ]
         if install_started:
@@ -859,6 +860,10 @@ async def _async_install_locked(
     remote_ipk = f"/tmp/{PACKAGE}-{nonce}.ipk"
     remote_helper = f"/tmp/enigma2-mqtt-installer-{nonce}.py"
     remote_manifest = f"/tmp/enigma2-mqtt-manifest-{nonce}"
+    # Beside the real file so the rename is atomic, but never at a name an attacker
+    # could have pre-created as a symlink: this file holds the broker password, and a
+    # fixed name following a planted link would write it wherever the link points.
+    remote_provision_tmp = f"{PROVISION_PATH}.ha-{nonce}"
     backup = f"/home/root/mqttbridge-backups/ha-installer-{nonce}"
     remote_lock = "/home/root/mqttbridge-backups/.ha-installer.lock"
     session: InstallerSession | None = None
@@ -942,15 +947,19 @@ async def _async_install_locked(
             await _async_progress(progress_cb, "provision")
             provision_started = True
             provisioning = request.provisioning.as_json()
+            quoted_tmp = shlex.quote(remote_provision_tmp)
             await _run_checked(
                 session,
-                f"umask 077; cat > {PROVISION_PATH}.ha-new",
+                f"set -eu; umask 077; "
+                f"if [ -e {quoted_tmp} ] || [ -L {quoted_tmp} ]; then exit 1; fi; "
+                f"cat > {quoted_tmp}",
                 InstallerErrorCode.PROVISION_FAILED,
                 input=provisioning,
             )
             await _run_checked(
                 session,
-                f"chmod 600 {PROVISION_PATH}.ha-new && mv {PROVISION_PATH}.ha-new {PROVISION_PATH}",
+                f"set -eu; if [ -L {quoted_tmp} ]; then exit 1; fi; "
+                f"chmod 600 {quoted_tmp}; mv {quoted_tmp} {PROVISION_PATH}",
                 InstallerErrorCode.PROVISION_FAILED,
             )
 
@@ -1043,6 +1052,7 @@ async def _async_install_locked(
                     remote_ipk,
                     remote_helper,
                     remote_manifest,
+                    remote_provision_tmp,
                     remote_lock,
                     install_started,
                     provision_started,

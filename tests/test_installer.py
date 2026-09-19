@@ -331,7 +331,7 @@ async def test_install_failure_restores_preexisting_plugin(
     digest = __import__("hashlib").sha256(artifact.read_bytes()).hexdigest()
     bundle = BundledPlugin(artifact, "0.1.0", digest, "1" * 40)
     receiver = FakeReceiver(
-        fail_on="cat > /etc/enigma2/mqttbridge.json.ha-new", close_raises_on={1}
+        fail_on="cat > /etc/enigma2/mqttbridge.json.ha-", close_raises_on={1}
     )
     original_run = FakeSession.run
 
@@ -484,6 +484,7 @@ async def test_rollback_restarts_enigma_when_restore_transport_raises(
             "/tmp/plugin.ipk",
             "/tmp/helper.py",
             "/tmp/manifest",
+            "/etc/enigma2/mqttbridge.json.ha-abc123",
             "/tmp/lock",
             True,
             True,
