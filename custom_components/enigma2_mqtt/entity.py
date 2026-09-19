@@ -118,6 +118,7 @@ class OptionalEntities:
         keys: Sequence[str],
         factory: Callable[[str], Entity],
         enabled: Callable[[], bool],
+        declared: Callable[[], bool],
         add_entities: Callable[[list[Entity]], None],
     ) -> None:
         """Remember what to create, when, and how to take it away again."""
@@ -127,6 +128,7 @@ class OptionalEntities:
         self.keys = tuple(keys)
         self.factory = factory
         self.enabled = enabled
+        self.declared = declared
         self.add_entities = add_entities
         self.live = False
 
@@ -138,11 +140,20 @@ class OptionalEntities:
 
     @callback
     def _update(self) -> None:
-        """Create or retire the whole set to match the option."""
+        """Create or retire the whole set to match the option.
+
+        Removing is only done on a stated "off". An `info` payload that simply does not
+        mention the setting — an older plugin, or one that answered before it had read
+        its own configuration — is not an answer, and treating it as one would delete
+        entities the household had renamed, hidden or put on a dashboard, together with
+        their history. Silence leaves everything exactly as it is.
+        """
         if self.enabled():
             if not self.live:
                 self.live = True
                 self.add_entities([self.factory(key) for key in self.keys])
+            return
+        if not self.declared():
             return
         if self.live:
             # The entities were added in this session; Home Assistant removes them when

@@ -959,6 +959,16 @@ class Enigma2Box:
         self.async_register_device()
         self._async_updated(TOPIC_INFO)
 
+    def telemetry_declared(self, setting: str) -> bool:
+        """Return whether the box has stated this opt-in either way.
+
+        An absent setting is not "off": it is a plugin that does not have the option, or
+        one that has not said yet. The difference matters to anything that would remove
+        entities on "off".
+        """
+        settings = self.state.info.get("settings")
+        return isinstance(settings, dict) and setting in settings
+
     @property
     def cam_enabled(self) -> bool:
         """Return whether this box opted into supported CAM telemetry."""

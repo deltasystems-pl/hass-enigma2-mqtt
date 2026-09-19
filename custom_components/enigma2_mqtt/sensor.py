@@ -36,6 +36,8 @@ import homeassistant.util.dt as dt_util
 
 from .box import Enigma2Box, Enigma2MqttConfigEntry, Enigma2State
 from .const import (
+    CONF_CAM_TELEMETRY,
+    CONF_OSCAM_TELEMETRY,
     DOMAIN,
     TOPIC_CAM,
     TOPIC_EPG,
@@ -261,9 +263,17 @@ async def async_setup_entry(
     async_add_entities(Enigma2Sensor(box, description) for description in SENSORS)
 
     by_key = {description.key: description for description in (*CAM_SENSORS, *OSCAM_SENSORS)}
-    for keys, enabled in (
-        ([description.key for description in CAM_SENSORS], lambda: box.cam_enabled),
-        ([description.key for description in OSCAM_SENSORS], lambda: box.oscam_enabled),
+    for keys, enabled, declared in (
+        (
+            [description.key for description in CAM_SENSORS],
+            lambda: box.cam_enabled,
+            lambda: box.telemetry_declared(CONF_CAM_TELEMETRY),
+        ),
+        (
+            [description.key for description in OSCAM_SENSORS],
+            lambda: box.oscam_enabled,
+            lambda: box.telemetry_declared(CONF_OSCAM_TELEMETRY),
+        ),
     ):
         entry.async_on_unload(
             OptionalEntities(
@@ -273,6 +283,7 @@ async def async_setup_entry(
                 keys,
                 lambda key: Enigma2Sensor(box, by_key[key]),
                 enabled,
+                declared,
                 async_add_entities,
             ).start()
         )

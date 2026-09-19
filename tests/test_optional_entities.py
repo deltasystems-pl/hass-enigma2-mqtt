@@ -134,6 +134,46 @@ async def test_turning_it_off_again_takes_them_away(
         assert registered(hass, platform, key) is None
 
 
+@pytest.mark.parametrize(
+    ("capability", "setting", "entities"),
+    [
+        ("cam", "cam_telemetry", CAM_ENTITIES),
+        ("oscam", "oscam_telemetry", OSCAM_ENTITIES),
+    ],
+)
+async def test_an_info_payload_that_says_nothing_about_the_option_removes_nothing(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    capability: str,
+    setting: str,
+    entities: tuple[tuple[str, str], ...],
+) -> None:
+    """Silence is not "off", and the difference is somebody's customisation.
+
+    A plugin that has not read its own configuration yet, or an older one that has no
+    such option, publishes `info` without the setting in it. Reading that as "turned
+    off" deleted the entities from the registry — with the names, the areas, the icons
+    and the history the household had given them — and the next `info` a second later
+    brought them back as strangers.
+    """
+    retained[AVAILABILITY_TOPIC] = "online"
+    retained[INFO_TOPIC] = info(capability, **{setting: True})
+    await async_setup_box(hass, config_entry)
+    before = {key: registered(hass, platform, key) for platform, key in entities}
+    assert all(before.values())
+
+    async_fire_mqtt_message(
+        hass,
+        INFO_TOPIC,
+        json.dumps({**INFO, "capabilities": [*INFO["capabilities"], capability]}),
+    )
+    await hass.async_block_till_done()
+
+    assert {key: registered(hass, platform, key) for platform, key in entities} == before
+
+
 async def test_a_box_without_the_capability_never_gets_them(
     hass: HomeAssistant,
     mqtt_mock,

@@ -23,7 +23,14 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .box import Enigma2Box, Enigma2MqttConfigEntry, Enigma2State
-from .const import TOPIC_CAM, TOPIC_HDD, TOPIC_OSCAM, TOPIC_RECORDING
+from .const import (
+    CONF_CAM_TELEMETRY,
+    CONF_OSCAM_TELEMETRY,
+    TOPIC_CAM,
+    TOPIC_HDD,
+    TOPIC_OSCAM,
+    TOPIC_RECORDING,
+)
 from .entity import Enigma2Entity, OptionalEntities
 
 PARALLEL_UPDATES = 0
@@ -126,9 +133,17 @@ async def async_setup_entry(
         description.key: description
         for description in (*CAM_BINARY_SENSORS, *OSCAM_BINARY_SENSORS)
     }
-    for keys, enabled in (
-        ([description.key for description in CAM_BINARY_SENSORS], lambda: box.cam_enabled),
-        ([description.key for description in OSCAM_BINARY_SENSORS], lambda: box.oscam_enabled),
+    for keys, enabled, declared in (
+        (
+            [description.key for description in CAM_BINARY_SENSORS],
+            lambda: box.cam_enabled,
+            lambda: box.telemetry_declared(CONF_CAM_TELEMETRY),
+        ),
+        (
+            [description.key for description in OSCAM_BINARY_SENSORS],
+            lambda: box.oscam_enabled,
+            lambda: box.telemetry_declared(CONF_OSCAM_TELEMETRY),
+        ),
     ):
         entry.async_on_unload(
             OptionalEntities(
@@ -138,6 +153,7 @@ async def async_setup_entry(
                 keys,
                 lambda key: Enigma2BinarySensor(box, by_key[key]),
                 enabled,
+                declared,
                 async_add_entities,
             ).start()
         )
