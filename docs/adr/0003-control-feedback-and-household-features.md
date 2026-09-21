@@ -98,6 +98,8 @@ fixes. It is documented instead.
 
 ### 5. A `select` platform, and a source list that fits the recorder
 
+*[„fits the recorder" in this heading is void — see the correction immediately below.]*
+
 > 🔴 **Corrected 2026-09-22 — the recorder half of this decision was wrong.**
 >
 > This section, as accepted, says that a long source list pushes the media player's attributes
@@ -105,9 +107,11 @@ fixes. It is documented instead.
 > did.** Home Assistant's `MediaPlayerEntity` declares `source_list` an **unrecorded** attribute,
 > and the recorder removes every unrecorded attribute *before* it weighs a state against the
 > 16 384-byte limit. `SelectEntity.options` is unrecorded on the same terms, so the „Channel"
-> select added here was never at risk either. Measured on a running system: a source list of many
-> hundred channels is tens of kilobytes of raw attributes and **under a hundred bytes** once the
-> recorder has filtered it, with every other attribute intact in the stored row.
+> select added here was never at risk either. Measured by running a thousand-channel state through
+> the recorder's own function: the media player is **27 620 bytes of raw attributes and 327 bytes
+> stored**, the select 27 053 and 41. The stored row is **a few hundred bytes** with every other
+> attribute intact — the difference between the two is the media player's other attributes, which
+> are kept; the select has almost nothing besides its options.
 >
 > Three statements below are therefore void: the heading's „fits the recorder", the problem
 > statement's second paragraph, and the claim that the new option „brings the media player's
@@ -142,6 +146,7 @@ at all, although the topics, the commands and the actions behind one were all al
 Separately, the media player's source list holds every channel of every configured bouquet; **on a
 receiver with many hundred channels that pushes the entity's attributes past the recorder's 16 KB
 limit**, so Home Assistant drops them from history entirely.
+*[Void — see the correction at the head of this decision: it does not, and nothing was dropped.]*
 
 - **„Bouquet"** — options are the bouquets the receiver publishes; the current option is the
   receiver's **active** bouquet; selecting one sends the bouquet command and **waits for the
@@ -157,7 +162,9 @@ limit**, so Home Assistant drops them from history entirely.
   bouquet are disambiguated rather than dropped, because a select cannot offer the same option
   twice and dropping one would make a channel unreachable.
 - **A `source_list_scope` option**, defaulting to **the active bouquet**, which brings the media
-  player's attributes back under the recorder's limit and restores its history. `all` keeps today's
+  player's attributes back under the recorder's limit and restores its history.
+  *[Void — see the correction at the head of this decision: it defaults to `all`.]*
+  `all` keeps today's
   behaviour for somebody who prefers one long list, and the option says what that costs. Selecting
   a source outside the active bouquet raises an error naming the alternatives — switch bouquet, or
   use the `zap` action, which takes a reference and is not scoped.

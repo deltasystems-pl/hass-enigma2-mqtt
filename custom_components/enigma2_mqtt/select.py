@@ -8,7 +8,7 @@ commands (`cmd/bouquet`, `cmd/zap`) were already there; only the two controls in
 of them were missing.
 
 **„Kanał" offers one bouquet at a time.** The receiver this was written against
-publishes 988 channels, and a select with a thousand rows is not a control. It follows
+publishes about a thousand channels, and a select with that many rows is not a control. It follows
 the receiver's own channel-up/down context instead, which is the list the household is
 already thinking in, and switching „Bukiet" reshapes it at once.
 

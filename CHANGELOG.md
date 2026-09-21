@@ -205,8 +205,9 @@ Found by running this release against a real receiver rather than a test one.
   push the media player's attributes past the recorder's 16 KB limit and cost the entity its
   history. It does not. Home Assistant declares `source_list` — and a select's `options` —
   unrecorded, and the recorder strips every unrecorded attribute *before* it weighs a state
-  against that limit; measured, a list of many hundred channels is tens of kilobytes raw and under
-  a hundred bytes once stored, with every other attribute intact. Nothing was ever dropped from
+  against that limit; measured through the recorder's own function, a thousand-channel media player
+  is 27 620 bytes of raw attributes and 327 stored — a few hundred bytes, with every other
+  attribute intact. Nothing was ever dropped from
   history. In consequence `source_list_scope` ships defaulting to **`all`**, so an existing
   installation does not change, `active_bouquet` is opt-in, and the reason for offering it is that
   a dropdown of a thousand rows is not a control. The size-based test was replaced by one that
