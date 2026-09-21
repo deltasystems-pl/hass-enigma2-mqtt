@@ -183,14 +183,26 @@ quality bar we hold ourselves to is [docs/QUALITY.md](docs/QUALITY.md).
 ## Roadmap
 
 - [x] **M0** — product requirements approved ([ADR-0000](docs/adr/0000-prd.md),
-      [ADR-0001](docs/adr/0001-m0-decisions.md))
-- [x] **M1** — config flow (discovered + manual), the device page, diagnostics
-- [ ] **M2** — plugin state and discovery complete, commands with guards
-- [ ] **M3** — the entities above, actions, device triggers, diagnostics, translations
-- [ ] **M4** — SSH installer, bundled IPK and `update` implemented; live acceptance pending
+      [ADR-0001](docs/adr/0001-m0-decisions.md)); the scope added since is
+      [ADR-0002](docs/adr/0002-scope-after-m0.md)
+- [x] **M1** — config flow (discovered + manual), the device page, diagnostics. Released as
+      **v0.1.0**, which is what HACS still serves
+- [ ] **M2** — plugin state and discovery complete, commands with guards: *the receiver plugin's
+      milestone — code complete and running, its long soak and the deep-standby drill still open*
+- [ ] **M3** — the entities above, actions, device triggers, diagnostics, translations: *live on
+      the maintainer's Home Assistant, not released*
+- [ ] **M4** — SSH installer, bundled IPK and `update`: *coded and reviewed, awaiting acceptance.*
+      The installer has never been run end to end on a receiver without the plugin, and no real
+      rollback has been exercised
 - [ ] **M5** — public beta `v0.x`: releases, HACS custom repository, call for testers
 - [ ] **M6** — `v1.0.0`: HACS default store, deep standby and Wake-on-LAN drilled
 - [ ] **M7** — afterwards: broker-login provisioning, further images
+
+Everything after M1 is unreleased, and both halves still report `0.1.0`: a coordinated version bump
+with the plugin has not happened yet.
+
+**Testers wanted: open an issue.** OpenATV, OpenPLi and OpenBH have no test box. There is no
+per-image thread to find yet — yours would start it.
 
 ## Contributing
 

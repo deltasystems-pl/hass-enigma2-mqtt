@@ -86,6 +86,18 @@ Found by running this release against a real receiver rather than a test one.
   plugin error no longer reports concurrent commands as complete before their own result is
   known.
 
+### Documentation
+
+- **[ADR-0002](docs/adr/0002-scope-after-m0.md) records the scope added and changed after M0** —
+  bouquet activation, the opt-in conditional-access diagnostics, an options page that writes to the
+  receiver and the privacy boundary that puts on the broker login, the hardened installer, the
+  reproducible bundle, and the two lessons that came out of things breaking: a backup of this
+  integration must live outside `custom_components/`, and a subscription is not in place until the
+  broker says so. It also states what is **not** done: no 0.2.0 release, an installer never run end
+  to end, no broker-credential help in the setup form, no hassfest re-run at release time, no
+  opt-in release check, and coverage at 93 % against the project's own 95 %. The README's roadmap
+  is corrected to match.
+
 ## [0.1.0] - 2026-09-16
 
 The first release. It sets a receiver up and gives it a device page; the entities and
