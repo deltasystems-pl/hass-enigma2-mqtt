@@ -60,6 +60,9 @@
       "refresh_discovery": {
         "default": "mdi:cloud-refresh-variant"
       },
+      "refresh_epg": {
+        "default": "mdi:television-guide"
+      },
       "restart_gui": {
         "default": "mdi:restart"
       },
@@ -113,6 +116,9 @@
       },
       "channel": {
         "default": "mdi:television-classic"
+      },
+      "last_error": {
+        "default": "mdi:alert-circle-outline"
       },
       "next_program": {
         "default": "mdi:skip-next-circle-outline"

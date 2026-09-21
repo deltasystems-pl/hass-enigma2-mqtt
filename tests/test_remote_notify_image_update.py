@@ -24,6 +24,7 @@ from homeassistant.components.update import ATTR_VERSION, UpdateEntityFeature
 from homeassistant.const import ATTR_ENTITY_ID, STATE_OFF, STATE_ON, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -38,6 +39,7 @@ from custom_components.enigma2_mqtt.const import (
     CONF_SSH_PASSWORD,
     CONF_SSH_PORT,
     CONF_SSH_USERNAME,
+    DOMAIN,
     MESSAGE_MAX_LENGTH,
 )
 from custom_components.enigma2_mqtt.installer import InstallerError, InstallerErrorCode
@@ -46,6 +48,7 @@ from custom_components.enigma2_mqtt.update import latest_version
 from .conftest import (
     INFO,
     INFO_TOPIC,
+    NODE_ID,
     PLUGIN_VERSION,
     POWER_TOPIC,
     SCREEN,
@@ -91,6 +94,49 @@ async def test_the_remote_follows_standby(
     async_fire_mqtt_message(hass, POWER_TOPIC, "standby")
     await hass.async_block_till_done()
     assert hass.states.get(REMOTE).state == STATE_OFF
+
+
+async def test_the_remote_is_hidden_but_still_works(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Home Assistant puts a power toggle on every remote, and this device has two.
+
+    Hidden is not disabled: the entity exists, has a state and answers
+    `remote.send_command`; it is simply not on the device page beside „Zasilanie" and
+    the media player, which both switch the same power.
+    """
+    await async_setup_box(hass, config_entry)
+
+    entry = er.async_get(hass).async_get(REMOTE)
+    assert entry.hidden_by is er.RegistryEntryHider.INTEGRATION
+    assert entry.disabled_by is None
+    assert hass.states.get(REMOTE).state == STATE_ON
+
+
+async def test_an_existing_remote_keeps_the_visibility_it_was_given(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Somebody may have put it on a dashboard, and the registry already says so."""
+    config_entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    registry.async_get_or_create(
+        "remote",
+        DOMAIN,
+        f"{NODE_ID}_remote",
+        config_entry=config_entry,
+        suggested_object_id="dekoder_salon_remote",
+    )
+
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert registry.async_get(REMOTE).hidden_by is None
 
 
 async def test_sending_one_key(

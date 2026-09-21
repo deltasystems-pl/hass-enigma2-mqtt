@@ -351,6 +351,32 @@ async def async_setup_box(hass: HomeAssistant, entry: MockConfigEntry) -> None:
     await hass.async_block_till_done()
 
 
+async def async_setup_box_then_retained(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    retained_store: dict[str, str | bytes],
+) -> None:
+    """Set the entry up first, and let the retained burst arrive afterwards.
+
+    This is the order a real broker produces and `async_setup_box` does not.
+    `box.async_start` registers the subscription and returns, Home Assistant holds the
+    SUBSCRIBE packet behind a tenth of a second of debouncing, and the platforms are set
+    up in the meantime — so `info`, `last_error` and the rest land on entities that
+    already exist. The `retained` fixture delivers them inside `mqtt.async_subscribe`
+    instead, which is the opposite order, and it hides every bug that depends on what a
+    thing knew before the box had said anything.
+
+    Use this for anything whose behaviour turns on that difference; the other order is
+    still the right one for the many tests that only want a box already in a state.
+    """
+    burst = dict(retained_store)
+    retained_store.clear()
+    await async_setup_box(hass, entry)
+    for topic, payload in burst.items():
+        async_fire_mqtt_message(hass, topic, payload, retain=True)
+    await hass.async_block_till_done()
+
+
 async def async_arm_ha_mode_ack(
     hass: HomeAssistant,
     info: dict[str, Any] | None = None,

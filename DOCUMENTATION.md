@@ -105,8 +105,8 @@ effect without a restart.
 
 | Option | Default | What it does |
 |---|---|---|
-| **Show the deep standby and reboot buttons** | off | Creates the „Głębokie uśpienie" and „Restart" buttons. Turning it off again removes them from the entity registry rather than leaving them behind unavailable. This is about what appears on a dashboard, **not** a safety mechanism: the plugin refuses both commands while a recording is running whatever is set here. |
-| **Wake-on-LAN MAC address** | the address the box reports on `info` | The target of the magic packet the „Obudź (WoL)" button and `media_player.turn_on` send. Set it when the receiver reports a different interface from the one that is plugged in — a box on Wi-Fi does not answer a packet sent to its cable port. |
+| **Show the deep standby and reboot buttons** | off | The Home Assistant half of the gate on „Głębokie uśpienie" and „Restart"; the receiver's own `deep_standby_allowed` is the other half, and [§4.5](#45-buttons-and-update) says how the two combine. Turning this off removes the buttons from the entity registry rather than leaving them behind unavailable. It is about what appears on a dashboard, **not** a safety mechanism: the plugin refuses both commands while a recording is running whatever is set here. |
+| **Wake-on-LAN MAC address** | the address the box reports on `info` | The target of the magic packet the „Obudź (WoL)" button and `media_player.turn_on` send. Set it when the receiver reports a different interface from the one that is plugged in — a box on Wi-Fi does not answer a packet sent to its cable port. Written as `00:00:5e:00:53:01`, `00-00-5e-00-53-01`, `0000.5e00.5301` or `00005e005301`, in any case; it is stored lower-case and colon-separated whichever you type, and anything that is not an address fails the form rather than failing later from inside `wake_on_lan`. Whichever address a packet would go to — the override, or the one the box reports — is registered on the device as its MAC connection, so the rest of Home Assistant knows it too. On current Home Assistant that connection does not merge devices across integrations, so a router or DHCP integration may still show a second card for the same receiver; it is there so that what *is* keyed on a MAC can find this one. A value stored by an earlier release that is not an address is dropped once at startup, with a line in the log. |
 | **Bouquets to offer** | every bouquet the box publishes | Which bouquets feed the media player's channel list and the media browser. The choices are the bouquets on the `channels` topic, and a name can be typed for one the box has not published yet. This narrows the plugin's own `bouquets_for_select`; it cannot widen it. |
 | **Channels in the media player's source list** | every bouquet on offer | What `media_player.source_list` holds, and nothing else. **Every bouquet on offer** is what this integration has always done and stays the default, so an existing installation does not change under an automation that names a channel; on a receiver with 988 channels it is a dropdown of 988 rows. **The active bouquet** is the short list the receiver's own channel ± is walking, which is also what the „Kanał" select shows. `select_source` follows this setting; the `zap` action takes a service reference and does not. Three cases keep the long list whatever is chosen, because there is nothing to shorten it to and an empty source list would leave no way to change channel: a receiver that publishes no channel-list context (an older plugin without `bouquet_context`), a context naming a bouquet the **Bouquets to offer** option excludes, and a context naming a bouquet with no playable channel in it. The last two are logged as a warning, once per bouquet. 🔴 This setting is **not** about the recorder: Home Assistant declares `source_list` an unrecorded attribute and the recorder removes it before it measures a state against its size limit, so the long list never reached the database in the first place. |
 | **Check for published plugin releases** | off | The only thing this integration can do that is not talking to your own broker, which is why it is off. Turned on, the version entity asks the plugin repository which release is published — **at most once every 24 hours** — and reports the tag in its summary, in a `published_version` attribute and in the release link. The time of the last request and its answer are written to `.storage/enigma2_mqtt.release_check`, keyed by config entry, so reloading the receiver, saving the options or restarting Home Assistant shows what is already known instead of spending another request; the record is deleted when the receiver is removed. At most 64 KiB of the answer is read, and a tag is only believed if it is at most 64 characters and parses as a version. The release link is only followed if it points into this plugin's own releases. It downloads nothing and it never raises `latest_version`: `install` can only ever put the bundle shipped here on a receiver, and offering a version the installer would refuse would be a button that lies. Failures — a rate limit, a timeout, an answer that is not a release — are a debug line and nothing else. |
@@ -138,8 +138,18 @@ everything.
 
 ## 4. Entities
 
-Twenty-six entities on one device, plus the two selects a receiver gets when its plugin can
-switch a channel-list context. Unique ids follow one scheme: `<node_id>_<key>`, where the
+**Twenty-five entities on every receiver**, and up to nineteen more that exist only while
+something says they should. The conditional ones are, in full:
+
+| How many | What | Created while |
+|---|---|---|
+| 2 | „Bukiet" and „Kanał" | the receiver reports the `channels` **and** `bouquet_context` capabilities |
+| 1 | „Odśwież EPG" | the receiver reports the `epg_grid` capability |
+| 2 | „Głębokie uśpienie", „Restart" | the Home Assistant option asks for them **and** the receiver permits deep standby |
+| 4 | the conditional-access diagnostics | the `cam_telemetry` option is on |
+| 12 + per source | the OSCam diagnostics | the `oscam_telemetry` option is on |
+
+Unique ids follow one scheme: `<node_id>_<key>`, where the
 key is the English translation key of the entity. Entity ids derive from the same key, so
 `sensor.dekoder_salon_channel` is `sensor.dekoder_salon_channel` in every language and only
 the display name changes.
@@ -200,6 +210,13 @@ while the box is unreachable, because that is precisely when somebody wants to w
   greater than zero sends a long press, `delay_secs` spaces a sequence out, `num_repeats`
   repeats it. A key name this integration has never heard of is passed through: the box is the
   side that knows which keys it has, and it answers on `last_error` when it does not.
+  **Hidden on the device page of a new installation.** Home Assistant gives every remote entity
+  a power toggle, so the device showed three controls that all switch power — this one,
+  „Zasilanie" and the media player — and no way to tell which was the real one. „Zasilanie" is
+  the labelled one. Hidden is not disabled: the entity exists, has a state and answers
+  `remote.send_command` from an automation. An installation that already has this entity keeps
+  whatever visibility it was given; un-hide it in the entity's settings to put it back on the
+  page.
 - **Ekran OSD** — `notify.send_message` puts a popup on the television. The popup has one text
   field, so a title becomes the first thing in it rather than being dropped; the text is cut
   at 500 characters, where the plugin cuts it.
@@ -223,6 +240,24 @@ while the box is unreachable, because that is precisely when somebody wants to w
 | `agc` | *AGC* | `<node_id>_agc` | `tuner` | % · diagnostic · **disabled by default** |
 | `ber` | *BER* | `<node_id>_ber` | `tuner` | count · diagnostic · **disabled by default** |
 | `uptime` | *Czas pracy* | `<node_id>_uptime` | `info` | seconds · diagnostic · **disabled by default** |
+| `last_error` | *Ostatni błąd* | `<node_id>_last_error` | `last_error` | the refused command's name · diagnostic · attributes `error` and `time` |
+
+**Ostatni błąd** is the one sensor whose memory belongs to Home Assistant rather than to a
+topic. The plugin clears `last_error` on the next command that succeeds, so by the time
+somebody asks why a button did nothing, the next volume step has usually wiped the evidence.
+This sensor keeps it: a cleared topic does not clear it, and it is restored with its text and
+its time across a reload and a restart. The state is the failed command — `deep_standby`,
+`zap` — and `unknown` until something fails; `error` is the receiver's own sentence, cut at
+255 characters, and `time` is the receiver's own `ts`, falling back to the moment Home
+Assistant learned of it when the payload has none. Taking the receiver's timestamp is what
+makes the replay harmless: the retained complaint arrives again on every reconnect and at
+every start-up, and a clock reading would walk the time forward each time. There is no clear
+button in 0.2.0: the next error replaces it.
+
+It is also the one entity of this device that **stays available while the receiver is not**.
+Deep standby is the headline case and it is precisely a box that has left the network; an
+entity that went unavailable with it would hide the explanation at the moment it was wanted,
+and a restart taken in the meantime would lose it for good.
 
 Times in attributes are ISO 8601 strings rather than the epoch seconds the topics carry,
 because a template can read one and not the other. The long programme description and the list
@@ -245,15 +280,44 @@ it is the opposite: the answer is coming, and the dashboard should not sit still
 
 ### 4.5 Buttons and update
 
-| Key | Polish name | unique_id | Command |
-|---|---|---|---|
-| `deep_standby` | *Głębokie uśpienie* | `<node_id>_deep_standby` | `cmd/deep_standby` · **hidden unless the option asks for it** |
-| `restart_gui` | *Restart GUI* | `<node_id>_restart_gui` | `cmd/restart_gui` |
-| `reboot` | *Restart* | `<node_id>_reboot` | `cmd/reboot` · **hidden unless the option asks for it** |
-| `wake` | *Obudź (WoL)* | `<node_id>_wake` | `wake_on_lan.send_magic_packet` — no MQTT, and available while the box is not |
-| `screenshot` | *Zrzut ekranu* | `<node_id>_screenshot` | `cmd/screenshot` |
-| `refresh_discovery` | *Odśwież discovery* | `<node_id>_refresh_discovery` | `cmd/discovery` |
-| `plugin` | *Wtyczka MQTT Bridge* | `<node_id>_plugin` | an `update` entity: installed = `info.plugin`, latest = the plugin release this version was written against |
+| Key | Polish name | unique_id | Command | What proves it |
+|---|---|---|---|---|
+| `deep_standby` | *Głębokie uśpienie* | `<node_id>_deep_standby` | `cmd/deep_standby` · **both gates below** | silence |
+| `restart_gui` | *Restart GUI* | `<node_id>_restart_gui` | `cmd/restart_gui` | silence |
+| `reboot` | *Restart* | `<node_id>_reboot` | `cmd/reboot` · **both gates below** | silence |
+| `wake` | *Obudź (WoL)* | `<node_id>_wake` | `wake_on_lan.send_magic_packet` — no MQTT, and available while the box is not | — |
+| `screenshot` | *Zrzut ekranu* | `<node_id>_screenshot` | `cmd/screenshot` | `screen` is republished |
+| `refresh_discovery` | *Odśwież discovery* | `<node_id>_refresh_discovery` | `cmd/discovery` | the announcement is republished |
+| `refresh_epg` | *Odśwież EPG* | `<node_id>_refresh_epg` | `cmd/epg_grid` · only while the box names the `epg_grid` capability | silence |
+| `plugin` | *Wtyczka MQTT Bridge* | `<node_id>_plugin` | an `update` entity: installed = `info.plugin`, latest = the plugin release this version was written against | — |
+
+**Every button waits for the receiver**, on the same path as the actions below. A refusal
+raises `HomeAssistantError` carrying the box's own sentence, and „Ostatni błąd" records it.
+Where the command has an observable effect, that effect is the proof and the press waits up to
+ten seconds for it. Where it has none — the box is about to restart, or an EPG grid whose
+content has not changed is not republished — the contract offers no positive acknowledgement,
+so the press waits a second for a complaint and treats **silence as success**. „Zrzut ekranu"
+pressed twice inside the plugin's minimum of five seconds between captures is therefore a
+visible refusal now, where it used to be a press that appeared to work and did nothing.
+
+The proof is that the topic moved, not that *this* command moved it: a screenshot the plugin
+publishes on its own interval, or a retained picture or announcement replayed by the broker
+after a reconnect, can end a press's wait. The press then reports success for something it did
+not cause. It is benign — the command was sent, and the receiver carries it out or complains on
+its own — and the alternative is a correlation id the contract does not have.
+
+**„Odśwież EPG"** exists only while the receiver names the `epg_grid` capability. With the
+plugin's `epg_grid_events` setting at zero there are no grids to rebuild, the capability is
+absent, and the button is not created. A capability can also arrive late, so the button appears
+when the receiver says it can do it rather than only at startup.
+
+**„Głębokie uśpienie" and „Restart" need two gates open**: the Home Assistant option
+[below](#options), and the receiver's own `deep_standby_allowed`, which is set on the box under
+*Menu → Plugins → MQTT Bridge* and cannot be written over MQTT — a setting that *enables* a
+command is deliberately outside what anything with publish rights can reach. Only a stated
+„no" removes the buttons: a receiver that never reports the permission is an older plugin, not
+a refusal, and there the option decides alone as it always did. Turning the permission on at
+the television makes the buttons appear without a Home Assistant restart.
 
 The version entity compares what the box reports on `info` with the plugin bundled here, and its
 summary says what that means. A box running an **older** plugin has an update: with SSH

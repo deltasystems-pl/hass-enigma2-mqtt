@@ -28,6 +28,8 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from .conftest import (
+    ANNOUNCEMENT,
+    ANNOUNCEMENT_TOPIC,
     AVAILABILITY_TOPIC,
     BOUQUET,
     BOUQUET_TOPIC,
@@ -43,6 +45,7 @@ from .conftest import (
     async_arm_box_error,
     async_arm_box_reply,
     async_setup_box,
+    async_setup_box_then_retained,
     command_topic,
 )
 
@@ -58,9 +61,16 @@ NO_CONTEXT: dict[str, Any] = {"name": None, "sref": None}
 
 
 def _with_bouquet_context(store: dict[str, str | bytes]) -> None:
-    """Make the example box one that can activate a channel-list context."""
-    store[INFO_TOPIC] = json.dumps(
-        {**INFO, "capabilities": [*INFO["capabilities"], "bouquet_context"]}
+    """Make the example box one that can activate a channel-list context.
+
+    Both topics, because the plugin publishes the same capability list on both and a
+    fixture where they disagree would be testing a receiver that does not exist — and
+    would hide, or invent, churn in the gate that reads them.
+    """
+    capabilities = [*INFO["capabilities"], "bouquet_context"]
+    store[INFO_TOPIC] = json.dumps({**INFO, "capabilities": capabilities})
+    store[ANNOUNCEMENT_TOPIC] = json.dumps(
+        {**ANNOUNCEMENT, "capabilities": capabilities}
     )
 
 
@@ -123,6 +133,76 @@ async def test_a_capability_that_arrives_late_still_creates_them(
 
     assert hass.states.get(BOUQUET_SELECT) is not None
     assert hass.states.get(CHANNEL_SELECT) is not None
+
+
+async def test_a_capable_box_creates_them_once_in_the_order_a_broker_delivers(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The retained burst lands after setup on a real broker, not inside it.
+
+    A gate that judged the capability from whichever payload happened to arrive first
+    would create both selects and delete them again a moment later: registry churn, a
+    transient entity in the recorder, and — on a restart — the loss of whatever name,
+    area or dashboard place the household had given them. The end state cannot tell
+    "created once" from "created, deleted and created again", so the registry is
+    watched.
+
+    The `update` events that do appear are the registry catching up with the `options`
+    list, which every select produces when its list arrives. They are not churn, and
+    asserting them away would only make this test fragile.
+    """
+    _with_bouquet_context(box_on_the_broker)
+    box_on_the_broker[BOUQUET_TOPIC] = json.dumps(BOUQUET)
+    config_entry.add_to_hass(hass)
+
+    touched: list[tuple[str, str]] = []
+    hass.bus.async_listen(
+        er.EVENT_ENTITY_REGISTRY_UPDATED,
+        lambda event: touched.append((event.data["entity_id"], event.data["action"])),
+    )
+
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    assert hass.states.get(BOUQUET_SELECT) is not None
+    assert hass.states.get(CHANNEL_SELECT) is not None
+    ours = [entry for entry in touched if entry[0] in (BOUQUET_SELECT, CHANNEL_SELECT)]
+    assert [entity_id for entity_id, action in ours if action == "create"] == [
+        BOUQUET_SELECT,
+        CHANNEL_SELECT,
+    ]
+    assert not [entry for entry in ours if entry[1] == "remove"]
+    assert {action for _entity_id, action in ours} <= {"create", "update"}
+
+
+async def test_a_box_that_has_not_spoken_creates_nothing_and_removes_nothing(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Silence is not "no". A box that never answers leaves the registry alone."""
+    retained[AVAILABILITY_TOPIC] = "online"
+    config_entry.add_to_hass(hass)
+
+    touched: list[str] = []
+    hass.bus.async_listen(
+        er.EVENT_ENTITY_REGISTRY_UPDATED,
+        lambda event: touched.append(event.data["entity_id"]),
+    )
+
+    await async_setup_box_then_retained(hass, config_entry, retained)
+
+    registry = er.async_get(hass)
+    assert registry.async_get(BOUQUET_SELECT) is None
+    assert registry.async_get(CHANNEL_SELECT) is None
+    assert not [
+        entity_id
+        for entity_id in touched
+        if entity_id in (BOUQUET_SELECT, CHANNEL_SELECT)
+    ]
 
 
 async def test_losing_the_capability_takes_them_out_of_the_registry(

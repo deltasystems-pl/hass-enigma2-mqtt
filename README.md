@@ -31,15 +31,15 @@ One receiver becomes **one device** with these entities (display names are Polis
 | Platform | Name | What it shows or does |
 |---|---|---|
 | `media_player` | *Dekoder salon* (the device name) | off or playing, the channel list of the bouquets you choose (or just the one the receiver is on — an option), `select_source`, `play_media` by service reference, channel name or active bouquet, `browse_media` through playable bouquets, volume and mute, channel ±, the screen grab as artwork |
-| `remote` | *Pilot* | `send_command` with `KEY_*` names; `hold_secs` makes it a long press |
+| `remote` | *Pilot* | `send_command` with `KEY_*` names; `hold_secs` makes it a long press. Hidden on the device page of a new installation — Home Assistant puts a power toggle on every remote, and *Zasilanie* is the labelled one |
 | `notify` | *Ekran OSD* | a message on the television screen |
 | `event` | *Pilot – klawisz* | every remote key as an event, with `press` = short or long |
 | `image` | *Ekran* | the last screen grab from the box |
-| `sensor` | *Kanał*, *Program*, *Następny program*, *Aktywne nagrania*, *Następny timer*, *SNR*, *AGC*, *BER*, *Czas pracy* | what is on, what is next, recordings and timers, tuner quality, uptime (tuner and uptime sensors off by default) |
+| `sensor` | *Kanał*, *Program*, *Następny program*, *Aktywne nagrania*, *Następny timer*, *SNR*, *AGC*, *BER*, *Czas pracy*, *Ostatni błąd* | what is on, what is next, recordings and timers, tuner quality, uptime (tuner and uptime sensors off by default), and the receiver's last refusal in its own words, kept across a restart |
 | `binary_sensor` | *Nagrywanie*, *Dysk nagrań* | whether a recording is running, whether the recording disk is mounted |
 | `switch` | *Zasilanie*, *Wyciszenie* | standby, mute |
 | `number` | *Głośność* | volume 0–100 |
-| `button` | *Głębokie uśpienie*, *Restart GUI*, *Restart*, *Obudź (WoL)*, *Zrzut ekranu*, *Odśwież discovery* | one-shot box actions; deep standby and reboot stay hidden until you enable them |
+| `button` | *Głębokie uśpienie*, *Restart GUI*, *Restart*, *Obudź (WoL)*, *Zrzut ekranu*, *Odśwież discovery*, *Odśwież EPG* | one-shot box actions, each waiting for the receiver and raising its own words when it refuses; deep standby and reboot need both the option and the receiver's own permission; *Odśwież EPG* exists only where the receiver publishes grids |
 | `update` | *Wtyczka MQTT Bridge* | the installed plugin version and, when SSH credentials were retained, a guarded reinstall/update from the verified local bundle |
 | `select` | *Bukiet*, *Kanał* | the bouquet the receiver's channel ± walks, and the channels inside it; only on a plugin that can switch a bouquet |
 | device triggers | red / green / yellow / blue × short / long | remote keys as automation triggers |
@@ -199,34 +199,38 @@ quality bar we hold ourselves to is [docs/QUALITY.md](docs/QUALITY.md).
 - [ ] **M6** — `v1.0.0`: HACS default store, deep standby and Wake-on-LAN drilled
 - [ ] **M7** — afterwards: broker-login provisioning, further images
 
-Everything after M1 is unreleased, and both halves still report `0.1.0`: a coordinated version bump
-with the plugin has not happened yet.
+Everything after M1 is unreleased: **0.1.0 is still the only published version of either half**,
+and a coordinated 0.2.0 tag with the plugin has not been cut. Development builds already report
+`0.2.0`, so the version on a receiver or in HACS says which of the two you are running.
 
 ### What 0.2.0 and 0.3.0 will carry
 
 Two days of household use produced a list of problems and a list of wants, and they are split into
 two releases. The reasoning is in
-[ADR-0003](docs/adr/0003-control-feedback-and-household-features.md). **Anything below marked
-"built, unreleased" is on `main` and not in a release; the rest is not implemented.**
+[ADR-0003](docs/adr/0003-control-feedback-and-household-features.md).
 
 **0.2.0 — fixes.** Cut after the guided installer has been run end to end on a receiver.
 
-- **Buttons wait for the receiver and raise when it refuses**, instead of publishing and returning.
-  A refused button used to be indistinguishable from a broken one.
-- **A „Last error" sensor** that remembers the receiver's last refusal with its text and time, and
-  keeps it across restarts — the plugin clears the topic on the next success, and the user is
+- [x] **Buttons wait for the receiver and raise when it refuses**, instead of publishing and
+  returning. A refused button used to be indistinguishable from a broken one.
+- [x] **A „Last error" sensor** that remembers the receiver's last refusal with its text and time,
+  and keeps it across restarts — the plugin clears the topic on the next success, and the user is
   usually looking afterwards.
-- **Deep standby and reboot appear only when the receiver says they are permitted**, and the option
-  text names both gates and where the box-side switch is.
-- **The Wake-on-LAN address is validated and normalised** instead of being passed through, is
+- [x] **Deep standby and reboot appear only when the receiver says they are permitted**, and the
+  option text names both gates and where the box-side switch is.
+- [x] **The Wake-on-LAN address is validated and normalised** instead of being passed through, is
   registered on the device, and a malformed stored value is repaired once.
-- **„Remote" is hidden by default** on new installations — Home Assistant gives every remote entity
-  a power toggle, which made three power controls on one device. Existing installations are not
-  rewritten.
-- **A `select` platform: „Bouquet" and „Channel"**, which is what integration mode was missing
-  entirely — and a `source_list_scope` option for a source list of many hundred channels, which
-  is a dropdown nobody can use. **Built, unreleased** — see the [changelog](CHANGELOG.md).
-- **A button that rebuilds the EPG grid.**
+- [x] **„Remote" is hidden by default** on new installations — Home Assistant gives every remote
+  entity a power toggle, which made three power controls on one device. Existing installations are
+  not rewritten.
+- [x] **A `select` platform: „Bouquet" and „Channel"**, which is what integration mode was missing
+  entirely — and a `source_list_scope` option, because a source list of many hundred channels is a
+  dropdown nobody can use. It defaults to every bouquet you have chosen, which is what the media
+  player has always offered. ~~because a source list of many hundred channels exceeds the
+  recorder's 16 KB attribute limit and loses the media player its history~~ — that diagnosis was
+  wrong: Home Assistant declares `source_list` unrecorded and the recorder strips it before it
+  measures anything, so no history was ever lost to it.
+- [x] **A button that rebuilds the EPG grid.**
 
 **0.3.0 — features**, following the receiver plugin: a **second notify entity** for the discreet
 toast and a `style` field on the `message` action; a **softcam** button and sensor (the auto-heal

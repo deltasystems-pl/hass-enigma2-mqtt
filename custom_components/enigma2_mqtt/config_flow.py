@@ -41,6 +41,7 @@ from .box import (
     Enigma2Box,
     async_request_ha_mode,
     async_wait_for_info,
+    normalise_mac,
     parse_json_payload,
 )
 from .const import (
@@ -719,16 +720,29 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                 requested[CONF_CAM_TELEMETRY] = user_input[CONF_CAM_TELEMETRY]
             if requested is not None and CONF_OSCAM_TELEMETRY in current:
                 requested[CONF_OSCAM_TELEMETRY] = user_input[CONF_OSCAM_TELEMETRY]
+            # An empty field means "use the address the box reports", which is the
+            # common case and not an error. Anything else has to be an address before
+            # it is stored: the value used to be passed through with nothing but a
+            # `.strip()`, and a malformed one surfaced from inside `wake_on_lan` as a
+            # complaint about a non-hexadecimal character at position 12.
+            typed_mac = (user_input.get(CONF_WOL_MAC) or "").strip()
+            wol_mac = normalise_mac(typed_mac) if typed_mac else ""
+            if wol_mac is None:
+                errors[CONF_WOL_MAC] = "invalid_mac"
             local_data = {
                 CONF_DANGEROUS_BUTTONS: user_input[CONF_DANGEROUS_BUTTONS],
-                CONF_WOL_MAC: (user_input.get(CONF_WOL_MAC) or "").strip(),
+                CONF_WOL_MAC: wol_mac or "",
                 CONF_BOUQUETS: user_input.get(CONF_BOUQUETS) or [],
                 CONF_CHECK_GITHUB_RELEASES: user_input[CONF_CHECK_GITHUB_RELEASES],
                 CONF_SOURCE_LIST_SCOPE: user_input[CONF_SOURCE_LIST_SCOPE],
             }
             if requested is not None:
                 local_data.update(requested)
-            if user_input.get("configure_ssh"):
+            # Nothing is sent to the receiver and no other step is entered while a field
+            # on this form is wrong: a user correcting the address would otherwise have
+            # already changed the box's privacy settings, or be three steps into an SSH
+            # flow, before seeing the message.
+            if not errors and user_input.get("configure_ssh"):
                 self._pending_options = local_data
                 self._pending_remote = (
                     requested
@@ -736,7 +750,7 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                     else None
                 )
                 return await self.async_step_ssh_host()
-            if requested is not None and not _settings_match(current, requested):
+            if not errors and requested is not None and not _settings_match(current, requested):
                 before = box.updates.get("info", 0)
                 try:
                     await box.async_command(
@@ -774,7 +788,7 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
         # change. A box that has not published its channels yet leaves the list empty,
         # and the selector still takes typed names.
         bouquets = box.bouquet_names if box is not None else []
-        mac = box.info.get("mac") if box is not None else None
+        mac = box.reported_mac if box is not None else None
         settings = box.info.get("settings") if box is not None else None
 
         schema = vol.Schema(
