@@ -98,6 +98,44 @@ fixes. It is documented instead.
 
 ### 5. A `select` platform, and a source list that fits the recorder
 
+> 🔴 **Corrected 2026-09-22 — the recorder half of this decision was wrong.**
+>
+> This section, as accepted, says that a long source list pushes the media player's attributes
+> past the recorder's 16 KB limit and costs the entity its history. **It does not, and it never
+> did.** Home Assistant's `MediaPlayerEntity` declares `source_list` an **unrecorded** attribute,
+> and the recorder removes every unrecorded attribute *before* it weighs a state against the
+> 16 384-byte limit. `SelectEntity.options` is unrecorded on the same terms, so the „Channel"
+> select added here was never at risk either. Measured on a running system: a source list of many
+> hundred channels is tens of kilobytes of raw attributes and **under a hundred bytes** once the
+> recorder has filtered it, with every other attribute intact in the stored row.
+>
+> Three statements below are therefore void: the heading's „fits the recorder", the problem
+> statement's second paragraph, and the claim that the new option „brings the media player's
+> attributes back under the recorder's limit and restores its history". Nothing was ever dropped
+> from history.
+>
+> **What changed as built**, in consequence:
+>
+> - **`source_list_scope` defaults to `all`**, not to the active bouquet. With the recorder
+>   rationale gone there was no reason to shorten every existing installation's source list, and a
+>   shorter default would have broken automations naming a channel outside the active bouquet.
+>   `active_bouquet` is opt-in.
+> - **The reason that survives is ergonomic, not technical**: a dropdown of a thousand rows is not
+>   a control, and the short list is the one the receiver's own channel ± is walking.
+> - **The acceptance criterion was replaced.** „Stays under 16 384 bytes" is meaningless here;
+>   the test now routes a real state-changed event through the recorder's own encoder and asserts
+>   that the attributes **survive** — including that `friendly_name` is still there, because a
+>   state over the limit comes back as an empty object and „small" alone would look like success.
+>
+> The lesson is worth more than the correction: **a limit that exists is not a limit that
+> applies.** The size was measured on the producer's side of the recorder's own filter and nothing
+> was checked against a stored row until the feature had already been designed around it. The near
+> miss is instructive too — the wrong number argued for a *safer* default, so nothing looked
+> broken.
+>
+> Decision 10's requirement is **not** affected by this and still stands; see the note there.
+
+
 **Two defects, one cause.** In integration mode **nothing listed bouquets or channels** — a channel
 selector exists only in the plugin's discovery mode, and this integration had no `select` platform
 at all, although the topics, the commands and the actions behind one were all already there.
@@ -164,15 +202,27 @@ with no progress is a button people press twice.
 
 ### 10. An EPG sensor for the active bouquet
 
+> **Checked 2026-09-22, and this reasoning stands.** The correction under decision 5 does not
+> weaken it, and the cross-reference in the paragraph below is the one thing here that was wrong:
+> decision 5 does **not** „solve the same problem by shrinking the payload", because decision 5
+> had no recorder problem to solve. The difference is **who declares the attribute unrecorded**.
+> `source_list` and a select's `options` are declared unrecorded by Home Assistant itself, so they
+> never needed anything from this integration. `channels` here is an attribute of ours on an
+> ordinary sensor, and an ordinary sensor's attributes **are** recorded — so this one is written
+> to the database on every refresh unless this integration excludes it. It must therefore be
+> declared in `_unrecorded_attributes`, and a test must assert that rather than assume it.
+
+
 A sensor whose state is how many channels in the **active bouquet** have guide data, and whose
 attribute carries now and next for each of them, built from the grid the receiver already
 publishes.
 
 🔴 **That attribute is declared unrecorded and never reaches the recorder.** It is the same trap
 the grid topic carries: an attribute of this size, rewritten on every update, bloats the database —
-and it is the same problem decision 5 solves for the media player by shrinking the payload. Here
-the payload cannot shrink, so it is excluded instead. Titles are capped. Full multi-event grids
-stay in the `get_epg_grid` action, which returns a response and stores nothing.
+and it is **not** the problem decision 5 turned out to have (see the notes on both). Here the
+attribute is ours rather than one Home Assistant already excludes, so it is excluded here. Titles
+are capped. Full multi-event grids stay in the `get_epg_grid` action, which returns a response and
+stores nothing.
 
 ### 11. Wake-on-LAN, and process sensors
 
