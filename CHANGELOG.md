@@ -200,6 +200,20 @@ Found by running this release against a real receiver rather than a test one.
 
 ### Documentation
 
+- **[ADR-0003](docs/adr/0003-control-feedback-and-household-features.md) carries a dated
+  correction: the recorder diagnosis behind decision 5 was wrong.** A long source list was said to
+  push the media player's attributes past the recorder's 16 KB limit and cost the entity its
+  history. It does not. Home Assistant declares `source_list` — and a select's `options` —
+  unrecorded, and the recorder strips every unrecorded attribute *before* it weighs a state
+  against that limit; measured through the recorder's own function, a thousand-channel media player
+  is 27 620 bytes of raw attributes and 327 stored — a few hundred bytes, with every other
+  attribute intact. Nothing was ever dropped from
+  history. In consequence `source_list_scope` ships defaulting to **`all`**, so an existing
+  installation does not change, `active_bouquet` is opt-in, and the reason for offering it is that
+  a dropdown of a thousand rows is not a control. The size-based test was replaced by one that
+  routes a real state through the recorder's own encoder and asserts the attributes survive.
+  Decision 10's requirement — the EPG sensor's own attribute really is recorded unless excluded —
+  is unaffected and now says why in as many words.
 - **[ADR-0002](docs/adr/0002-scope-after-m0.md) records the scope added and changed after M0** —
   bouquet activation, the opt-in conditional-access diagnostics, an options page that writes to the
   receiver and the privacy boundary that puts on the broker login, the hardened installer, the
