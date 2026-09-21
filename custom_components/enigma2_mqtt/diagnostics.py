@@ -28,7 +28,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 
 from .box import Enigma2MqttConfigEntry
-from .const import DOMAIN
+from .bundle import BundleError, load_bundled_plugin
+from .const import DOMAIN, SUPPORTED_PLUGIN_VERSION
+from .update import plugin_compatibility
 
 TO_REDACT = {
     "broker_host",
@@ -63,7 +65,16 @@ async def async_get_config_entry_diagnostics(
     device = dr.async_get(hass).async_get_device_by_identifier(
         (DOMAIN, box.node_id), entry.entry_id
     )
+    try:
+        bundled_version: str | None = (
+            await hass.async_add_executor_job(load_bundled_plugin)
+        ).version
+    except (BundleError, OSError):
+        # A distribution whose bundle will not load is itself worth reporting, and it is
+        # the state the update entity falls back on, so the constant is what it compares.
+        bundled_version = None
 
+    installed_plugin = state.info.get("plugin")
     data: dict[str, Any] = {
         "entry": {
             "data": dict(entry.data),
@@ -82,6 +93,18 @@ async def async_get_config_entry_diagnostics(
         },
         "announcement": dict(state.announcement),
         "info": dict(state.info),
+        # A receiver ahead of this integration reads "up to date" on its card, because
+        # offering it a downgrade would be worse. That makes the one version mismatch
+        # nobody can see from the UI the one a bug report most needs stated.
+        "plugin": {
+            "installed": installed_plugin if isinstance(installed_plugin, str) else None,
+            "bundled": bundled_version,
+            "expected": SUPPORTED_PLUGIN_VERSION,
+            "compatibility": plugin_compatibility(
+                installed_plugin if isinstance(installed_plugin, str) else None,
+                bundled_version or SUPPORTED_PLUGIN_VERSION,
+            ),
+        },
         "topics": {
             "power": state.power,
             "service": state.service,

@@ -3,10 +3,12 @@ name: Validate
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
   schedule:
     - cron: "0 4 * * 1"
+  # Called by the release workflow, so that a tag runs these jobs once — as the gate in
+  # front of the published zip — rather than twice beside it.
+  workflow_call:
 
 permissions:
   contents: read
@@ -17,14 +19,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: home-assistant/actions/hassfest@master
+      # Pinned: this workflow is a gate in front of a published release, and a
+      # moving ref is somebody else's push running in that position.
+      - uses: home-assistant/actions/hassfest@58bff37c8947f690ace498be413a9b78d6f30f93  # master, 2026-09-21
 
   hacs:
     name: HACS
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: hacs/action@main
+      - uses: hacs/action@1ebf01c408f29afcb6406bd431bc98fd8cbb15aa  # main, 2026-09-21, after 22.5.0
         with:
           category: integration
 

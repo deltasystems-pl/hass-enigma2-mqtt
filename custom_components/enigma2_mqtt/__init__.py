@@ -28,6 +28,7 @@ from .const import (
     DOMAIN,
     HA_MODE_DISCOVERY,
 )
+from .release_store import async_release_check_store
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -96,7 +97,13 @@ async def async_remove_entry(
     that nothing listens to, and the user with no entities and no obvious reason why.
     This is best effort on purpose: the box may be off, the broker may be gone, and
     neither is a reason to refuse to remove a config entry.
+
+    The release check's stored stamp goes with it. It is keyed by entry id, and Home
+    Assistant does not reuse one, so a record left behind is a row nothing will ever
+    read again — and, if the same receiver is added back, a stamp from its previous life
+    deciding whether its new one may ask a question.
     """
+    await async_release_check_store(hass).async_remove(entry.entry_id)
     try:
         if not await mqtt.async_wait_for_mqtt_client(hass):
             _LOGGER.debug(

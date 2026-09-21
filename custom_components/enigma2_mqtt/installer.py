@@ -290,7 +290,14 @@ async def _async_connect(credentials: SshCredentials) -> InstallerSession:
             encoding=None,
             login_timeout=15,
         )
-    except asyncssh.HostKeyNotVerifiable as err:
+    except (asyncssh.HostKeyNotVerifiable, asyncssh.KeyImportError) as err:
+        # `KeyImportError` is the stored key itself being unreadable, and it subclasses
+        # `ValueError` rather than `asyncssh.Error` — so it used to sail past both
+        # handlers below and reach the user as a traceback and the word "Unknown". It
+        # belongs here: whatever the cause — a truncated write, a hand-edited entry, a
+        # restored backup from another receiver — the pinned identity is no longer
+        # usable, and the recovery is the same one a changed host key gets, which is to
+        # be shown the fingerprint again and asked to accept it.
         raise InstallerError(InstallerErrorCode.HOST_KEY_CHANGED) from err
     except asyncssh.PermissionDenied as err:
         raise InstallerError(InstallerErrorCode.AUTH_FAILED) from err

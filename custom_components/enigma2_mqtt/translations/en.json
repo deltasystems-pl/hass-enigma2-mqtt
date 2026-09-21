@@ -1,5 +1,11 @@
 {
   "title": "Enigma2 MQTT",
+  "common": {
+    "update_summary_older": "The receiver runs an older plugin than this integration carries. Installing replaces it with the bundled {version} and leaves the receiver's own broker settings alone.",
+    "update_summary_older_no_install": "The receiver runs an older plugin than the bundled {version}. No SSH credentials are stored, so this card cannot install it: reconfigure the receiver with “Keep SSH credentials for updates”, or install the IPK on the box by hand.",
+    "update_summary_newer": "The receiver runs a plugin newer than the bundled {version}. Nothing here replaces it — this card never offers a downgrade.",
+    "update_summary_published": "The plugin repository has published {version}. This check only reports it; installing always uses the bundle shipped with this integration."
+  },
   "config": {
     "flow_title": "{name}",
     "step": {
@@ -36,8 +42,14 @@
       },
       "install_confirm": {
         "title": "Confirm receiver identity and install",
-        "description": "Confirm SSH fingerprint `{fingerprint}` before sending credentials. The plugin is installed from the bundle shipped with this integration.",
-        "data": {"ssh_username": "SSH username", "ssh_password": "SSH password", "broker_host": "MQTT broker host", "broker_port": "MQTT broker port", "broker_username": "MQTT username", "broker_password": "MQTT password", "node_id": "Node ID", "base_topic": "Base topic", "name": "Name", "keep_ssh_credentials": "Keep SSH credentials for updates"}
+        "description": "Confirm SSH fingerprint `{fingerprint}` before sending credentials. The plugin is installed from the bundle shipped with this integration.\n\n**Give the receiver a broker login of its own.** The receiver keeps that password in a file on its own flash, and most Enigma2 images answer SSH with the image's default root password — so a login shared with Home Assistant hands over the whole broker.\n\nOn a standalone Mosquitto these four lines confine the login to one receiver — put its own node ID where the example stands:\n\n- `topic readwrite enigma2/vuuno4kse_005301/#`\n- `topic write enigma2mqtt/discovery/vuuno4kse_005301/#`\n- `topic write homeassistant/device/vuuno4kse_005301/#`\n- `topic write homeassistant/device_automation/vuuno4kse_005301/#`\n\nThe Home Assistant Mosquitto add-on does **not** enforce an `acl_file` today: it accepts the file and never asks it. There a dedicated login names the receiver in the broker log but does not confine it, so treat the receiver as able to publish anywhere until the add-on gains ACL support.",
+        "data": {"ssh_username": "SSH username", "ssh_password": "SSH password", "broker_host": "MQTT broker host", "broker_port": "MQTT broker port", "broker_username": "MQTT username", "broker_password": "MQTT password", "node_id": "Node ID", "base_topic": "Base topic", "name": "Name", "keep_ssh_credentials": "Keep SSH credentials for updates"},
+        "data_description": {
+          "broker_host": "The broker address as the receiver reaches it. The receiver is the one that connects, so this has to work from the receiver's network — Home Assistant's own broker setting is not necessarily the same address.",
+          "broker_port": "The broker's MQTT port. 1883 unless the broker was moved.",
+          "broker_username": "The login created for this receiver alone. Do not reuse the one Home Assistant connects with.",
+          "broker_password": "Written to the receiver in a file only root can read. It never reaches a Home Assistant log or the diagnostics download."
+        }
       },
       "install_progress": {"title": "Installing MQTT Bridge"},
       "reauth": {
@@ -138,7 +150,8 @@
           "screenshot_interval": "Screenshot interval (seconds)",
           "screenshot_delay": "Delay after changing channel (seconds)",
           "cam_telemetry": "Publish conditional-access telemetry",
-          "oscam_telemetry": "Publish OSCam health telemetry"
+          "oscam_telemetry": "Publish OSCam health telemetry",
+          "check_github_releases": "Check for published plugin releases"
           ,"configure_ssh": "Configure SSH credentials for plugin updates"
           ,"keep_ssh_credentials": "Keep SSH credentials for updates"
         },
@@ -151,7 +164,8 @@
           "screenshot_interval": "Used only in interval mode. The receiver enforces a minimum of five seconds.",
           "screenshot_delay": "Wait before an automatic screenshot after a channel change, so the new picture has time to appear.",
           "cam_telemetry": "Expose the current service's encryption and ECM status. No server, account or card details are published.",
-          "oscam_telemetry": "Expose privacy-neutral OSCam process, API, reader and server health. Reader labels, addresses, accounts and card identifiers are never published."
+          "oscam_telemetry": "Expose privacy-neutral OSCam process, API, reader and server health. Reader labels, addresses, accounts and card identifiers are never published.",
+          "check_github_releases": "Off by default, and off means this integration talks to nothing but your broker. On, it asks the plugin's repository which release is published, at most once every 24 hours, and says so on the version entity. The answer and the time it was asked are saved, so reloading the receiver or restarting Home Assistant shows what is already known rather than asking again. It never downloads anything: installing still uses only the bundle shipped here."
         }
       }
       ,"ssh_host": {"title": "Connect to the receiver", "data": {"ssh_host": "Receiver host", "ssh_port": "SSH port"}}

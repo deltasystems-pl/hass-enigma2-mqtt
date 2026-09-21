@@ -44,7 +44,7 @@ by-effect check. The milestone column says when it is due.
 | `docs-configuration-parameters` — every option explained | [x] | M3 |
 | `docs-installation-parameters` — every setup field explained | [x] | M3 |
 | `integration-owner` — a codeowner in the manifest | [x] | M1 |
-| `test-coverage` — at least 95 % of the integration's lines | [ ] | M4 |
+| `test-coverage` — at least 95 % of the integration's lines | [x] | M4 |
 
 ## Beyond silver
 
@@ -62,11 +62,23 @@ actions, registered on the media player platform, which is where Home Assistant 
 entity action to be registered; the rule's intent — a schema on every action, validated before
 anything is published, and an action that exists whether or not a box is loaded — is met.
 
-`test-coverage` stays open on purpose. The current 372-test suite covers every platform, every
-action, the device triggers, both flows and the guarded installer, including its refusals, its
-rollback and the races its durable lock can lose. The local frozen-source run measured 93%
-statement coverage on Python 3.14.4 — 92% for `installer.py` — below the 95% target. What is still uncovered is concentrated in the
-asyncssh transport itself, which has no receiver to talk to here.
+`test-coverage` is met as of the 473-test suite: 95.7% statement coverage (142 of 3292 lines
+uncovered) on Python 3.14.4 against Home Assistant 2026.9.2, measured locally with
+`pytest --cov`. The suite covers every platform, every action, the device triggers, both flows
+and the guarded installer, including its refusals, its rollback and the races its durable lock
+can lose. Nothing is excluded with `# pragma: no cover`, so the number is the whole file.
+
+What closed the gap was the transport, which was the part a fake session could never check: the
+real AsyncSSH adapter now runs against an SSH server started inside the test process — a
+receiver that is not there, one that refuses the password, one whose host key has changed, one
+that never answers a command — and the assertions are the error codes a user would end up
+reading. The receiver-side helper is also exercised through its command line, which is the
+interface the installer actually uses, rather than only through its functions.
+
+The lowest files are `installer_helper.py` at 91% and `config_flow.py` at 92%. What remains
+uncovered there is concentrated in branches that need a real receiver's filesystem or a real
+failure of the SSH probe mid-flow. That is a gap in what can be simulated, and it is named here
+rather than closed with a pragma.
 
 The intermittent failure previously recorded against
 `test_aborting_progress_cancels_the_transaction_and_clears_secrets` is fixed. Its cause was in
@@ -85,3 +97,19 @@ has not.
 - **ruff** — lint and import order (`E`, `F`, `W`, `I`, `B`, `UP`).
 - **pytest** — the test suite, against the Home Assistant release pinned by
   `pytest-homeassistant-custom-component`.
+- **Reproduce bundled receiver plugin** — the committed IPK and source archive are rebuilt from
+  the pinned plugin commit and compared byte for byte.
+
+All five run on every push to `main`, on every pull request, once a week — and **in front of
+every release**. The release workflow calls the same workflow and publishes nothing unless all of
+it passes. That is not redundant with the branch ruleset: a tag is pushed by a person, at
+whatever commit they choose, so "main was green" is not evidence about the tree being released.
+
+Two consequences of putting those jobs in front of the publisher are worth stating. Every
+release is now gated on a **live checkout of `deltasystems-pl/enigma2-mqtt-bridge` at the commit
+the bundle pins**, rebuilt and compared byte for byte — so a release cannot be cut while that
+repository is unreachable, and it cannot be cut at all if the committed IPK no longer matches
+the source it claims. And the third-party actions that now sit in the publishing path
+(`hassfest`, the HACS action, `action-gh-release`) are **pinned by commit SHA** with the version
+in a comment beside them, because a moving `@master`, `@main` or `@v2` is somebody else's push
+running with this repository's release token.
