@@ -169,6 +169,21 @@
       "snr": {
         "default": "mdi:signal"
       },
+      "process_memory": {
+        "default": "mdi:memory"
+      },
+      "process_memory_peak": {
+        "default": "mdi:chart-line-variant"
+      },
+      "process_open_files": {
+        "default": "mdi:file-multiple-outline"
+      },
+      "process_started": {
+        "default": "mdi:restart"
+      },
+      "process_threads": {
+        "default": "mdi:sitemap-outline"
+      },
       "uptime": {
         "default": "mdi:clock-start"
       }

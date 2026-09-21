@@ -1,12 +1,17 @@
 """What the receiver is doing, as sensors.
 
-Ten of them, from three groups. The first five are what a household looks at — the
-channel, what is on now and next, whether anything is being recorded and when the next
-recording starts. The next four are diagnostics: signal quality and uptime matter when
-something is wrong and are noise on a dashboard, so they are in the diagnostic category
-and disabled until somebody turns them on. The last one is „Ostatni błąd", which is the
-opposite case: a diagnostic that is enabled, because the only time anybody goes looking
-for it is after something has already gone wrong.
+Ten always, and more when the box says it can measure them. The first five are what a
+household looks at — the channel, what is on now and next, whether anything is being
+recorded and when the next recording starts. The next four are diagnostics: signal
+quality and uptime matter when something is wrong and are noise on a dashboard, so they
+are in the diagnostic category and disabled until somebody turns them on. The tenth is
+„Ostatni błąd", which is the opposite case: a diagnostic that is enabled, because the
+only time anybody goes looking for it is after something has already gone wrong.
+
+The rest depend on what the plugin announced. The `process` group — what enigma2 itself
+is using — appears when the box names that capability. The conditional-access and OSCam
+groups follow a setting instead of a capability, because they are a choice about privacy
+rather than about what the image allows.
 
 Two conventions run through the file. Epoch seconds from the topics become ISO strings
 in attributes and `datetime` objects in states, because those are what a template and a
@@ -34,6 +39,7 @@ from homeassistant.const import (
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
     EntityCategory,
+    UnitOfInformation,
     UnitOfTime,
 )
 from homeassistant.core import HomeAssistant, callback
@@ -45,6 +51,7 @@ import homeassistant.util.dt as dt_util
 
 from .box import Enigma2Box, Enigma2MqttConfigEntry, Enigma2State
 from .const import (
+    CAPABILITY_PROCESS,
     CONF_CAM_TELEMETRY,
     CONF_OSCAM_TELEMETRY,
     DOMAIN,
@@ -54,6 +61,7 @@ from .const import (
     TOPIC_INFO,
     TOPIC_LAST_ERROR,
     TOPIC_OSCAM,
+    TOPIC_PROCESS,
     TOPIC_RECORDING,
     TOPIC_SERVICE,
     TOPIC_TUNER,
@@ -128,6 +136,30 @@ def _refused_at(ts: Any) -> str | None:
         return dt_util.utc_from_timestamp(ts).isoformat()
     except (OverflowError, OSError, ValueError):
         return None
+
+
+def _process_value(state: Enigma2State, key: str) -> int | None:
+    """Return one bounded integer from the `process` topic, or None."""
+    value = (state.process or {}).get(key)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _mebibytes(state: Enigma2State, key: str) -> float | None:
+    """Return a kilobyte count as MiB, at the precision the number deserves.
+
+    The plugin reports kilobytes because that is what `/proc` gives it. A hundredth of a
+    mebibyte is ten kilobytes of jitter, which on an hour-by-hour memory curve is noise
+    with a decimal point on it; one place is enough to see a leak and not enough to make
+    a graph look busy when nothing is happening.
+    """
+    value = _process_value(state, key)
+    return None if value is None else round(value / 1024, 1)
+
+
+def _started(state: Enigma2State) -> datetime | None:
+    """Return when the enigma2 process started, as a moment rather than a number."""
+    value = _process_value(state, "started")
+    return None if value is None else dt_util.utc_from_timestamp(value)
 
 
 def _cam_value(state: Enigma2State, key: str, expected: type) -> Any:
@@ -222,6 +254,59 @@ SENSORS: tuple[Enigma2SensorDescription, ...] = (
     ),
 )
 
+# What the enigma2 process itself is doing, which is the question behind "the box has
+# gone slow", "the interface died again" and "it was fine until Thursday". Only the
+# memory is on by default: a resident set size over weeks is the one of these that
+# answers a question nobody thought to ask at the time, and the recorder cannot go back
+# and collect it later.
+PROCESS_SENSORS: tuple[Enigma2SensorDescription, ...] = (
+    Enigma2SensorDescription(
+        key="process_memory",
+        topics=(TOPIC_PROCESS,),
+        device_class=SensorDeviceClass.DATA_SIZE,
+        native_unit_of_measurement=UnitOfInformation.MEBIBYTES,
+        suggested_display_precision=1,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda state: _mebibytes(state, "rss_kb"),
+    ),
+    Enigma2SensorDescription(
+        key="process_memory_peak",
+        topics=(TOPIC_PROCESS,),
+        device_class=SensorDeviceClass.DATA_SIZE,
+        native_unit_of_measurement=UnitOfInformation.MEBIBYTES,
+        suggested_display_precision=1,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value_fn=lambda state: _mebibytes(state, "hwm_kb"),
+    ),
+    Enigma2SensorDescription(
+        key="process_threads",
+        topics=(TOPIC_PROCESS,),
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value_fn=lambda state: _process_value(state, "threads"),
+    ),
+    Enigma2SensorDescription(
+        key="process_open_files",
+        topics=(TOPIC_PROCESS,),
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value_fn=lambda state: _process_value(state, "fds"),
+    ),
+    Enigma2SensorDescription(
+        key="process_started",
+        topics=(TOPIC_PROCESS,),
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value_fn=_started,
+    ),
+)
+
 CAM_SENSORS: tuple[Enigma2SensorDescription, ...] = (
     Enigma2SensorDescription(
         key="cam_system",
@@ -300,8 +385,21 @@ async def async_setup_entry(
         ]
     )
 
-    by_key = {description.key: description for description in (*CAM_SENSORS, *OSCAM_SENSORS)}
+    by_key = {
+        description.key: description
+        for description in (*PROCESS_SENSORS, *CAM_SENSORS, *OSCAM_SENSORS)
+    }
     for keys, enabled, declared in (
+        (
+            [description.key for description in PROCESS_SENSORS],
+            lambda: CAPABILITY_PROCESS in box.capabilities,
+            # Never. The CAM and OSCam entities follow a setting a household can turn
+            # off, and turning it off is a reason to take them away. This follows a
+            # capability, and a capability that stops being named is not a decision —
+            # it is a downgraded plugin, an image that lost a hook, or a box that has
+            # not answered yet. None of those is a reason to delete somebody's history.
+            lambda: False,
+        ),
         (
             [description.key for description in CAM_SENSORS],
             lambda: box.cam_enabled,

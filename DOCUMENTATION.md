@@ -325,6 +325,11 @@ while the box is unreachable, because that is precisely when somebody wants to w
 | `ber` | *BER* | `<node_id>_ber` | `tuner` | count · diagnostic · **disabled by default** |
 | `uptime` | *Czas pracy* | `<node_id>_uptime` | `info` | seconds · diagnostic · **disabled by default** |
 | `last_error` | *Ostatni błąd* | `<node_id>_last_error` | `last_error` | the refused command's name · diagnostic · attributes `error` and `time` |
+| `process_memory` | *Pamięć Enigma2* | `<node_id>_process_memory` | `process` | MiB · `data_size` · diagnostic · **on by default** |
+| `process_memory_peak` | *Pamięć Enigma2 (szczyt)* | `<node_id>_process_memory_peak` | `process` | MiB · the high-water mark since the process started · diagnostic · **disabled by default** |
+| `process_threads` | *Wątki Enigma2* | `<node_id>_process_threads` | `process` | count · diagnostic · **disabled by default** |
+| `process_open_files` | *Otwarte pliki Enigma2* | `<node_id>_process_open_files` | `process` | count of open file descriptors · diagnostic · **disabled by default** |
+| `process_started` | *Start Enigma2* | `<node_id>_process_started` | `process` | a timestamp · diagnostic · **disabled by default** |
 
 **Ostatni błąd** is the one sensor whose memory belongs to Home Assistant rather than to a
 topic. The plugin clears `last_error` on the next command that succeeds, so by the time
@@ -342,6 +347,21 @@ It is also the one entity of this device that **stays available while the receiv
 Deep standby is the headline case and it is precisely a box that has left the network; an
 entity that went unavailable with it would hide the explanation at the moment it was wanted,
 and a restart taken in the meantime would lose it for good.
+
+The five `process` sensors exist only when the plugin announces the **`process`** capability —
+an older plugin, or an image that would not let it hook the measurement, simply has none of
+them. They are created whenever that capability arrives, including long after Home Assistant
+has finished setting the integration up, which is the normal case on a real receiver. They are
+never removed for a capability that stops being named: that is a downgraded plugin or a box
+that has not answered yet, not a decision, and deleting them would take somebody's renames,
+areas, dashboards and history with them. Switch them off in the entity registry instead.
+
+`process_memory` is the one of the five that is **on** by default. The others are looked up
+once something is already wrong, so they cost a household nothing until they are wanted; a
+resident set size over weeks is the opposite — the recorder cannot go back and collect it after
+the question has been asked. Every field of the topic may be `null`, and a null is `unknown`
+rather than a zero: a process with no threads and one that started at the epoch are both
+readings, and neither is what "the plugin could not measure this" means.
 
 Times in attributes are ISO 8601 strings rather than the epoch seconds the topics carry,
 because a template can read one and not the other. The long programme description and the list

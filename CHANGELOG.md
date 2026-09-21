@@ -53,6 +53,12 @@ with this release is byte for byte the package published as the plugin's own v0.
   ask for them.
 - **Binary sensors** for whether a recording is running and whether the recording disk is
   still mounted, which is the failure that otherwise goes unnoticed for weeks.
+- **What enigma2 itself is using** — memory, its high-water mark, threads, open files and when
+  the process started — when the receiver plugin can measure it. The memory is on by default,
+  because "it has been getting slower for a fortnight" is a question the recorder can only
+  answer if it was already collecting; the rest are switched off until something is wrong. They
+  appear whenever the receiver announces the capability, and a receiver that stops announcing it
+  never loses them.
 - **Switches** for standby and mute, a **volume slider**, and **buttons** for a GUI restart, a
   screen grab, a Wake-on-LAN packet and a discovery refresh. Deep standby and reboot are there
   too, hidden until you turn them on, so neither sits one mis-tap from the volume.

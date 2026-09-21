@@ -27,7 +27,7 @@ import ipaddress
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, Final
 
 from homeassistant.components import mqtt
 from homeassistant.components.mqtt import ReceiveMessage
@@ -81,6 +81,7 @@ from .const import (
     TOPIC_LAST_ERROR,
     TOPIC_OSCAM,
     TOPIC_POWER,
+    TOPIC_PROCESS,
     TOPIC_RECORDING,
     TOPIC_SCREEN,
     TOPIC_SERVICE,
@@ -166,6 +167,23 @@ OSCAM_VERSION = re.compile(
 # a megabyte of `1.20_a_a_a…` would match, and it is a label for a bug report. The
 # longest version anyone has seen is a quarter of this.
 OSCAM_VERSION_MAX = 64
+
+# What the `process` topic may say, and the largest value of each that is a measurement
+# rather than a bug. The topic is five integers about the enigma2 process itself, and
+# every one of them is a number somebody would put on a graph — so the job here is to
+# make sure nothing that is not a number ever gets there. A receiver has under a
+# gigabyte of RAM and a few dozen threads; these ceilings are orders of magnitude above
+# anything real, which is what makes a value above them evidence of a different bug.
+PROCESS_BOUNDS: Final[dict[str, int]] = {
+    "rss_kb": 64 * 1024 * 1024,
+    "hwm_kb": 64 * 1024 * 1024,
+    "threads": 65_536,
+    "fds": 1_048_576,
+    # Unix seconds. Far enough ahead that no receiver clock reaches it, close enough
+    # that a millisecond timestamp published by mistake is refused rather than shown as
+    # a date in the year 57000.
+    "started": 4_102_444_800,
+}
 
 type Enigma2MqttConfigEntry = ConfigEntry[Enigma2Box]
 
@@ -579,6 +597,7 @@ class Enigma2State:
     hdd: dict[str, Any] | None = None
     cam: dict[str, Any] | None = None
     oscam: dict[str, Any] | None = None
+    process: dict[str, Any] | None = None
     bouquet: dict[str, Any] | None = None
     channels: dict[str, Any] | None = None
     last_error: dict[str, Any] | None = None
@@ -1111,6 +1130,8 @@ class Enigma2Box:
             return
         if suffix == TOPIC_CAM:
             self._cam_received(msg)
+        elif suffix == TOPIC_PROCESS:
+            self._process_received(msg)
         elif suffix == TOPIC_OSCAM:
             self._oscam_received(msg)
         elif suffix.startswith(f"{TOPIC_EPG_GRID}/"):
@@ -1379,6 +1400,55 @@ class Enigma2Box:
         for listener in list(self._listeners):
             if listener.wants(TOPIC_OSCAM):
                 listener.callback()
+
+    @callback
+    def _process_received(self, msg: ReceiveMessage) -> None:
+        """Cache what the plugin measured about the enigma2 process itself.
+
+        Unlike the CAM and OSCam topics this is not an opt-in: there is nothing private
+        in a resident set size, and the entities follow the capability rather than a
+        setting. What it shares with them is that the payload arrives from a box and is
+        therefore not trusted to be what the contract says.
+        """
+        raw = msg.payload
+        if isinstance(raw, (bytes, bytearray, str)) and not raw.strip():
+            # An empty retained payload is a retraction: a plugin that stopped
+            # publishing, or a topic cleared by hand. The numbers are gone; the
+            # entities stay and go unknown, which is the truth.
+            #
+            # Tested on the raw payload rather than on the decoded text, because this
+            # topic arrives as bytes and bytes that are not UTF-8 decode to nothing —
+            # which would make a corrupt publish indistinguishable from a retraction
+            # and quietly throw away the last good sample.
+            self.state.process = None
+            self._async_updated(TOPIC_PROCESS)
+            return
+        payload = parse_json_payload(msg.payload)
+        if payload is None:
+            # Not JSON, or not an object. Nothing to read here, and the last sample
+            # that did parse is more use than throwing it away over one bad publish.
+            _LOGGER.debug("Ignoring an unreadable process payload from %s", self.node_id)
+            return
+        self.state.process = self._normalize_process(payload)
+        self._async_updated(TOPIC_PROCESS)
+
+    @staticmethod
+    def _normalize_process(payload: dict[str, Any]) -> dict[str, Any]:
+        """Strip process telemetry to five bounded integers, or None for each.
+
+        `True` is an `int` in Python and would otherwise become a resident set size of
+        one kilobyte on a graph. Everything else that is not a plain integer in range —
+        a float, a string, a negative, a missing key, a number from a different unit —
+        is None, which is the only honest answer and the one a sensor shows as unknown.
+        """
+
+        def bounded(key: str) -> int | None:
+            value = payload.get(key)
+            if isinstance(value, bool) or not isinstance(value, int):
+                return None
+            return value if 0 <= value <= PROCESS_BOUNDS[key] else None
+
+        return {key: bounded(key) for key in PROCESS_BOUNDS}
 
     @callback
     def _announcement_received(self, msg: ReceiveMessage) -> None:

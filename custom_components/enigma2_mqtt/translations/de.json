@@ -253,6 +253,21 @@
       "uptime": {
         "name": "Laufzeit"
       },
+      "process_memory": {
+        "name": "Enigma2-Speicher"
+      },
+      "process_memory_peak": {
+        "name": "Enigma2-Speicher (Spitze)"
+      },
+      "process_threads": {
+        "name": "Enigma2-Threads"
+      },
+      "process_open_files": {
+        "name": "Enigma2 offene Dateien"
+      },
+      "process_started": {
+        "name": "Enigma2 gestartet"
+      },
       "cam_system": {
         "name": "Zugangsberechtigungssystem"
       },
