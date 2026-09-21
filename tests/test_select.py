@@ -18,7 +18,7 @@ from homeassistant.components.select import (
     SERVICE_SELECT_OPTION,
 )
 from homeassistant.const import ATTR_ENTITY_ID, STATE_UNAVAILABLE, STATE_UNKNOWN
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 import pytest
@@ -162,10 +162,17 @@ async def test_a_capable_box_creates_them_once_in_the_order_a_broker_delivers(
     config_entry.add_to_hass(hass)
 
     touched: list[tuple[str, str]] = []
-    hass.bus.async_listen(
-        er.EVENT_ENTITY_REGISTRY_UPDATED,
-        lambda event: touched.append((event.data["entity_id"], event.data["action"])),
-    )
+
+    # On the loop, not in a worker thread. `async_listen` treats a plain callable as an
+    # executor job, and this list is read in the order it was appended to: every event
+    # still arrives, but the order the appends land in is the order the thread pool got
+    # to them. That is not the order the events were fired in, and below it is asserted
+    # to be.
+    @callback
+    def _record(event: Event) -> None:
+        touched.append((event.data["entity_id"], event.data["action"]))
+
+    hass.bus.async_listen(er.EVENT_ENTITY_REGISTRY_UPDATED, _record)
 
     await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
 
@@ -209,10 +216,17 @@ async def test_a_start_up_the_box_slept_through_keeps_the_selects(
     }
 
     touched: list[tuple[str, str]] = []
-    hass.bus.async_listen(
-        er.EVENT_ENTITY_REGISTRY_UPDATED,
-        lambda event: touched.append((event.data["entity_id"], event.data["action"])),
-    )
+
+    # On the loop, not in a worker thread. `async_listen` treats a plain callable as an
+    # executor job, and this list is read in the order it was appended to: every event
+    # still arrives, but the order the appends land in is the order the thread pool got
+    # to them. That is not the order the events were fired in, and below it is asserted
+    # to be.
+    @callback
+    def _record(event: Event) -> None:
+        touched.append((event.data["entity_id"], event.data["action"]))
+
+    hass.bus.async_listen(er.EVENT_ENTITY_REGISTRY_UPDATED, _record)
 
     await async_setup_box_then_retained(hass, config_entry, retained)
 
