@@ -108,21 +108,26 @@ def _next_timer(state: Enigma2State) -> datetime | None:
     return dt_util.utc_from_timestamp(begin)
 
 
-def _refused_at(ts: Any) -> str:
-    """Return when the receiver refused, preferring its own timestamp.
+def _refused_at(ts: Any) -> str | None:
+    """Return when the receiver says it refused, or None when it does not say.
 
     The complaint carries `ts`, and using it is what makes a replay idempotent: the
     retained payload arrives again on every reconnect and at every start-up, and a
-    clock reading would put a new time on the same event each time. A payload without
-    a usable `ts` — an older plugin, a truncated write — falls back to now, which is
-    at least the moment this integration first learned of it.
+    clock reading would put a new time on the same event each time. A `ts` the caller
+    can rely on therefore answers the whole question of whether two payloads are the
+    same refusal, which is why this says nothing rather than guessing when there is
+    none to rely on.
+
+    Zero and negative values are not timestamps here, whatever `utc_from_timestamp`
+    makes of them: the plugin stamps the moment it refused, and a complaint dated
+    1969 is a field that was never filled in.
     """
-    if isinstance(ts, (int, float)) and not isinstance(ts, bool):
-        try:
-            return dt_util.utc_from_timestamp(ts).isoformat()
-        except (OverflowError, OSError, ValueError):
-            pass
-    return dt_util.utcnow().isoformat()
+    if not isinstance(ts, (int, float)) or isinstance(ts, bool) or ts <= 0:
+        return None
+    try:
+        return dt_util.utc_from_timestamp(ts).isoformat()
+    except (OverflowError, OSError, ValueError):
+        return None
 
 
 def _cam_value(state: Enigma2State, key: str, expected: type) -> Any:
@@ -369,8 +374,11 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
     moment this integration read it. The retained complaint is replayed on every
     reconnect and again at every start-up, and a time taken from the clock moves each
     time — so the one number that says when the receiver refused would drift forward
-    for as long as nobody pressed anything else. A replay of a complaint that is already
-    shown changes nothing at all.
+    for as long as nobody pressed anything else. With a `ts` in hand a replay writes
+    exactly what is already there and Home Assistant drops it, and two refusals that
+    differ only in when they happened are still two refusals: the sentence a permission
+    error carries is the same every time, so the text cannot tell them apart and is not
+    asked to.
 
     **It is available even when the receiver is not.** Deep standby is the headline
     case and it is exactly a box that has left the network: an entity that went
@@ -428,18 +436,27 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
             return
         command = command[:ERROR_TEXT_MAX]
         error = str(payload.get("error") or "")[:ERROR_TEXT_MAX] or None
+        when = _refused_at(payload.get("ts"))
         if (
-            self.box.state.last_error_retained
+            when is None
+            and self.box.state.last_error_retained
             and command == self._attr_native_value
             and error == self._attr_extra_state_attributes.get("error")
         ):
-            # The broker replaying what is already on the screen. A payload with no
-            # `ts` would otherwise have its time moved to now by its own replay.
+            # A replay of what is already shown, by a payload that gives no time of its
+            # own: taking it would move the time to now, and a reconnect would do it
+            # again. The text alone only settles this when there is no `ts` — a
+            # permission refusal says the same sentence every time, so the second one,
+            # made while Home Assistant was down, is byte-identical to the first except
+            # for the moment it happened.
             return
         self._attr_native_value = command
         self._attr_extra_state_attributes = {
             "error": error,
-            "time": _refused_at(payload.get("ts")),
+            # Writing the same `ts` again writes the same state and the same
+            # attributes, which Home Assistant drops: a replay costs nothing and
+            # changes nothing, without this having to recognise it.
+            "time": when or dt_util.utcnow().isoformat(),
         }
 
 

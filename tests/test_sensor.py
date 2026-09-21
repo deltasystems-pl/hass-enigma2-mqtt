@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import json
 
-from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.const import (
+    EVENT_STATE_CHANGED,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+)
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import entity_registry as er
 import homeassistant.util.dt as dt_util
@@ -500,6 +504,150 @@ async def test_a_reconnect_does_not_move_the_time_of_a_complaint(
     state = hass.states.get("sensor.dekoder_salon_last_error")
     assert state.state == "reboot"
     assert state.attributes["time"] == first
+
+
+async def test_a_newer_identical_complaint_moves_the_time(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Two refusals of the same thing differ only in when they happened.
+
+    A permission error says the same sentence every time, so a second „deep standby
+    is not allowed" — pressed while Home Assistant was down, and waiting on the topic
+    when it came back — is byte-identical to the first except for `ts`. Comparing the
+    text would show the right error at the wrong time, which is the one thing this
+    sensor exists to get right.
+    """
+    mock_restore_cache(
+        hass,
+        [
+            State(
+                "sensor.dekoder_salon_last_error",
+                "deep_standby",
+                {
+                    "error": "deep standby is not allowed on this box",
+                    "time": "2026-09-15T08:00:13+00:00",
+                },
+            )
+        ],
+    )
+    box_on_the_broker[LAST_ERROR_TOPIC] = json.dumps(
+        {
+            "cmd": "deep_standby",
+            "error": "deep standby is not allowed on this box",
+            "ts": 1789462813,
+        }
+    )
+
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    state = hass.states.get("sensor.dekoder_salon_last_error")
+    assert state.state == "deep_standby"
+    assert state.attributes["time"] == "2026-09-15T09:00:13+00:00"
+
+
+async def test_replaying_the_very_same_complaint_changes_nothing(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Not merely the same values — the same state, with no event behind it.
+
+    Every reconnect replays this payload, and an entity that rewrote itself each time
+    would be a row in the recorder for something that did not happen.
+    """
+    await async_setup_box(hass, config_entry)
+    complaint = json.dumps(
+        {"cmd": "reboot", "error": "a recording is running", "ts": 1789459213}
+    )
+    async_fire_mqtt_message(hass, LAST_ERROR_TOPIC, complaint)
+    await hass.async_block_till_done()
+    before = hass.states.get("sensor.dekoder_salon_last_error")
+
+    changes: list[str] = []
+    hass.bus.async_listen(
+        EVENT_STATE_CHANGED, lambda event: changes.append(event.data["entity_id"])
+    )
+    async_fire_mqtt_message(hass, LAST_ERROR_TOPIC, complaint, retain=True)
+    await hass.async_block_till_done()
+
+    after = hass.states.get("sensor.dekoder_salon_last_error")
+    assert after.state == before.state
+    assert after.attributes["time"] == before.attributes["time"]
+    assert after.last_updated == before.last_updated
+    assert "sensor.dekoder_salon_last_error" not in changes
+
+
+async def test_a_replay_with_no_timestamp_is_still_ignored(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Without a `ts` there is nothing but the text to go on, and it has to do."""
+    await async_setup_box(hass, config_entry)
+    complaint = json.dumps({"cmd": "epg_grid", "error": "the EPG grid is off"})
+    async_fire_mqtt_message(hass, LAST_ERROR_TOPIC, complaint)
+    await hass.async_block_till_done()
+    first = hass.states.get("sensor.dekoder_salon_last_error").attributes["time"]
+
+    async_fire_mqtt_message(hass, LAST_ERROR_TOPIC, complaint, retain=True)
+    await hass.async_block_till_done()
+
+    assert hass.states.get("sensor.dekoder_salon_last_error").attributes["time"] == first
+
+
+async def test_an_identical_complaint_that_is_not_a_replay_is_a_new_refusal(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    freezer,
+) -> None:
+    """The broker delivers a fresh publish without the retain flag, and that is news.
+
+    Pressing a refused button twice is two refusals even on a plugin too old to date
+    them, and the second one is the one somebody is looking at.
+    """
+    await async_setup_box(hass, config_entry)
+    complaint = json.dumps({"cmd": "epg_grid", "error": "the EPG grid is off"})
+    freezer.move_to("2026-09-15T08:00:13+00:00")
+    async_fire_mqtt_message(hass, LAST_ERROR_TOPIC, complaint)
+    await hass.async_block_till_done()
+
+    freezer.move_to("2026-09-15T09:00:13+00:00")
+    async_fire_mqtt_message(hass, LAST_ERROR_TOPIC, complaint)
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.dekoder_salon_last_error")
+    assert state.attributes["time"] == "2026-09-15T09:00:13+00:00"
+
+
+@pytest.mark.parametrize("ts", [0, -1, True, "1789459213", None])
+async def test_a_timestamp_that_is_not_one_falls_back_to_now(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    freezer,
+    ts: object,
+) -> None:
+    """A zero `ts` rendered as 1969, which is not when anything was refused."""
+    await async_setup_box(hass, config_entry)
+    freezer.move_to("2026-09-15T09:00:13+00:00")
+
+    async_fire_mqtt_message(
+        hass,
+        LAST_ERROR_TOPIC,
+        json.dumps({"cmd": "zap", "error": "no such service", "ts": ts}),
+    )
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.dekoder_salon_last_error")
+    assert state.attributes["time"] == "2026-09-15T09:00:13+00:00"
 
 
 async def test_a_retained_complaint_is_shown_when_there_is_nothing_to_restore(
