@@ -33,7 +33,7 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .box import Enigma2Box, Enigma2MqttConfigEntry
+from .box import Enigma2Box, Enigma2MqttConfigEntry, same_service, service_identity
 from .const import DOMAIN, TOPIC_BOUQUET, TOPIC_CHANNELS, TOPIC_SERVICE
 from .entity import Enigma2Entity, OptionalEntities
 from .services import async_select_bouquet
@@ -53,23 +53,44 @@ def _unique_options(entries: Iterable[tuple[str, str]]) -> list[tuple[str, str]]
     """Return (label, sref) pairs whose labels are unique, numbering the repeats.
 
     A select cannot offer the same option twice, and dropping the second „TVN HD" would
-    make that channel unreachable from Home Assistant. So a repeat is numbered in the
-    order the receiver lists it: the first keeps the bare name, the next becomes
-    „TVN HD (2)". Counting up until the label is free rather than straight to the
-    occurrence number also covers the case where a bouquet really does hold a channel
-    called „TVN HD (2)" of its own.
+    make that channel unreachable from Home Assistant. So a repeat is numbered —
+    „TVN HD", „TVN HD (2)" — while the list itself stays in the receiver's order.
+
+    🔴 **The number follows the service reference, not the position.** Numbering in
+    bouquet order would mean that moving one „TVN HD" above the other in the receiver's
+    own bouquet editor silently swaps which channel „TVN HD (2)" tunes, and an
+    automation that names it would keep working and do something else. Sorting the
+    repeats of one name by their identity makes the label stable under a reorder. It
+    cannot be stable under a duplicate being added or removed — the numbers there are
+    positions in a set that changed — which is why an automation belongs on the `zap`
+    action with a reference rather than on a label.
+
+    Counting up until the label is free, rather than straight to the occurrence number,
+    also covers a bouquet that really does hold a channel called „TVN HD (2)".
     """
-    options: list[tuple[str, str]] = []
+    pairs = list(entries)
+    # Names in the order the receiver first lists them, so that the rare collision
+    # below is resolved the same way on every run rather than by a set's iteration
+    # order, which Python randomises between processes.
+    names = list(dict.fromkeys(name for name, _sref in pairs))
+
+    labels: dict[int, str] = {}
     used: set[str] = set()
-    for name, sref in entries:
-        label = name
-        suffix = 1
-        while label in used:
-            suffix += 1
-            label = f"{name} ({suffix})"
-        used.add(label)
-        options.append((label, sref))
-    return options
+    for name in names:
+        positions = [index for index, (other, _sref) in enumerate(pairs) if other == name]
+        # Ties are two entries with the same reference as well as the same name, which
+        # is a bouquet listing one channel twice; falling back to the position keeps
+        # that deterministic.
+        positions.sort(key=lambda index: (service_identity(pairs[index][1]), index))
+        for rank, index in enumerate(positions):
+            suffix = rank + 1
+            label = name if suffix == 1 else f"{name} ({suffix})"
+            while label in used:
+                suffix += 1
+                label = f"{name} ({suffix})"
+            used.add(label)
+            labels[index] = label
+    return [(labels[index], sref) for index, (_name, sref) in enumerate(pairs)]
 
 
 def _named_entries(items: Iterable[Any]) -> list[tuple[str, str]]:
@@ -138,27 +159,33 @@ class Enigma2Select(Enigma2Entity, SelectEntity):
     def _set_options(
         self, entries: Iterable[tuple[str, str]], current_sref: Any
     ) -> None:
-        """Rebuild the list, and point it at whatever the box says is current."""
+        """Rebuild the list, and point it at whatever the box says is current.
+
+        The current reference is matched by service identity rather than by string: the
+        `service` topic and the `channels` topic do not have to spell one channel the
+        same way, and a raw comparison leaves the select showing nothing for ever on a
+        receiver whose reference carries a stream URL or a different case.
+        """
         options = _unique_options(entries)
         self._srefs = dict(options)
         self._attr_options = [label for label, _ in options]
         self._attr_current_option = next(
-            (label for label, sref in options if sref == current_sref), None
+            (label for label, sref in options if same_service(sref, current_sref)), None
         )
 
-    def _sref_for(self, option: str, translation_key: str, field: str) -> str:
+    def _sref_for(self, option: str) -> str:
         """Return the reference behind an option, or say it is no longer offered.
 
         Home Assistant checks an option against the list before this is reached, so the
-        only way here is a list that changed between the two — the box republished its
-        channels while somebody was choosing. Sending the stale label as a name anyway
-        is how the wrong channel gets tuned.
+        only way here is a list that changed between the two — the receiver republished
+        its channels while somebody was choosing. Sending the stale label as a name
+        anyway is how the wrong channel gets tuned.
         """
         if (sref := self._srefs.get(option)) is None:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
-                translation_key=translation_key,
-                translation_placeholders={field: option},
+                translation_key="option_no_longer_offered",
+                translation_placeholders={"option": option},
             )
         return sref
 
@@ -186,9 +213,7 @@ class Enigma2BouquetSelect(Enigma2Select):
 
     async def async_select_option(self, option: str) -> None:
         """Make this bouquet the receiver's channel-up/down context."""
-        await async_select_bouquet(
-            self.box, self._sref_for(option, "bouquet_not_published", "bouquet")
-        )
+        await async_select_bouquet(self.box, self._sref_for(option))
 
 
 class Enigma2ChannelSelect(Enigma2Select):
@@ -219,9 +244,17 @@ class Enigma2ChannelSelect(Enigma2Select):
         )
 
     async def async_select_option(self, option: str) -> None:
-        """Tune this channel, by its service reference."""
+        """Tune this channel, by its service reference.
+
+        What proves it worked is the `service` topic naming the same service — by
+        identity, not by string. The receiver answers with its own spelling of the
+        reference, and a raw comparison would report a zap that plainly happened as a
+        timeout.
+        """
         box = self.box
-        sref = self._sref_for(option, "unknown_channel", "channel")
+        sref = self._sref_for(option)
         await box.async_command(
-            "zap", sref, effect=lambda: (box.state.service or {}).get("sref") == sref
+            "zap",
+            sref,
+            effect=lambda: same_service((box.state.service or {}).get("sref"), sref),
         )

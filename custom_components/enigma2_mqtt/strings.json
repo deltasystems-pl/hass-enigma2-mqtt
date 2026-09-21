@@ -167,7 +167,7 @@
           "cam_telemetry": "Expose the current service's encryption and ECM status. No server, account or card details are published.",
           "oscam_telemetry": "Expose privacy-neutral OSCam process, API, reader and server health. Reader labels, addresses, accounts and card identifiers are never published.",
           "check_github_releases": "Off by default, and off means this integration talks to nothing but your broker. On, it asks the plugin's repository which release is published, at most once every 24 hours, and says so on the version entity. The answer and the time it was asked are saved, so reloading the receiver or restarting Home Assistant shows what is already known rather than asking again. It never downloads anything: installing still uses only the bundle shipped here.",
-          "source_list_scope": "The active bouquet is the list the receiver is on, and it is what the „Channel” select offers too. Every bouquet gives one long list instead — on a receiver with a thousand channels that list is large enough to push the media player past the recorder's limit, and Home Assistant then keeps no history for the entity at all. Either way the „Bouquet” select switches bouquets, and the zap action takes a service reference and ignores this setting."
+          "source_list_scope": "Every bouquet on offer is one list of all of them, which is what this integration has always done — on a receiver with a thousand channels that is a dropdown of a thousand rows. The active bouquet is the short list the receiver itself is on, the one its channel up and down walk, and the same one the “Channel” select shows; a receiver that has published no active bouquet keeps the long list, because there is nothing to shorten it to. Either way the “Bouquet” select changes bouquets, and the zap action takes a service reference and ignores this setting."
         }
       }
       ,"ssh_host": {"title": "Connect to the receiver", "data": {"ssh_host": "Receiver host", "ssh_port": "SSH port"}}
@@ -549,6 +549,7 @@
     "update_version_unavailable": {"message": "The requested version is not available from this integration’s verified bundle."},
     "update_no_credentials": {"message": "No SSH credentials are stored for this receiver. Reconfigure it and tick “Keep SSH credentials for updates”, then try again."},
     "update_failed": {"message": "Plugin update failed: {reason}"},
-    "channel_not_in_active_bouquet": {"message": "{channel} is not in the bouquet the receiver is on, so the source list does not offer it. Switch the „Bouquet” select to the bouquet it belongs to first, or use the enigma2_mqtt.zap action, which takes a service reference and is not scoped."}
+    "channel_not_in_active_bouquet": {"message": "{channel} is not in the bouquet the receiver is on, so the source list does not offer it. Switch the “Bouquet” select to the bouquet it belongs to first, or use the enigma2_mqtt.zap action, which takes a service reference and is not scoped."},
+    "option_no_longer_offered": {"message": "{option} is no longer on this list. The receiver republished its channels while it was being chosen; open the list again and pick from what is there now."}
     }
   }

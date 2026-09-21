@@ -32,7 +32,7 @@ from homeassistant.helpers import config_validation as cv, entity_platform
 import homeassistant.util.dt as dt_util
 import voluptuous as vol
 
-from .box import Enigma2Box, Enigma2CommandError, normalise_key
+from .box import Enigma2Box, Enigma2CommandError, normalise_key, same_service
 from .const import (
     DOMAIN,
     HA_MODES,
@@ -135,7 +135,7 @@ async def async_select_bouquet(box: Enigma2Box, sref: str) -> None:
         json.dumps({"sref": sref}),
         effect=lambda: (
             box.updates.get(TOPIC_BOUQUET, 0) > before
-            and (box.state.bouquet or {}).get("sref") == sref
+            and same_service((box.state.bouquet or {}).get("sref"), sref)
         ),
     )
 
@@ -161,7 +161,11 @@ class Enigma2Actions:
             await box.async_command(
                 "zap",
                 sref,
-                effect=lambda: (box.state.service or {}).get("sref") == sref,
+                # By identity, not by string: the receiver answers on `service` with
+                # its own spelling of the reference — a trailing colon, a stream URL,
+                # a different case — and a raw comparison reports a zap that plainly
+                # happened as a timeout.
+                effect=lambda: same_service((box.state.service or {}).get("sref"), sref),
             )
             return
         await box.async_command(

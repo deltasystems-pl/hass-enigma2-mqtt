@@ -90,9 +90,21 @@ have not been accepted on a receiver, and no tag has been cut.
   anywhere. „Bukiet" lists what the receiver published and switches its real channel-up/down
   context; „Kanał" lists the channels of whichever bouquet that is, and reshapes the moment the
   context moves. Both select by service reference rather than by name, both wait for the
-  receiver and raise its own words when it refuses, and both exist only while the receiver says
-  it can switch a bouquet at all. A name repeated inside one bouquet is numbered rather than
-  dropped, because a dropped one would be a channel Home Assistant could not reach.
+  receiver and raise its own words when it refuses, and both are created only while the receiver
+  reports **both** the `channels` and the `bouquet_context` capabilities. A name repeated inside
+  one bouquet is numbered rather than dropped, because a dropped one would be a channel Home
+  Assistant could not reach; the number follows the service reference, so reordering the bouquet
+  on the receiver does not silently swap which channel „TVN HD (2)" tunes. It can still shift
+  when a duplicate is added or removed, so an automation belongs on the `zap` action with a
+  reference rather than on a label.
+- **An option for how long the media player's source list is.** *Channels in the media player's
+  source list* offers every bouquet you have chosen — which is what it has always done and stays
+  the default — or just the bouquet the receiver is on, which on a receiver with a thousand
+  channels is the difference between a dropdown of a thousand rows and one of ninety. A receiver
+  that has published no channel-list context, or one whose context names a bouquet the bouquets
+  option excludes or that holds no playable channel, keeps the long list: there is nothing to
+  shorten it to, and an empty source list would leave no way to change channel at all. The last
+  two of those say so in the log, once.
 
 ### Fixed
 
@@ -118,13 +130,13 @@ Found by running this release against a real receiver rather than a test one.
   reproduction between the tag and the upload. A tag is pushed by a person at whatever commit
   they choose, so "main was green" was never evidence about the tagged tree. The release workflow
   now runs the whole validation suite first and publishes nothing if any of it fails.
-- **The media player has its history back.** A receiver with 988 channels put 16.6 kB of names
-  into `source_list`, which took the entity's attributes to 17.3 kB — past the recorder's
-  16 384-byte limit, so Home Assistant dropped *all* of them and kept no history for the channel,
-  the programme or the artwork either. The list now follows the bouquet the receiver is on, which
-  fits. A new option, **Channels in the media player's source list**, takes it back to every
-  bouquet for anybody who would rather have the long list than the history, and a receiver that
-  publishes no channel-list context at all is left with the full list rather than an empty one.
+- **A zap is confirmed by which service it is, not by how the reference is spelled.** One
+  channel has more than one spelling — a reference can stop at the tenth colon or carry it, an
+  IPTV entry adds its stream URL and its name, and the case of the hexadecimal fields is not
+  agreed on anywhere. The `zap` and `select_bouquet` actions compared the receiver's answer with
+  the string they had sent, so on a receiver that answers in its own spelling a command that had
+  plainly worked was reported as a timeout ten seconds later. They now compare the fields that
+  identify a service, by the same rule and the same field count as the receiver plugin.
 
 ### Changed
 
@@ -138,7 +150,9 @@ Found by running this release against a real receiver rather than a test one.
   the receiver has but the source list is not currently showing now says so, and names the two
   ways on — switch „Bukiet", or use the `zap` action, which takes a service reference and ignores
   the scope. Where the same name is in several bouquets, the copy in the bouquet on the list is
-  the one tuned. `play_media` with `channel_name` is unchanged and is not scoped.
+  the one tuned. `play_media` with `channel_name` is unchanged and is not scoped. What the media
+  player reports as its **source** is still whatever is playing, even when the scope means that
+  is not on the list: what is on is a fact and the length of a list is a preference.
 
 ### Documentation
 

@@ -57,15 +57,29 @@ MAX_SCREENSHOT_INTERVAL: Final = 3600
 MIN_SCREENSHOT_DELAY: Final = 1
 MAX_SCREENSHOT_DELAY: Final = 30
 
-# What the media player's `source_list` offers. A receiver with a thousand channels
-# writes 16.6 kB of names into one attribute, and the recorder drops the attributes of
-# any state past 16 384 bytes — so the whole entity loses its history, not just the
-# list. Scoping to the bouquet the receiver is on fits, and is the default; `all` is
-# today's behaviour for somebody who would rather have one long list than a history.
+# What the media player's `source_list` offers. Every chosen bouquet is the default,
+# because it is what this integration has always done and narrowing it under somebody
+# who has automations naming a channel would break them. `active_bouquet` is the opt-in:
+# a receiver with a thousand channels makes one dropdown of a thousand rows, and the
+# bouquet the receiver is on is both short and the list its own channel ± walks.
+#
+# It is a preference about the length of a list and nothing more. It is *not* about the
+# recorder: Home Assistant lists `source_list` in the media player's
+# `_entity_component_unrecorded_attributes`, and the recorder strips those before it
+# measures a state against its 16 384-byte limit, so the long list never reached the
+# database in the first place.
 SOURCE_LIST_SCOPE_ACTIVE_BOUQUET: Final = "active_bouquet"
 SOURCE_LIST_SCOPE_ALL: Final = "all"
 SOURCE_LIST_SCOPES: Final = (SOURCE_LIST_SCOPE_ACTIVE_BOUQUET, SOURCE_LIST_SCOPE_ALL)
-DEFAULT_SOURCE_LIST_SCOPE: Final = SOURCE_LIST_SCOPE_ACTIVE_BOUQUET
+DEFAULT_SOURCE_LIST_SCOPE: Final = SOURCE_LIST_SCOPE_ALL
+
+# How many colon-separated fields identify a service. Two spellings of one channel
+# differ in what follows them — a trailing colon, a stream URL, a name — so a comparison
+# that is not made over exactly these fields will call the same channel two channels.
+# 🔴 This mirrors `SERVICE_FIELDS` in the receiver plugin's `enigma2.identity()`. The two
+# halves have to agree about what "the same service" means; a cleverer rule here than
+# there would be worse than either rule on its own.
+SERVICE_FIELDS: Final = 11
 
 # How the plugin presents a box to Home Assistant, switchable with `cmd/ha_mode`.
 HA_MODE_DISCOVERY: Final = "discovery"

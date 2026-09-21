@@ -49,6 +49,7 @@ from .conftest import (
 BOUQUET_SELECT = "select.dekoder_salon_bouquet"
 CHANNEL_SELECT = "select.dekoder_salon_channel"
 
+ULUBIONE = CHANNELS["bouquets"][0]
 SPORT = CHANNELS["bouquets"][1]
 SPORT_CONTEXT: dict[str, Any] = {"name": SPORT["name"], "sref": SPORT["sref"]}
 # The receiver on a list the plugin was not told to publish. Both fields null is
@@ -218,24 +219,51 @@ async def test_a_refused_bouquet_raises_with_the_boxs_own_words(
     assert "bouquet has no playable service" in str(raised.value)
 
 
-async def test_a_bouquet_option_that_vanished_is_refused_rather_than_sent(
+async def test_a_bouquet_option_that_vanished_says_the_list_moved(
     hass: HomeAssistant,
     mqtt_mock,
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """The list can be republished while somebody is choosing from it."""
+    """The list can be republished while somebody is choosing from it.
+
+    The message has to be the one about the list having moved — "the receiver does not
+    offer that bouquet" is what the action says about a bouquet that was never there,
+    and it sends the reader looking at the receiver's configuration instead of at the
+    list in front of them.
+    """
     _with_bouquet_context(box_on_the_broker)
     box_on_the_broker[BOUQUET_TOPIC] = json.dumps(BOUQUET)
     await async_setup_box(hass, config_entry)
 
     entity = _entity(hass, BOUQUET_SELECT)
-    with pytest.raises(ServiceValidationError):
+    with pytest.raises(ServiceValidationError) as raised:
         await entity.async_select_option("A bouquet that is no longer there")
+    assert raised.value.translation_key == "option_no_longer_offered"
     assert not any(
         call.args[0] == command_topic("bouquet")
         for call in mqtt_mock.async_publish.call_args_list
     )
+
+
+async def test_the_active_bouquet_is_matched_by_identity(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """One bouquet has more than one spelling, and a raw `==` calls them two."""
+    _with_bouquet_context(box_on_the_broker)
+    box_on_the_broker[BOUQUET_TOPIC] = json.dumps(
+        {"name": None, "sref": SPORT["sref"].lower()}
+    )
+    await async_setup_box(hass, config_entry)
+
+    assert hass.states.get(BOUQUET_SELECT).state == "Sport"
+    assert hass.states.get(CHANNEL_SELECT).attributes[ATTR_OPTIONS] == [
+        "Eurosport 1",
+        "TVN HD",
+    ]
 
 
 # -------------------------------------------------------------------------- „Kanał"
@@ -335,6 +363,58 @@ async def test_duplicate_names_inside_one_bouquet_are_numbered(
     assert_published(mqtt_mock, command_topic("zap"), "1:0:19:4242:3F3:1:C00000:0:0:0:")
 
 
+async def test_a_numbered_duplicate_keeps_its_channel_when_the_bouquet_is_reordered(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Otherwise moving one of them in the receiver's bouquet editor swaps them.
+
+    A label that silently starts tuning a different channel is worse than a label that
+    is missing: an automation naming it keeps working and does something else. The
+    number follows the service reference, so the list order can change underneath it.
+    """
+    _with_bouquet_context(box_on_the_broker)
+    # The repeat is listed second here and first after the reorder below.
+    doubled = json.loads(json.dumps(CHANNELS))
+    doubled["bouquets"][0]["channels"] = [
+        {"sref": SREF, "name": "TVP 1 HD"},
+        {"sref": "1:0:19:4242:3F3:1:C00000:0:0:0:", "name": "TVP 1 HD"},
+        {"sref": SREF_TWO, "name": "TVN HD"},
+    ]
+    box_on_the_broker[CHANNELS_TOPIC] = json.dumps(doubled)
+    box_on_the_broker[BOUQUET_TOPIC] = json.dumps(BOUQUET)
+    await async_setup_box(hass, config_entry)
+
+    before = _labels_by_sref(hass)
+    assert sorted(before) == ["TVP 1 HD", "TVP 1 HD (2)"]
+
+    reordered = json.loads(json.dumps(doubled))
+    reordered["bouquets"][0]["channels"] = [
+        reordered["bouquets"][0]["channels"][1],
+        reordered["bouquets"][0]["channels"][0],
+        reordered["bouquets"][0]["channels"][2],
+    ]
+    async_fire_mqtt_message(hass, CHANNELS_TOPIC, json.dumps(reordered))
+    await hass.async_block_till_done()
+
+    # The list follows the receiver's new order …
+    assert hass.states.get(CHANNEL_SELECT).attributes[ATTR_OPTIONS] == [
+        "TVP 1 HD (2)",
+        "TVP 1 HD",
+        "TVN HD",
+    ]
+    # … and every label still tunes exactly the channel it tuned before.
+    assert _labels_by_sref(hass) == before
+
+
+def _labels_by_sref(hass: HomeAssistant) -> dict[str, str]:
+    """Return the „Kanał" select's label for each duplicated reference."""
+    srefs = _entity(hass, CHANNEL_SELECT)._srefs
+    return {label: sref for label, sref in srefs.items() if label.startswith("TVP 1 HD")}
+
+
 async def test_selecting_a_channel_zaps_by_reference(
     hass: HomeAssistant,
     mqtt_mock,
@@ -373,24 +453,101 @@ async def test_a_refused_channel_raises_with_the_boxs_own_words(
     assert "no tuner is free" in str(raised.value)
 
 
-async def test_a_channel_option_that_vanished_is_refused_rather_than_sent(
+async def test_a_channel_option_that_vanished_says_the_list_moved(
     hass: HomeAssistant,
     mqtt_mock,
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """A stale label must not be sent as if it were a service reference."""
+    """A stale label must not be sent as if it were a service reference.
+
+    And the complaint is that the list moved, not that the receiver has no such
+    channel: it may have it, in the bouquet this list is no longer showing.
+    """
     _with_bouquet_context(box_on_the_broker)
     box_on_the_broker[BOUQUET_TOPIC] = json.dumps(BOUQUET)
     await async_setup_box(hass, config_entry)
 
     entity = _entity(hass, CHANNEL_SELECT)
-    with pytest.raises(ServiceValidationError):
+    with pytest.raises(ServiceValidationError) as raised:
         await entity.async_select_option("A channel that is no longer there")
+    assert raised.value.translation_key == "option_no_longer_offered"
     assert not any(
         call.args[0] == command_topic("zap")
         for call in mqtt_mock.async_publish.call_args_list
     )
+
+
+async def test_the_playing_channel_is_matched_by_identity(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The `service` topic need not spell a reference the way `channels` does.
+
+    A receiver that answers with a name after the tenth colon, or in another case, is
+    tuned to exactly the channel on this list — and a raw comparison would leave the
+    select showing nothing for as long as it stayed there.
+    """
+    _with_bouquet_context(box_on_the_broker)
+    box_on_the_broker[BOUQUET_TOPIC] = json.dumps(BOUQUET)
+    box_on_the_broker[SERVICE_TOPIC] = json.dumps(
+        {**SERVICE, "sref": SREF_TWO.lower().rstrip(":")}
+    )
+    await async_setup_box(hass, config_entry)
+
+    assert hass.states.get(CHANNEL_SELECT).state == "TVN HD"
+
+
+async def test_a_zap_is_proved_by_identity_not_by_spelling(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Otherwise a zap the receiver plainly carried out is reported as a timeout."""
+    _with_bouquet_context(box_on_the_broker)
+    box_on_the_broker[BOUQUET_TOPIC] = json.dumps(BOUQUET)
+    await async_setup_box(hass, config_entry)
+    await async_arm_box_reply(
+        hass,
+        "zap",
+        SERVICE_TOPIC,
+        # The receiver's own spelling: lower case, and stopping at the tenth colon.
+        json.dumps({**SERVICE, "sref": SREF_TWO.lower().rstrip(":"), "name": "TVN HD"}),
+    )
+
+    await _select(hass, CHANNEL_SELECT, "TVN HD")
+
+    assert_published(mqtt_mock, command_topic("zap"), SREF_TWO)
+
+
+async def test_an_iptv_channels_stream_name_does_not_make_it_a_second_channel(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """An IPTV reference always carries its URL and its name; the name is not identity.
+
+    This is the shape the identifying-field count exists for: the channel list holds
+    the reference up to the stream URL and the receiver answers with the name after it.
+    """
+    _with_bouquet_context(box_on_the_broker)
+    iptv_sref = "4097:0:1:0:0:0:0:0:0:0:http%3a//192.0.2.30/stream.m3u8"
+    with_iptv = json.loads(json.dumps(CHANNELS))
+    with_iptv["bouquets"][0]["channels"].append(
+        {"sref": iptv_sref, "name": "Kanał IPTV"}
+    )
+    box_on_the_broker[CHANNELS_TOPIC] = json.dumps(with_iptv)
+    box_on_the_broker[BOUQUET_TOPIC] = json.dumps(BOUQUET)
+    box_on_the_broker[SERVICE_TOPIC] = json.dumps(
+        {**SERVICE, "sref": f"{iptv_sref}:Kanał IPTV", "name": "Kanał IPTV"}
+    )
+    await async_setup_box(hass, config_entry)
+
+    assert hass.states.get(CHANNEL_SELECT).state == "Kanał IPTV"
 
 
 async def test_a_channel_without_a_reference_is_left_off_the_list(

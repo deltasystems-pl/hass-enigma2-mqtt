@@ -108,7 +108,7 @@ effect without a restart.
 | **Show the deep standby and reboot buttons** | off | Creates the „Głębokie uśpienie" and „Restart" buttons. Turning it off again removes them from the entity registry rather than leaving them behind unavailable. This is about what appears on a dashboard, **not** a safety mechanism: the plugin refuses both commands while a recording is running whatever is set here. |
 | **Wake-on-LAN MAC address** | the address the box reports on `info` | The target of the magic packet the „Obudź (WoL)" button and `media_player.turn_on` send. Set it when the receiver reports a different interface from the one that is plugged in — a box on Wi-Fi does not answer a packet sent to its cable port. |
 | **Bouquets to offer** | every bouquet the box publishes | Which bouquets feed the media player's channel list and the media browser. The choices are the bouquets on the `channels` topic, and a name can be typed for one the box has not published yet. This narrows the plugin's own `bouquets_for_select`; it cannot widen it. |
-| **Channels in the media player's source list** | the active bouquet | What `media_player.source_list` offers. **The active bouquet** is the list the receiver's own channel ± is walking, which is also what the „Kanał" select shows; it is the default because a receiver with 988 channels writes 16.6 kB of names into that one attribute, which takes the entity past the recorder's 16 384-byte limit and makes Home Assistant drop **every** attribute of it from history — the channel and the programme with the list. **Every bouquet on offer** is one long list for somebody who would rather have it than the history. A receiver that publishes no channel-list context at all — an older plugin without `bouquet_context` — is left with the full list either way, because there is nothing to narrow it to. `select_source` follows this setting; the `zap` action takes a service reference and does not. |
+| **Channels in the media player's source list** | every bouquet on offer | What `media_player.source_list` holds, and nothing else. **Every bouquet on offer** is what this integration has always done and stays the default, so an existing installation does not change under an automation that names a channel; on a receiver with 988 channels it is a dropdown of 988 rows. **The active bouquet** is the short list the receiver's own channel ± is walking, which is also what the „Kanał" select shows. `select_source` follows this setting; the `zap` action takes a service reference and does not. Three cases keep the long list whatever is chosen, because there is nothing to shorten it to and an empty source list would leave no way to change channel: a receiver that publishes no channel-list context (an older plugin without `bouquet_context`), a context naming a bouquet the **Bouquets to offer** option excludes, and a context naming a bouquet with no playable channel in it. The last two are logged as a warning, once per bouquet. 🔴 This setting is **not** about the recorder: Home Assistant declares `source_list` an unrecorded attribute and the recorder removes it before it measures a state against its size limit, so the long list never reached the database in the first place. |
 | **Check for published plugin releases** | off | The only thing this integration can do that is not talking to your own broker, which is why it is off. Turned on, the version entity asks the plugin repository which release is published — **at most once every 24 hours** — and reports the tag in its summary, in a `published_version` attribute and in the release link. The time of the last request and its answer are written to `.storage/enigma2_mqtt.release_check`, keyed by config entry, so reloading the receiver, saving the options or restarting Home Assistant shows what is already known instead of spending another request; the record is deleted when the receiver is removed. At most 64 KiB of the answer is read, and a tag is only believed if it is at most 64 characters and parses as a version. The release link is only followed if it points into this plugin's own releases. It downloads nothing and it never raises `latest_version`: `install` can only ever put the bundle shipped here on a receiver, and offering a version the installer would refuse would be a button that lies. Failures — a rate limit, a timeout, an answer that is not a release — are a debug line and nothing else. |
 
 When a recent plugin advertises its configurable publishers, the same form also controls key
@@ -160,16 +160,20 @@ while the box is unreachable, because that is precisely when somebody wants to w
   and deep standby are both `off`: `MediaPlayerState.STANDBY` was deprecated in Home Assistant
   2026.8, and what the household sees is a dark television either way. The „Zasilanie" switch
   and the device's availability tell the two apart for anyone who needs it.
-- **Source** — the current channel name; the source list is the channels of the bouquet the
-  receiver is on, in its own order, with a duplicate name listed once. The
-  [source list scope option](#options) widens it to every selected bouquet, and a receiver that
-  publishes no channel-list context gets that wider list anyway. Selecting one publishes
-  `cmd/zap {"name": …}` when that name is unique across the offered bouquets, and the service
-  reference when it is not — the plugin refuses an ambiguous name, and rightly, but a person
-  picking a name off a list has already made the choice it is refusing to make, and where the
-  list is scoped the copy on it is the one sent. A name the receiver has but the list is not
-  showing is refused with both ways on: switch „Bukiet", or call `zap` with a service reference,
-  which is not scoped.
+- **Source** — the current channel name; the source list is the channels of every bouquet the
+  options offer, in bouquet order, with a duplicate name listed once. The
+  [source list scope option](#options) narrows it to the bouquet the receiver is on. Selecting
+  one publishes `cmd/zap {"name": …}` when that name is unique across the offered bouquets, and
+  the service reference when it is not — the plugin refuses an ambiguous name, and rightly, but
+  a person picking a name off a list has already made the choice it is refusing to make, and
+  where the list is scoped the copy on it is the one sent. A name the receiver has but the list
+  is not showing is refused with both ways on: switch „Bukiet", or call `zap` with a service
+  reference, which is not scoped.
+- **Source is not promised to be in the source list.** In the scoped setting the receiver can
+  perfectly well be tuned to something outside the bouquet it is on — somebody typed a channel
+  number on the remote. `source` and `media_channel` still say what is playing, because what is
+  on is a fact and the length of a dropdown is a preference. Use `media_content_id`, which is
+  the service reference, for anything that has to be exact.
 - **Browsing** — bouquets, then channels, each with the picon the box's own web interface
   serves at `http://<ip>/picon/<sref>.png`. Picons are not published over MQTT; no address on
   `info` simply means no thumbnail.
@@ -290,9 +294,23 @@ silence is not "no".
   never its name, because resolving a name is the plugin's ambiguity problem and there is no
   reason to hand it one. Nothing is selected while the playing service is not one of these
   channels.
-- **A name that appears twice inside one bouquet** is numbered — „TVN HD", then „TVN HD (2)" —
-  in the order the bouquet lists them. A select cannot offer the same option twice, and dropping
-  the repeat would put a channel out of reach.
+- **A name that appears twice inside one bouquet** is numbered — „TVN HD", then „TVN HD (2)".
+  A select cannot offer the same option twice, and dropping the repeat would put a channel out
+  of reach. The number follows the **service reference**, not the position, so reordering the
+  bouquet in the receiver's own editor does not change which channel „TVN HD (2)" tunes; the
+  list itself still follows the receiver's order. 🔴 It cannot be stable when a duplicate is
+  **added or removed** — the numbers are positions in a set that changed — so an automation
+  should use the `zap` action with a service reference rather than name a label.
+- **Service references are compared by identity, not as strings.** One channel has more than one
+  spelling: a reference may stop at the tenth colon or carry it, an IPTV entry always adds its
+  stream URL and its name, and the case of the hexadecimal fields is not agreed on anywhere. The
+  selects compare the fields that identify a service, by the same rule and the same field count
+  as the receiver plugin, so what is playing is recognised and a zap that worked is not reported
+  as a timeout.
+
+Both selects report **nothing selected** rather than an invented option — the receiver is on the
+radio list, on a bouquet nobody published, or tuned outside the bouquet it is walking. That is
+ordinary operation and not a fault.
 
 ## 5. Actions
 

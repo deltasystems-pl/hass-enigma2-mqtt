@@ -65,6 +65,7 @@ from .const import (
     PRESS_LONG,
     PRESS_SHORT,
     PROBE_TIMEOUT,
+    SERVICE_FIELDS,
     SOURCE_LIST_SCOPE_ACTIVE_BOUQUET,
     SUBSCRIBE_TIMEOUT,
     TOPIC_AVAILABILITY,
@@ -280,6 +281,37 @@ def normalise_key(command: str) -> str:
     if not key.startswith(KEY_PREFIX):
         key = f"{KEY_PREFIX}{key}"
     return key
+
+
+def service_identity(sref: Any) -> str:
+    """Return the fields that identify a service, padded and upper-cased.
+
+    One channel has more than one spelling. A reference can end at the tenth colon or
+    without it, an IPTV entry carries its stream URL and its name after the fields that
+    identify it, and the case of the hexadecimal fields is not agreed on anywhere. A
+    raw `==` between two of those spellings says two different channels, which is how a
+    select ends up permanently showing nothing and a zap the receiver carried out is
+    reported as a timeout.
+
+    🔴 This mirrors `identity()` in the receiver plugin's `enigma2.py`, field count
+    included. The two halves have to mean the same thing by "the same service"; a
+    better rule on one side only would be worse than the rule they share.
+    """
+    parts = [part.strip().upper() for part in str(sref or "").strip().split(":")]
+    if not any(parts):
+        return ""
+    parts = parts[:SERVICE_FIELDS]
+    parts += [""] * (SERVICE_FIELDS - len(parts))
+    return ":".join(parts)
+
+
+def same_service(one: Any, other: Any) -> bool:
+    """Return whether two service references name the same service.
+
+    Two empty references are not the same service; they are two absences.
+    """
+    identity = service_identity(one)
+    return bool(identity) and identity == service_identity(other)
 
 
 def picon_url(ip_address: str | None, sref: str | None) -> str | None:
@@ -550,6 +582,9 @@ class Enigma2Box:
         self._pending_cam: object = _NO_PENDING_CAM
         self._pending_oscam: object = _NO_PENDING_OSCAM
         self._subscribed = asyncio.Event()
+        # The bouquet the source list scope last complained about, so that it is said
+        # once rather than on every republished channel list.
+        self._scope_fallback_warned: str | None = None
 
     # ------------------------------------------------------------------ properties
 
@@ -661,7 +696,10 @@ class Enigma2Box:
         context = self.state.bouquet or {}
         sref = context.get("sref")
         if isinstance(sref, str) and sref:
-            return self.bouquet_by_sref(sref)
+            for bouquet in self.bouquets:
+                if same_service(bouquet.get("sref"), sref):
+                    return bouquet
+            return None
         name = context.get("name")
         if isinstance(name, str) and name:
             for bouquet in self.bouquets:
@@ -673,21 +711,53 @@ class Enigma2Box:
     def scoped_bouquets(self) -> list[dict[str, Any]]:
         """Return the bouquets the media player's source list draws on.
 
-        A receiver with a thousand channels puts 16.6 kB of names into one attribute,
-        which takes the whole entity past the recorder's 16 384-byte limit and gets its
-        attributes dropped from history altogether. Scoping the list to the bouquet the
-        receiver is actually on brings it back under, and it is the default.
+        This is a preference about how long a dropdown is. The default is every
+        bouquet on offer, which is what this integration has always done; scoping it to
+        the bouquet the receiver is on makes a thousand-row list into a short one, and
+        it is the list the receiver's own channel ± walks.
 
-        A box that has published no context to scope to — an older plugin with no
-        `bouquet_context`, or one that has not answered yet — cannot be narrowed, so it
-        falls back to every offered bouquet. An empty list would be a regression for a
-        box whose only fault is being old.
+        Three cases cannot be narrowed at all, and every one of them falls back to the
+        full list rather than to nothing: a box that has published no context (an older
+        plugin with no `bouquet_context`, or one that has not answered yet), a context
+        naming a bouquet the bouquets option has filtered out, and a context naming a
+        bouquet that holds no playable channel. An empty source list would leave the
+        media player with no way to change channel at all, which is worse than a list
+        that is longer than asked for.
         """
         scope = self.entry.options.get(CONF_SOURCE_LIST_SCOPE, DEFAULT_SOURCE_LIST_SCOPE)
         if scope != SOURCE_LIST_SCOPE_ACTIVE_BOUQUET:
             return self.bouquets
-        active = self.active_bouquet
-        return [active] if active is not None else self.bouquets
+        if (active := self.active_bouquet) is not None and active["channels"]:
+            self._scope_fallback_warned = None
+            return [active]
+        self._warn_scope_fallback()
+        return self.bouquets
+
+    @callback
+    def _warn_scope_fallback(self) -> None:
+        """Say once why the source list is not the bouquet the option asked for.
+
+        Once per bouquet, not once per payload: `channels` and `bouquet` are republished
+        whenever anything about them moves, and a line per message would bury the log of
+        a box that is simply configured this way.
+        """
+        context = self.state.bouquet or {}
+        name = context.get("name")
+        if not isinstance(name, str) or not name:
+            # No context at all is the documented older-plugin case and is not news.
+            self._scope_fallback_warned = None
+            return
+        if self._scope_fallback_warned == name:
+            return
+        self._scope_fallback_warned = name
+        _LOGGER.warning(
+            "Receiver %s is on bouquet %s, which this receiver's options do not offer "
+            "or which holds no playable channel, so the media player is listing every "
+            "bouquet instead. Add it to the receiver's bouquets option to narrow the "
+            "list again",
+            self.node_id,
+            name,
+        )
 
     @property
     def channel_names(self) -> list[str]:
