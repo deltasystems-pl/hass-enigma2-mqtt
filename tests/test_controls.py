@@ -393,6 +393,41 @@ async def test_the_epg_button_appears_when_the_capability_does(
     assert hass.states.get("button.dekoder_salon_refresh_epg") is not None
 
 
+async def test_an_info_with_no_capability_list_keeps_the_epg_button(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A payload that arrived is not the same as a question that was answered.
+
+    An `info` without a `capabilities` key has said nothing about capabilities — an
+    older plugin, or one that published before it had read its own configuration. Read
+    as "the box has spoken", it becomes a stated „no" and the button is deleted from the
+    registry with whatever the household had done to it. The next `info` brings the
+    button back under a new id, so the end state hides it; the registry does not.
+    """
+    retained[AVAILABILITY_TOPIC] = "online"
+    retained[INFO_TOPIC] = json.dumps(
+        {key: value for key, value in INFO.items() if key != "capabilities"}
+    )
+    config_entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    existing = registry.async_get_or_create(
+        "button",
+        DOMAIN,
+        f"{NODE_ID}_refresh_epg",
+        config_entry=config_entry,
+        suggested_object_id="dekoder_salon_refresh_epg",
+    ).id
+
+    await async_setup_box_then_retained(hass, config_entry, retained)
+
+    surviving = registry.async_get("button.dekoder_salon_refresh_epg")
+    assert surviving is not None
+    assert surviving.id == existing
+
+
 async def test_the_dangerous_buttons_are_absent_by_default(
     hass: HomeAssistant,
     mqtt_mock,

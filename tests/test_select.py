@@ -27,6 +27,8 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_mqtt_message,
 )
 
+from custom_components.enigma2_mqtt.const import DOMAIN
+
 from .conftest import (
     ANNOUNCEMENT,
     ANNOUNCEMENT_TOPIC,
@@ -37,6 +39,7 @@ from .conftest import (
     CHANNELS_TOPIC,
     INFO,
     INFO_TOPIC,
+    NODE_ID,
     SERVICE,
     SERVICE_TOPIC,
     SREF,
@@ -177,32 +180,105 @@ async def test_a_capable_box_creates_them_once_in_the_order_a_broker_delivers(
     assert {action for _entity_id, action in ours} <= {"create", "update"}
 
 
-async def test_a_box_that_has_not_spoken_creates_nothing_and_removes_nothing(
+async def test_a_start_up_the_box_slept_through_keeps_the_selects(
     hass: HomeAssistant,
     mqtt_mock,
     retained: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """Silence is not "no". A box that never answers leaves the registry alone."""
+    """"Not yet known" is not a stated „no", and a box in deep standby says nothing.
+
+    The dangerous case is a restart, not a first run: the registry already holds these
+    two, with whatever name, area and dashboard place the household gave them. A gate
+    that reads silence as "the capability is gone" deletes all of that before the
+    receiver has had a chance to answer — and a first-run test cannot catch it, because
+    there is nothing registered for a wrong answer to destroy.
+    """
     retained[AVAILABILITY_TOPIC] = "online"
     config_entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    existing = {
+        key: registry.async_get_or_create(
+            "select",
+            DOMAIN,
+            f"{NODE_ID}_{key}",
+            config_entry=config_entry,
+            suggested_object_id=f"dekoder_salon_{key}",
+        ).id
+        for key in ("bouquet", "channel")
+    }
 
-    touched: list[str] = []
+    touched: list[tuple[str, str]] = []
     hass.bus.async_listen(
         er.EVENT_ENTITY_REGISTRY_UPDATED,
-        lambda event: touched.append(event.data["entity_id"]),
+        lambda event: touched.append((event.data["entity_id"], event.data["action"])),
     )
 
     await async_setup_box_then_retained(hass, config_entry, retained)
 
+    assert registry.async_get(BOUQUET_SELECT).id == existing["bouquet"]
+    assert registry.async_get(CHANNEL_SELECT).id == existing["channel"]
+    assert not [entry for entry in touched if entry[1] == "remove"]
+
+
+async def test_a_payload_that_states_no_capabilities_keeps_them_too(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """An `info` with no capability list said nothing about capabilities.
+
+    It is not the same answer as a list that does not contain `bouquet_context`, and
+    treating "a payload arrived" as "the box has answered" reads the first as the
+    second — which deletes two entities on any receiver whose plugin is old enough, or
+    whose first `info` was published before it had read its own configuration.
+    """
+    retained[AVAILABILITY_TOPIC] = "online"
+    retained[INFO_TOPIC] = json.dumps(
+        {key: value for key, value in INFO.items() if key != "capabilities"}
+    )
+    config_entry.add_to_hass(hass)
     registry = er.async_get(hass)
+    for key in ("bouquet", "channel"):
+        registry.async_get_or_create(
+            "select",
+            DOMAIN,
+            f"{NODE_ID}_{key}",
+            config_entry=config_entry,
+            suggested_object_id=f"dekoder_salon_{key}",
+        )
+
+    await async_setup_box_then_retained(hass, config_entry, retained)
+
+    assert registry.async_get(BOUQUET_SELECT) is not None
+    assert registry.async_get(CHANNEL_SELECT) is not None
+
+
+async def test_a_stated_capability_list_without_it_does_remove_them(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The other half: a list that was stated and does not name it is a „no"."""
+    retained[AVAILABILITY_TOPIC] = "online"
+    retained[INFO_TOPIC] = json.dumps(INFO)
+    config_entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    for key in ("bouquet", "channel"):
+        registry.async_get_or_create(
+            "select",
+            DOMAIN,
+            f"{NODE_ID}_{key}",
+            config_entry=config_entry,
+            suggested_object_id=f"dekoder_salon_{key}",
+        )
+
+    await async_setup_box_then_retained(hass, config_entry, retained)
+
     assert registry.async_get(BOUQUET_SELECT) is None
     assert registry.async_get(CHANNEL_SELECT) is None
-    assert not [
-        entity_id
-        for entity_id in touched
-        if entity_id in (BOUQUET_SELECT, CHANNEL_SELECT)
-    ]
 
 
 async def test_losing_the_capability_takes_them_out_of_the_registry(
