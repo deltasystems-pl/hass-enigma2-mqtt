@@ -66,10 +66,17 @@ have not been accepted on a receiver, and no tag has been cut.
   receiver — and says plainly that the Home Assistant Mosquitto add-on does not enforce one, where
   a dedicated login names the receiver in the broker log but does not confine it.
 - **An opt-in release check on the version entity**, off by default and off means no outbound
-  connection at all. Turned on, it asks the plugin's repository once a day which release is
-  published and reports the tag in the summary, in an attribute and in the release link. It
-  downloads nothing, and it never raises the offered version above the bundle that is actually
-  shipped here — a card cannot offer what `install` would refuse.
+  connection at all. Turned on, it asks the plugin's repository which release is published —
+  at most once every 24 hours — and reports the tag in the summary, in an attribute and in the
+  release link. It downloads nothing, and it never raises the offered version above the bundle
+  that is actually shipped here, because a card cannot offer what `install` would refuse.
+  The limit is kept where it survives: the time of the last request and its answer are stored
+  per receiver, so reloading, saving the options or restarting Home Assistant shows what is
+  already known rather than spending another request, and removing the receiver deletes the
+  record. The answer is read up to 64 KiB and no further, a tag is believed only if it is short
+  enough and parses as a version, and the release link is only followed if it points into this
+  plugin's own releases — it arrives over the network, and it ends up as a link a household is
+  invited to click.
 - **The version entity explains itself.** An older plugin than the bundled one says what
   installing will do, or — with no SSH credentials stored — says that it cannot install and how to
   change that. A newer plugin says it is ahead rather than pretending to be in step, and the
@@ -91,6 +98,12 @@ Found by running this release against a real receiver rather than a test one.
   receiver installed from the bundle shipped here now reports that version too.
 - **The Wake-on-LAN address is redacted** from the diagnostics download, like every other
   hardware address in it.
+- **A receiver whose stored SSH identity had become unreadable said "Unknown error".** A
+  truncated write, a hand-edited entry or a backup restored from a different receiver leaves a
+  host key that cannot be parsed, and that failure took a different route out of the installer
+  from every other one: a raw traceback, no explanation, and — worst of it — no offer to
+  re-accept the fingerprint, which is the one thing that fixes it. It is now reported as a
+  changed host key and starts the same re-pinning it does.
 - **A release could be published without the checks having run.** The release workflow built and
   uploaded the zip on a tag without hassfest, the HACS action, ruff, the tests or the bundle
   reproduction between the tag and the upload. A tag is pushed by a person at whatever commit

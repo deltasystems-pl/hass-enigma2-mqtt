@@ -347,8 +347,8 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         # state change would turn one unreachable service into a loop. The answer stored
         # alongside it is the last one that worked, so a failure costs the stamp and
         # leaves the card saying what it already knew.
-        self._last_release_check = dt_util.utcnow()
-        await self._async_remember()
+        checked = self._last_release_check = dt_util.utcnow()
+        await self._async_remember(checked)
         session = async_get_clientsession(self.hass)
         try:
             async with (
@@ -391,17 +391,17 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             return
         self._published_version = version
         self._published_url = published_release_url(payload.get("html_url"))
-        await self._async_remember()
+        # Written against the time of the request, not of the answer: the stamp is what
+        # was spent, and a slow reply must not buy back part of the day.
+        await self._async_remember(checked)
         self._async_read_state()
         self.async_write_ha_state()
 
-    async def _async_remember(self) -> None:
+    async def _async_remember(self, checked: datetime) -> None:
         """Put the stamp and the answer where a reload or a restart will find them."""
-        if self._last_release_check is None:
-            return
         await async_release_check_store(self.hass).async_set(
             self._entry.entry_id,
-            self._last_release_check,
+            checked,
             self._published_version,
             self._published_url,
         )

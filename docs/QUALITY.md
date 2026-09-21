@@ -62,7 +62,7 @@ actions, registered on the media player platform, which is where Home Assistant 
 entity action to be registered; the rule's intent — a schema on every action, validated before
 anything is published, and an action that exists whether or not a box is loaded — is met.
 
-`test-coverage` is met as of the 449-test suite: 95.6% statement coverage (142 of 3212 lines
+`test-coverage` is met as of the 473-test suite: 95.7% statement coverage (142 of 3292 lines
 uncovered) on Python 3.14.4 against Home Assistant 2026.9.2, measured locally with
 `pytest --cov`. The suite covers every platform, every action, the device triggers, both flows
 and the guarded installer, including its refusals, its rollback and the races its durable lock
