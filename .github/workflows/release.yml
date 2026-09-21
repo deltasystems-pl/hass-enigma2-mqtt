@@ -9,8 +9,20 @@ permissions:
   contents: write
 
 jobs:
+  # Everything a pull request has to pass, in front of the only workflow that publishes.
+  # A tag is pushed by a person and a person can push one at any commit, so "main was
+  # green" is not evidence about the tagged tree: hassfest, the HACS action, ruff, the
+  # test suite and the bundle reproduction all run again here, and the zip is only built
+  # if they pass.
+  validate:
+    name: Validate
+    permissions:
+      contents: read
+    uses: ./.github/workflows/validate.yml
+
   release:
     name: Build and publish
+    needs: validate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
