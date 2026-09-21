@@ -46,6 +46,7 @@ from .const import (
     COMMAND_TIMEOUT,
     CONF_BASE_TOPIC,
     CONF_BOUQUETS,
+    CONF_DEEP_STANDBY_ALLOWED,
     CONF_NAME,
     CONF_NODE_ID,
     CONF_RECEIVER_HOST,
@@ -192,6 +193,35 @@ def _configuration_url(host: Any) -> str | None:
 def command_topic(base_topic: str, node_id: str, name: str) -> str:
     """Return a command topic of one box."""
     return f"{base_topic}/{node_id}/cmd/{name}"
+
+
+# The four spellings a MAC address is written in. Anything else is not a near miss to be
+# repaired but a value nobody can act on: the failure it used to cause was
+# `bytes.fromhex` complaining about a character at position 12, which tells a user
+# nothing about what they typed.
+_MAC_FORMS = (
+    r"[0-9a-f]{12}",
+    r"[0-9a-f]{2}(?::[0-9a-f]{2}){5}",
+    r"[0-9a-f]{2}(?:-[0-9a-f]{2}){5}",
+    r"[0-9a-f]{4}(?:\.[0-9a-f]{4}){2}",
+)
+_MAC_SEPARATORS = re.compile(r"[:.-]")
+
+
+def normalise_mac(value: Any) -> str | None:
+    """Return a MAC address as lower-case colon-separated hex, or None.
+
+    One spelling is stored, sent and registered, whatever was typed: the device registry
+    keys connections by the string, so `AA-BB-…` and `aa:bb:…` would otherwise be two
+    different devices' worth of address for one box.
+    """
+    if not isinstance(value, str):
+        return None
+    text = value.strip().lower()
+    if not any(re.fullmatch(form, text) for form in _MAC_FORMS):
+        return None
+    digits = _MAC_SEPARATORS.sub("", text)
+    return ":".join(digits[index : index + 2] for index in range(0, 12, 2))
 
 
 def announcement_topic(node_id: str) -> str:
@@ -459,8 +489,8 @@ class _Pending:
             self.future.set_exception(
                 Enigma2CommandError(
                     translation_domain=DOMAIN,
-                    translation_key="command_failed",
-                    translation_placeholders={"command": self.cmd, "error": error},
+                    translation_key="command_refused",
+                    translation_placeholders={"command": self.cmd, "reason": error},
                 )
             )
 
@@ -575,6 +605,12 @@ class Enigma2Box:
         return ip_address if isinstance(ip_address, str) and ip_address else None
 
     @property
+    def reported_mac(self) -> str | None:
+        """Return the address the box reports on `info`, normalised."""
+        source = {**self.state.announcement, **self.state.info}
+        return normalise_mac(source.get("mac"))
+
+    @property
     def mac_address(self) -> str | None:
         """Return the Wake-on-LAN target: the option if set, else what the box says.
 
@@ -582,12 +618,33 @@ class Enigma2Box:
         one enigma2 reports — a box with both a wired and a wireless interface reports
         the one it is using, and the magic packet has to go to the one that is plugged
         in and listening.
+
+        It is normalised here as well as in the options flow, because an entry written
+        before the flow validated anything, or edited by hand in `.storage`, reaches
+        this property without ever having passed through a form. An override that is not
+        an address at all is no address, so the box's own one is used — which is what
+        the setup repair leaves behind anyway.
         """
-        if override := (self.entry.options.get(CONF_WOL_MAC) or "").strip():
+        if override := normalise_mac(self.entry.options.get(CONF_WOL_MAC)):
             return override
-        source = {**self.state.announcement, **self.state.info}
-        mac = source.get("mac")
-        return mac if isinstance(mac, str) and mac else None
+        return self.reported_mac
+
+    @property
+    def deep_standby_permission(self) -> bool | None:
+        """Return the box's own answer about deep standby and reboot, if it gave one.
+
+        `deep_standby_allowed` is set on the receiver's setup screen and deliberately
+        cannot be written over MQTT, so this is the only way Home Assistant can tell
+        „the box will refuse" from „the box has not been asked". `None` is the second
+        one — an older plugin that does not report the key — and it must not be read as
+        a refusal, because that would delete the buttons of every installation that
+        works today.
+        """
+        settings = self.state.info.get("settings")
+        if not isinstance(settings, dict):
+            return None
+        value = settings.get(CONF_DEEP_STANDBY_ALLOWED)
+        return value if isinstance(value, bool) else None
 
     @property
     def is_on(self) -> bool:
@@ -853,9 +910,17 @@ class Enigma2Box:
         configuration_url = _configuration_url(source.get("ip"))
         if configuration_url is None:
             configuration_url = _configuration_url(self.entry.data.get(CONF_RECEIVER_HOST))
+        # The address the packet is actually sent to, so that everything else in Home
+        # Assistant — a DHCP discovery, a router integration listing what is on the
+        # network — can recognise the same box. Without it the device page knew the
+        # receiver's MAC and nothing else did.
+        mac = self.mac_address
         device = dr.async_get(self.hass).async_get_or_create(
             config_entry_id=self.entry.entry_id,
             identifiers={(DOMAIN, self.node_id)},
+            connections=(
+                {(dr.CONNECTION_NETWORK_MAC, mac)} if mac is not None else set()
+            ),
             name=name,
             manufacturer=manufacturer_for(boxtype),
             model=boxtype,

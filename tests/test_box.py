@@ -13,7 +13,7 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_mqtt_message,
 )
 
-from custom_components.enigma2_mqtt.box import picon_url
+from custom_components.enigma2_mqtt.box import normalise_mac, picon_url
 from custom_components.enigma2_mqtt.const import (
     TOPIC_EPG_GRID,
     TOPIC_SCREEN,
@@ -222,3 +222,42 @@ def test_the_picon_url_is_guarded(
 ) -> None:
     """No address means no picon, rather than a URL that cannot resolve."""
     assert picon_url(address, sref) == expected
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        "00:00:5e:00:53:01",
+        "00:00:5E:00:53:01",
+        "00-00-5e-00-53-01",
+        "0000.5e00.5301",
+        "00005e005301",
+        "  00005E005301  ",
+    ],
+)
+def test_every_spelling_of_an_address_normalises_to_one(spelling: str) -> None:
+    """The four forms a MAC is written in, and the one form it is stored in."""
+    assert normalise_mac(spelling) == "00:00:5e:00:53:01"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        "",
+        "   ",
+        # The one that was actually stored: an address with a note after it.
+        "00:00:5e:00:53:01 (kabel)",
+        "00:00:5e:00:53:01x",
+        # Too short, too long, not hexadecimal, and separators that do not agree.
+        "00:00:5e:00:53",
+        "00:00:5e:00:53:01:02",
+        "zz:00:5e:00:53:01",
+        "00:00-5e:00.53:01",
+        "0000.5e00.53.01",
+        192,
+    ],
+)
+def test_anything_that_is_not_an_address_is_refused(value: object) -> None:
+    """A near miss is still not an address, and guessing at one wakes the wrong box."""
+    assert normalise_mac(value) is None

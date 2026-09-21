@@ -1,10 +1,12 @@
 """What the receiver is doing, as sensors.
 
-Nine of them, from two groups. The first five are what a household looks at — the
+Ten of them, from three groups. The first five are what a household looks at — the
 channel, what is on now and next, whether anything is being recorded and when the next
-recording starts. The last four are diagnostics: signal quality and uptime matter when
+recording starts. The next four are diagnostics: signal quality and uptime matter when
 something is wrong and are noise on a dashboard, so they are in the diagnostic category
-and disabled until somebody turns them on.
+and disabled until somebody turns them on. The last one is „Ostatni błąd", which is the
+opposite case: a diagnostic that is enabled, because the only time anybody goes looking
+for it is after something has already gone wrong.
 
 Two conventions run through the file. Epoch seconds from the topics become ISO strings
 in attributes and `datetime` objects in states, because those are what a template and a
@@ -27,10 +29,17 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfTime
+from homeassistant.const import (
+    PERCENTAGE,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+    EntityCategory,
+    UnitOfTime,
+)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.typing import StateType
 import homeassistant.util.dt as dt_util
 
@@ -39,9 +48,11 @@ from .const import (
     CONF_CAM_TELEMETRY,
     CONF_OSCAM_TELEMETRY,
     DOMAIN,
+    ERROR_TEXT_MAX,
     TOPIC_CAM,
     TOPIC_EPG,
     TOPIC_INFO,
+    TOPIC_LAST_ERROR,
     TOPIC_OSCAM,
     TOPIC_RECORDING,
     TOPIC_SERVICE,
@@ -260,7 +271,12 @@ async def async_setup_entry(
 ) -> None:
     """Set up every sensor of one box."""
     box = entry.runtime_data
-    async_add_entities(Enigma2Sensor(box, description) for description in SENSORS)
+    async_add_entities(
+        [
+            *(Enigma2Sensor(box, description) for description in SENSORS),
+            Enigma2LastErrorSensor(box),
+        ]
+    )
 
     by_key = {description.key: description for description in (*CAM_SENSORS, *OSCAM_SENSORS)}
     for keys, enabled, declared in (
@@ -320,6 +336,70 @@ class Enigma2Sensor(Enigma2Entity, SensorEntity):
         self._attr_native_value = description.value_fn(self.box.state)
         if description.attributes_fn is not None:
             self._attr_extra_state_attributes = description.attributes_fn(self.box.state)
+
+
+class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
+    """The last thing the receiver refused to do, and what it said about it.
+
+    The integration owns this memory rather than the topic. The plugin clears
+    `last_error` on the next command that succeeds, and the person who wants to know why
+    „Restart" did nothing is looking afterwards — usually after the next volume step has
+    already wiped the evidence. So a cleared topic leaves this sensor alone, and a
+    restart does too: the last complaint is restored with the time it was first seen,
+    not with the time the retained payload was replayed at start-up.
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, box: Enigma2Box) -> None:
+        """Set up the sensor on the complaint topic, with no state to wait for."""
+        super().__init__(box, "last_error", topics=(TOPIC_LAST_ERROR,), requires=None)
+        # How many `last_error` payloads had arrived when this entity last looked. The
+        # count rather than the payload, because the same command failing the same way
+        # twice is two errors and the second one has its own time.
+        self._handled = 0
+        self._attr_native_value = None
+        self._attr_extra_state_attributes: dict[str, Any] = {"error": None, "time": None}
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the last complaint before reading anything new."""
+        last_state = await self.async_get_last_state()
+        if last_state is not None and last_state.state not in (
+            STATE_UNKNOWN,
+            STATE_UNAVAILABLE,
+        ):
+            self._attr_native_value = last_state.state
+            self._attr_extra_state_attributes = {
+                "error": last_state.attributes.get("error"),
+                "time": last_state.attributes.get("time"),
+            }
+            # The retained complaint is about to be replayed by the broker, and it is
+            # the one just restored. Taking it again would move its timestamp to now
+            # and lose the only thing that says when it happened.
+            self._handled = self.box.updates.get(TOPIC_LAST_ERROR, 0)
+        await super().async_added_to_hass()
+
+    @callback
+    def _async_read_state(self) -> None:
+        """Take a new complaint, and only a new one."""
+        arrived = self.box.updates.get(TOPIC_LAST_ERROR, 0)
+        if arrived == self._handled:
+            return
+        self._handled = arrived
+        payload = self.box.state.last_error
+        if not isinstance(payload, dict):
+            # An empty payload is the plugin clearing the topic after a success. It
+            # says nothing about the last failure, and this entity exists precisely
+            # because that clear happens before anybody looks.
+            return
+        command = payload.get("cmd")
+        if not isinstance(command, str) or not command:
+            return
+        self._attr_native_value = command[:ERROR_TEXT_MAX]
+        self._attr_extra_state_attributes = {
+            "error": str(payload.get("error") or "")[:ERROR_TEXT_MAX] or None,
+            "time": dt_util.utcnow().isoformat(),
+        }
 
 
 class OscamSourceSensor(Enigma2Entity, SensorEntity):

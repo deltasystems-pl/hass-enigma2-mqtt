@@ -131,7 +131,7 @@
           "keep_ssh_credentials": "SSH-Zugangsdaten für Updates behalten"
         },
         "data_description": {
-          "dangerous_buttons": "Der Tiefschlaf nimmt den Receiver vom Netz, bis ihn ein Magic Packet weckt, und der Neustart unterbricht, was er gerade tut. Beide sind voreingestellt ausgeblendet, damit sie auf einem gemeinsamen Dashboard nicht einen Fehlgriff neben der Lautstärke liegen. Das Plugin verweigert beide während einer Aufnahme, unabhängig von dieser Einstellung.",
+          "dangerous_buttons": "Der Tiefschlaf nimmt den Receiver vom Netz, bis ihn ein Magic Packet weckt, und der Neustart unterbricht, was er gerade tut. Die Schaltflächen erscheinen erst, wenn beide Tore offen sind: diese Option und die Erlaubnis des Receivers für den Tiefschlaf, die am Gerät selbst unter Menü → Plugins → MQTT Bridge gesetzt wird und von hier aus nicht änderbar ist. Ein älteres Plugin, das diese Erlaubnis nicht meldet, überlässt die Entscheidung dieser Option. Die Schaltflächen sind voreingestellt ausgeblendet, damit sie auf einem gemeinsamen Dashboard nicht einen Fehlgriff neben der Lautstärke liegen, und das Plugin verweigert beide während einer Aufnahme, unabhängig von dieser Einstellung.",
           "wol_mac": "Leer lassen, um die vom Receiver gemeldete Adresse zu verwenden. Setze sie, wenn der Receiver eine andere Schnittstelle meldet als die angeschlossene — eine Box im WLAN antwortet nicht auf ein Magic Packet an ihren Kabelanschluss.",
           "bouquets": "Welche Bouquets die Senderliste und der Medienbrowser anbieten. Leer lassen für alle Bouquets, die der Receiver veröffentlicht.",
           "publish_keys": "Tastenereignisse können Automationen auslösen, zeigen aber auch, was gedrückt wird. Deaktiviere sie, wenn keine Automation sie benötigt.",
@@ -148,7 +148,8 @@
     },
     "error": {
       "plugin_unavailable": "Der Receiver ist nicht verbunden; seine Datenschutzeinstellungen wurden nicht geändert. Versuche es erneut, wenn er online ist.",
-      "plugin_config_failed": "Der Receiver hat die neuen Datenschutzeinstellungen nicht bestätigt. Die bisherigen Receiver-Einstellungen und Home-Assistant-Optionen wurden beibehalten."
+      "plugin_config_failed": "Der Receiver hat die neuen Datenschutzeinstellungen nicht bestätigt. Die bisherigen Receiver-Einstellungen und Home-Assistant-Optionen wurden beibehalten.",
+      "invalid_mac": "Das ist keine MAC-Adresse. Schreibe sie als `00:00:5e:00:53:01`, `00-00-5e-00-53-01`, `0000.5e00.5301` oder `00005e005301`, oder lass das Feld leer, um die vom Receiver gemeldete Adresse zu verwenden."
     }
   },
   "entity": {
@@ -188,6 +189,9 @@
       },
       "refresh_discovery": {
         "name": "Discovery auffrischen"
+      },
+      "refresh_epg": {
+        "name": "EPG auffrischen"
       }
     },
     "event": {
@@ -277,7 +281,8 @@
         }
       },
       "oscam_source_ready_cards": {"name": "Bereite Leser der OSCam-Quelle {id}"},
-      "oscam_source_shared_cards": {"name": "Gemeldete Karten der OSCam-Quelle {id}"}
+      "oscam_source_shared_cards": {"name": "Gemeldete Karten der OSCam-Quelle {id}"},
+      "last_error": {"name": "Letzter Fehler"}
     },
     "switch": {
       "power": {
@@ -467,8 +472,8 @@
     "mqtt_not_available": {
       "message": "Die MQTT-Integration ist nicht verfügbar, der Receiver ist daher nicht erreichbar."
     },
-    "command_failed": {
-      "message": "Der Receiver hat `{command}` abgelehnt: {error}"
+    "command_refused": {
+      "message": "Der Receiver hat `{command}` abgelehnt: {reason}"
     },
     "command_timeout": {
       "message": "Der Receiver hat `{command}` nicht ausgeführt. Prüfe, ob er eingeschaltet ist und das Plugin läuft."

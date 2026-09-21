@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import json
 
-from homeassistant.const import STATE_UNAVAILABLE
-from homeassistant.core import HomeAssistant
+from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import entity_registry as er
+import homeassistant.util.dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_fire_mqtt_message,
+    mock_restore_cache,
 )
 
 from custom_components.enigma2_mqtt.diagnostics import (
@@ -23,6 +25,7 @@ from .conftest import (
     EPG_TOPIC,
     INFO,
     INFO_TOPIC,
+    LAST_ERROR_TOPIC,
     RECORDING_ACTIVE,
     RECORDING_TOPIC,
     SREF,
@@ -334,6 +337,174 @@ async def test_retained_cam_before_info_is_discarded_on_tombstone_or_opt_out(
     assert config_entry.runtime_data.state.cam is None
     assert CAM_TOPIC.rsplit("/", 1)[-1] not in config_entry.runtime_data.seen
     assert hass.states.get("sensor.dekoder_salon_conditional_access_system") is None
+
+
+async def test_the_last_error_sensor_takes_the_boxs_complaint(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The command is the state, the box's own sentence is the attribute."""
+    await async_setup_box(hass, config_entry)
+    assert hass.states.get("sensor.dekoder_salon_last_error").state == STATE_UNKNOWN
+
+    async_fire_mqtt_message(
+        hass,
+        LAST_ERROR_TOPIC,
+        json.dumps(
+            {
+                "cmd": "deep_standby",
+                "error": "deep standby is not allowed on this box",
+                "ts": 1789459213,
+            }
+        ),
+    )
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.dekoder_salon_last_error")
+    assert state.state == "deep_standby"
+    assert state.attributes["error"] == "deep standby is not allowed on this box"
+    # When this integration saw it, which is the only time it can vouch for.
+    assert dt_util.parse_datetime(state.attributes["time"]) is not None
+
+
+async def test_clearing_the_topic_does_not_clear_the_sensor(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """This is the entire point of the sensor.
+
+    The plugin clears `last_error` on the next command that succeeds, and the person
+    asking why „Restart" did nothing looks afterwards — usually after the next volume
+    step has already wiped it.
+    """
+    await async_setup_box(hass, config_entry)
+    async_fire_mqtt_message(
+        hass,
+        LAST_ERROR_TOPIC,
+        json.dumps({"cmd": "reboot", "error": "a recording is running", "ts": 1}),
+    )
+    await hass.async_block_till_done()
+
+    async_fire_mqtt_message(hass, LAST_ERROR_TOPIC, "")
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.dekoder_salon_last_error")
+    assert state.state == "reboot"
+    assert state.attributes["error"] == "a recording is running"
+
+
+async def test_a_long_complaint_is_cut_to_what_a_state_can_hold(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A state over 255 characters is dropped entirely, so the text is bounded too."""
+    await async_setup_box(hass, config_entry)
+
+    async_fire_mqtt_message(
+        hass,
+        LAST_ERROR_TOPIC,
+        json.dumps({"cmd": "zap", "error": "no signal. " * 60, "ts": 1}),
+    )
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.dekoder_salon_last_error")
+    assert state.state == "zap"
+    assert len(state.attributes["error"]) == 255
+
+
+async def test_the_last_error_survives_a_restart(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Including the time, which the replayed retained payload must not move."""
+    seen_at = "2026-09-20T21:14:03+00:00"
+    mock_restore_cache(
+        hass,
+        [
+            State(
+                "sensor.dekoder_salon_last_error",
+                "deep_standby",
+                {"error": "deep standby is not allowed on this box", "time": seen_at},
+            )
+        ],
+    )
+    box_on_the_broker[LAST_ERROR_TOPIC] = json.dumps(
+        {
+            "cmd": "deep_standby",
+            "error": "deep standby is not allowed on this box",
+            "ts": 1789459213,
+        }
+    )
+
+    await async_setup_box(hass, config_entry)
+
+    state = hass.states.get("sensor.dekoder_salon_last_error")
+    assert state.state == "deep_standby"
+    assert state.attributes["error"] == "deep standby is not allowed on this box"
+    assert state.attributes["time"] == seen_at
+
+
+async def test_an_empty_retained_complaint_does_not_clear_a_restored_one(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The usual state of the topic after a restart is empty, and it means nothing."""
+    mock_restore_cache(
+        hass,
+        [
+            State(
+                "sensor.dekoder_salon_last_error",
+                "epg_grid",
+                {"error": "the EPG grid is switched off", "time": "2026-09-20T21:14:03+00:00"},
+            )
+        ],
+    )
+    box_on_the_broker[LAST_ERROR_TOPIC] = ""
+
+    await async_setup_box(hass, config_entry)
+
+    assert hass.states.get("sensor.dekoder_salon_last_error").state == "epg_grid"
+
+
+async def test_a_new_complaint_replaces_a_restored_one(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """There is no explicit clear, so the next error has to be able to take over."""
+    mock_restore_cache(
+        hass,
+        [
+            State(
+                "sensor.dekoder_salon_last_error",
+                "epg_grid",
+                {"error": "the EPG grid is switched off", "time": "2026-09-20T21:14:03+00:00"},
+            )
+        ],
+    )
+    await async_setup_box(hass, config_entry)
+
+    async_fire_mqtt_message(
+        hass,
+        LAST_ERROR_TOPIC,
+        json.dumps({"cmd": "record", "error": "no tuner is free", "ts": 2}),
+    )
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.dekoder_salon_last_error")
+    assert state.state == "record"
+    assert state.attributes["error"] == "no tuner is free"
 
 
 async def test_retained_cam_tombstone_before_enabled_info_remains_empty(
