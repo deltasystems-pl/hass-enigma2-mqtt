@@ -118,6 +118,8 @@ Found by running this release against a real receiver rather than a test one.
 - Command cleanup now retires internal waiters without spurious asyncio errors. Clearing an old
   plugin error no longer reports concurrent commands as complete before their own result is
   known.
+- **The bundled receiver plugin is rebuilt from a newer pinned commit**, which reports whether the
+  box permits deep standby and clears bytecode an upgrade has orphaned. Its version is unchanged.
 
 ### Documentation
 
