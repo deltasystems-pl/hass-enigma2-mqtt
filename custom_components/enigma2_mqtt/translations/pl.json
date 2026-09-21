@@ -1,5 +1,11 @@
 {
   "title": "Enigma2 MQTT",
+  "common": {
+    "update_summary_older": "Dekoder ma starszą wtyczkę niż ta, którą niesie integracja. Instalacja zastąpi ją dołączoną wersją {version} i nie ruszy ustawień brokera na dekoderze.",
+    "update_summary_older_no_install": "Dekoder ma wtyczkę starszą niż dołączona {version}. Nie zapisano danych SSH, więc ta karta nie może jej zainstalować: skonfiguruj dekoder ponownie z opcją „Zachowaj dane SSH do aktualizacji”, albo wgraj plik IPK na dekoder ręcznie.",
+    "update_summary_newer": "Dekoder ma wtyczkę nowszą niż dołączona {version}. Nic jej tutaj nie zastąpi — ta karta nigdy nie proponuje cofnięcia wersji.",
+    "update_summary_published": "Repozytorium wtyczki opublikowało {version}. To sprawdzenie tylko o tym informuje; instalacja zawsze korzysta z pakietu dołączonego do tej integracji."
+  },
   "config": {
     "flow_title": "{name}",
     "step": {
@@ -25,7 +31,7 @@
         }
       },
       "install": {"title": "Połącz z dekoderem", "description": "Home Assistant odczyta klucz hosta SSH przed zapytaniem o hasło.", "data": {"ssh_host": "Adres dekodera", "ssh_port": "Port SSH"}},
-      "install_confirm": {"title": "Potwierdź tożsamość i zainstaluj", "description": "Potwierdź odcisk SSH `{fingerprint}` przed wysłaniem danych logowania.", "data": {"ssh_username": "Użytkownik SSH", "ssh_password": "Hasło SSH", "broker_host": "Adres brokera MQTT", "broker_port": "Port brokera MQTT", "broker_username": "Użytkownik MQTT", "broker_password": "Hasło MQTT", "node_id": "Identyfikator węzła", "base_topic": "Temat bazowy", "name": "Nazwa", "keep_ssh_credentials": "Zachowaj dane SSH do aktualizacji"}},
+      "install_confirm": {"title": "Potwierdź tożsamość i zainstaluj", "description": "Potwierdź odcisk SSH `{fingerprint}` przed wysłaniem danych logowania. Wtyczka jest instalowana z pakietu dołączonego do tej integracji.\n\n**Załóż dekoderowi osobne konto w brokerze.** Dekoder trzyma to hasło w pliku na własnej pamięci flash, a większość obrazów Enigma2 wpuszcza przez SSH na domyślne hasło roota — konto współdzielone z Home Assistantem oddaje więc całego brokera.\n\nW samodzielnym Mosquitto te cztery linie ograniczają konto do tego dekodera:\n\n- `topic readwrite enigma2/<node_id>/#`\n- `topic write enigma2mqtt/discovery/<node_id>/#`\n- `topic write homeassistant/device/<node_id>/#`\n- `topic write homeassistant/device_automation/<node_id>/#`\n\nDodatek Mosquitto w Home Assistancie **nie** egzekwuje dziś pliku `acl_file`: przyjmuje go i nigdy do niego nie zagląda. Tam osobne konto tylko nazywa dekoder w dzienniku brokera, ale go nie ogranicza — dopóki dodatek nie zacznie obsługiwać ACL, traktuj dekoder jako mogący publikować wszędzie.", "data": {"ssh_username": "Użytkownik SSH", "ssh_password": "Hasło SSH", "broker_host": "Adres brokera MQTT", "broker_port": "Port brokera MQTT", "broker_username": "Użytkownik MQTT", "broker_password": "Hasło MQTT", "node_id": "Identyfikator węzła", "base_topic": "Temat bazowy", "name": "Nazwa", "keep_ssh_credentials": "Zachowaj dane SSH do aktualizacji"}, "data_description": {"broker_host": "Adres brokera widziany z dekodera. To dekoder nawiązuje połączenie, więc adres musi działać w jego sieci — ustawienie brokera w Home Assistancie nie zawsze jest tym samym adresem.", "broker_port": "Port MQTT brokera. 1883, chyba że broker został przeniesiony.", "broker_username": "Konto założone wyłącznie dla tego dekodera. Nie używaj tego, którym łączy się Home Assistant.", "broker_password": "Zapisywane na dekoderze w pliku czytelnym tylko dla roota. Nie trafia do dziennika Home Assistanta ani do pliku diagnostycznego."}},
       "install_progress": {"title": "Instalowanie MQTT Bridge"},
       "reauth": {"title": "Zaktualizuj dane SSH", "data": {"ssh_username": "Użytkownik SSH", "ssh_password": "Hasło SSH"}},
       "reauth_confirm_host_key": {"title": "Klucz hosta SSH zmienił się", "description": "Kontynuuj tylko, jeśli dekoder pokazuje odcisk `{fingerprint}`."},
@@ -120,6 +126,7 @@
           "screenshot_delay": "Opóźnienie po zmianie kanału (sekundy)",
           "cam_telemetry": "Publikuj telemetrię dostępu warunkowego",
           "oscam_telemetry": "Publikuj telemetrię stanu OSCam",
+          "check_github_releases": "Sprawdzaj opublikowane wydania wtyczki",
           "configure_ssh": "Skonfiguruj dane SSH do aktualizacji wtyczki",
           "keep_ssh_credentials": "Zachowaj dane SSH do aktualizacji"
         },
@@ -132,7 +139,8 @@
           "screenshot_interval": "Używane tylko w trybie interwału. Dekoder wymusza minimum pięć sekund.",
           "screenshot_delay": "Czas oczekiwania przed automatycznym zrzutem po zmianie kanału, aby nowy obraz zdążył się pojawić.",
           "cam_telemetry": "Udostępnia szyfrowanie bieżącej usługi i stan ECM. Dane serwera, konta ani karty nie są publikowane.",
-          "oscam_telemetry": "Udostępnia stan procesu, API, czytników i serwerów OSCam bez danych prywatnych. Nazwy czytników, adresy, konta i identyfikatory kart nie są publikowane."
+          "oscam_telemetry": "Udostępnia stan procesu, API, czytników i serwerów OSCam bez danych prywatnych. Nazwy czytników, adresy, konta i identyfikatory kart nie są publikowane.",
+          "check_github_releases": "Domyślnie wyłączone, a wyłączone znaczy, że ta integracja nie łączy się z niczym poza Twoim brokerem. Włączone — raz dziennie pyta repozytorium wtyczki o opublikowane wydanie i pokazuje je na encji wersji. Nic nie pobiera: instalacja nadal korzysta wyłącznie z pakietu dołączonego tutaj."
         }
       },
       "ssh_host": {"title": "Połącz z dekoderem", "data": {"ssh_host": "Adres dekodera", "ssh_port": "Port SSH"}},

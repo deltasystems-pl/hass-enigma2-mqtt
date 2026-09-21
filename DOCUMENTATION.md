@@ -70,7 +70,29 @@ on this topic". It then switches the mode exactly as the discovered path does. T
 for a box behind an MQTT bridge that rewrites the topic prefix, or for one whose announcement
 never arrived.
 
-**Install the plugin from here.** M4.
+**Install the plugin from here.** *Add integration → Enigma2 MQTT → Install MQTT Bridge over
+SSH* reads the receiver's SSH host key, shows its fingerprint, and only then asks for the SSH
+password and the broker settings it will write onto the box.
+
+🔴 **Give the receiver a broker login of its own.** The broker password ends up in a file on the
+receiver's own flash, and most Enigma2 images answer SSH with the image's default root password
+— so a login shared with Home Assistant is the whole broker, one box away. On a standalone
+Mosquitto these four lines confine it to one receiver:
+
+```
+topic readwrite enigma2/<node_id>/#
+topic write enigma2mqtt/discovery/<node_id>/#
+topic write homeassistant/device/<node_id>/#
+topic write homeassistant/device_automation/<node_id>/#
+```
+
+The **Home Assistant Mosquitto add-on does not enforce an `acl_file`**: it accepts the file and
+never asks it, because its authentication plugin answers "superuser" for every login and the
+chain stops at the first allow ([home-assistant/addons#4721](https://github.com/home-assistant/addons/issues/4721)).
+A dedicated login there still names the receiver in the broker log, which is worth having — but
+it does not confine it, and a documented ACL that enforces nothing is worse than none, because
+the next person to read it believes it. Until the add-on gains ACL support, treat a receiver on
+it as able to publish anywhere on that broker.
 
 The node id is the entry's unique id, so the same box cannot be added twice by either path,
 and a box that renames itself updates the entry it already owns.
@@ -86,6 +108,7 @@ effect without a restart.
 | **Show the deep standby and reboot buttons** | off | Creates the „Głębokie uśpienie" and „Restart" buttons. Turning it off again removes them from the entity registry rather than leaving them behind unavailable. This is about what appears on a dashboard, **not** a safety mechanism: the plugin refuses both commands while a recording is running whatever is set here. |
 | **Wake-on-LAN MAC address** | the address the box reports on `info` | The target of the magic packet the „Obudź (WoL)" button and `media_player.turn_on` send. Set it when the receiver reports a different interface from the one that is plugged in — a box on Wi-Fi does not answer a packet sent to its cable port. |
 | **Bouquets to offer** | every bouquet the box publishes | Which bouquets feed the media player's channel list and the media browser. The choices are the bouquets on the `channels` topic, and a name can be typed for one the box has not published yet. This narrows the plugin's own `bouquets_for_select`; it cannot widen it. |
+| **Check for published plugin releases** | off | The only thing this integration can do that is not talking to your own broker, which is why it is off. Turned on, the version entity asks the plugin repository once a day which release is published and reports the tag in its summary, in a `published_version` attribute and in the release link. It downloads nothing and it never raises `latest_version`: `install` can only ever put the bundle shipped here on a receiver, and offering a version the installer would refuse would be a button that lies. Failures — a rate limit, a timeout, an answer that is not a release — are a debug line and nothing else. |
 
 When a recent plugin advertises its configurable publishers, the same form also controls key
 events, screenshot mode and interval, and the delay before an on-zap screenshot. Older plugins
@@ -221,11 +244,17 @@ it is the opposite: the answer is coming, and the dashboard should not sit still
 | `refresh_discovery` | *Odśwież discovery* | `<node_id>_refresh_discovery` | `cmd/discovery` |
 | `plugin` | *Wtyczka MQTT Bridge* | `<node_id>_plugin` | an `update` entity: installed = `info.plugin`, latest = the plugin release this version was written against |
 
-The version entity **cannot install anything yet** — the installer is M4. It is there because a
-box running an older plugin than the integration expects is the first thing to check when
-something is missing, and the device page is where that should be visible without reading a
-log. A box running a *newer* plugin is reported as up to date: the constant is what this code
-was written against, not what exists.
+The version entity compares what the box reports on `info` with the plugin bundled here, and its
+summary says what that means. A box running an **older** plugin has an update: with SSH
+credentials retained the card can install it and says so; without them it cannot, and the
+summary says how to get there — reconfigure with „Zachowaj dane SSH do aktualizacji", or copy
+the IPK onto the box and install it by hand. A box running a **newer** plugin is reported as up
+to date, because offering it a downgrade would be worse than saying nothing; the summary states
+that it is ahead, and the [diagnostics download](#7-diagnostics) carries the verdict in words
+for a bug report. A version neither side can parse is reported as `unknown` rather than guessed.
+
+Nothing on this card reaches the internet unless the **release check** option is on, and then
+only once a day, and then only to report a tag — see [Options](#options).
 
 ## 5. Actions
 
@@ -326,6 +355,13 @@ bug report asks and describe a household instead. **`screen`** appears as a size
 it was taken, never as the picture of somebody's television. **`channels`** appears as the
 bouquet names and how many services each holds, not as the channel list. **`key`** does not
 appear at all: it is who pressed what a moment ago, which is not state.
+
+One thing is stated rather than left to be worked out. The **`plugin`** block gives the version
+installed on the box, the version bundled here, the version this release was written against,
+and the verdict — `matched`, `older_than_bundle`, `newer_than_bundle` or `unknown`. A receiver
+running a *newer* plugin reads "up to date" everywhere in the UI, because the version entity
+refuses to offer a downgrade; that is right for a household and useless in a bug report, and a
+plugin mismatch is where a missing entity or an unrecognised command usually ends up.
 
 ## 8. Troubleshooting
 

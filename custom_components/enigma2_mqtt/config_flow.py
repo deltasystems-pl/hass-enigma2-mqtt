@@ -48,6 +48,7 @@ from .const import (
     CONF_BASE_TOPIC,
     CONF_BOUQUETS,
     CONF_CAM_TELEMETRY,
+    CONF_CHECK_GITHUB_RELEASES,
     CONF_DANGEROUS_BUTTONS,
     CONF_KEEP_SSH_CREDENTIALS,
     CONF_NAME,
@@ -66,6 +67,7 @@ from .const import (
     CONF_WOL_MAC,
     DEFAULT_BASE_TOPIC,
     DEFAULT_CAM_TELEMETRY,
+    DEFAULT_CHECK_GITHUB_RELEASES,
     DEFAULT_OSCAM_TELEMETRY,
     DEFAULT_PUBLISH_KEYS,
     DEFAULT_SCREENSHOT,
@@ -718,6 +720,7 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                 CONF_DANGEROUS_BUTTONS: user_input[CONF_DANGEROUS_BUTTONS],
                 CONF_WOL_MAC: (user_input.get(CONF_WOL_MAC) or "").strip(),
                 CONF_BOUQUETS: user_input.get(CONF_BOUQUETS) or [],
+                CONF_CHECK_GITHUB_RELEASES: user_input[CONF_CHECK_GITHUB_RELEASES],
             }
             if requested is not None:
                 local_data.update(requested)
@@ -783,6 +786,10 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                         sort=False,
                     )
                 ),
+                vol.Required(
+                    CONF_CHECK_GITHUB_RELEASES,
+                    default=DEFAULT_CHECK_GITHUB_RELEASES,
+                ): bool,
             }
         )
         if isinstance(settings, dict):

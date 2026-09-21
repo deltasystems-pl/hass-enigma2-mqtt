@@ -17,6 +17,7 @@ from custom_components.enigma2_mqtt.const import (
     CONF_BASE_TOPIC,
     CONF_BOUQUETS,
     CONF_CAM_TELEMETRY,
+    CONF_CHECK_GITHUB_RELEASES,
     CONF_DANGEROUS_BUTTONS,
     CONF_NAME,
     CONF_NODE_ID,
@@ -118,6 +119,9 @@ async def test_saving_the_options_reloads_the_entry(
         # Trimmed: a MAC with a space around it is a MAC nothing would match.
         CONF_WOL_MAC: "00:00:5e:00:53:07",
         CONF_BOUQUETS: ["Ulubione TV"],
+        # Nobody asked for it on this form, and it is saved off: the release check is
+        # the one thing here that would talk to anything but the household's broker.
+        CONF_CHECK_GITHUB_RELEASES: False,
         **PLUGIN_SETTINGS,
     }
     assert hass.states.get("button.dekoder_salon_reboot") is not None

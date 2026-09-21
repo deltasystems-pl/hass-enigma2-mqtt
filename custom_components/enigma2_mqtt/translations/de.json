@@ -1,5 +1,11 @@
 {
   "title": "Enigma2 MQTT",
+  "common": {
+    "update_summary_older": "Der Receiver hat ein älteres Plugin als das, welches diese Integration mitbringt. Die Installation ersetzt es durch das mitgelieferte {version} und lässt die Broker-Einstellungen des Receivers unberührt.",
+    "update_summary_older_no_install": "Der Receiver hat ein älteres Plugin als das mitgelieferte {version}. Es sind keine SSH-Zugangsdaten gespeichert, daher kann diese Karte es nicht installieren: Konfiguriere den Receiver mit „SSH-Zugangsdaten für Updates behalten“ neu, oder spiele das IPK von Hand auf.",
+    "update_summary_newer": "Der Receiver hat ein neueres Plugin als das mitgelieferte {version}. Hier ersetzt es nichts — diese Karte bietet nie eine ältere Version an.",
+    "update_summary_published": "Das Repository des Plugins hat {version} veröffentlicht. Diese Prüfung meldet das nur; installiert wird immer aus dem mit dieser Integration gelieferten Paket."
+  },
   "config": {
     "flow_title": "{name}",
     "step": {
@@ -25,7 +31,7 @@
         }
       },
       "install": {"title": "Mit dem Receiver verbinden", "description": "Home Assistant liest den SSH-Hostschlüssel vor der Passwortabfrage.", "data": {"ssh_host": "Receiver-Adresse", "ssh_port": "SSH-Port"}},
-      "install_confirm": {"title": "Identität bestätigen und installieren", "description": "Bestätige den SSH-Fingerabdruck `{fingerprint}` vor dem Senden der Zugangsdaten.", "data": {"ssh_username": "SSH-Benutzer", "ssh_password": "SSH-Passwort", "broker_host": "MQTT-Broker-Adresse", "broker_port": "MQTT-Broker-Port", "broker_username": "MQTT-Benutzer", "broker_password": "MQTT-Passwort", "node_id": "Knoten-ID", "base_topic": "Basis-Topic", "name": "Name", "keep_ssh_credentials": "SSH-Zugangsdaten für Updates behalten"}},
+      "install_confirm": {"title": "Identität bestätigen und installieren", "description": "Bestätige den SSH-Fingerabdruck `{fingerprint}` vor dem Senden der Zugangsdaten. Das Plugin wird aus dem mit dieser Integration gelieferten Paket installiert.\n\n**Gib dem Receiver ein eigenes Broker-Konto.** Der Receiver bewahrt dieses Passwort in einer Datei auf seinem eigenen Flash-Speicher auf, und die meisten Enigma2-Images lassen SSH mit dem Standard-Root-Passwort des Images zu — ein mit Home Assistant geteiltes Konto gibt also den gesamten Broker preis.\n\nBei einem eigenständigen Mosquitto beschränken diese vier Zeilen das Konto auf diesen Receiver:\n\n- `topic readwrite enigma2/<node_id>/#`\n- `topic write enigma2mqtt/discovery/<node_id>/#`\n- `topic write homeassistant/device/<node_id>/#`\n- `topic write homeassistant/device_automation/<node_id>/#`\n\nDas Mosquitto-Add-on von Home Assistant erzwingt derzeit **keine** `acl_file`: Es nimmt die Datei an und fragt sie nie ab. Dort benennt ein eigenes Konto den Receiver nur im Broker-Protokoll, begrenzt ihn aber nicht — behandle den Receiver als überall veröffentlichungsfähig, bis das Add-on ACLs unterstützt.", "data": {"ssh_username": "SSH-Benutzer", "ssh_password": "SSH-Passwort", "broker_host": "MQTT-Broker-Adresse", "broker_port": "MQTT-Broker-Port", "broker_username": "MQTT-Benutzer", "broker_password": "MQTT-Passwort", "node_id": "Knoten-ID", "base_topic": "Basis-Topic", "name": "Name", "keep_ssh_credentials": "SSH-Zugangsdaten für Updates behalten"}, "data_description": {"broker_host": "Die Broker-Adresse, wie der Receiver sie erreicht. Der Receiver baut die Verbindung auf, sie muss also aus seinem Netz funktionieren — die Broker-Einstellung von Home Assistant ist nicht zwingend dieselbe Adresse.", "broker_port": "Der MQTT-Port des Brokers. 1883, sofern der Broker nicht verschoben wurde.", "broker_username": "Das Konto, das nur für diesen Receiver angelegt wurde. Nimm nicht das Konto, mit dem sich Home Assistant verbindet.", "broker_password": "Wird auf dem Receiver in einer nur für root lesbaren Datei abgelegt. Es erscheint weder im Home-Assistant-Protokoll noch im Diagnose-Download."}},
       "install_progress": {"title": "MQTT Bridge wird installiert"},
       "reauth": {"title": "SSH-Zugangsdaten aktualisieren", "data": {"ssh_username": "SSH-Benutzer", "ssh_password": "SSH-Passwort"}},
       "reauth_confirm_host_key": {"title": "SSH-Hostschlüssel geändert", "description": "Nur fortfahren, wenn der Receiver den Fingerabdruck `{fingerprint}` zeigt."},
@@ -120,6 +126,7 @@
           "screenshot_delay": "Verzögerung nach dem Kanalwechsel (Sekunden)",
           "cam_telemetry": "Zugangsberechtigungs-Telemetrie veröffentlichen",
           "oscam_telemetry": "OSCam-Zustandstelemetrie veröffentlichen",
+          "check_github_releases": "Auf veröffentlichte Plugin-Versionen prüfen",
           "configure_ssh": "SSH-Zugangsdaten für Plugin-Updates einrichten",
           "keep_ssh_credentials": "SSH-Zugangsdaten für Updates behalten"
         },
@@ -132,7 +139,8 @@
           "screenshot_interval": "Nur im Intervallmodus verwendet. Der Receiver erzwingt mindestens fünf Sekunden.",
           "screenshot_delay": "Wartezeit vor einem automatischen Bildschirmfoto nach dem Kanalwechsel, damit das neue Bild erscheinen kann.",
           "cam_telemetry": "Zeigt Verschlüsselung und ECM-Status des aktuellen Dienstes. Server-, Konto- und Kartendaten werden nicht veröffentlicht.",
-          "oscam_telemetry": "Zeigt den neutralisierten Zustand von OSCam-Prozess, API, Lesern und Servern. Leserbezeichnungen, Adressen, Konten und Kartenkennungen werden nie veröffentlicht."
+          "oscam_telemetry": "Zeigt den neutralisierten Zustand von OSCam-Prozess, API, Lesern und Servern. Leserbezeichnungen, Adressen, Konten und Kartenkennungen werden nie veröffentlicht.",
+          "check_github_releases": "Standardmäßig aus, und aus bedeutet, dass diese Integration mit nichts außer deinem Broker spricht. Eingeschaltet fragt sie einmal täglich beim Repository des Plugins nach der veröffentlichten Version und zeigt sie an der Versions-Entität an. Sie lädt nichts herunter: Installiert wird weiterhin nur aus dem hier mitgelieferten Paket."
         }
       },
       "ssh_host": {"title": "Mit dem Receiver verbinden", "data": {"ssh_host": "Receiver-Adresse", "ssh_port": "SSH-Port"}},

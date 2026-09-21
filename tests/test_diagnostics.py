@@ -5,21 +5,29 @@ from __future__ import annotations
 import json
 import re
 from typing import Any
+from unittest.mock import patch
 
 from homeassistant.components.diagnostics import REDACTED
 from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_fire_mqtt_message,
+)
 
+from custom_components.enigma2_mqtt.bundle import BundleError
 from custom_components.enigma2_mqtt.diagnostics import (
     async_get_config_entry_diagnostics,
 )
 
 from .conftest import (
+    AVAILABILITY_TOPIC,
     BOX_NAME,
     BOXTYPE,
     EPG_GRID,
     EPG_GRID_TOPIC,
     IMAGE,
+    INFO,
+    INFO_TOPIC,
     NODE_ID,
     PLUGIN_VERSION,
     SCREEN,
@@ -247,3 +255,62 @@ async def test_the_bouquet_context_is_in_the_download(
 
     assert "bouquet" in diagnostics["topics"]
     assert diagnostics["topics"]["bouquet"] == config_entry.runtime_data.state.bouquet
+
+
+async def test_the_download_states_the_plugin_mismatch_the_card_cannot_show(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A receiver ahead of the integration reads "up to date" everywhere else.
+
+    The version entity refuses to offer a downgrade, which is right, and the cost is that
+    a box running a plugin this release has never been tested against looks exactly like
+    a box in step. That is the one question a bug report about a missing entity starts
+    with, so the download answers it in words.
+    """
+    await async_setup_box(hass, config_entry)
+    async_fire_mqtt_message(hass, INFO_TOPIC, json.dumps({**INFO, "plugin": "9.9.9"}))
+    await hass.async_block_till_done()
+
+    plugin = (await async_get_config_entry_diagnostics(hass, config_entry))["plugin"]
+
+    assert plugin["installed"] == "9.9.9"
+    assert plugin["bundled"] == PLUGIN_VERSION
+    assert plugin["compatibility"] == "newer_than_bundle"
+
+
+async def test_a_bundle_that_will_not_load_is_reported_rather_than_fatal(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A damaged HACS download is itself the bug, and the report has to survive it."""
+    await async_setup_box(hass, config_entry)
+
+    with patch(
+        "custom_components.enigma2_mqtt.diagnostics.load_bundled_plugin",
+        side_effect=BundleError("invalid"),
+    ):
+        plugin = (await async_get_config_entry_diagnostics(hass, config_entry))["plugin"]
+
+    assert plugin["bundled"] is None
+    assert plugin["expected"] == PLUGIN_VERSION
+    assert plugin["compatibility"] == "matched"
+
+
+async def test_a_box_that_has_published_no_channel_list_summarises_to_nothing(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """An empty summary is not the same as an empty list, and neither is a failure."""
+    retained.update({INFO_TOPIC: json.dumps(INFO), AVAILABILITY_TOPIC: "online"})
+    await async_setup_box(hass, config_entry)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, config_entry)
+
+    assert diagnostics["topics"]["channels"] is None
