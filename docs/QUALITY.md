@@ -104,3 +104,12 @@ All five run on every push to `main`, on every pull request, once a week — and
 every release**. The release workflow calls the same workflow and publishes nothing unless all of
 it passes. That is not redundant with the branch ruleset: a tag is pushed by a person, at
 whatever commit they choose, so "main was green" is not evidence about the tree being released.
+
+Two consequences of putting those jobs in front of the publisher are worth stating. Every
+release is now gated on a **live checkout of `deltasystems-pl/enigma2-mqtt-bridge` at the commit
+the bundle pins**, rebuilt and compared byte for byte — so a release cannot be cut while that
+repository is unreachable, and it cannot be cut at all if the committed IPK no longer matches
+the source it claims. And the third-party actions that now sit in the publishing path
+(`hassfest`, the HACS action, `action-gh-release`) are **pinned by commit SHA** with the version
+in a comment beside them, because a moving `@master`, `@main` or `@v2` is somebody else's push
+running with this repository's release token.

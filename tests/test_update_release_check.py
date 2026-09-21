@@ -10,14 +10,18 @@ the installer would refuse is a button that lies.
 
 from __future__ import annotations
 
+from datetime import timedelta
 import json
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.update import ATTR_VERSION
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_ENTITY_ID, STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+import homeassistant.util.dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -34,7 +38,12 @@ from custom_components.enigma2_mqtt.const import (
     CONF_SSH_PORT,
     CONF_SSH_USERNAME,
     PLUGIN_LATEST_RELEASE_URL,
+    PLUGIN_RELEASES_URL,
+    RELEASE_BODY_LIMIT,
     RELEASE_CHECK_INTERVAL,
+    RELEASE_CHECK_STORAGE_KEY,
+    RELEASE_CHECK_STORAGE_VERSION,
+    RELEASE_TAG_MAX,
 )
 from custom_components.enigma2_mqtt.update import (
     COMPATIBILITY_MATCHED,
@@ -42,6 +51,8 @@ from custom_components.enigma2_mqtt.update import (
     COMPATIBILITY_OLDER,
     COMPATIBILITY_UNKNOWN,
     plugin_compatibility,
+    published_release_url,
+    published_release_version,
 )
 
 from .conftest import INFO, INFO_TOPIC, PLUGIN_VERSION, async_setup_box
@@ -453,3 +464,427 @@ async def test_a_phase_the_card_cannot_draw_moves_no_bar(
         )
 
     assert percentages == [None, 37]
+
+
+# ------------------------------------------- where the answer is allowed to point you
+
+
+@pytest.mark.parametrize(
+    "hostile",
+    [
+        "https://evil.example/phish",
+        "javascript:alert(1)",
+        # The right host, the wrong repository — a release page somebody else owns.
+        "https://github.com/someone-else/enigma2-mqtt-bridge/releases/tag/v9.9.9",
+        # The prefix as a prefix of the *host*, which is the classic way past a naive
+        # "does it contain our address" check.
+        "https://github.com.evil.example/deltasystems-pl/enigma2-mqtt-bridge/releases/tag/v1",
+        7,
+        None,
+    ],
+)
+async def test_a_release_link_that_is_not_ours_is_not_shown(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    hostile: object,
+) -> None:
+    """The release link is one a household is invited to click from its device page.
+
+    It arrives in a JSON document fetched over the network, and the field it arrives in
+    says nothing about where it leads. The tag is still reported; only the link is
+    dropped, back to the releases page this integration was built against.
+    """
+    aioclient_mock.get(
+        PLUGIN_LATEST_RELEASE_URL, json={"tag_name": "v9.9.9", "html_url": hostile}
+    )
+    await _setup_with_release_check(hass, config_entry)
+
+    state = hass.states.get(PLUGIN)
+    assert state.attributes["release_url"] == PLUGIN_RELEASES_URL
+    assert state.attributes["published_version"] == "9.9.9"
+
+
+async def test_a_legitimate_release_link_is_kept(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Without this the check above could pass by refusing every link there is."""
+    aioclient_mock.get(
+        PLUGIN_LATEST_RELEASE_URL, json={"tag_name": "v9.9.9", "html_url": RELEASE_URL}
+    )
+    await _setup_with_release_check(hass, config_entry)
+
+    assert hass.states.get(PLUGIN).attributes["release_url"] == RELEASE_URL
+
+
+def test_the_release_link_allowlist_is_a_prefix_of_the_real_thing() -> None:
+    """Stated directly, because it is the one comparison the whole guard rests on."""
+    assert published_release_url(RELEASE_URL) == RELEASE_URL
+    assert published_release_url("https://evil.example/phish") is None
+    assert published_release_url("javascript:alert(1)") is None
+    # The releases page itself, without the trailing slash, is not a release.
+    assert published_release_url(PLUGIN_RELEASES_URL) is None
+    assert published_release_url(None) is None
+
+
+# --------------------------------------------------- how much of an answer is believed
+
+
+async def test_an_answer_too_large_to_be_a_release_is_not_read(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """A release document is a few kilobytes. A megabyte is a different endpoint."""
+    filler = "x" * (RELEASE_BODY_LIMIT + 1024)
+    aioclient_mock.get(
+        PLUGIN_LATEST_RELEASE_URL,
+        json={"tag_name": "v9.9.9", "html_url": RELEASE_URL, "body": filler},
+    )
+    await _setup_with_release_check(hass, config_entry)
+
+    assert hass.states.get(PLUGIN).attributes["published_version"] is None
+
+
+async def test_an_answer_just_under_the_ceiling_is_still_read(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """GitHub puts the whole release note in this document; it must not be the limit."""
+    payload = {"tag_name": "v9.9.9", "html_url": RELEASE_URL, "body": ""}
+    payload["body"] = "x" * (RELEASE_BODY_LIMIT - len(json.dumps(payload)) - 16)
+    assert len(json.dumps(payload)) <= RELEASE_BODY_LIMIT
+    aioclient_mock.get(PLUGIN_LATEST_RELEASE_URL, json=payload)
+    await _setup_with_release_check(hass, config_entry)
+
+    assert hass.states.get(PLUGIN).attributes["published_version"] == "9.9.9"
+
+
+@pytest.mark.parametrize(
+    "tag",
+    [
+        # 606 characters, which is text on a device page rather than a version.
+        "v" + "9" * 605,
+        # Inside the length cap and still not a version.
+        "nightly",
+        "v",
+        "latest-and-greatest",
+    ],
+)
+async def test_a_tag_that_is_not_a_version_never_reaches_the_card(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    tag: str,
+) -> None:
+    """Everything downstream compares this with the bundled build.
+
+    A string that does not sort is not a comparison, it is a label pretending to be one
+    — and it would be shown in an attribute and in a sentence either way.
+    """
+    aioclient_mock.get(
+        PLUGIN_LATEST_RELEASE_URL, json={"tag_name": tag, "html_url": RELEASE_URL}
+    )
+    await _setup_with_release_check(hass, config_entry)
+
+    state = hass.states.get(PLUGIN)
+    assert state.attributes["published_version"] is None
+    assert state.attributes["release_url"] == PLUGIN_RELEASES_URL
+
+
+def test_the_tag_guard_takes_versions_and_refuses_essays() -> None:
+    assert published_release_version("v0.2.0") == "0.2.0"
+    assert published_release_version("0.2.0") == "0.2.0"
+    assert published_release_version("v" + "9" * 605) is None
+    assert published_release_version("x" * (RELEASE_TAG_MAX + 1)) is None
+    assert published_release_version("nightly") is None
+    assert published_release_version(None) is None
+
+
+# ------------------------------------ one request a day, across reloads and restarts
+
+
+async def test_six_reloads_are_still_one_request(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """The limit used to live on the entity, and a reload builds a new entity.
+
+    Every options save reloads the entry, so a household adjusting three settings in a
+    row spent three days' budget in a minute — on a rate limit shared with everything
+    else on that address.
+    """
+    aioclient_mock.get(
+        PLUGIN_LATEST_RELEASE_URL,
+        json={"tag_name": "v9.9.9", "html_url": RELEASE_URL},
+    )
+    await _setup_with_release_check(hass, config_entry)
+    assert aioclient_mock.call_count == 1
+
+    for _ in range(5):
+        await hass.config_entries.async_reload(config_entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert aioclient_mock.call_count == 1
+    assert hass.states.get(PLUGIN).attributes["published_version"] == "9.9.9"
+
+
+async def test_a_restart_within_the_day_asks_nothing_and_still_knows(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    hass_storage: dict[str, Any],
+) -> None:
+    """A restart is a fresh process, and the stamp has to outlive it.
+
+    The card also has to keep saying what it knows: going blank until the next day's
+    request would make a restart look like the check had stopped working.
+    """
+    hass_storage[RELEASE_CHECK_STORAGE_KEY] = {
+        "version": RELEASE_CHECK_STORAGE_VERSION,
+        "data": {
+            config_entry.entry_id: {
+                "checked": (dt_util.utcnow() - timedelta(hours=3)).isoformat(),
+                "version": "9.9.9",
+                "url": RELEASE_URL,
+            }
+        },
+    }
+    await _setup_with_release_check(hass, config_entry)
+
+    assert aioclient_mock.call_count == 0
+    state = hass.states.get(PLUGIN)
+    assert state.attributes["published_version"] == "9.9.9"
+    assert state.attributes["release_url"] == RELEASE_URL
+
+
+async def test_a_stamp_older_than_a_day_is_spent_again(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    hass_storage: dict[str, Any],
+) -> None:
+    """Otherwise the cache would be a way of never asking again."""
+    hass_storage[RELEASE_CHECK_STORAGE_KEY] = {
+        "version": RELEASE_CHECK_STORAGE_VERSION,
+        "data": {
+            config_entry.entry_id: {
+                "checked": (dt_util.utcnow() - timedelta(hours=25)).isoformat(),
+                "version": "0.0.1",
+                "url": RELEASE_URL,
+            }
+        },
+    }
+    aioclient_mock.get(
+        PLUGIN_LATEST_RELEASE_URL,
+        json={"tag_name": "v9.9.9", "html_url": RELEASE_URL},
+    )
+    await _setup_with_release_check(hass, config_entry)
+
+    assert aioclient_mock.call_count == 1
+    assert hass.states.get(PLUGIN).attributes["published_version"] == "9.9.9"
+
+
+async def test_a_check_that_failed_keeps_the_answer_and_spends_the_day(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    hass_storage: dict[str, Any],
+) -> None:
+    """A rate limit must cost the request, not the tag the card was showing.
+
+    Stamping only on success would mean a service that is down is asked again on every
+    reload, which is the behaviour most likely to keep it rate-limited.
+    """
+    hass_storage[RELEASE_CHECK_STORAGE_KEY] = {
+        "version": RELEASE_CHECK_STORAGE_VERSION,
+        "data": {
+            config_entry.entry_id: {
+                "checked": (dt_util.utcnow() - timedelta(hours=25)).isoformat(),
+                "version": "9.9.9",
+                "url": RELEASE_URL,
+            }
+        },
+    }
+    aioclient_mock.get(PLUGIN_LATEST_RELEASE_URL, status=403, text="")
+    await _setup_with_release_check(hass, config_entry)
+    assert aioclient_mock.call_count == 1
+    assert hass.states.get(PLUGIN).attributes["published_version"] == "9.9.9"
+
+    await hass.config_entries.async_reload(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert aioclient_mock.call_count == 1
+    assert hass.states.get(PLUGIN).attributes["published_version"] == "9.9.9"
+
+
+async def test_removing_the_receiver_forgets_its_stamp(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    hass_storage: dict[str, Any],
+) -> None:
+    """An entry id is never reused, so a record left behind is one nobody reads.
+
+    It is also a stamp from a receiver's previous life deciding whether its next one is
+    allowed to ask a question.
+    """
+    aioclient_mock.get(
+        PLUGIN_LATEST_RELEASE_URL,
+        json={"tag_name": "v9.9.9", "html_url": RELEASE_URL},
+    )
+    await _setup_with_release_check(hass, config_entry)
+    entry_id = config_entry.entry_id
+    assert entry_id in hass_storage[RELEASE_CHECK_STORAGE_KEY]["data"]
+
+    assert await hass.config_entries.async_remove(entry_id)
+    await hass.async_block_till_done()
+
+    assert entry_id not in hass_storage[RELEASE_CHECK_STORAGE_KEY]["data"]
+
+
+# ------------------------------------------------------ a summary that fits, or does not
+
+
+async def test_a_second_sentence_that_will_not_fit_is_dropped_whole(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Home Assistant cuts at 255 characters, wherever the 255th happens to fall.
+
+    Mid-word, usually — and in a language with long compounds, mid-sentence. The first
+    sentence says what to do and the second is context about a published tag, so the
+    second is dropped whole rather than shown as a fragment.
+    """
+    first = "A" * 200
+    aioclient_mock.get(
+        PLUGIN_LATEST_RELEASE_URL,
+        json={"tag_name": "v9.9.9", "html_url": RELEASE_URL},
+    )
+    with patch(
+        "custom_components.enigma2_mqtt.update.async_get_translations",
+        AsyncMock(
+            return_value={
+                "component.enigma2_mqtt.common.update_summary_older_no_install": first,
+                "component.enigma2_mqtt.common.update_summary_published": "B" * 60,
+            }
+        ),
+    ):
+        await _setup_with_release_check(hass, config_entry)
+        await _publish_plugin_version(hass, "0.0.9")
+
+    summary = hass.states.get(PLUGIN).attributes["release_summary"]
+    # 200 + 1 + 60 is 261, so the second sentence goes entirely rather than partly.
+    assert summary == first
+    assert "B" not in summary
+
+
+async def test_two_sentences_that_do_fit_are_both_kept(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """One character under the ceiling is still under it."""
+    first = "A" * 194
+    second = "B" * 60
+    aioclient_mock.get(
+        PLUGIN_LATEST_RELEASE_URL,
+        json={"tag_name": "v9.9.9", "html_url": RELEASE_URL},
+    )
+    with patch(
+        "custom_components.enigma2_mqtt.update.async_get_translations",
+        AsyncMock(
+            return_value={
+                "component.enigma2_mqtt.common.update_summary_older_no_install": first,
+                "component.enigma2_mqtt.common.update_summary_published": second,
+            }
+        ),
+    ):
+        await _setup_with_release_check(hass, config_entry)
+        await _publish_plugin_version(hass, "0.0.9")
+
+    summary = hass.states.get(PLUGIN).attributes["release_summary"]
+    # Exactly 255: the boundary itself, which is the case an off-by-one would take.
+    assert summary == f"{first} {second}"
+    assert len(summary) == 255
+
+
+async def test_the_release_check_belongs_to_the_entry_that_started_it(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """A request started on `hass` outlives the receiver it was started for.
+
+    Unloading the entry — a reload, a removal, a shutdown — then leaves a ten-second
+    request running against an entity that has gone, with nothing holding a handle to
+    cancel it. Started on the entry, it is cancelled with everything else the receiver
+    owns.
+    """
+    aioclient_mock.get(
+        PLUGIN_LATEST_RELEASE_URL,
+        json={"tag_name": "v9.9.9", "html_url": RELEASE_URL},
+    )
+    config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        config_entry, options={CONF_CHECK_GITHUB_RELEASES: True}
+    )
+    with (
+        patch.object(
+            type(config_entry),
+            "async_create_background_task",
+            autospec=True,
+            side_effect=ConfigEntry.async_create_background_task,
+        ) as on_the_entry,
+        patch.object(
+            hass, "async_create_task", side_effect=hass.async_create_task
+        ) as on_hass,
+    ):
+        assert await hass.config_entries.async_setup(config_entry.entry_id)
+        await hass.async_block_till_done()
+
+    def _named(calls) -> list[str]:
+        """Return the task names of a set of calls, however `name` was passed."""
+        names = []
+        for call in calls:
+            if "name" in call.kwargs:
+                names.append(str(call.kwargs["name"]))
+            elif len(call.args) >= 4:
+                names.append(str(call.args[3]))
+        return names
+
+    assert aioclient_mock.call_count == 1
+    assert [name for name in _named(on_the_entry.call_args_list) if "release check" in name]
+    # And not on hass, where nothing that unloads the receiver can reach it.
+    assert not [name for name in _named(on_hass.call_args_list) if "release check" in name]

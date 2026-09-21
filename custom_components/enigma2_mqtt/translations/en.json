@@ -165,7 +165,7 @@
           "screenshot_delay": "Wait before an automatic screenshot after a channel change, so the new picture has time to appear.",
           "cam_telemetry": "Expose the current service's encryption and ECM status. No server, account or card details are published.",
           "oscam_telemetry": "Expose privacy-neutral OSCam process, API, reader and server health. Reader labels, addresses, accounts and card identifiers are never published.",
-          "check_github_releases": "Off by default, and off means this integration talks to nothing but your broker. On, it asks the plugin's repository once a day which release is published and says so on the version entity. It never downloads anything: installing still uses only the bundle shipped here."
+          "check_github_releases": "Off by default, and off means this integration talks to nothing but your broker. On, it asks the plugin's repository which release is published, at most once every 24 hours, and says so on the version entity. The answer and the time it was asked are saved, so reloading the receiver or restarting Home Assistant shows what is already known rather than asking again. It never downloads anything: installing still uses only the bundle shipped here."
         }
       }
       ,"ssh_host": {"title": "Connect to the receiver", "data": {"ssh_host": "Receiver host", "ssh_port": "SSH port"}}

@@ -299,3 +299,26 @@ async def test_a_command_with_no_output_at_all_is_not_a_failure() -> None:
 
     assert result.stdout == ""
     assert result.stderr == ""
+
+
+async def test_a_stored_host_key_that_is_not_a_key_routes_to_re_pinning(
+    socket_enabled: None,
+) -> None:
+    """A pinned identity can be unreadable as well as wrong.
+
+    AsyncSSH raises KeyImportError for a host key it cannot parse, and that subclasses
+    ValueError rather than asyncssh.Error — so a truncated write, a hand-edited entry or
+    a backup restored from another receiver left the installer as a raw traceback, shown
+    to the user as "Unknown error", with no reauthentication offered. Offering it is the
+    one thing that fixes this: the fingerprint is shown again and accepted again.
+    """
+    async with _server() as (port, _key, passwords):
+        credentials = SshCredentials(
+            "127.0.0.1", "root", "test-password", "ssh-ed25519 not-a-key", port
+        )
+        with pytest.raises(InstallerError) as raised:
+            await _async_connect(credentials)
+
+    assert raised.value.code is InstallerErrorCode.HOST_KEY_CHANGED
+    # And not one byte of the password went to a host whose identity could not be pinned.
+    assert passwords == []

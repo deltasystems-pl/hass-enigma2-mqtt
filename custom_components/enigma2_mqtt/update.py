@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+import json
 import logging
 from typing import Any
 
@@ -46,8 +47,10 @@ from .const import (
     DOMAIN,
     PLUGIN_LATEST_RELEASE_URL,
     PLUGIN_RELEASES_URL,
+    RELEASE_BODY_LIMIT,
     RELEASE_CHECK_INTERVAL,
     RELEASE_CHECK_TIMEOUT,
+    RELEASE_TAG_MAX,
     SUPPORTED_PLUGIN_VERSION,
     TOPIC_INFO,
 )
@@ -59,6 +62,7 @@ from .installer import (
     SshCredentials,
     async_install,
 )
+from .release_store import async_release_check_store
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -80,6 +84,12 @@ SUMMARY_OLDER_NO_INSTALL = "update_summary_older_no_install"
 SUMMARY_NEWER = "update_summary_newer"
 SUMMARY_PUBLISHED = "update_summary_published"
 SUMMARY_LIMIT = 255
+
+# The only place a release link may point. The JSON that carries it comes off the
+# network, and a `release_url` is a link a user is invited to click from their own
+# device page — so it is checked against where it is supposed to lead rather than
+# trusted because of the field it arrived in.
+RELEASE_URL_PREFIX = f"{PLUGIN_RELEASES_URL}/"
 
 # The installer's phases, in the order it reports them. The update card has one bar, so
 # the phase becomes a percentage; the config flow shows the same phases as words.
@@ -103,6 +113,36 @@ def _version(value: str | None) -> Version | None:
         return Version(value)
     except InvalidVersion:
         return None
+
+
+def published_release_url(url: Any) -> str | None:
+    """Return a release link only when it leads to this plugin's releases.
+
+    `html_url` arrives in a JSON document fetched over the network, and it ends up as
+    the "Release notes" link on a device page — somewhere a household is invited to
+    click. A field being called `html_url` says nothing about where it points: a
+    redirected DNS name, a captive portal or a compromised answer can put any address
+    there, `javascript:` included. So the value is compared against where a release of
+    this plugin can actually live, and anything else is dropped rather than shown.
+    """
+    if isinstance(url, str) and url.startswith(RELEASE_URL_PREFIX):
+        return url
+    return None
+
+
+def published_release_version(tag: Any) -> str | None:
+    """Return a tag as a version, or None if it is not one.
+
+    Two separate refusals. The length cap is about the tag as *text*: it reaches an
+    attribute and a sentence on a device page, and there is no version that needs more
+    than a handful of characters. The parse is about the tag as a *version*: everything
+    downstream compares it with the bundled build, and a string that does not sort is
+    not a comparison — it is a label pretending to be one.
+    """
+    if not isinstance(tag, str) or len(tag) > RELEASE_TAG_MAX:
+        return None
+    candidate = tag.strip().removeprefix("v")
+    return candidate if _version(candidate) is not None else None
 
 
 def _newer(candidate: str | None, than: str | None) -> bool:
@@ -195,6 +235,16 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             self.hass, self.hass.config.language, "common", {DOMAIN}
         )
         if self._check_releases:
+            # What the last entity heard, and when it asked. This entity is a reload, an
+            # options save or a restart away from that one, and none of those is a
+            # reason to spend another request or to blank the tag on the card.
+            (
+                self._last_release_check,
+                self._published_version,
+                self._published_url,
+            ) = await async_release_check_store(self.hass).async_get(
+                self._entry.entry_id
+            )
             # Saving the options reloads the entry, so the option is read once here and
             # the timer only exists on an entity that was built while it was on.
             self.async_on_remove(
@@ -205,7 +255,13 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
                     cancel_on_shutdown=True,
                 )
             )
-            self.hass.async_create_task(self._async_check_release())
+            # On the entry, so that unloading the receiver takes the request with it
+            # rather than leaving it to finish against an entity that is already gone.
+            self._entry.async_create_background_task(
+                self.hass,
+                self._async_check_release(),
+                name=f"{DOMAIN} release check {self._entry.entry_id}",
+            )
         self._async_read_state()
         self.async_write_ha_state()
 
@@ -246,8 +302,25 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             sentences.append(
                 self._text(SUMMARY_PUBLISHED, version=self._published_version)
             )
-        summary = " ".join(sentence for sentence in sentences if sentence)
-        return summary[:SUMMARY_LIMIT] or None
+
+        # Home Assistant cuts a summary at 255 characters, and where it cuts is where
+        # the 255th character happens to fall — mid-word, and in a language with long
+        # compounds usually mid-sentence. The sentences here are in priority order: the
+        # first says what the version numbers mean and what to do, the second is extra
+        # context about a published tag. A second sentence that will not fit whole is
+        # dropped whole, because half of it reads as a bug rather than as a summary.
+        summary = ""
+        for sentence in sentences:
+            if not sentence:
+                continue
+            if not summary:
+                summary = sentence
+            elif len(summary) + 1 + len(sentence) <= SUMMARY_LIMIT:
+                summary = f"{summary} {sentence}"
+            else:
+                _LOGGER.debug("The release summary has no room for every sentence")
+                break
+        return summary or None
 
     async def _async_check_release(self, now: datetime | None = None) -> None:
         """Ask the plugin repository what it last published. Opt-in, daily, silent.
@@ -259,8 +332,8 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
 
         Only reached on an entity built while the option was on: the timer below is not
         registered otherwise, and changing the option reloads the entry. The interval
-        sets the cadence and the stamp enforces it, because a timer that fires early —
-        or twice — must not turn one day's request into two.
+        sets the cadence and the stored stamp enforces it, because a timer that fires
+        early — or a reload, or a restart — must not turn one day's request into two.
         """
         del now
         if (
@@ -268,10 +341,14 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             and dt_util.utcnow() - self._last_release_check < RELEASE_CHECK_INTERVAL
         ):
             return
-        # Stamped before the request, not after it: a check that times out has still
-        # spent this day's request, and retrying it on every state change would turn one
-        # unreachable service into a loop.
+        # Stamped, and written to storage, before the request rather than after it. A
+        # check that times out has still spent this day's request; a stamp that only
+        # lives in this entity is spent again by the next reload; and retrying on every
+        # state change would turn one unreachable service into a loop. The answer stored
+        # alongside it is the last one that worked, so a failure costs the stamp and
+        # leaves the card saying what it already knew.
         self._last_release_check = dt_util.utcnow()
+        await self._async_remember()
         session = async_get_clientsession(self.hass)
         try:
             async with (
@@ -288,20 +365,46 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
                         "The plugin release check answered HTTP %s", response.status
                     )
                     return
-                payload = await response.json(content_type=None)
+                # Read in chunks with a ceiling rather than in one call: `read(n)` on a
+                # live stream may return less than asked for, so a body that is merely
+                # slow would look truncated, and a body with no end at all would
+                # otherwise be pulled into memory in full before anything noticed.
+                body = bytearray()
+                async for chunk in response.content.iter_chunked(8192):
+                    body.extend(chunk)
+                    if len(body) > RELEASE_BODY_LIMIT:
+                        _LOGGER.debug(
+                            "The plugin release check answered with more than %s bytes",
+                            RELEASE_BODY_LIMIT,
+                        )
+                        return
+            payload = json.loads(bytes(body))
         except (TimeoutError, aiohttp.ClientError, ValueError) as err:
             _LOGGER.debug("The plugin release check did not answer: %s", err)
             return
 
-        tag = payload.get("tag_name") if isinstance(payload, dict) else None
-        if not isinstance(tag, str) or not tag.strip():
+        version = published_release_version(
+            payload.get("tag_name") if isinstance(payload, dict) else None
+        )
+        if version is None:
             _LOGGER.debug("The plugin release check returned no usable tag")
             return
-        url = payload.get("html_url")
-        self._published_version = tag.strip().removeprefix("v")
-        self._published_url = url if isinstance(url, str) and url else None
+        self._published_version = version
+        self._published_url = published_release_url(payload.get("html_url"))
+        await self._async_remember()
         self._async_read_state()
         self.async_write_ha_state()
+
+    async def _async_remember(self) -> None:
+        """Put the stamp and the answer where a reload or a restart will find them."""
+        if self._last_release_check is None:
+            return
+        await async_release_check_store(self.hass).async_set(
+            self._entry.entry_id,
+            self._last_release_check,
+            self._published_version,
+            self._published_url,
+        )
 
     def _has_credentials(self) -> bool:
         """Return whether a complete pinned SSH identity is retained for this box.

@@ -235,8 +235,24 @@ PLUGIN_LATEST_RELEASE_URL: Final = (
 # GitHub's unauthenticated rate limit is sixty requests an hour per address, shared by
 # everything else on that address. One request a day per receiver keeps this invisible
 # inside it, and a plugin release is not news that goes stale in an afternoon.
+#
+# "A day" is measured against a stamp in Home Assistant's own storage, not against the
+# life of an entity. A reload, an options save and a restart each build a new entity,
+# and a limit that any of those resets is not a limit — six reloads were six requests.
+# Between checks the entity shows the stored answer, so the tag survives a restart
+# without anybody being asked for it again.
 RELEASE_CHECK_INTERVAL: Final = timedelta(hours=24)
 RELEASE_CHECK_TIMEOUT: Final = 10
+RELEASE_CHECK_STORAGE_KEY: Final = f"{DOMAIN}.release_check"
+RELEASE_CHECK_STORAGE_VERSION: Final = 1
+
+# The most of an answer this will read. A GitHub release document is a few kilobytes;
+# anything past this is not the endpoint that was asked for, and pulling it into memory
+# to discover that would be the bug rather than the check.
+RELEASE_BODY_LIMIT: Final = 64 * 1024
+# The longest tag it will believe. A version is a handful of characters, and everything
+# here is somebody else's text arriving on a device page.
+RELEASE_TAG_MAX: Final = 64
 
 # Manufacturer names keyed by the prefix of the box type enigma2 reports. Longest
 # prefix wins. A box type nobody has mapped yet is still a perfectly good device, so

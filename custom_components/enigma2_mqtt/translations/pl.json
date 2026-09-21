@@ -140,7 +140,7 @@
           "screenshot_delay": "Czas oczekiwania przed automatycznym zrzutem po zmianie kanału, aby nowy obraz zdążył się pojawić.",
           "cam_telemetry": "Udostępnia szyfrowanie bieżącej usługi i stan ECM. Dane serwera, konta ani karty nie są publikowane.",
           "oscam_telemetry": "Udostępnia stan procesu, API, czytników i serwerów OSCam bez danych prywatnych. Nazwy czytników, adresy, konta i identyfikatory kart nie są publikowane.",
-          "check_github_releases": "Domyślnie wyłączone, a wyłączone znaczy, że ta integracja nie łączy się z niczym poza Twoim brokerem. Włączone — raz dziennie pyta repozytorium wtyczki o opublikowane wydanie i pokazuje je na encji wersji. Nic nie pobiera: instalacja nadal korzysta wyłącznie z pakietu dołączonego tutaj."
+          "check_github_releases": "Domyślnie wyłączone, a wyłączone znaczy, że ta integracja nie łączy się z niczym poza Twoim brokerem. Włączone — pyta repozytorium wtyczki o opublikowane wydanie nie częściej niż raz na 24 godziny i pokazuje je na encji wersji. Odpowiedź i godzina zapytania są zapisywane, więc przeładowanie dekodera albo restart Home Assistanta pokazuje to, co już wiadomo, zamiast pytać ponownie. Nic nie pobiera: instalacja nadal korzysta wyłącznie z pakietu dołączonego tutaj."
         }
       },
       "ssh_host": {"title": "Połącz z dekoderem", "data": {"ssh_host": "Adres dekodera", "ssh_port": "Port SSH"}},
