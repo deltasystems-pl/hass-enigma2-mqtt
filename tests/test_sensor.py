@@ -31,6 +31,7 @@ from .conftest import (
     SREF,
     TUNER_TOPIC,
     async_setup_box,
+    async_setup_box_then_retained,
 )
 
 CAM_TOPIC = "enigma2/vuuno4kse_005301/cam"
@@ -365,7 +366,28 @@ async def test_the_last_error_sensor_takes_the_boxs_complaint(
     state = hass.states.get("sensor.dekoder_salon_last_error")
     assert state.state == "deep_standby"
     assert state.attributes["error"] == "deep standby is not allowed on this box"
-    # When this integration saw it, which is the only time it can vouch for.
+    # The receiver's own timestamp, which is what makes a replay of this payload
+    # change nothing.
+    assert state.attributes["time"] == "2026-09-15T08:00:13+00:00"
+
+
+async def test_a_complaint_without_a_timestamp_is_stamped_on_arrival(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """An older plugin, or a truncated write, still gets a time worth showing."""
+    await async_setup_box(hass, config_entry)
+
+    async_fire_mqtt_message(
+        hass,
+        LAST_ERROR_TOPIC,
+        json.dumps({"cmd": "zap", "error": "no such service"}),
+    )
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.dekoder_salon_last_error")
     assert dt_util.parse_datetime(state.attributes["time"]) is not None
 
 
@@ -424,7 +446,12 @@ async def test_the_last_error_survives_a_restart(
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """Including the time, which the replayed retained payload must not move."""
+    """Including the time, which the replayed retained payload must not move.
+
+    In the order a real broker produces: the entity is built first and the retained
+    complaint arrives afterwards, which is exactly when a sensor that trusted the
+    clock would overwrite the restored time with the moment of the replay.
+    """
     seen_at = "2026-09-20T21:14:03+00:00"
     mock_restore_cache(
         hass,
@@ -437,18 +464,120 @@ async def test_the_last_error_survives_a_restart(
         ],
     )
     box_on_the_broker[LAST_ERROR_TOPIC] = json.dumps(
-        {
-            "cmd": "deep_standby",
-            "error": "deep standby is not allowed on this box",
-            "ts": 1789459213,
-        }
+        {"cmd": "deep_standby", "error": "deep standby is not allowed on this box"}
     )
 
-    await async_setup_box(hass, config_entry)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
 
     state = hass.states.get("sensor.dekoder_salon_last_error")
     assert state.state == "deep_standby"
     assert state.attributes["error"] == "deep standby is not allowed on this box"
+    assert state.attributes["time"] == seen_at
+
+
+async def test_a_reconnect_does_not_move_the_time_of_a_complaint(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The broker replays the retained complaint on every reconnect.
+
+    A time read off the clock would walk forward each time, so the one number that
+    says when the receiver refused would end up saying "just now" for ever.
+    """
+    await async_setup_box(hass, config_entry)
+    complaint = json.dumps(
+        {"cmd": "reboot", "error": "a recording is running", "ts": 1789459213}
+    )
+    async_fire_mqtt_message(hass, LAST_ERROR_TOPIC, complaint)
+    await hass.async_block_till_done()
+    first = hass.states.get("sensor.dekoder_salon_last_error").attributes["time"]
+
+    async_fire_mqtt_message(hass, LAST_ERROR_TOPIC, complaint, retain=True)
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.dekoder_salon_last_error")
+    assert state.state == "reboot"
+    assert state.attributes["time"] == first
+
+
+async def test_a_retained_complaint_is_shown_when_there_is_nothing_to_restore(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A fresh install, or a refusal that happened while Home Assistant was down.
+
+    The complaint is still the truth about the receiver, so it is shown — with the
+    receiver's own timestamp, not the moment the broker handed it over.
+    """
+    box_on_the_broker[LAST_ERROR_TOPIC] = json.dumps(
+        {"cmd": "deep_standby", "error": "deep standby is not allowed", "ts": 1789459213}
+    )
+
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    state = hass.states.get("sensor.dekoder_salon_last_error")
+    assert state.state == "deep_standby"
+    assert state.attributes["error"] == "deep standby is not allowed"
+    assert state.attributes["time"] == "2026-09-15T08:00:13+00:00"
+
+
+async def test_the_complaint_outlives_the_receiver(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Deep standby is a box that has left the network, and it is the headline case.
+
+    An entity that went unavailable with the receiver would lose the explanation at
+    the exact moment somebody went looking for it.
+    """
+    await async_setup_box(hass, config_entry)
+    async_fire_mqtt_message(
+        hass,
+        LAST_ERROR_TOPIC,
+        json.dumps({"cmd": "deep_standby", "error": "not allowed", "ts": 1789459213}),
+    )
+    await hass.async_block_till_done()
+
+    async_fire_mqtt_message(hass, AVAILABILITY_TOPIC, "offline")
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.dekoder_salon_last_error")
+    assert state.state == "deep_standby"
+    assert state.attributes["error"] == "not allowed"
+    # Every other entity of this box is unavailable by now.
+    assert hass.states.get("sensor.dekoder_salon_channel").state == STATE_UNAVAILABLE
+
+
+async def test_a_restart_while_the_receiver_is_away_keeps_the_complaint(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Which is the restart that happens after somebody pressed deep standby."""
+    seen_at = "2026-09-20T21:14:03+00:00"
+    mock_restore_cache(
+        hass,
+        [
+            State(
+                "sensor.dekoder_salon_last_error",
+                "deep_standby",
+                {"error": "deep standby is not allowed", "time": seen_at},
+            )
+        ],
+    )
+    retained[AVAILABILITY_TOPIC] = "offline"
+
+    await async_setup_box_then_retained(hass, config_entry, retained)
+
+    state = hass.states.get("sensor.dekoder_salon_last_error")
+    assert state.state == "deep_standby"
     assert state.attributes["time"] == seen_at
 
 
@@ -471,7 +600,7 @@ async def test_an_empty_retained_complaint_does_not_clear_a_restored_one(
     )
     box_on_the_broker[LAST_ERROR_TOPIC] = ""
 
-    await async_setup_box(hass, config_entry)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
 
     assert hass.states.get("sensor.dekoder_salon_last_error").state == "epg_grid"
 

@@ -547,6 +547,11 @@ class Enigma2State:
     bouquet: dict[str, Any] | None = None
     channels: dict[str, Any] | None = None
     last_error: dict[str, Any] | None = None
+    # Whether the last complaint arrived with the retain flag set. A retained payload
+    # is what the broker had before we subscribed, so it is a replay of something that
+    # already happened rather than news — which matters to anything that stamps a time
+    # on it, because a reconnect replays it again.
+    last_error_retained: bool = False
     screen: bytes | None = None
     screen_updated: datetime | None = None
     epg_grid: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -830,9 +835,11 @@ class Enigma2Box:
         Commands are never retained: a retained command is delivered again the instant
         the plugin subscribes, so the box would obey it after every reboot.
 
-        This is what the entities use. An entity press that blocked for ten seconds to
-        confirm itself would make the dashboard feel broken, and the state topic moves
-        the entity a moment later anyway.
+        This is the bottom of `async_command`, and what the optimistic controls use —
+        the switches and the volume number, which move the moment they are pressed
+        because the state topic confirms them a moment later. Anything whose only
+        answer is an error goes through `async_command` instead: the buttons used this
+        directly, and a refusal had nowhere to arrive.
         """
         await self.async_wait_subscribed()
         await mqtt.async_publish(
@@ -1295,6 +1302,7 @@ class Enigma2Box:
         """
         error = parse_json_payload(msg.payload)
         self.state.last_error = error
+        self.state.last_error_retained = msg.retain
         if not msg.retain and error is not None:
             cmd = error.get("cmd")
             text = str(error.get("error") or "")

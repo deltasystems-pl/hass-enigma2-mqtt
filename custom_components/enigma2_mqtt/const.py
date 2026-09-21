@@ -93,10 +93,12 @@ COMMAND_TIMEOUT: Final = 10
 # the same LAN answers in well under a tenth of this.
 ERROR_GRACE: Final = 1.0
 
-# The most of the box's complaint the „Ostatni błąd" sensor keeps. A Home Assistant
-# state is capped at 255 characters and a state that exceeds it is dropped entirely, so
-# the same bound is applied to the text in the attributes: an error nobody can read is
-# still better than an entity that silently refuses to take one.
+# The most of a complaint the „Ostatni błąd" sensor keeps, and it bounds both halves:
+# the command name it shows as its state and the receiver's text in the attributes. A
+# Home Assistant state over 255 characters is dropped entirely rather than cut, and the
+# command name arrives from the box like everything else here, so neither is trusted to
+# be short. A cut error is still readable; an entity that silently refused to take one
+# would not be.
 ERROR_TEXT_MAX: Final = 255
 
 # State topic suffixes, relative to `<base_topic>/<node_id>/`.

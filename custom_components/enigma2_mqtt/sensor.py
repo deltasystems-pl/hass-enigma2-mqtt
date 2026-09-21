@@ -108,6 +108,23 @@ def _next_timer(state: Enigma2State) -> datetime | None:
     return dt_util.utc_from_timestamp(begin)
 
 
+def _refused_at(ts: Any) -> str:
+    """Return when the receiver refused, preferring its own timestamp.
+
+    The complaint carries `ts`, and using it is what makes a replay idempotent: the
+    retained payload arrives again on every reconnect and at every start-up, and a
+    clock reading would put a new time on the same event each time. A payload without
+    a usable `ts` — an older plugin, a truncated write — falls back to now, which is
+    at least the moment this integration first learned of it.
+    """
+    if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+        try:
+            return dt_util.utc_from_timestamp(ts).isoformat()
+        except (OverflowError, OSError, ValueError):
+            pass
+    return dt_util.utcnow().isoformat()
+
+
 def _cam_value(state: Enigma2State, key: str, expected: type) -> Any:
     """Return one CAM value only when its JSON type is exact."""
     value = (state.cam or {}).get(key)
@@ -344,9 +361,22 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
     The integration owns this memory rather than the topic. The plugin clears
     `last_error` on the next command that succeeds, and the person who wants to know why
     „Restart" did nothing is looking afterwards — usually after the next volume step has
-    already wiped the evidence. So a cleared topic leaves this sensor alone, and a
-    restart does too: the last complaint is restored with the time it was first seen,
-    not with the time the retained payload was replayed at start-up.
+    already wiped the evidence. So a cleared topic leaves this sensor alone.
+
+    Two things follow from that, and both of them are about the receiver being gone.
+
+    **The time is the receiver's own `ts`** whenever the payload carries one, not the
+    moment this integration read it. The retained complaint is replayed on every
+    reconnect and again at every start-up, and a time taken from the clock moves each
+    time — so the one number that says when the receiver refused would drift forward
+    for as long as nobody pressed anything else. A replay of a complaint that is already
+    shown changes nothing at all.
+
+    **It is available even when the receiver is not.** Deep standby is the headline
+    case and it is exactly a box that has left the network: an entity that went
+    unavailable with the box would lose the explanation at the moment it was wanted, and
+    a restart taken while the box was away would store `unavailable` and lose it for
+    good.
     """
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -361,6 +391,11 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
         self._attr_native_value = None
         self._attr_extra_state_attributes: dict[str, Any] = {"error": None, "time": None}
 
+    @property
+    def available(self) -> bool:
+        """Return True, always: the complaint outlives the box that made it."""
+        return True
+
     async def async_added_to_hass(self) -> None:
         """Restore the last complaint before reading anything new."""
         last_state = await self.async_get_last_state()
@@ -373,10 +408,6 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
                 "error": last_state.attributes.get("error"),
                 "time": last_state.attributes.get("time"),
             }
-            # The retained complaint is about to be replayed by the broker, and it is
-            # the one just restored. Taking it again would move its timestamp to now
-            # and lose the only thing that says when it happened.
-            self._handled = self.box.updates.get(TOPIC_LAST_ERROR, 0)
         await super().async_added_to_hass()
 
     @callback
@@ -395,10 +426,20 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
         command = payload.get("cmd")
         if not isinstance(command, str) or not command:
             return
-        self._attr_native_value = command[:ERROR_TEXT_MAX]
+        command = command[:ERROR_TEXT_MAX]
+        error = str(payload.get("error") or "")[:ERROR_TEXT_MAX] or None
+        if (
+            self.box.state.last_error_retained
+            and command == self._attr_native_value
+            and error == self._attr_extra_state_attributes.get("error")
+        ):
+            # The broker replaying what is already on the screen. A payload with no
+            # `ts` would otherwise have its time moved to now by its own replay.
+            return
+        self._attr_native_value = command
         self._attr_extra_state_attributes = {
-            "error": str(payload.get("error") or "")[:ERROR_TEXT_MAX] or None,
-            "time": dt_util.utcnow().isoformat(),
+            "error": error,
+            "time": _refused_at(payload.get("ts")),
         }
 
 

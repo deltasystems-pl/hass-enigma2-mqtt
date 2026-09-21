@@ -106,7 +106,7 @@ effect without a restart.
 | Option | Default | What it does |
 |---|---|---|
 | **Show the deep standby and reboot buttons** | off | The Home Assistant half of the gate on „Głębokie uśpienie" and „Restart"; the receiver's own `deep_standby_allowed` is the other half, and [§4.5](#45-buttons-and-update) says how the two combine. Turning this off removes the buttons from the entity registry rather than leaving them behind unavailable. It is about what appears on a dashboard, **not** a safety mechanism: the plugin refuses both commands while a recording is running whatever is set here. |
-| **Wake-on-LAN MAC address** | the address the box reports on `info` | The target of the magic packet the „Obudź (WoL)" button and `media_player.turn_on` send. Set it when the receiver reports a different interface from the one that is plugged in — a box on Wi-Fi does not answer a packet sent to its cable port. Written as `00:00:5e:00:53:01`, `00-00-5e-00-53-01`, `0000.5e00.5301` or `00005e005301`, in any case; it is stored lower-case and colon-separated whichever you type, and anything that is not an address fails the form rather than failing later from inside `wake_on_lan`. Whichever address a packet would go to — the override, or the one the box reports — is registered on the device as its MAC connection, so the rest of Home Assistant knows it too. A value stored by an earlier release that is not an address is dropped once at startup, with a line in the log. |
+| **Wake-on-LAN MAC address** | the address the box reports on `info` | The target of the magic packet the „Obudź (WoL)" button and `media_player.turn_on` send. Set it when the receiver reports a different interface from the one that is plugged in — a box on Wi-Fi does not answer a packet sent to its cable port. Written as `00:00:5e:00:53:01`, `00-00-5e-00-53-01`, `0000.5e00.5301` or `00005e005301`, in any case; it is stored lower-case and colon-separated whichever you type, and anything that is not an address fails the form rather than failing later from inside `wake_on_lan`. Whichever address a packet would go to — the override, or the one the box reports — is registered on the device as its MAC connection, so the rest of Home Assistant knows it too. On current Home Assistant that connection does not merge devices across integrations, so a router or DHCP integration may still show a second card for the same receiver; it is there so that what *is* keyed on a MAC can find this one. A value stored by an earlier release that is not an address is dropped once at startup, with a line in the log. |
 | **Bouquets to offer** | every bouquet the box publishes | Which bouquets feed the media player's channel list and the media browser. The choices are the bouquets on the `channels` topic, and a name can be typed for one the box has not published yet. This narrows the plugin's own `bouquets_for_select`; it cannot widen it. |
 | **Check for published plugin releases** | off | The only thing this integration can do that is not talking to your own broker, which is why it is off. Turned on, the version entity asks the plugin repository which release is published — **at most once every 24 hours** — and reports the tag in its summary, in a `published_version` attribute and in the release link. The time of the last request and its answer are written to `.storage/enigma2_mqtt.release_check`, keyed by config entry, so reloading the receiver, saving the options or restarting Home Assistant shows what is already known instead of spending another request; the record is deleted when the receiver is removed. At most 64 KiB of the answer is read, and a tag is only believed if it is at most 64 characters and parses as a version. The release link is only followed if it points into this plugin's own releases. It downloads nothing and it never raises `latest_version`: `install` can only ever put the bundle shipped here on a receiver, and offering a version the installer would refuse would be a button that lies. Failures — a rate limit, a timeout, an answer that is not a release — are a debug line and nothing else. |
 
@@ -227,8 +227,16 @@ somebody asks why a button did nothing, the next volume step has usually wiped t
 This sensor keeps it: a cleared topic does not clear it, and it is restored with its text and
 its time across a reload and a restart. The state is the failed command — `deep_standby`,
 `zap` — and `unknown` until something fails; `error` is the receiver's own sentence, cut at
-255 characters, and `time` is when Home Assistant saw it. There is no clear button in 0.2.0:
-the next error replaces it.
+255 characters, and `time` is the receiver's own `ts`, falling back to the moment Home
+Assistant learned of it when the payload has none. Taking the receiver's timestamp is what
+makes the replay harmless: the retained complaint arrives again on every reconnect and at
+every start-up, and a clock reading would walk the time forward each time. There is no clear
+button in 0.2.0: the next error replaces it.
+
+It is also the one entity of this device that **stays available while the receiver is not**.
+Deep standby is the headline case and it is precisely a box that has left the network; an
+entity that went unavailable with it would hide the explanation at the moment it was wanted,
+and a restart taken in the meantime would lose it for good.
 
 Times in attributes are ISO 8601 strings rather than the epoch seconds the topics carry,
 because a template can read one and not the other. The long programme description and the list
@@ -267,7 +275,15 @@ raises `HomeAssistantError` carrying the box's own sentence, and „Ostatni bł�
 Where the command has an observable effect, that effect is the proof and the press waits up to
 ten seconds for it. Where it has none — the box is about to restart, or an EPG grid whose
 content has not changed is not republished — the contract offers no positive acknowledgement,
-so the press waits a second for a complaint and treats **silence as success**.
+so the press waits a second for a complaint and treats **silence as success**. „Zrzut ekranu"
+pressed twice inside the plugin's minimum of five seconds between captures is therefore a
+visible refusal now, where it used to be a press that appeared to work and did nothing.
+
+The proof is that the topic moved, not that *this* command moved it: a screenshot the plugin
+publishes on its own interval, or a retained picture or announcement replayed by the broker
+after a reconnect, can end a press's wait. The press then reports success for something it did
+not cause. It is benign — the command was sent, and the receiver carries it out or complains on
+its own — and the alternative is a correlation id the contract does not have.
 
 **„Odśwież EPG"** exists only while the receiver names the `epg_grid` capability. With the
 plugin's `epg_grid_events` setting at zero there are no grids to rebuild, the capability is

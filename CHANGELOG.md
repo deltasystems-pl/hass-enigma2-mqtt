@@ -84,11 +84,14 @@ have not been accepted on a receiver, and no tag has been cut.
   screen in Home Assistant can show.
 - **Polish and German** names for every entity, action and trigger. German is still a draft
   and would welcome a native speaker.
-- **A „Last error" sensor.** The receiver's last refusal, with its own words and the time Home
-  Assistant saw it, kept across a reload and a restart. The plugin clears its error topic on the
-  next command that succeeds, so by the time anybody asks why a button did nothing the evidence
-  is usually gone; this sensor is where it stays. There is no clear button — the next error
-  replaces it.
+- **A „Last error" sensor.** The receiver's last refusal, with its own words and the time the
+  receiver put on it, kept across a reload and a restart — and across the replay of the retained
+  complaint that follows every reconnect, which is why the time is the receiver's rather than a
+  reading of the clock. The plugin clears its error topic on the next command that succeeds, so
+  by the time anybody asks why a button did nothing the evidence is usually gone; this sensor is
+  where it stays. It is the one entity here that stays available while the receiver is not,
+  because deep standby is exactly a receiver that has left the network. There is no clear
+  button — the next error replaces it.
 - **A „Refresh EPG" button**, which rebuilds and republishes the programme grids. It exists only
   on a receiver that publishes them: with the plugin's grid setting at zero the capability is
   absent and so is the button.
@@ -119,7 +122,9 @@ Found by running this release against a real receiver rather than a test one.
   receiver and raises its own sentence. Where there is an effect to watch — a new screen grab, a
   republished announcement — that is the proof. Where there is none, because the box is about to
   restart or because an unchanged EPG grid is not republished, the press waits a moment for a
-  complaint and treats silence as success.
+  complaint and treats silence as success. One consequence you will see straight away: „Zrzut
+  ekranu" pressed twice inside the plugin's minimum of five seconds between captures now says
+  so, where it used to look like a press that worked.
 - **„Deep standby" and „Restart" now also need the receiver's permission.** `deep_standby_allowed`
   is set on the box's own setup screen and deliberately cannot be written over MQTT, so Home
   Assistant had no way to know the two buttons it was offering would always be refused. They are

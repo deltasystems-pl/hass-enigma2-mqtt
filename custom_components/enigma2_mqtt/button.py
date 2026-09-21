@@ -158,6 +158,22 @@ async def async_setup_entry(
         """Return whether the Home Assistant option asks for the two of them."""
         return bool(entry.options.get(CONF_DANGEROUS_BUTTONS))
 
+    def has_spoken() -> bool:
+        """Return whether the box has described itself yet.
+
+        Either topic will do for a capability: the announcement carries the same list.
+        """
+        return bool(box.state.info or box.state.announcement)
+
+    def has_answered() -> bool:
+        """Return whether the box has published the topic its permissions live on.
+
+        `info` and nothing else. The announcement arrives first and carries no
+        `settings` at all, so treating it as "the box has spoken" reads every
+        permission as "not said" and creates buttons the very next message deletes.
+        """
+        return bool(box.state.info)
+
     by_key = {
         description.key: description
         for description in (*DANGEROUS_BUTTONS, *(pair[1] for pair in CAPABILITY_BUTTONS))
@@ -173,13 +189,27 @@ async def async_setup_entry(
             "button",
             [description.key for description in DANGEROUS_BUTTONS],
             factory,
-            # A box that never reports `deep_standby_allowed` is an older plugin, and
-            # the behaviour there is the one that shipped: the option decides alone.
-            lambda: wanted() and box.deep_standby_permission is not False,
+            # Nothing is created until `info` has arrived. It lands after the platforms
+            # are set up — the subscription is registered and returns, and Home
+            # Assistant debounces the SUBSCRIBE behind it — so a gate that read the
+            # permission at set-up time would read "not said" on every start, create
+            # both buttons, and delete them again a moment later when `info` landed
+            # with a "no": registry churn on every restart, and a race where the
+            # deletion arrives before the addition and the button is left registered
+            # for good. Once `info` is in, a box that never reports
+            # `deep_standby_allowed` is an older plugin, and the behaviour there is the
+            # one that shipped: the option decides alone.
+            lambda: (
+                wanted() and has_answered() and box.deep_standby_permission is not False
+            ),
             # The option being off is an answer on its own, and the one this
             # integration has always acted on, so it still removes the buttons from a
-            # box that has said nothing.
-            lambda: not wanted() or box.deep_standby_permission is not None,
+            # box that has said nothing. Everything else waits for the box: "not yet
+            # known" is not a stated "no", and an entity somebody already has must
+            # survive a start-up the box slept through.
+            lambda: not wanted() or (
+                has_answered() and box.deep_standby_permission is not None
+            ),
             async_add_entities,
         ).start()
     )
@@ -196,7 +226,7 @@ async def async_setup_entry(
                 # Before `info` or the announcement arrives the box has not said which
                 # features it hooked; it has said nothing, and nothing is not a reason
                 # to delete somebody's button.
-                lambda: bool(box.state.info or box.state.announcement),
+                has_spoken,
                 async_add_entities,
             ).start()
         )

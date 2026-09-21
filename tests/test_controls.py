@@ -47,6 +47,7 @@ from .conftest import (
     HDD_TOPIC,
     INFO,
     INFO_TOPIC,
+    LAST_ERROR_TOPIC,
     MAC,
     NODE_ID,
     POWER_TOPIC,
@@ -58,6 +59,7 @@ from .conftest import (
     assert_published,
     async_arm_box_error,
     async_setup_box,
+    async_setup_box_then_retained,
     command_topic,
 )
 
@@ -320,16 +322,38 @@ async def test_somebody_elses_complaint_does_not_fail_a_button(
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """`last_error` names the command it is about, and only that one waits on it."""
-    await async_setup_box(hass, config_entry)
-    await async_arm_box_error(hass, "restart_gui", "the tuner is busy")
+    """`last_error` names the command it is about, and only that one waits on it.
 
-    await hass.services.async_call(
-        BUTTON_DOMAIN,
-        SERVICE_PRESS,
-        {ATTR_ENTITY_ID: "button.dekoder_salon_refresh_epg"},
-        blocking=True,
+    The complaint has to arrive *inside* the window the press is holding open, or
+    this proves nothing: a receiver refusing an automation's screenshot while
+    somebody restarts the GUI is one topic carrying two conversations.
+    """
+    await async_setup_box(hass, config_entry)
+
+    press = hass.async_create_task(
+        hass.services.async_call(
+            BUTTON_DOMAIN,
+            SERVICE_PRESS,
+            {ATTR_ENTITY_ID: "button.dekoder_salon_restart_gui"},
+            blocking=True,
+        )
     )
+    await _command_sent(mqtt_mock, command_topic("restart_gui"))
+    assert not press.done()
+
+    async_fire_mqtt_message(
+        hass,
+        LAST_ERROR_TOPIC,
+        json.dumps(
+            {"cmd": "screenshot", "error": "one screenshot every five seconds", "ts": 1}
+        ),
+    )
+    await hass.async_block_till_done()
+
+    # Silence about `restart_gui` is still success, and the complaint that was about
+    # something else is on the sensor rather than in an exception.
+    await press
+    assert hass.states.get("sensor.dekoder_salon_last_error").state == "screenshot"
 
 
 async def test_the_epg_button_needs_the_capability(
@@ -442,11 +466,84 @@ async def test_the_box_can_refuse_the_dangerous_buttons_too(
     hass.config_entries.async_update_entry(
         config_entry, options={CONF_DANGEROUS_BUTTONS: True}
     )
-    assert await hass.config_entries.async_setup(config_entry.entry_id)
-    await hass.async_block_till_done()
+    # A gate that read the permission before `info` arrived would create both buttons
+    # and delete them again a moment later, on every single start-up: registry churn, a
+    # transient entity in the recorder, and a race in which the deletion overtakes the
+    # addition and the button is left registered for good. The end state cannot tell
+    # "never created" from "created and then deleted", so the registry is watched.
+    touched: list[str] = []
+    hass.bus.async_listen(
+        er.EVENT_ENTITY_REGISTRY_UPDATED,
+        lambda event: touched.append(event.data["entity_id"]),
+    )
+
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
 
     assert hass.states.get("button.dekoder_salon_deep_standby") is None
     assert hass.states.get("button.dekoder_salon_reboot") is None
+    registry = er.async_get(hass)
+    assert registry.async_get("button.dekoder_salon_deep_standby") is None
+    assert registry.async_get("button.dekoder_salon_reboot") is None
+    assert not [entity_id for entity_id in touched if "deep_standby" in entity_id]
+    assert not [entity_id for entity_id in touched if "reboot" in entity_id]
+
+
+async def test_a_permitted_button_keeps_its_entity_id_across_a_restart(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Created once, when the box says it may be, and the same one afterwards."""
+    box_on_the_broker[INFO_TOPIC] = json.dumps(
+        {**INFO, "settings": {"deep_standby_allowed": True}}
+    )
+    config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        config_entry, options={CONF_DANGEROUS_BUTTONS: True}
+    )
+
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    registry = er.async_get(hass)
+    first = registry.async_get("button.dekoder_salon_deep_standby")
+    assert first is not None
+
+    await hass.config_entries.async_reload(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    again = registry.async_get("button.dekoder_salon_deep_standby")
+    assert again is not None
+    assert again.id == first.id
+
+
+async def test_a_start_up_the_box_slept_through_keeps_the_buttons(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """"Not yet known" is not a stated „no", and a box in deep standby says nothing.
+
+    Which is the one state in which somebody is most likely to want the buttons that
+    put it there to still be where they left them.
+    """
+    config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        config_entry, options={CONF_DANGEROUS_BUTTONS: True}
+    )
+    registry = er.async_get(hass)
+    existing = registry.async_get_or_create(
+        "button",
+        DOMAIN,
+        f"{NODE_ID}_deep_standby",
+        config_entry=config_entry,
+        suggested_object_id="dekoder_salon_deep_standby",
+    )
+
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert registry.async_get(existing.entity_id) is not None
 
 
 async def test_permission_at_the_television_brings_the_buttons_back(
@@ -463,8 +560,7 @@ async def test_permission_at_the_television_brings_the_buttons_back(
     hass.config_entries.async_update_entry(
         config_entry, options={CONF_DANGEROUS_BUTTONS: True}
     )
-    assert await hass.config_entries.async_setup(config_entry.entry_id)
-    await hass.async_block_till_done()
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
     assert hass.states.get("button.dekoder_salon_deep_standby") is None
 
     async_fire_mqtt_message(
@@ -488,11 +584,40 @@ async def test_an_older_plugin_leaves_the_dangerous_buttons_to_the_option(
     hass.config_entries.async_update_entry(
         config_entry, options={CONF_DANGEROUS_BUTTONS: True}
     )
-    assert await hass.config_entries.async_setup(config_entry.entry_id)
-    await hass.async_block_till_done()
+
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
 
     assert hass.states.get("button.dekoder_salon_deep_standby") is not None
     assert hass.states.get("button.dekoder_salon_reboot") is not None
+
+
+@pytest.mark.parametrize("stated", ["false", 1, None, []])
+async def test_only_a_boolean_permission_is_an_answer(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    stated: object,
+) -> None:
+    """The string „false" is not False, and 1 is not True.
+
+    A receiver that answers in something other than a boolean has not answered, and
+    reading a truthy value out of it would either delete working buttons or offer two
+    the box is about to refuse.
+    """
+    box_on_the_broker[INFO_TOPIC] = json.dumps(
+        {**INFO, "settings": {"deep_standby_allowed": stated}}
+    )
+    config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        config_entry, options={CONF_DANGEROUS_BUTTONS: True}
+    )
+
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    assert config_entry.runtime_data.deep_standby_permission is None
+    # And so the Home Assistant option decides alone, as it did before the key existed.
+    assert hass.states.get("button.dekoder_salon_deep_standby") is not None
 
 
 async def test_an_unparseable_info_leaves_the_dangerous_buttons_alone(
@@ -590,6 +715,34 @@ async def test_an_override_in_any_spelling_reaches_wake_on_lan_normalised(
     )
 
     assert magic_packets[0].data["mac"] == "00:00:5e:00:53:02"
+
+
+async def test_an_override_written_after_setup_is_still_normalised(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Defence in depth, and the only thing that covers it.
+
+    The set-up repair canonicalises what is already stored, so every other path
+    reaches `wake_on_lan` through a value that has been through it. An entry edited
+    in `.storage` while Home Assistant is running has not.
+    """
+    await async_setup_box(hass, config_entry)
+    box = config_entry.runtime_data
+
+    hass.config_entries.async_update_entry(
+        config_entry, options={CONF_WOL_MAC: "00-00-5E-00-53-02"}
+    )
+    assert box.mac_address == "00:00:5e:00:53:02"
+
+    # And an override that is not an address is no address: the packet goes where the
+    # receiver says it should rather than to something `bytes.fromhex` will reject.
+    hass.config_entries.async_update_entry(
+        config_entry, options={CONF_WOL_MAC: "00:00:5e:00:53:01x"}
+    )
+    assert box.mac_address == MAC
 
 
 async def test_a_stored_override_that_is_not_an_address_is_dropped_once(
