@@ -153,6 +153,8 @@ Found by running this release against a real receiver rather than a test one.
 - Command cleanup now retires internal waiters without spurious asyncio errors. Clearing an old
   plugin error no longer reports concurrent commands as complete before their own result is
   known.
+- **The bundled receiver plugin is rebuilt from a newer pinned commit**, which reports whether the
+  box permits deep standby and clears bytecode an upgrade has orphaned. Its version is unchanged.
 - **„Pilot" is hidden on the device page of a new installation.** Home Assistant gives every
   remote entity a power toggle, which put three controls that all switch power on one device and
   no way to tell which was the real one; „Zasilanie" is the labelled one. The remote is hidden,
