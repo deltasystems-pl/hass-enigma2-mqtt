@@ -40,6 +40,12 @@ CONF_SSH_HOST_KEY: Final = "ssh_host_key"
 CONF_KEEP_SSH_CREDENTIALS: Final = "keep_ssh_credentials"
 CONF_CHECK_GITHUB_RELEASES: Final = "check_github_releases"
 
+# Read-only members of `info.settings`. They are settings a consumer may read, not ones
+# `cmd/config` will accept: `deep_standby_allowed` gates a command, and a setting that
+# enables a command can only be turned on by somebody standing in front of the
+# television. Presence in `info.settings` therefore says nothing about writability.
+CONF_DEEP_STANDBY_ALLOWED: Final = "deep_standby_allowed"
+
 SCREENSHOT_OFF: Final = "off"
 SCREENSHOT_ON_ZAP: Final = "on_zap"
 SCREENSHOT_INTERVAL: Final = "interval"
@@ -86,6 +92,14 @@ COMMAND_TIMEOUT: Final = 10
 # action unusable, and not waiting at all would swallow "unknown key name". A box on
 # the same LAN answers in well under a tenth of this.
 ERROR_GRACE: Final = 1.0
+
+# The most of a complaint the „Ostatni błąd" sensor keeps, and it bounds both halves:
+# the command name it shows as its state and the receiver's text in the attributes. A
+# Home Assistant state over 255 characters is dropped entirely rather than cut, and the
+# command name arrives from the box like everything else here, so neither is trusted to
+# be short. A cut error is still readable; an entity that silently refused to take one
+# would not be.
+ERROR_TEXT_MAX: Final = 255
 
 # State topic suffixes, relative to `<base_topic>/<node_id>/`.
 TOPIC_AVAILABILITY: Final = "availability"

@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_mqtt_message
 
 from custom_components.enigma2_mqtt.const import (
@@ -125,6 +126,98 @@ async def test_saving_the_options_reloads_the_entry(
         **PLUGIN_SETTINGS,
     }
     assert hass.states.get("button.dekoder_salon_reboot") is not None
+
+
+@pytest.mark.parametrize(
+    "typed",
+    [
+        "00:00:5E:00:53:07",
+        "00-00-5e-00-53-07",
+        "0000.5e00.5307",
+        "  00005E005307 ",
+    ],
+)
+async def test_every_spelling_of_an_address_is_stored_the_same_way(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    typed: str,
+) -> None:
+    """One stored spelling, whatever was typed.
+
+    The device registry keys a connection by the string, so two spellings of one
+    address would be two addresses as far as the rest of Home Assistant is concerned.
+    """
+    await async_setup_box(hass, config_entry)
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_DANGEROUS_BUTTONS: False, CONF_WOL_MAC: typed, CONF_BOUQUETS: []},
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert config_entry.options[CONF_WOL_MAC] == "00:00:5e:00:53:07"
+
+
+async def test_an_address_that_is_not_one_fails_the_form(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Told on the form, in the user's language, rather than from inside `wake_on_lan`."""
+    await async_setup_box(hass, config_entry)
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_DANGEROUS_BUTTONS: False,
+            CONF_WOL_MAC: "00:00:5e:00:53:01 (kabel)",
+            CONF_BOUQUETS: [],
+        },
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_WOL_MAC: "invalid_mac"}
+    assert CONF_WOL_MAC not in config_entry.options
+
+
+async def test_a_bad_address_stops_the_receiver_being_reconfigured(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A form that failed has changed nothing, on this side or on the box's."""
+    await async_setup_box(hass, config_entry)
+    async_fire_mqtt_message(
+        hass, INFO_TOPIC, json.dumps({**INFO, "settings": PLUGIN_DEFAULT_SETTINGS})
+    )
+    await hass.async_block_till_done()
+    mqtt_mock.async_publish.reset_mock()
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_DANGEROUS_BUTTONS: False,
+            CONF_WOL_MAC: "nonsense",
+            CONF_BOUQUETS: [],
+            **PLUGIN_SETTINGS,
+        },
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_WOL_MAC: "invalid_mac"}
+    assert not [
+        call
+        for call in mqtt_mock.async_publish.call_args_list
+        if call.args[0] == command_topic("config")
+    ]
 
 
 async def test_modern_plugin_offers_delay_and_accepts_ack_with_extra_settings(

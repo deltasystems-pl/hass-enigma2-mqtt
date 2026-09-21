@@ -15,15 +15,16 @@ import logging
 
 from homeassistant.components import mqtt
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
-from .box import Enigma2Box, Enigma2MqttConfigEntry, command_topic
+from .box import Enigma2Box, Enigma2MqttConfigEntry, command_topic, normalise_mac
 from .const import (
     CONF_BASE_TOPIC,
     CONF_NODE_ID,
+    CONF_WOL_MAC,
     DEFAULT_BASE_TOPIC,
     DOMAIN,
     HA_MODE_DISCOVERY,
@@ -59,6 +60,41 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     return True
 
 
+@callback
+def _async_repair_wol_mac(hass: HomeAssistant, entry: Enigma2MqttConfigEntry) -> None:
+    """Drop a stored Wake-on-LAN override that is not an address.
+
+    The option used to be stored with nothing but a `.strip()`, so an entry written
+    before this release can hold anything somebody typed. Leaving it there means the
+    box's own address is never used and the button fails from inside `wake_on_lan` with
+    a message about hexadecimal characters; dropping it means the packet goes where the
+    receiver says it should, which is what an empty field has always meant.
+
+    A log line rather than a repair issue: the value is already fixed by the time
+    anybody could act on a card, and the operator asked to be told, not asked.
+    """
+    stored = entry.options.get(CONF_WOL_MAC)
+    if not isinstance(stored, str) or not stored.strip():
+        return
+    if (normalised := normalise_mac(stored)) is not None:
+        if normalised == stored:
+            return
+        _LOGGER.debug(
+            "Normalising the Wake-on-LAN address of %s", entry.data.get(CONF_NODE_ID)
+        )
+    else:
+        _LOGGER.warning(
+            "The Wake-on-LAN address stored for %s is not a MAC address and has been "
+            "removed; magic packets now go to the address the receiver reports. Set a "
+            "new one in the integration's options if the receiver's own interface is "
+            "not the one to wake",
+            entry.data.get(CONF_NODE_ID),
+        )
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, CONF_WOL_MAC: normalised or ""}
+    )
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: Enigma2MqttConfigEntry
 ) -> bool:
@@ -67,6 +103,8 @@ async def async_setup_entry(
         raise ConfigEntryNotReady(
             translation_domain=DOMAIN, translation_key="mqtt_not_available"
         )
+
+    _async_repair_wol_mac(hass, entry)
 
     box = Enigma2Box(hass, entry)
     entry.runtime_data = box

@@ -47,7 +47,21 @@ async def async_setup_entry(
 
 
 class Enigma2Remote(Enigma2Entity, RemoteEntity):
-    """Send remote keys to one Enigma2 receiver."""
+    """Send remote keys to one Enigma2 receiver.
+
+    Hidden on the device page by default, and only there. Home Assistant gives every
+    remote entity a power toggle, so a device that also has a „Zasilanie" switch and a
+    media player shows three controls that all switch power and no way to tell which is
+    the real one. „Zasilanie" is the labelled one; this entity stays enabled and
+    `remote.send_command` keeps working from an automation, it is simply not on the page
+    until somebody un-hides it.
+
+    Only new entities are affected: an installation that already has a registry entry
+    has a visibility decision in it, possibly a deliberate one with a dashboard behind
+    it, and rewriting that would be worse than the confusion it fixes.
+    """
+
+    _attr_entity_registry_visible_default = False
 
     def __init__(self, box: Enigma2Box) -> None:
         """Set up the remote on the power topic, which is all it reports."""
