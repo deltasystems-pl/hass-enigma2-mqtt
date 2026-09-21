@@ -201,6 +201,39 @@ quality bar we hold ourselves to is [docs/QUALITY.md](docs/QUALITY.md).
 Everything after M1 is unreleased, and both halves still report `0.1.0`: a coordinated version bump
 with the plugin has not happened yet.
 
+### What 0.2.0 and 0.3.0 will carry
+
+Two days of household use produced a list of problems and a list of wants, and they are split into
+two releases. The reasoning is in
+[ADR-0003](docs/adr/0003-control-feedback-and-household-features.md). **None of it is
+implemented.**
+
+**0.2.0 — fixes.** Cut after the guided installer has been run end to end on a receiver.
+
+- **Buttons wait for the receiver and raise when it refuses**, instead of publishing and returning.
+  A refused button used to be indistinguishable from a broken one.
+- **A „Last error" sensor** that remembers the receiver's last refusal with its text and time, and
+  keeps it across restarts — the plugin clears the topic on the next success, and the user is
+  usually looking afterwards.
+- **Deep standby and reboot appear only when the receiver says they are permitted**, and the option
+  text names both gates and where the box-side switch is.
+- **The Wake-on-LAN address is validated and normalised** instead of being passed through, is
+  registered on the device, and a malformed stored value is repaired once.
+- **„Remote" is hidden by default** on new installations — Home Assistant gives every remote entity
+  a power toggle, which made three power controls on one device. Existing installations are not
+  rewritten.
+- **A `select` platform: „Bouquet" and „Channel"**, which is what integration mode was missing
+  entirely — and a `source_list_scope` option defaulting to the active bouquet, because a source
+  list of many hundred channels exceeds the recorder's 16 KB attribute limit and loses the media
+  player its history.
+- **A button that rebuilds the EPG grid.**
+
+**0.3.0 — features**, following the receiver plugin: a **second notify entity** for the discreet
+toast and a `style` field on the `message` action; a **softcam** button and sensor (the auto-heal
+settings are in the options, the permission is not); an **EPG import** button and status sensor; an
+**EPG sensor for the active bouquet** whose payload is declared unrecorded; and the **process**
+sensors, already in review.
+
 **Testers wanted: open an issue.** OpenATV, OpenPLi and OpenBH have no test box. There is no
 per-image thread to find yet — yours would start it.
 

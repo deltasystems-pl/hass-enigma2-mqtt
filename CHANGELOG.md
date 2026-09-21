@@ -130,6 +130,16 @@ Found by running this release against a real receiver rather than a test one.
   to end, no broker-credential help in the setup form, no hassfest re-run at release time, no
   opt-in release check, and coverage at 93 % against the project's own 95 %. The README's roadmap
   is corrected to match.
+- **[ADR-0003](docs/adr/0003-control-feedback-and-household-features.md) records the 0.2.0 and
+  0.3.0 plan** that came out of two days of household use. 0.2.0 is fixes: buttons that wait for
+  the receiver and raise when it refuses, a „Last error" sensor that remembers a refusal the plugin
+  has already cleared, power-off buttons gated on what the receiver says it permits, a Wake-on-LAN
+  address that is validated rather than passed through, a remote hidden by default, a `select`
+  platform for bouquet and channel, a source list that fits back inside the recorder's attribute
+  limit, and a button for the EPG grid. 0.3.0 follows the receiver: a second notify entity for the
+  discreet toast, softcam and EPG-import controls gated on box-side permissions, and an EPG sensor
+  whose payload is declared unrecorded. **Nothing in the plan is implemented**, and the README's
+  roadmap says so.
 
 ## [0.1.0] - 2026-09-16
 
