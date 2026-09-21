@@ -226,10 +226,7 @@ two releases. The reasoning is in
 - [x] **A `select` platform: „Bouquet" and „Channel"**, which is what integration mode was missing
   entirely — and a `source_list_scope` option, because a source list of many hundred channels is a
   dropdown nobody can use. It defaults to every bouquet you have chosen, which is what the media
-  player has always offered. ~~because a source list of many hundred channels exceeds the
-  recorder's 16 KB attribute limit and loses the media player its history~~ — that diagnosis was
-  wrong: Home Assistant declares `source_list` unrecorded and the recorder strips it before it
-  measures anything, so no history was ever lost to it.
+  player has always offered.
 - [x] **A button that rebuilds the EPG grid.**
 
 **0.3.0 — features**, following the receiver plugin: a **second notify entity** for the discreet

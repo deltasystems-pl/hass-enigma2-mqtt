@@ -126,7 +126,8 @@ async def test_saving_the_options_reloads_the_entry(
         # Nobody asked for it on this form, and it is saved off: the release check is
         # the one thing here that would talk to anything but the household's broker.
         CONF_CHECK_GITHUB_RELEASES: False,
-        # Nor for this one, and its default is the scope that fits the recorder.
+        # Nor for this one, whose default is the long list the media player has always
+        # offered — narrowing it under an existing installation would be a surprise.
         CONF_SOURCE_LIST_SCOPE: DEFAULT_SOURCE_LIST_SCOPE,
         **PLUGIN_SETTINGS,
     }

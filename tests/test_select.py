@@ -519,6 +519,41 @@ async def test_duplicate_names_inside_one_bouquet_are_numbered(
     assert_published(mqtt_mock, command_topic("zap"), "1:0:19:4242:3F3:1:C00000:0:0:0:")
 
 
+async def test_a_bouquet_that_already_holds_the_numbered_name_loses_no_channel(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The numbering can collide with a real channel name, and must give way to it.
+
+    Two „TVP 1 HD" want „TVP 1 HD" and „TVP 1 HD (2)", and the bouquet already has a
+    channel called „TVP 1 HD (2)". Three channels, so three options: a select cannot
+    offer one label twice, and whichever channel lost the argument would be one Home
+    Assistant could not tune at all.
+    """
+    _with_bouquet_context(box_on_the_broker)
+    colliding = json.loads(json.dumps(CHANNELS))
+    colliding["bouquets"][0]["channels"] = [
+        {"sref": SREF, "name": "TVP 1 HD"},
+        {"sref": "1:0:19:4242:3F3:1:C00000:0:0:0:", "name": "TVP 1 HD"},
+        {"sref": "1:0:19:7777:3F3:1:C00000:0:0:0:", "name": "TVP 1 HD (2)"},
+    ]
+    box_on_the_broker[CHANNELS_TOPIC] = json.dumps(colliding)
+    box_on_the_broker[BOUQUET_TOPIC] = json.dumps(BOUQUET)
+    await async_setup_box(hass, config_entry)
+
+    options = hass.states.get(CHANNEL_SELECT).attributes[ATTR_OPTIONS]
+    assert len(options) == 3
+    assert len(set(options)) == 3
+    srefs = _entity(hass, CHANNEL_SELECT)._srefs
+    assert set(srefs.values()) == {
+        SREF,
+        "1:0:19:4242:3F3:1:C00000:0:0:0:",
+        "1:0:19:7777:3F3:1:C00000:0:0:0:",
+    }
+
+
 async def test_a_numbered_duplicate_keeps_its_channel_when_the_bouquet_is_reordered(
     hass: HomeAssistant,
     mqtt_mock,

@@ -138,8 +138,10 @@ everything.
 
 ## 4. Entities
 
-**Twenty-five entities on every receiver**, and up to nineteen more that exist only while
-something says they should. The conditional ones are, in full:
+**Twenty-five entities on every receiver**, and twenty-one more that exist only while
+something says they should — plus one set of three per OSCam source, which has no fixed
+number because it follows however many readers and servers that receiver has. The
+conditional ones are, in full:
 
 | How many | What | Created while |
 |---|---|---|
@@ -147,7 +149,8 @@ something says they should. The conditional ones are, in full:
 | 1 | „Odśwież EPG" | the receiver reports the `epg_grid` capability |
 | 2 | „Głębokie uśpienie", „Restart" | the Home Assistant option asks for them **and** the receiver permits deep standby |
 | 4 | the conditional-access diagnostics | the `cam_telemetry` option is on |
-| 12 + per source | the OSCam diagnostics | the `oscam_telemetry` option is on |
+| 12 | the OSCam aggregates | the `oscam_telemetry` option is on |
+| 3 per OSCam source | status, ready cards, shared cards | the `oscam_telemetry` option is on, for each reader or server that receiver reports |
 
 Unique ids follow one scheme: `<node_id>_<key>`, where the
 key is the English translation key of the entity. Entity ids derive from the same key, so

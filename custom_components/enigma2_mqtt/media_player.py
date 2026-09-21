@@ -178,9 +178,11 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
     def source_list(self) -> list[str] | None:
         """Return the channels to offer, narrowed by the source list scope option.
 
-        The default scope is the bouquet the receiver is on, which is what keeps this
-        attribute — and with it every other attribute of this entity — inside the
-        recorder's 16 384-byte limit on a box with a thousand channels.
+        The default is every bouquet on offer, which is what this integration has
+        always done; scoping it to the bouquet the receiver is on turns a dropdown of a
+        thousand rows into a short one. It is a preference about the length of a list
+        and nothing more — Home Assistant declares this attribute unrecorded, so none
+        of it ever reaches the recorder however long it is.
         """
         return self.box.channel_names or None
 

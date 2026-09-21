@@ -859,7 +859,16 @@ class Enigma2Box:
         return matches
 
     def bouquet_by_sref(self, sref: str) -> dict[str, Any] | None:
-        """Return one selected bouquet by its service reference."""
+        """Return one selected bouquet by its service reference.
+
+        🔴 An exact string match, deliberately, and not the identity comparison the
+        service references elsewhere get. This is what validates a reference before
+        `cmd/bouquet` carries it, and the plugin activates a bouquet on an exact
+        allowlist match — so accepting a spelling here that the receiver will refuse
+        would only move the refusal somewhere less clear. Reading the *active* context
+        is the other direction and does compare by identity: there the receiver's own
+        spelling is the one that has to be recognised.
+        """
         for bouquet in self.bouquets:
             if bouquet.get("sref") == sref:
                 return bouquet
