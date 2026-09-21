@@ -18,6 +18,7 @@ product spans both.
 | `proposed` | written down, open for discussion, not yet binding |
 | `accepted` | binding; the code and the docs follow it |
 | `superseded by ADR-NNNN` | replaced; kept for the history, with a link forward |
+| `extended by ADR-NNNN` | still binding, and a later record adds scope it never mentioned |
 | `rejected` | considered and turned down, with the reason |
 
 An accepted ADR changes only by a new ADR that supersedes it.
@@ -44,5 +45,6 @@ What this costs, what it rules out, and what has to change because of it.
 
 | ADR | Title | Status |
 |---|---|---|
-| [0000](0000-prd.md) | Product requirements (PRD) | accepted |
+| [0000](0000-prd.md) | Product requirements (PRD) | accepted, amended by [ADR-0001](0001-m0-decisions.md) and extended by [ADR-0002](0002-scope-after-m0.md) |
 | [0001](0001-m0-decisions.md) | M0 sign-off — the three open questions | accepted |
+| [0002](0002-scope-after-m0.md) | Scope added and changed after M0 | accepted |
