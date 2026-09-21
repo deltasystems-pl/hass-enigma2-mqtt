@@ -322,6 +322,9 @@ async def test_a_thousand_channels_are_nowhere_near_the_recorders_limit(
             {"entity_id": entity_id, "old_state": None, "new_state": state},
         )
         shared = StateAttributes.shared_attrs_bytes_from_event(event, None)
+        # 🔴 A state over the limit comes back as `b"{}"`, so small is not by itself
+        # good news: the attributes have to still be in there.
+        assert b"friendly_name" in shared, entity_id
         assert len(shared) < MAX_STATE_ATTRS_BYTES / 4, entity_id
         # And the long list is not in there at all, which is why it is nowhere near.
         assert b"Kanal Tematyczny" not in shared
