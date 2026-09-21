@@ -84,6 +84,14 @@ have not been accepted on a receiver, and no tag has been cut.
   screen in Home Assistant can show.
 - **Polish and German** names for every entity, action and trigger. German is still a draft
   and would welcome a native speaker.
+- **A „Last error" sensor.** The receiver's last refusal, with its own words and the time Home
+  Assistant saw it, kept across a reload and a restart. The plugin clears its error topic on the
+  next command that succeeds, so by the time anybody asks why a button did nothing the evidence
+  is usually gone; this sensor is where it stays. There is no clear button — the next error
+  replaces it.
+- **A „Refresh EPG" button**, which rebuilds and republishes the programme grids. It exists only
+  on a receiver that publishes them: with the plugin's grid setting at zero the capability is
+  absent and so is the button.
 
 ### Fixed
 
@@ -104,6 +112,28 @@ Found by running this release against a real receiver rather than a test one.
   from every other one: a raw traceback, no explanation, and — worst of it — no offer to
   re-accept the fingerprint, which is the one thing that fixes it. It is now reported as a
   changed host key and starts the same re-pinning it does.
+- **A button that the receiver refused looked exactly like one that worked.** „Restart" and
+  „Deep standby" were pressed, the receiver refused both, and nothing was reported anywhere: the
+  buttons published their command and returned, only the actions waited for an answer, and the
+  refusal reached the diagnostics download and nothing else. Every button now waits for the
+  receiver and raises its own sentence. Where there is an effect to watch — a new screen grab, a
+  republished announcement — that is the proof. Where there is none, because the box is about to
+  restart or because an unchanged EPG grid is not republished, the press waits a moment for a
+  complaint and treats silence as success.
+- **„Deep standby" and „Restart" now also need the receiver's permission.** `deep_standby_allowed`
+  is set on the box's own setup screen and deliberately cannot be written over MQTT, so Home
+  Assistant had no way to know the two buttons it was offering would always be refused. They are
+  created only while the Home Assistant option is on **and** the receiver reports that permission,
+  and the option's text now names both gates and where the box-side one is. A receiver that never
+  reports it — an older plugin — behaves exactly as before, with the option deciding alone.
+- **The Wake-on-LAN address is validated, normalised and registered.** The option was stored with
+  nothing but its spaces trimmed and handed to `wake_on_lan` as typed, so a malformed one failed
+  with a complaint about a non-hexadecimal character at position 12 — from a component the user
+  never went near. All four spellings (`00:00:5e:00:53:01`, `00-00-5e-00-53-01`, `0000.5e00.5301`
+  and `00005e005301`) are now accepted and stored as one, anything else fails the form with a
+  sentence, an empty field means the address the receiver reports, and that address is registered
+  on the device so the rest of Home Assistant knows it too. A stored value that is not an address
+  is dropped once at startup and logged.
 - **A release could be published without the checks having run.** The release workflow built and
   uploaded the zip on a tag without hassfest, the HACS action, ruff, the tests or the bundle
   reproduction between the tag and the upload. A tag is pushed by a person at whatever commit
@@ -118,6 +148,13 @@ Found by running this release against a real receiver rather than a test one.
 - Command cleanup now retires internal waiters without spurious asyncio errors. Clearing an old
   plugin error no longer reports concurrent commands as complete before their own result is
   known.
+- **„Pilot" is hidden on the device page of a new installation.** Home Assistant gives every
+  remote entity a power toggle, which put three controls that all switch power on one device and
+  no way to tell which was the real one; „Zasilanie" is the labelled one. The remote is hidden,
+  not disabled: it still has a state and `remote.send_command` still works. **Existing
+  installations are not rewritten** — their registry already holds a visibility decision, and
+  quietly hiding an entity somebody may have put on a dashboard would be worse than the confusion
+  it fixes. Un-hide it in the entity's settings if you want it back.
 
 ### Documentation
 
@@ -138,8 +175,8 @@ Found by running this release against a real receiver rather than a test one.
   platform for bouquet and channel, a source list that fits back inside the recorder's attribute
   limit, and a button for the EPG grid. 0.3.0 follows the receiver: a second notify entity for the
   discreet toast, softcam and EPG-import controls gated on box-side permissions, and an EPG sensor
-  whose payload is declared unrecorded. **Nothing in the plan is implemented**, and the README's
-  roadmap says so.
+  whose payload is declared unrecorded. The 0.2.0 fixes above are landing against that plan; the
+  README's roadmap says which of them are done.
 
 ## [0.1.0] - 2026-09-16
 
