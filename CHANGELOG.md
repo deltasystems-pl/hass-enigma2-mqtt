@@ -95,6 +95,27 @@ have not been accepted on a receiver, and no tag has been cut.
 - **A „Refresh EPG" button**, which rebuilds and republishes the programme grids. It exists only
   on a receiver that publishes them: with the plugin's grid setting at zero the capability is
   absent and so is the button.
+- **„Bukiet" and „Kanał", two selects.** The receiver plugin publishes a channel select of its
+  own only in MQTT discovery mode, and this integration takes a box out of that mode — so a
+  receiver set up the way this integration wants it listed neither bouquets nor channels
+  anywhere. „Bukiet" lists what the receiver published and switches its real channel-up/down
+  context; „Kanał" lists the channels of whichever bouquet that is, and reshapes the moment the
+  context moves. Both select by service reference rather than by name, both wait for the
+  receiver and raise its own words when it refuses, and both are created only while the receiver
+  reports **both** the `channels` and the `bouquet_context` capabilities. A name repeated inside
+  one bouquet is numbered rather than dropped, because a dropped one would be a channel Home
+  Assistant could not reach; the number follows the service reference, so reordering the bouquet
+  on the receiver does not silently swap which channel „TVN HD (2)" tunes. It can still shift
+  when a duplicate is added or removed, so an automation belongs on the `zap` action with a
+  reference rather than on a label.
+- **An option for how long the media player's source list is.** *Channels in the media player's
+  source list* offers every bouquet you have chosen — which is what it has always done and stays
+  the default — or just the bouquet the receiver is on, which on a receiver with a thousand
+  channels is the difference between a dropdown of a thousand rows and one of ninety. A receiver
+  that has published no channel-list context, or one whose context names a bouquet the bouquets
+  option excludes or that holds no playable channel, keeps the long list: there is nothing to
+  shorten it to, and an empty source list would leave no way to change channel at all. The last
+  two of those say so in the log, once.
 
 ### Fixed
 
@@ -144,6 +165,13 @@ Found by running this release against a real receiver rather than a test one.
   reproduction between the tag and the upload. A tag is pushed by a person at whatever commit
   they choose, so "main was green" was never evidence about the tagged tree. The release workflow
   now runs the whole validation suite first and publishes nothing if any of it fails.
+- **A zap is confirmed by which service it is, not by how the reference is spelled.** One
+  channel has more than one spelling — a reference can stop at the tenth colon or carry it, an
+  IPTV entry adds its stream URL and its name, and the case of the hexadecimal fields is not
+  agreed on anywhere. The `zap` and `select_bouquet` actions compared the receiver's answer with
+  the string they had sent, so on a receiver that answers in its own spelling a command that had
+  plainly worked was reported as a timeout ten seconds later. They now compare the fields that
+  identify a service, by the same rule and the same field count as the receiver plugin.
 
 ### Changed
 
@@ -162,6 +190,13 @@ Found by running this release against a real receiver rather than a test one.
   installations are not rewritten** — their registry already holds a visibility decision, and
   quietly hiding an entity somebody may have put on a dashboard would be worse than the confusion
   it fixes. Un-hide it in the entity's settings if you want it back.
+- **`select_source` is scoped to the list it offers.** Asking the media player for a channel that
+  the receiver has but the source list is not currently showing now says so, and names the two
+  ways on — switch „Bukiet", or use the `zap` action, which takes a service reference and ignores
+  the scope. Where the same name is in several bouquets, the copy in the bouquet on the list is
+  the one tuned. `play_media` with `channel_name` is unchanged and is not scoped. What the media
+  player reports as its **source** is still whatever is playing, even when the scope means that
+  is not on the list: what is on is a fact and the length of a list is a preference.
 
 ### Documentation
 
@@ -179,8 +214,8 @@ Found by running this release against a real receiver rather than a test one.
   the receiver and raise when it refuses, a „Last error" sensor that remembers a refusal the plugin
   has already cleared, power-off buttons gated on what the receiver says it permits, a Wake-on-LAN
   address that is validated rather than passed through, a remote hidden by default, a `select`
-  platform for bouquet and channel, a source list that fits back inside the recorder's attribute
-  limit, and a button for the EPG grid. 0.3.0 follows the receiver: a second notify entity for the
+  platform for bouquet and channel, a source list that can follow the active bouquet, and a button
+  for the EPG grid. 0.3.0 follows the receiver: a second notify entity for the
   discreet toast, softcam and EPG-import controls gated on box-side permissions, and an EPG sensor
   whose payload is declared unrecorded. The 0.2.0 fixes above are landing against that plan; the
   README's roadmap says which of them are done.

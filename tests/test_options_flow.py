@@ -28,8 +28,11 @@ from custom_components.enigma2_mqtt.const import (
     CONF_SCREENSHOT,
     CONF_SCREENSHOT_DELAY,
     CONF_SCREENSHOT_INTERVAL,
+    CONF_SOURCE_LIST_SCOPE,
     CONF_WOL_MAC,
+    DEFAULT_SOURCE_LIST_SCOPE,
     DOMAIN,
+    SOURCE_LIST_SCOPE_ACTIVE_BOUQUET,
 )
 
 from .conftest import (
@@ -123,6 +126,9 @@ async def test_saving_the_options_reloads_the_entry(
         # Nobody asked for it on this form, and it is saved off: the release check is
         # the one thing here that would talk to anything but the household's broker.
         CONF_CHECK_GITHUB_RELEASES: False,
+        # Nor for this one, whose default is the long list the media player has always
+        # offered — narrowing it under an existing installation would be a surprise.
+        CONF_SOURCE_LIST_SCOPE: DEFAULT_SOURCE_LIST_SCOPE,
         **PLUGIN_SETTINGS,
     }
     assert hass.states.get("button.dekoder_salon_reboot") is not None
@@ -218,6 +224,37 @@ async def test_a_bad_address_stops_the_receiver_being_reconfigured(
         for call in mqtt_mock.async_publish.call_args_list
         if call.args[0] == command_topic("config")
     ]
+
+
+async def test_the_source_list_scope_is_offered_and_saved(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Both scopes on the form, every bouquet the default, and the choice kept."""
+    await async_setup_box(hass, config_entry)
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    selector = result["data_schema"].schema[CONF_SOURCE_LIST_SCOPE]
+    assert selector.config["options"] == ["active_bouquet", "all"]
+    assert result["data_schema"]({})[CONF_SOURCE_LIST_SCOPE] == DEFAULT_SOURCE_LIST_SCOPE
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_DANGEROUS_BUTTONS: False,
+            CONF_WOL_MAC: "",
+            CONF_BOUQUETS: [],
+            CONF_SOURCE_LIST_SCOPE: SOURCE_LIST_SCOPE_ACTIVE_BOUQUET,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert (
+        config_entry.options[CONF_SOURCE_LIST_SCOPE] == SOURCE_LIST_SCOPE_ACTIVE_BOUQUET
+    )
 
 
 async def test_modern_plugin_offers_delay_and_accepts_ack_with_extra_settings(

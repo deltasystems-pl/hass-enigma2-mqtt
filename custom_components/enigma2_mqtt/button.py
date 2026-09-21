@@ -159,11 +159,14 @@ async def async_setup_entry(
         return bool(entry.options.get(CONF_DANGEROUS_BUTTONS))
 
     def has_spoken() -> bool:
-        """Return whether the box has described itself yet.
+        """Return whether the box has stated its capability list yet.
 
-        Either topic will do for a capability: the announcement carries the same list.
+        Either topic will do: the announcement carries the same list. What it asks is
+        whether the list was *stated*, not whether a payload arrived — an `info` with no
+        `capabilities` in it is a box that has said nothing on the subject, and reading
+        that as "it has none" would delete a button the next message brings back.
         """
-        return bool(box.state.info or box.state.announcement)
+        return box.capabilities_declared
 
     def has_answered() -> bool:
         """Return whether the box has published the topic its permissions live on.

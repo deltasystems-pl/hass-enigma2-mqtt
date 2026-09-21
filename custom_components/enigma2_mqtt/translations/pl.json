@@ -128,7 +128,8 @@
           "oscam_telemetry": "Publikuj telemetrię stanu OSCam",
           "check_github_releases": "Sprawdzaj opublikowane wydania wtyczki",
           "configure_ssh": "Skonfiguruj dane SSH do aktualizacji wtyczki",
-          "keep_ssh_credentials": "Zachowaj dane SSH do aktualizacji"
+          "keep_ssh_credentials": "Zachowaj dane SSH do aktualizacji",
+          "source_list_scope": "Kanały na liście źródeł odtwarzacza"
         },
         "data_description": {
           "dangerous_buttons": "Głębokie uśpienie odcina dekoder od sieci, dopóki nie obudzi go pakiet budzący, a restart przerywa to, co dekoder właśnie robi. Przyciski pojawiają się dopiero, gdy spełnione są dwa warunki: ta opcja jest włączona, a sam dekoder zgadza się na głębokie uśpienie — zgodę ustawia się na dekoderze w Menu → Wtyczki → MQTT Bridge i nie da się jej zmienić stąd. Starsza wtyczka, która tej zgody nie zgłasza, zostawia decyzję tej opcji. Przyciski są domyślnie ukryte, żeby na wspólnym panelu nie leżały o jedno nieuważne dotknięcie od głośności, a wtyczka i tak odmawia obu podczas nagrywania, niezależnie od tego ustawienia.",
@@ -140,7 +141,8 @@
           "screenshot_delay": "Czas oczekiwania przed automatycznym zrzutem po zmianie kanału, aby nowy obraz zdążył się pojawić.",
           "cam_telemetry": "Udostępnia szyfrowanie bieżącej usługi i stan ECM. Dane serwera, konta ani karty nie są publikowane.",
           "oscam_telemetry": "Udostępnia stan procesu, API, czytników i serwerów OSCam bez danych prywatnych. Nazwy czytników, adresy, konta i identyfikatory kart nie są publikowane.",
-          "check_github_releases": "Domyślnie wyłączone, a wyłączone znaczy, że ta integracja nie łączy się z niczym poza Twoim brokerem. Włączone — pyta repozytorium wtyczki o opublikowane wydanie nie częściej niż raz na 24 godziny i pokazuje je na encji wersji. Odpowiedź i godzina zapytania są zapisywane, więc przeładowanie dekodera albo restart Home Assistanta pokazuje to, co już wiadomo, zamiast pytać ponownie. Nic nie pobiera: instalacja nadal korzysta wyłącznie z pakietu dołączonego tutaj."
+          "check_github_releases": "Domyślnie wyłączone, a wyłączone znaczy, że ta integracja nie łączy się z niczym poza Twoim brokerem. Włączone — pyta repozytorium wtyczki o opublikowane wydanie nie częściej niż raz na 24 godziny i pokazuje je na encji wersji. Odpowiedź i godzina zapytania są zapisywane, więc przeładowanie dekodera albo restart Home Assistanta pokazuje to, co już wiadomo, zamiast pytać ponownie. Nic nie pobiera: instalacja nadal korzysta wyłącznie z pakietu dołączonego tutaj.",
+          "source_list_scope": "Wszystkie oferowane bukiety to jedna lista ze wszystkich — tak ta integracja działała dotąd — a przy tysiącu kanałów jest to lista rozwijana o tysiącu pozycji. Aktywny bukiet to krótka lista, na której stoi sam dekoder, ta sama, po której chodzą kanał w górę i w dół, i ta sama, którą pokazuje wybór „Kanał”. Dekoder, który nie opublikował aktywnego bukietu, zostaje przy długiej liście, bo nie ma czym jej skrócić. Tak czy inaczej bukiet zmienia się wyborem „Bukiet”, a akcja zap przyjmuje referencję usługi i nie podlega temu ustawieniu."
         }
       },
       "ssh_host": {"title": "Połącz z dekoderem", "data": {"ssh_host": "Adres dekodera", "ssh_port": "Port SSH"}},
@@ -295,6 +297,14 @@
     "update": {
       "plugin": {
         "name": "Wtyczka MQTT Bridge"
+      }
+    },
+    "select": {
+      "bouquet": {
+        "name": "Bukiet"
+      },
+      "channel": {
+        "name": "Kanał"
       }
     }
   },
@@ -466,6 +476,12 @@
         "integration": "Ta integracja",
         "off": "Żadne z nich"
       }
+    },
+    "source_list_scope": {
+      "options": {
+        "active_bouquet": "Aktywny bukiet",
+        "all": "Wszystkie oferowane bukiety"
+      }
     }
   },
   "exceptions": {
@@ -512,6 +528,8 @@
     "update_downgrade": {"message": "Odmowa zastąpienia nowszej wtyczki starszą wersją z pakietu."},
     "update_version_unavailable": {"message": "Żądana wersja nie jest dostępna w zweryfikowanym pakiecie integracji."},
     "update_no_credentials": {"message": "Dla tego dekodera nie zapisano danych SSH. Skonfiguruj go ponownie i zaznacz „Zachowaj dane SSH do aktualizacji”, a potem spróbuj jeszcze raz."},
-    "update_failed": {"message": "Aktualizacja wtyczki nie powiodła się: {reason}"}
+    "update_failed": {"message": "Aktualizacja wtyczki nie powiodła się: {reason}"},
+    "channel_not_in_active_bouquet": {"message": "{channel} nie należy do bukietu, na którym jest dekoder, więc lista źródeł go nie oferuje. Najpierw przełącz wybór „Bukiet” na właściwy bukiet albo użyj akcji enigma2_mqtt.zap, która przyjmuje referencję usługi i nie podlega temu ograniczeniu."},
+    "option_no_longer_offered": {"message": "{option} nie ma już na tej liście. Dekoder opublikował listę kanałów na nowo w trakcie wybierania; otwórz listę ponownie i wskaż coś, co jest na niej teraz."}
     }
   }

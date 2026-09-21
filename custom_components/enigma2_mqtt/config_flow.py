@@ -60,6 +60,7 @@ from .const import (
     CONF_SCREENSHOT,
     CONF_SCREENSHOT_DELAY,
     CONF_SCREENSHOT_INTERVAL,
+    CONF_SOURCE_LIST_SCOPE,
     CONF_SSH_HOST,
     CONF_SSH_HOST_KEY,
     CONF_SSH_PASSWORD,
@@ -74,6 +75,7 @@ from .const import (
     DEFAULT_SCREENSHOT,
     DEFAULT_SCREENSHOT_DELAY,
     DEFAULT_SCREENSHOT_INTERVAL,
+    DEFAULT_SOURCE_LIST_SCOPE,
     DISCOVERY_PREFIX,
     DOMAIN,
     HA_MODE_INTEGRATION,
@@ -83,6 +85,7 @@ from .const import (
     MIN_SCREENSHOT_INTERVAL,
     PROBE_TIMEOUT,
     SCREENSHOT_MODES,
+    SOURCE_LIST_SCOPES,
 )
 from .installer import (
     InstallerError,
@@ -731,6 +734,7 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                 CONF_WOL_MAC: wol_mac or "",
                 CONF_BOUQUETS: user_input.get(CONF_BOUQUETS) or [],
                 CONF_CHECK_GITHUB_RELEASES: user_input[CONF_CHECK_GITHUB_RELEASES],
+                CONF_SOURCE_LIST_SCOPE: user_input[CONF_SOURCE_LIST_SCOPE],
             }
             if requested is not None:
                 local_data.update(requested)
@@ -804,6 +808,16 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                     CONF_CHECK_GITHUB_RELEASES,
                     default=DEFAULT_CHECK_GITHUB_RELEASES,
                 ): bool,
+                vol.Required(
+                    CONF_SOURCE_LIST_SCOPE, default=DEFAULT_SOURCE_LIST_SCOPE
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=list(SOURCE_LIST_SCOPES),
+                        translation_key=CONF_SOURCE_LIST_SCOPE,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                        sort=False,
+                    )
+                ),
             }
         )
         if isinstance(settings, dict):

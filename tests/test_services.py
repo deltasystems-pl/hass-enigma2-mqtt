@@ -77,6 +77,57 @@ async def test_zapping_by_reference_waits_for_the_service_topic(
     assert_published(mqtt_mock, command_topic("zap"), other)
 
 
+async def test_the_zap_action_accepts_the_receivers_own_spelling(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The answer on `service` is the receiver's spelling, not the one that was sent.
+
+    A reference can stop at the tenth colon or carry one, and its hexadecimal fields
+    are not written in an agreed case, so comparing the two as strings reports a zap
+    that plainly happened as a timeout — ten seconds after it happened.
+    """
+    await async_setup_box(hass, config_entry)
+    other = "1:0:19:1234:3F3:1:C00000:0:0:0:"
+    await async_arm_box_reply(
+        hass,
+        "zap",
+        SERVICE_TOPIC,
+        json.dumps({**SERVICE, "sref": other.lower().rstrip(":")}),
+    )
+
+    await _call(hass, "zap", sref=other)
+
+    assert_published(mqtt_mock, command_topic("zap"), other)
+
+
+async def test_the_select_bouquet_action_accepts_the_receivers_own_spelling(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Same for the context readback, for the same reason."""
+    box_on_the_broker[INFO_TOPIC] = json.dumps(
+        {**INFO, "capabilities": [*INFO["capabilities"], "bouquet_context"]}
+    )
+    await async_setup_box(hass, config_entry)
+    await async_arm_box_reply(
+        hass,
+        "bouquet",
+        BOUQUET_TOPIC,
+        json.dumps({**BOUQUET, "sref": BOUQUET["sref"].lower()}),
+    )
+
+    await _call(hass, "select_bouquet", sref=BOUQUET["sref"])
+
+    assert_published(
+        mqtt_mock, command_topic("bouquet"), json.dumps({"sref": BOUQUET["sref"]})
+    )
+
+
 async def test_select_bouquet_action_waits_for_fresh_context(
     hass: HomeAssistant,
     mqtt_mock,

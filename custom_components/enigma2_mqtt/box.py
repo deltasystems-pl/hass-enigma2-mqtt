@@ -50,9 +50,11 @@ from .const import (
     CONF_NAME,
     CONF_NODE_ID,
     CONF_RECEIVER_HOST,
+    CONF_SOURCE_LIST_SCOPE,
     CONF_WOL_MAC,
     DEFAULT_BASE_TOPIC,
     DEFAULT_MANUFACTURER,
+    DEFAULT_SOURCE_LIST_SCOPE,
     DISCOVERY_PREFIX,
     DOMAIN,
     ERROR_GRACE,
@@ -64,6 +66,8 @@ from .const import (
     PRESS_LONG,
     PRESS_SHORT,
     PROBE_TIMEOUT,
+    SERVICE_FIELDS,
+    SOURCE_LIST_SCOPE_ACTIVE_BOUQUET,
     SUBSCRIBE_TIMEOUT,
     TOPIC_AVAILABILITY,
     TOPIC_BOUQUET,
@@ -307,6 +311,37 @@ def normalise_key(command: str) -> str:
     if not key.startswith(KEY_PREFIX):
         key = f"{KEY_PREFIX}{key}"
     return key
+
+
+def service_identity(sref: Any) -> str:
+    """Return the fields that identify a service, padded and upper-cased.
+
+    One channel has more than one spelling. A reference can end at the tenth colon or
+    without it, an IPTV entry carries its stream URL and its name after the fields that
+    identify it, and the case of the hexadecimal fields is not agreed on anywhere. A
+    raw `==` between two of those spellings says two different channels, which is how a
+    select ends up permanently showing nothing and a zap the receiver carried out is
+    reported as a timeout.
+
+    🔴 This mirrors `identity()` in the receiver plugin's `enigma2.py`, field count
+    included. The two halves have to mean the same thing by "the same service"; a
+    better rule on one side only would be worse than the rule they share.
+    """
+    parts = [part.strip().upper() for part in str(sref or "").strip().split(":")]
+    if not any(parts):
+        return ""
+    parts = parts[:SERVICE_FIELDS]
+    parts += [""] * (SERVICE_FIELDS - len(parts))
+    return ":".join(parts)
+
+
+def same_service(one: Any, other: Any) -> bool:
+    """Return whether two service references name the same service.
+
+    Two empty references are not the same service; they are two absences.
+    """
+    identity = service_identity(one)
+    return bool(identity) and identity == service_identity(other)
 
 
 def picon_url(ip_address: str | None, sref: str | None) -> str | None:
@@ -582,6 +617,9 @@ class Enigma2Box:
         self._pending_cam: object = _NO_PENDING_CAM
         self._pending_oscam: object = _NO_PENDING_OSCAM
         self._subscribed = asyncio.Event()
+        # The bouquet the source list scope last complained about, so that it is said
+        # once rather than on every republished channel list.
+        self._scope_fallback_warned: str | None = None
 
     # ------------------------------------------------------------------ properties
 
@@ -601,6 +639,18 @@ class Enigma2Box:
         source = self.state.info or self.state.announcement
         capabilities = source.get("capabilities")
         return list(capabilities) if isinstance(capabilities, list) else []
+
+    @property
+    def capabilities_declared(self) -> bool:
+        """Return whether the box has stated its capability list at all.
+
+        An empty `capabilities` is not the same answer as never having said: the first
+        is a box that has hooked nothing, the second is a box that has not spoken yet.
+        Anything that would take entities away on "no" has to be able to tell them
+        apart, or a reload before the first payload deletes what the household built.
+        """
+        source = self.state.info or self.state.announcement
+        return isinstance(source.get("capabilities"), list)
 
     @property
     def ip_address(self) -> str | None:
@@ -696,15 +746,93 @@ class Enigma2Box:
         ]
 
     @property
+    def active_bouquet(self) -> dict[str, Any] | None:
+        """Return the bouquet whose channel list the receiver is currently walking.
+
+        The `bouquet` topic carries the receiver's own channel-up/down context, and
+        both of its fields being null is ordinary operation: the radio list, the movie
+        list, or a bouquet the plugin was not told to publish. So is a context that
+        names a bouquet the options here have filtered out. Either way there is no
+        bouquet of ours to point at, which is what None says.
+        """
+        context = self.state.bouquet or {}
+        sref = context.get("sref")
+        if isinstance(sref, str) and sref:
+            for bouquet in self.bouquets:
+                if same_service(bouquet.get("sref"), sref):
+                    return bouquet
+            return None
+        name = context.get("name")
+        if isinstance(name, str) and name:
+            for bouquet in self.bouquets:
+                if bouquet.get("name") == name:
+                    return bouquet
+        return None
+
+    @property
+    def scoped_bouquets(self) -> list[dict[str, Any]]:
+        """Return the bouquets the media player's source list draws on.
+
+        This is a preference about how long a dropdown is. The default is every
+        bouquet on offer, which is what this integration has always done; scoping it to
+        the bouquet the receiver is on makes a thousand-row list into a short one, and
+        it is the list the receiver's own channel ± walks.
+
+        Three cases cannot be narrowed at all, and every one of them falls back to the
+        full list rather than to nothing: a box that has published no context (an older
+        plugin with no `bouquet_context`, or one that has not answered yet), a context
+        naming a bouquet the bouquets option has filtered out, and a context naming a
+        bouquet that holds no playable channel. An empty source list would leave the
+        media player with no way to change channel at all, which is worse than a list
+        that is longer than asked for.
+        """
+        scope = self.entry.options.get(CONF_SOURCE_LIST_SCOPE, DEFAULT_SOURCE_LIST_SCOPE)
+        if scope != SOURCE_LIST_SCOPE_ACTIVE_BOUQUET:
+            return self.bouquets
+        if (active := self.active_bouquet) is not None and active["channels"]:
+            self._scope_fallback_warned = None
+            return [active]
+        self._warn_scope_fallback()
+        return self.bouquets
+
+    @callback
+    def _warn_scope_fallback(self) -> None:
+        """Say once why the source list is not the bouquet the option asked for.
+
+        Once per bouquet, not once per payload: `channels` and `bouquet` are republished
+        whenever anything about them moves, and a line per message would bury the log of
+        a box that is simply configured this way.
+        """
+        context = self.state.bouquet or {}
+        name = context.get("name")
+        if not isinstance(name, str) or not name:
+            # No context at all is the documented older-plugin case and is not news.
+            self._scope_fallback_warned = None
+            return
+        if self._scope_fallback_warned == name:
+            return
+        self._scope_fallback_warned = name
+        _LOGGER.warning(
+            "Receiver %s is on bouquet %s, which this receiver's options do not offer "
+            "or which holds no playable channel, so the media player is listing every "
+            "bouquet instead. Add it to the receiver's bouquets option to narrow the "
+            "list again",
+            self.node_id,
+            name,
+        )
+
+    @property
     def channel_names(self) -> list[str]:
-        """Return the channel names of the selected bouquets, in bouquet order.
+        """Return the channel names the source list offers, in bouquet order.
 
         Duplicates are dropped rather than numbered: the same channel in two bouquets
-        is one channel, and a source list with "TVP 1 HD" twice helps nobody.
+        is one channel, and a source list with "TVP 1 HD" twice helps nobody. The
+        „Kanał" select numbers them instead, because it is scoped to one bouquet and a
+        repeat inside one bouquet is a channel that would otherwise be unreachable.
         """
         names: list[str] = []
         seen: set[str] = set()
-        for bouquet in self.bouquets:
+        for bouquet in self.scoped_bouquets:
             for channel in bouquet["channels"]:
                 if not isinstance(channel, dict):
                     continue
@@ -714,17 +842,33 @@ class Enigma2Box:
                     names.append(name)
         return names
 
-    def channels_named(self, name: str) -> list[dict[str, Any]]:
-        """Return every channel of the selected bouquets with this exact name."""
+    def channels_named(
+        self, name: str, bouquets: Iterable[dict[str, Any]] | None = None
+    ) -> list[dict[str, Any]]:
+        """Return every channel with this exact name, in the bouquets given.
+
+        The default is every bouquet the options offer, which is the set the plugin
+        would have to resolve a zap by name against. A caller that knows which copy is
+        meant — the source list, scoped to the active bouquet — passes that instead.
+        """
         matches: list[dict[str, Any]] = []
-        for bouquet in self.bouquets:
-            for channel in bouquet["channels"]:
+        for bouquet in self.bouquets if bouquets is None else bouquets:
+            for channel in bouquet.get("channels") or []:
                 if isinstance(channel, dict) and channel.get("name") == name:
                     matches.append(channel)
         return matches
 
     def bouquet_by_sref(self, sref: str) -> dict[str, Any] | None:
-        """Return one selected bouquet by its service reference."""
+        """Return one selected bouquet by its service reference.
+
+        🔴 An exact string match, deliberately, and not the identity comparison the
+        service references elsewhere get. This is what validates a reference before
+        `cmd/bouquet` carries it, and the plugin activates a bouquet on an exact
+        allowlist match — so accepting a spelling here that the receiver will refuse
+        would only move the refusal somewhere less clear. Reading the *active* context
+        is the other direction and does compare by identity: there the receiver's own
+        spelling is the one that has to be recognised.
+        """
         for bouquet in self.bouquets:
             if bouquet.get("sref") == sref:
                 return bouquet
