@@ -154,6 +154,7 @@
           "check_github_releases": "Check for published plugin releases"
           ,"configure_ssh": "Configure SSH credentials for plugin updates"
           ,"keep_ssh_credentials": "Keep SSH credentials for updates"
+          ,"source_list_scope": "Channels in the media player's source list"
         },
         "data_description": {
           "dangerous_buttons": "Deep standby takes the receiver off the network until a magic packet wakes it, and reboot interrupts whatever it is doing. Both are hidden by default so that neither is one mis-tap away on a shared dashboard. The plugin refuses both while a recording is running, whatever is set here.",
@@ -165,7 +166,8 @@
           "screenshot_delay": "Wait before an automatic screenshot after a channel change, so the new picture has time to appear.",
           "cam_telemetry": "Expose the current service's encryption and ECM status. No server, account or card details are published.",
           "oscam_telemetry": "Expose privacy-neutral OSCam process, API, reader and server health. Reader labels, addresses, accounts and card identifiers are never published.",
-          "check_github_releases": "Off by default, and off means this integration talks to nothing but your broker. On, it asks the plugin's repository which release is published, at most once every 24 hours, and says so on the version entity. The answer and the time it was asked are saved, so reloading the receiver or restarting Home Assistant shows what is already known rather than asking again. It never downloads anything: installing still uses only the bundle shipped here."
+          "check_github_releases": "Off by default, and off means this integration talks to nothing but your broker. On, it asks the plugin's repository which release is published, at most once every 24 hours, and says so on the version entity. The answer and the time it was asked are saved, so reloading the receiver or restarting Home Assistant shows what is already known rather than asking again. It never downloads anything: installing still uses only the bundle shipped here.",
+          "source_list_scope": "The active bouquet is the list the receiver is on, and it is what the „Channel” select offers too. Every bouquet gives one long list instead — on a receiver with a thousand channels that list is large enough to push the media player past the recorder's limit, and Home Assistant then keeps no history for the entity at all. Either way the „Bouquet” select switches bouquets, and the zap action takes a service reference and ignores this setting."
         }
       }
       ,"ssh_host": {"title": "Connect to the receiver", "data": {"ssh_host": "Receiver host", "ssh_port": "SSH port"}}
@@ -315,6 +317,14 @@
     "update": {
       "plugin": {
         "name": "Plugin"
+      }
+    },
+    "select": {
+      "bouquet": {
+        "name": "Bouquet"
+      },
+      "channel": {
+        "name": "Channel"
       }
     }
   },
@@ -486,6 +496,12 @@
         "integration": "This integration",
         "off": "Neither"
       }
+    },
+    "source_list_scope": {
+      "options": {
+        "active_bouquet": "The active bouquet",
+        "all": "Every bouquet on offer"
+      }
     }
   },
   "exceptions": {
@@ -532,6 +548,7 @@
     "update_downgrade": {"message": "Refusing to replace a newer plugin with an older bundled version."},
     "update_version_unavailable": {"message": "The requested version is not available from this integration’s verified bundle."},
     "update_no_credentials": {"message": "No SSH credentials are stored for this receiver. Reconfigure it and tick “Keep SSH credentials for updates”, then try again."},
-    "update_failed": {"message": "Plugin update failed: {reason}"}
+    "update_failed": {"message": "Plugin update failed: {reason}"},
+    "channel_not_in_active_bouquet": {"message": "{channel} is not in the bouquet the receiver is on, so the source list does not offer it. Switch the „Bouquet” select to the bouquet it belongs to first, or use the enigma2_mqtt.zap action, which takes a service reference and is not scoped."}
     }
   }

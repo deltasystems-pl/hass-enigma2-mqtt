@@ -30,7 +30,7 @@ One receiver becomes **one device** with these entities (display names are Polis
 
 | Platform | Name | What it shows or does |
 |---|---|---|
-| `media_player` | *Dekoder salon* (the device name) | off or playing, the channel list of the bouquets you choose, `select_source`, `play_media` by service reference, channel name or active bouquet, `browse_media` through playable bouquets, volume and mute, channel ±, the screen grab as artwork |
+| `media_player` | *Dekoder salon* (the device name) | off or playing, the channel list of the bouquet the receiver is on (or of every bouquet you choose — an option), `select_source`, `play_media` by service reference, channel name or active bouquet, `browse_media` through playable bouquets, volume and mute, channel ±, the screen grab as artwork |
 | `remote` | *Pilot* | `send_command` with `KEY_*` names; `hold_secs` makes it a long press |
 | `notify` | *Ekran OSD* | a message on the television screen |
 | `event` | *Pilot – klawisz* | every remote key as an event, with `press` = short or long |
@@ -41,6 +41,7 @@ One receiver becomes **one device** with these entities (display names are Polis
 | `number` | *Głośność* | volume 0–100 |
 | `button` | *Głębokie uśpienie*, *Restart GUI*, *Restart*, *Obudź (WoL)*, *Zrzut ekranu*, *Odśwież discovery* | one-shot box actions; deep standby and reboot stay hidden until you enable them |
 | `update` | *Wtyczka MQTT Bridge* | the installed plugin version and, when SSH credentials were retained, a guarded reinstall/update from the verified local bundle |
+| `select` | *Bukiet*, *Kanał* | the bouquet the receiver's channel ± walks, and the channels inside it; only on a plugin that can switch a bouquet |
 | device triggers | red / green / yellow / blue × short / long | remote keys as automation triggers |
 
 OSCam health is optional and off by default. When the receiver plugin advertises support, the
@@ -205,8 +206,8 @@ with the plugin has not happened yet.
 
 Two days of household use produced a list of problems and a list of wants, and they are split into
 two releases. The reasoning is in
-[ADR-0003](docs/adr/0003-control-feedback-and-household-features.md). **None of it is
-implemented.**
+[ADR-0003](docs/adr/0003-control-feedback-and-household-features.md). **What is struck through
+below is built and unreleased; the rest is not implemented.**
 
 **0.2.0 — fixes.** Cut after the guided installer has been run end to end on a receiver.
 
@@ -222,10 +223,10 @@ implemented.**
 - **„Remote" is hidden by default** on new installations — Home Assistant gives every remote entity
   a power toggle, which made three power controls on one device. Existing installations are not
   rewritten.
-- **A `select` platform: „Bouquet" and „Channel"**, which is what integration mode was missing
+- ~~**A `select` platform: „Bouquet" and „Channel"**, which is what integration mode was missing
   entirely — and a `source_list_scope` option defaulting to the active bouquet, because a source
   list of many hundred channels exceeds the recorder's 16 KB attribute limit and loses the media
-  player its history.
+  player its history.~~ **Built** — see the [changelog](CHANGELOG.md).
 - **A button that rebuilds the EPG grid.**
 
 **0.3.0 — features**, following the receiver plugin: a **second notify entity** for the discreet

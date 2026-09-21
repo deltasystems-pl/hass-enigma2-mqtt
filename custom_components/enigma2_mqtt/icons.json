@@ -182,6 +182,14 @@
       "plugin": {
         "default": "mdi:puzzle"
       }
+    },
+    "select": {
+      "bouquet": {
+        "default": "mdi:format-list-bulleted"
+      },
+      "channel": {
+        "default": "mdi:television-classic"
+      }
     }
   },
   "services": {

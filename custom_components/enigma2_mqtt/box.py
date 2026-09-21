@@ -49,9 +49,11 @@ from .const import (
     CONF_NAME,
     CONF_NODE_ID,
     CONF_RECEIVER_HOST,
+    CONF_SOURCE_LIST_SCOPE,
     CONF_WOL_MAC,
     DEFAULT_BASE_TOPIC,
     DEFAULT_MANUFACTURER,
+    DEFAULT_SOURCE_LIST_SCOPE,
     DISCOVERY_PREFIX,
     DOMAIN,
     ERROR_GRACE,
@@ -63,6 +65,7 @@ from .const import (
     PRESS_LONG,
     PRESS_SHORT,
     PROBE_TIMEOUT,
+    SOURCE_LIST_SCOPE_ACTIVE_BOUQUET,
     SUBSCRIBE_TIMEOUT,
     TOPIC_AVAILABILITY,
     TOPIC_BOUQUET,
@@ -568,6 +571,18 @@ class Enigma2Box:
         return list(capabilities) if isinstance(capabilities, list) else []
 
     @property
+    def capabilities_declared(self) -> bool:
+        """Return whether the box has stated its capability list at all.
+
+        An empty `capabilities` is not the same answer as never having said: the first
+        is a box that has hooked nothing, the second is a box that has not spoken yet.
+        Anything that would take entities away on "no" has to be able to tell them
+        apart, or a reload before the first payload deletes what the household built.
+        """
+        source = self.state.info or self.state.announcement
+        return isinstance(source.get("capabilities"), list)
+
+    @property
     def ip_address(self) -> str | None:
         """Return the box's LAN address, as it last reported it."""
         source = {**self.state.announcement, **self.state.info}
@@ -634,15 +649,58 @@ class Enigma2Box:
         ]
 
     @property
+    def active_bouquet(self) -> dict[str, Any] | None:
+        """Return the bouquet whose channel list the receiver is currently walking.
+
+        The `bouquet` topic carries the receiver's own channel-up/down context, and
+        both of its fields being null is ordinary operation: the radio list, the movie
+        list, or a bouquet the plugin was not told to publish. So is a context that
+        names a bouquet the options here have filtered out. Either way there is no
+        bouquet of ours to point at, which is what None says.
+        """
+        context = self.state.bouquet or {}
+        sref = context.get("sref")
+        if isinstance(sref, str) and sref:
+            return self.bouquet_by_sref(sref)
+        name = context.get("name")
+        if isinstance(name, str) and name:
+            for bouquet in self.bouquets:
+                if bouquet.get("name") == name:
+                    return bouquet
+        return None
+
+    @property
+    def scoped_bouquets(self) -> list[dict[str, Any]]:
+        """Return the bouquets the media player's source list draws on.
+
+        A receiver with a thousand channels puts 16.6 kB of names into one attribute,
+        which takes the whole entity past the recorder's 16 384-byte limit and gets its
+        attributes dropped from history altogether. Scoping the list to the bouquet the
+        receiver is actually on brings it back under, and it is the default.
+
+        A box that has published no context to scope to — an older plugin with no
+        `bouquet_context`, or one that has not answered yet — cannot be narrowed, so it
+        falls back to every offered bouquet. An empty list would be a regression for a
+        box whose only fault is being old.
+        """
+        scope = self.entry.options.get(CONF_SOURCE_LIST_SCOPE, DEFAULT_SOURCE_LIST_SCOPE)
+        if scope != SOURCE_LIST_SCOPE_ACTIVE_BOUQUET:
+            return self.bouquets
+        active = self.active_bouquet
+        return [active] if active is not None else self.bouquets
+
+    @property
     def channel_names(self) -> list[str]:
-        """Return the channel names of the selected bouquets, in bouquet order.
+        """Return the channel names the source list offers, in bouquet order.
 
         Duplicates are dropped rather than numbered: the same channel in two bouquets
-        is one channel, and a source list with "TVP 1 HD" twice helps nobody.
+        is one channel, and a source list with "TVP 1 HD" twice helps nobody. The
+        „Kanał" select numbers them instead, because it is scoped to one bouquet and a
+        repeat inside one bouquet is a channel that would otherwise be unreachable.
         """
         names: list[str] = []
         seen: set[str] = set()
-        for bouquet in self.bouquets:
+        for bouquet in self.scoped_bouquets:
             for channel in bouquet["channels"]:
                 if not isinstance(channel, dict):
                     continue
@@ -652,11 +710,18 @@ class Enigma2Box:
                     names.append(name)
         return names
 
-    def channels_named(self, name: str) -> list[dict[str, Any]]:
-        """Return every channel of the selected bouquets with this exact name."""
+    def channels_named(
+        self, name: str, bouquets: Iterable[dict[str, Any]] | None = None
+    ) -> list[dict[str, Any]]:
+        """Return every channel with this exact name, in the bouquets given.
+
+        The default is every bouquet the options offer, which is the set the plugin
+        would have to resolve a zap by name against. A caller that knows which copy is
+        meant — the source list, scoped to the active bouquet — passes that instead.
+        """
         matches: list[dict[str, Any]] = []
-        for bouquet in self.bouquets:
-            for channel in bouquet["channels"]:
+        for bouquet in self.bouquets if bouquets is None else bouquets:
+            for channel in bouquet.get("channels") or []:
                 if isinstance(channel, dict) and channel.get("name") == name:
                     matches.append(channel)
         return matches

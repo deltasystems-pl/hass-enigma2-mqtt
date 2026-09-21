@@ -108,6 +108,7 @@ effect without a restart.
 | **Show the deep standby and reboot buttons** | off | Creates the „Głębokie uśpienie" and „Restart" buttons. Turning it off again removes them from the entity registry rather than leaving them behind unavailable. This is about what appears on a dashboard, **not** a safety mechanism: the plugin refuses both commands while a recording is running whatever is set here. |
 | **Wake-on-LAN MAC address** | the address the box reports on `info` | The target of the magic packet the „Obudź (WoL)" button and `media_player.turn_on` send. Set it when the receiver reports a different interface from the one that is plugged in — a box on Wi-Fi does not answer a packet sent to its cable port. |
 | **Bouquets to offer** | every bouquet the box publishes | Which bouquets feed the media player's channel list and the media browser. The choices are the bouquets on the `channels` topic, and a name can be typed for one the box has not published yet. This narrows the plugin's own `bouquets_for_select`; it cannot widen it. |
+| **Channels in the media player's source list** | the active bouquet | What `media_player.source_list` offers. **The active bouquet** is the list the receiver's own channel ± is walking, which is also what the „Kanał" select shows; it is the default because a receiver with 988 channels writes 16.6 kB of names into that one attribute, which takes the entity past the recorder's 16 384-byte limit and makes Home Assistant drop **every** attribute of it from history — the channel and the programme with the list. **Every bouquet on offer** is one long list for somebody who would rather have it than the history. A receiver that publishes no channel-list context at all — an older plugin without `bouquet_context` — is left with the full list either way, because there is nothing to narrow it to. `select_source` follows this setting; the `zap` action takes a service reference and does not. |
 | **Check for published plugin releases** | off | The only thing this integration can do that is not talking to your own broker, which is why it is off. Turned on, the version entity asks the plugin repository which release is published — **at most once every 24 hours** — and reports the tag in its summary, in a `published_version` attribute and in the release link. The time of the last request and its answer are written to `.storage/enigma2_mqtt.release_check`, keyed by config entry, so reloading the receiver, saving the options or restarting Home Assistant shows what is already known instead of spending another request; the record is deleted when the receiver is removed. At most 64 KiB of the answer is read, and a tag is only believed if it is at most 64 characters and parses as a version. The release link is only followed if it points into this plugin's own releases. It downloads nothing and it never raises `latest_version`: `install` can only ever put the bundle shipped here on a receiver, and offering a version the installer would refuse would be a button that lies. Failures — a rate limit, a timeout, an answer that is not a release — are a debug line and nothing else. |
 
 When a recent plugin advertises its configurable publishers, the same form also controls key
@@ -137,7 +138,8 @@ everything.
 
 ## 4. Entities
 
-Twenty-six entities on one device. Unique ids follow one scheme: `<node_id>_<key>`, where the
+Twenty-six entities on one device, plus the two selects a receiver gets when its plugin can
+switch a channel-list context. Unique ids follow one scheme: `<node_id>_<key>`, where the
 key is the English translation key of the entity. Entity ids derive from the same key, so
 `sensor.dekoder_salon_channel` is `sensor.dekoder_salon_channel` in every language and only
 the display name changes.
@@ -152,17 +154,22 @@ while the box is unreachable, because that is precisely when somebody wants to w
 
 | Key | Polish name | unique_id | Topics |
 |---|---|---|---|
-| (the device itself) | *Dekoder salon* | `<node_id>_media_player` | `power`, `service`, `epg`, `volume`, `screen`, `channels` |
+| (the device itself) | *Dekoder salon* | `<node_id>_media_player` | `power`, `service`, `epg`, `volume`, `screen`, `channels`, `bouquet` |
 
 - **State** — `playing` when `power` is `on` and the box is online, `off` otherwise. Standby
   and deep standby are both `off`: `MediaPlayerState.STANDBY` was deprecated in Home Assistant
   2026.8, and what the household sees is a dark television either way. The „Zasilanie" switch
   and the device's availability tell the two apart for anyone who needs it.
-- **Source** — the current channel name; the source list is the channels of the selected
-  bouquets, in bouquet order, with a duplicate name listed once. Selecting one publishes
-  `cmd/zap {"name": …}` when that name is unique, and the service reference when it is not —
-  the plugin refuses an ambiguous name, and rightly, but a person picking a name off a list
-  has already made the choice it is refusing to make.
+- **Source** — the current channel name; the source list is the channels of the bouquet the
+  receiver is on, in its own order, with a duplicate name listed once. The
+  [source list scope option](#options) widens it to every selected bouquet, and a receiver that
+  publishes no channel-list context gets that wider list anyway. Selecting one publishes
+  `cmd/zap {"name": …}` when that name is unique across the offered bouquets, and the service
+  reference when it is not — the plugin refuses an ambiguous name, and rightly, but a person
+  picking a name off a list has already made the choice it is refusing to make, and where the
+  list is scoped the copy on it is the one sent. A name the receiver has but the list is not
+  showing is refused with both ways on: switch „Bukiet", or call `zap` with a service reference,
+  which is not scoped.
 - **Browsing** — bouquets, then channels, each with the picon the box's own web interface
   serves at `http://<ip>/picon/<sref>.png`. Picons are not published over MQTT; no address on
   `info` simply means no thumbnail.
@@ -255,6 +262,37 @@ for a bug report. A version neither side can parse is reported as `unknown` rath
 
 Nothing on this card reaches the internet unless the **release check** option is on, and then
 only once a day, and then only to report a tag — see [Options](#options).
+
+### 4.6 Selects
+
+| Key | Polish name | unique_id | Topics | Command |
+|---|---|---|---|---|
+| `bouquet` | *Bukiet* | `<node_id>_bouquet` | `channels`, `bouquet` | `cmd/bouquet` |
+| `channel` | *Kanał* | `<node_id>_channel` | `channels`, `bouquet`, `service` | `cmd/zap` |
+
+Both exist **only while the receiver names the `channels` and `bouquet_context` capabilities**.
+A plugin that cannot switch a channel-list context has nothing for either of them to do, and a
+receiver that loses the capability has them taken out of the entity registry rather than left
+behind unavailable. A receiver that has not said what it can do yet keeps whatever it has —
+silence is not "no".
+
+- **„Bukiet"** lists the bouquets on the `channels` topic, in the order the receiver published
+  them and narrowed by the [bouquets option](#options), and points at the one the `bouquet`
+  topic names. Nothing is selected when the receiver reports a null context: that is the radio
+  list, the movie list, or a bouquet the plugin was not told to publish, and all three are
+  ordinary operation. Choosing one sends `cmd/bouquet` with the bouquet's **service reference**
+  and waits for the `bouquet` topic to come back — the plugin republishes it on every success,
+  including a no-op, so there is always something to wait for. The receiver's own refusal is
+  raised as the error.
+- **„Kanał"** lists the channels of **that** bouquet only, and nothing else: the whole list is
+  988 rows on a real receiver, which is not a control. It reshapes the instant „Bukiet" or the
+  channel list moves. Choosing one sends `cmd/zap` with the channel's **service reference** —
+  never its name, because resolving a name is the plugin's ambiguity problem and there is no
+  reason to hand it one. Nothing is selected while the playing service is not one of these
+  channels.
+- **A name that appears twice inside one bouquet** is numbered — „TVN HD", then „TVN HD (2)" —
+  in the order the bouquet lists them. A select cannot offer the same option twice, and dropping
+  the repeat would put a channel out of reach.
 
 ## 5. Actions
 

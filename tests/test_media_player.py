@@ -20,6 +20,7 @@ from homeassistant.components.media_player import (
     MediaPlayerState,
 )
 from homeassistant.components.media_player.errors import BrowseError
+from homeassistant.components.recorder.db_schema import MAX_STATE_ATTRS_BYTES
 from homeassistant.const import (
     ATTR_ENTITY_ID,
     SERVICE_MEDIA_NEXT_TRACK,
@@ -29,6 +30,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers.json import json_bytes
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -36,13 +38,18 @@ from pytest_homeassistant_custom_component.common import (
     async_mock_service,
 )
 
-from custom_components.enigma2_mqtt.const import CONF_BOUQUETS
+from custom_components.enigma2_mqtt.const import (
+    CONF_BOUQUETS,
+    CONF_SOURCE_LIST_SCOPE,
+    SOURCE_LIST_SCOPE_ALL,
+)
 
 from .conftest import (
     AVAILABILITY_TOPIC,
     BOUQUET,
     BOUQUET_TOPIC,
     CHANNELS,
+    CHANNELS_TOPIC,
     INFO,
     INFO_TOPIC,
     MAC,
@@ -59,6 +66,9 @@ from .conftest import (
 )
 
 PLAYER = "media_player.dekoder_salon"
+
+SPORT = CHANNELS["bouquets"][1]
+SPORT_CONTEXT = {"name": SPORT["name"], "sref": SPORT["sref"]}
 
 
 async def _call(hass: HomeAssistant, service: str, **data) -> None:
@@ -154,6 +164,185 @@ async def test_the_bouquet_option_narrows_the_source_list(
         "TVP 1 HD",
         "TVN HD",
     ]
+
+
+async def test_the_default_scope_is_the_bouquet_the_box_is_on(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The whole list is 988 names on a real receiver; the active bouquet is not."""
+    box_on_the_broker[BOUQUET_TOPIC] = json.dumps(SPORT_CONTEXT)
+    await async_setup_box(hass, config_entry)
+
+    assert hass.states.get(PLAYER).attributes[ATTR_INPUT_SOURCE_LIST] == [
+        "Eurosport 1",
+        "TVN HD",
+    ]
+
+
+async def test_the_scope_follows_the_box_without_a_reload(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Switching „Bukiet" reshapes the source list on the topic alone."""
+    box_on_the_broker[BOUQUET_TOPIC] = json.dumps(BOUQUET)
+    await async_setup_box(hass, config_entry)
+    assert hass.states.get(PLAYER).attributes[ATTR_INPUT_SOURCE_LIST] == [
+        "TVP 1 HD",
+        "TVN HD",
+    ]
+
+    async_fire_mqtt_message(hass, BOUQUET_TOPIC, json.dumps(SPORT_CONTEXT))
+    await hass.async_block_till_done()
+
+    assert hass.states.get(PLAYER).attributes[ATTR_INPUT_SOURCE_LIST] == [
+        "Eurosport 1",
+        "TVN HD",
+    ]
+
+
+async def test_the_all_scope_keeps_one_long_list(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """For somebody who would rather have every channel than a history."""
+    box_on_the_broker[BOUQUET_TOPIC] = json.dumps(SPORT_CONTEXT)
+    config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        config_entry, options={CONF_SOURCE_LIST_SCOPE: SOURCE_LIST_SCOPE_ALL}
+    )
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.states.get(PLAYER).attributes[ATTR_INPUT_SOURCE_LIST] == [
+        "TVP 1 HD",
+        "TVN HD",
+        "Eurosport 1",
+    ]
+
+
+async def test_a_box_with_no_context_is_not_narrowed_to_nothing(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """An older plugin publishes no `bouquet`, and an empty list would be a regression."""
+    await async_setup_box(hass, config_entry)
+
+    assert hass.states.get(PLAYER).attributes[ATTR_INPUT_SOURCE_LIST] == [
+        "TVP 1 HD",
+        "TVN HD",
+        "Eurosport 1",
+    ]
+
+
+async def test_the_default_scope_keeps_the_attributes_inside_the_recorder(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """988 names took this entity to 17.3 kB and the recorder dropped all of them.
+
+    The limit is on the whole attribute set, so losing it costs the channel, the
+    programme and the artwork too — not only the list that caused it.
+    """
+    box_on_the_broker[CHANNELS_TOPIC] = json.dumps(_thousand_channels())
+    box_on_the_broker[BOUQUET_TOPIC] = json.dumps(
+        {"name": "Bukiet 1", "sref": "1:7:1:0:0:0:0:0:0:0:FROM BOUQUET \"b1.tv\""}
+    )
+    await async_setup_box(hass, config_entry)
+
+    state = hass.states.get(PLAYER)
+    assert len(state.attributes[ATTR_INPUT_SOURCE_LIST]) == 100
+    assert len(json_bytes(dict(state.attributes))) < MAX_STATE_ATTRS_BYTES
+
+
+async def test_the_all_scope_is_what_overflows_it(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The other half of the measurement: without the scope the limit is passed."""
+    box_on_the_broker[CHANNELS_TOPIC] = json.dumps(_thousand_channels())
+    config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        config_entry, options={CONF_SOURCE_LIST_SCOPE: SOURCE_LIST_SCOPE_ALL}
+    )
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    state = hass.states.get(PLAYER)
+    assert len(state.attributes[ATTR_INPUT_SOURCE_LIST]) == 1000
+    assert len(json_bytes(dict(state.attributes))) > MAX_STATE_ATTRS_BYTES
+
+
+async def test_selecting_a_source_outside_the_active_bouquet_says_how_to_get_there(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Ignoring the scope would make the list a lie about what it offers."""
+    box_on_the_broker[BOUQUET_TOPIC] = json.dumps(SPORT_CONTEXT)
+    await async_setup_box(hass, config_entry)
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await _call(hass, SERVICE_SELECT_SOURCE, **{ATTR_INPUT_SOURCE: "TVP 1 HD"})
+
+    assert "zap" in str(raised.value)
+    assert not any(
+        call.args[0] == command_topic("zap")
+        for call in mqtt_mock.async_publish.call_args_list
+    )
+
+
+async def test_an_ambiguous_source_resolves_inside_the_active_bouquet(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """„TVN HD" is in both bouquets, and the one on the list is the one meant."""
+    box_on_the_broker[BOUQUET_TOPIC] = json.dumps(SPORT_CONTEXT)
+    await async_setup_box(hass, config_entry)
+
+    await _call(hass, SERVICE_SELECT_SOURCE, **{ATTR_INPUT_SOURCE: "TVN HD"})
+
+    assert_published(mqtt_mock, command_topic("zap"), SPORT["channels"][1]["sref"])
+
+
+def _thousand_channels() -> dict[str, object]:
+    """Return a channel list the size of the receiver this was measured on.
+
+    Ten bouquets of a hundred, with names as long as the ones a Polish satellite
+    package actually carries — the size of the attribute is the whole point.
+    """
+    return {
+        "generated": 1789459200,
+        "bouquets": [
+            {
+                "name": f"Bukiet {bouquet}",
+                "sref": f"1:7:1:0:0:0:0:0:0:0:FROM BOUQUET \"b{bouquet}.tv\"",
+                "channels": [
+                    {
+                        "sref": f"1:0:19:{bouquet:X}{channel:03X}:3FB:1:C00000:0:0:0:",
+                        "name": f"Kanał Tematyczny {bouquet}-{channel:03d} HD",
+                    }
+                    for channel in range(100)
+                ],
+            }
+            for bouquet in range(1, 11)
+        ],
+    }
 
 
 async def test_selecting_a_unique_source_zaps_by_name(

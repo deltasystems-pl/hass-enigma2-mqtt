@@ -128,7 +128,8 @@
           "oscam_telemetry": "OSCam-Zustandstelemetrie veröffentlichen",
           "check_github_releases": "Auf veröffentlichte Plugin-Versionen prüfen",
           "configure_ssh": "SSH-Zugangsdaten für Plugin-Updates einrichten",
-          "keep_ssh_credentials": "SSH-Zugangsdaten für Updates behalten"
+          "keep_ssh_credentials": "SSH-Zugangsdaten für Updates behalten",
+          "source_list_scope": "Sender in der Quellenliste des Media Players"
         },
         "data_description": {
           "dangerous_buttons": "Der Tiefschlaf nimmt den Receiver vom Netz, bis ihn ein Magic Packet weckt, und der Neustart unterbricht, was er gerade tut. Beide sind voreingestellt ausgeblendet, damit sie auf einem gemeinsamen Dashboard nicht einen Fehlgriff neben der Lautstärke liegen. Das Plugin verweigert beide während einer Aufnahme, unabhängig von dieser Einstellung.",
@@ -140,7 +141,8 @@
           "screenshot_delay": "Wartezeit vor einem automatischen Bildschirmfoto nach dem Kanalwechsel, damit das neue Bild erscheinen kann.",
           "cam_telemetry": "Zeigt Verschlüsselung und ECM-Status des aktuellen Dienstes. Server-, Konto- und Kartendaten werden nicht veröffentlicht.",
           "oscam_telemetry": "Zeigt den neutralisierten Zustand von OSCam-Prozess, API, Lesern und Servern. Leserbezeichnungen, Adressen, Konten und Kartenkennungen werden nie veröffentlicht.",
-          "check_github_releases": "Standardmäßig aus, und aus bedeutet, dass diese Integration mit nichts außer deinem Broker spricht. Eingeschaltet fragt sie höchstens alle 24 Stunden beim Repository des Plugins nach der veröffentlichten Version und zeigt sie an der Versions-Entität an. Die Antwort und der Zeitpunkt der Abfrage werden gespeichert, sodass ein Neuladen des Receivers oder ein Neustart von Home Assistant das bereits Bekannte zeigt, statt erneut zu fragen. Sie lädt nichts herunter: Installiert wird weiterhin nur aus dem hier mitgelieferten Paket."
+          "check_github_releases": "Standardmäßig aus, und aus bedeutet, dass diese Integration mit nichts außer deinem Broker spricht. Eingeschaltet fragt sie höchstens alle 24 Stunden beim Repository des Plugins nach der veröffentlichten Version und zeigt sie an der Versions-Entität an. Die Antwort und der Zeitpunkt der Abfrage werden gespeichert, sodass ein Neuladen des Receivers oder ein Neustart von Home Assistant das bereits Bekannte zeigt, statt erneut zu fragen. Sie lädt nichts herunter: Installiert wird weiterhin nur aus dem hier mitgelieferten Paket.",
+          "source_list_scope": "Das aktive Bouquet ist die Liste, auf der der Receiver steht, und genau sie bietet auch die Auswahl „Kanal” an. Alle Bouquets ergeben stattdessen eine lange Liste — bei tausend Sendern ist sie groß genug, um die Grenze des Recorders zu überschreiten, und Home Assistant führt dann für den Media Player überhaupt keine Historie mehr. In beiden Fällen wechselt die Auswahl „Bouquet” das Bouquet, und die Aktion zap nimmt eine Dienstreferenz und ignoriert diese Einstellung."
         }
       },
       "ssh_host": {"title": "Mit dem Receiver verbinden", "data": {"ssh_host": "Receiver-Adresse", "ssh_port": "SSH-Port"}},
@@ -290,6 +292,14 @@
     "update": {
       "plugin": {
         "name": "MQTT-Bridge-Plugin"
+      }
+    },
+    "select": {
+      "bouquet": {
+        "name": "Bouquet"
+      },
+      "channel": {
+        "name": "Kanal"
       }
     }
   },
@@ -461,6 +471,12 @@
         "integration": "Diese Integration",
         "off": "Keines von beiden"
       }
+    },
+    "source_list_scope": {
+      "options": {
+        "active_bouquet": "Das aktive Bouquet",
+        "all": "Alle angebotenen Bouquets"
+      }
     }
   },
   "exceptions": {
@@ -507,6 +523,7 @@
     "update_downgrade": {"message": "Ein neueres Plugin wird nicht durch eine ältere gebündelte Version ersetzt."},
     "update_version_unavailable": {"message": "Die angeforderte Version ist nicht im geprüften Integrationspaket verfügbar."},
     "update_no_credentials": {"message": "Für diesen Receiver sind keine SSH-Zugangsdaten gespeichert. Richte ihn neu ein, setze den Haken bei „SSH-Zugangsdaten für Updates behalten“ und versuche es erneut."},
-    "update_failed": {"message": "Plugin-Aktualisierung fehlgeschlagen: {reason}"}
+    "update_failed": {"message": "Plugin-Aktualisierung fehlgeschlagen: {reason}"},
+    "channel_not_in_active_bouquet": {"message": "{channel} liegt nicht in dem Bouquet, auf dem der Receiver steht, und wird daher von der Quellenliste nicht angeboten. Stelle die Auswahl „Bouquet” zuerst auf das zugehörige Bouquet um oder verwende die Aktion enigma2_mqtt.zap, die eine Dienstreferenz nimmt und dieser Einschränkung nicht unterliegt."}
     }
   }

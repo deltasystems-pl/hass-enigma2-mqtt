@@ -45,6 +45,7 @@ import homeassistant.util.dt as dt_util
 from .box import Enigma2Box, Enigma2MqttConfigEntry, async_send_magic_packet
 from .const import (
     DOMAIN,
+    TOPIC_BOUQUET,
     TOPIC_CHANNELS,
     TOPIC_EPG,
     TOPIC_POWER,
@@ -112,6 +113,10 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
                 TOPIC_VOLUME,
                 TOPIC_SCREEN,
                 TOPIC_CHANNELS,
+                # The source list is scoped to the receiver's channel-list context by
+                # default, so a bouquet switched on the remote reshapes it — and a
+                # list that only reshapes on the next reload is a list that is wrong.
+                TOPIC_BOUQUET,
             ),
             requires=None,
         )
@@ -171,7 +176,12 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
 
     @property
     def source_list(self) -> list[str] | None:
-        """Return the channels of the bouquets the options selected."""
+        """Return the channels to offer, narrowed by the source list scope option.
+
+        The default scope is the bouquet the receiver is on, which is what keeps this
+        attribute — and with it every other attribute of this entity — inside the
+        recorder's 16 384-byte limit on a box with a thousand channels.
+        """
         return self.box.channel_names or None
 
     async def async_get_media_image(self) -> tuple[bytes | None, str | None]:
@@ -210,8 +220,21 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
         await self.box.async_publish_cmd("key", "KEY_CHANNELDOWN")
 
     async def async_select_source(self, source: str) -> None:
-        """Zap to a channel by the name the bouquet gives it."""
-        await async_zap_to_name(self.box, source)
+        """Zap to a channel by the name the source list gives it.
+
+        A name the receiver has, but which this list is not currently offering, is
+        refused with the way out rather than tuned: the scope is a deliberate choice
+        about what the list holds, and silently ignoring it would make the list a lie.
+        """
+        box = self.box
+        scoped = box.scoped_bouquets
+        if not box.channels_named(source, scoped) and box.channels_named(source):
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="channel_not_in_active_bouquet",
+                translation_placeholders={"channel": source},
+            )
+        await async_zap_to_name(box, source, scoped)
 
     async def async_play_media(
         self, media_type: MediaType | str, media_id: str, **kwargs: Any
@@ -307,7 +330,9 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
         )
 
 
-async def async_zap_to_name(box: Enigma2Box, name: str) -> None:
+async def async_zap_to_name(
+    box: Enigma2Box, name: str, prefer: list[dict[str, Any]] | None = None
+) -> None:
     """Zap to a channel by name, falling back to its service reference.
 
     The plugin refuses a zap by name unless exactly one service in its configured
@@ -316,6 +341,11 @@ async def async_zap_to_name(box: Enigma2Box, name: str) -> None:
     household picking a name out of a list has already made the choice the plugin is
     refusing to make, so a name that is ambiguous here is sent as the reference of the
     first match instead — the one that was on the list they picked from.
+
+    Whether the name is ambiguous is judged over every bouquet on offer, because that
+    is the set the plugin itself would resolve it against. `prefer` only says which
+    copy is meant once it is: a source list scoped to the active bouquet knows which
+    „TVN HD" the household was looking at.
     """
     matches = box.channels_named(name)
     if not matches:
@@ -327,4 +357,5 @@ async def async_zap_to_name(box: Enigma2Box, name: str) -> None:
     if len(matches) == 1:
         await box.async_publish_cmd("zap", json.dumps({"name": name}))
         return
-    await box.async_publish_cmd("zap", matches[0].get("sref") or "")
+    preferred = box.channels_named(name, prefer) if prefer is not None else []
+    await box.async_publish_cmd("zap", (preferred or matches)[0].get("sref") or "")

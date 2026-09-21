@@ -39,6 +39,7 @@ CONF_SSH_PASSWORD: Final = "ssh_password"
 CONF_SSH_HOST_KEY: Final = "ssh_host_key"
 CONF_KEEP_SSH_CREDENTIALS: Final = "keep_ssh_credentials"
 CONF_CHECK_GITHUB_RELEASES: Final = "check_github_releases"
+CONF_SOURCE_LIST_SCOPE: Final = "source_list_scope"
 
 SCREENSHOT_OFF: Final = "off"
 SCREENSHOT_ON_ZAP: Final = "on_zap"
@@ -55,6 +56,16 @@ MIN_SCREENSHOT_INTERVAL: Final = 5
 MAX_SCREENSHOT_INTERVAL: Final = 3600
 MIN_SCREENSHOT_DELAY: Final = 1
 MAX_SCREENSHOT_DELAY: Final = 30
+
+# What the media player's `source_list` offers. A receiver with a thousand channels
+# writes 16.6 kB of names into one attribute, and the recorder drops the attributes of
+# any state past 16 384 bytes — so the whole entity loses its history, not just the
+# list. Scoping to the bouquet the receiver is on fits, and is the default; `all` is
+# today's behaviour for somebody who would rather have one long list than a history.
+SOURCE_LIST_SCOPE_ACTIVE_BOUQUET: Final = "active_bouquet"
+SOURCE_LIST_SCOPE_ALL: Final = "all"
+SOURCE_LIST_SCOPES: Final = (SOURCE_LIST_SCOPE_ACTIVE_BOUQUET, SOURCE_LIST_SCOPE_ALL)
+DEFAULT_SOURCE_LIST_SCOPE: Final = SOURCE_LIST_SCOPE_ACTIVE_BOUQUET
 
 # How the plugin presents a box to Home Assistant, switchable with `cmd/ha_mode`.
 HA_MODE_DISCOVERY: Final = "discovery"

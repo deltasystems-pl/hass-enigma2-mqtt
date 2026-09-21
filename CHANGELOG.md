@@ -84,6 +84,15 @@ have not been accepted on a receiver, and no tag has been cut.
   screen in Home Assistant can show.
 - **Polish and German** names for every entity, action and trigger. German is still a draft
   and would welcome a native speaker.
+- **„Bukiet" and „Kanał", two selects.** The receiver plugin publishes a channel select of its
+  own only in MQTT discovery mode, and this integration takes a box out of that mode — so a
+  receiver set up the way this integration wants it listed neither bouquets nor channels
+  anywhere. „Bukiet" lists what the receiver published and switches its real channel-up/down
+  context; „Kanał" lists the channels of whichever bouquet that is, and reshapes the moment the
+  context moves. Both select by service reference rather than by name, both wait for the
+  receiver and raise its own words when it refuses, and both exist only while the receiver says
+  it can switch a bouquet at all. A name repeated inside one bouquet is numbered rather than
+  dropped, because a dropped one would be a channel Home Assistant could not reach.
 
 ### Fixed
 
@@ -109,6 +118,13 @@ Found by running this release against a real receiver rather than a test one.
   reproduction between the tag and the upload. A tag is pushed by a person at whatever commit
   they choose, so "main was green" was never evidence about the tagged tree. The release workflow
   now runs the whole validation suite first and publishes nothing if any of it fails.
+- **The media player has its history back.** A receiver with 988 channels put 16.6 kB of names
+  into `source_list`, which took the entity's attributes to 17.3 kB — past the recorder's
+  16 384-byte limit, so Home Assistant dropped *all* of them and kept no history for the channel,
+  the programme or the artwork either. The list now follows the bouquet the receiver is on, which
+  fits. A new option, **Channels in the media player's source list**, takes it back to every
+  bouquet for anybody who would rather have the long list than the history, and a receiver that
+  publishes no channel-list context at all is left with the full list rather than an empty one.
 
 ### Changed
 
@@ -118,6 +134,11 @@ Found by running this release against a real receiver rather than a test one.
 - Command cleanup now retires internal waiters without spurious asyncio errors. Clearing an old
   plugin error no longer reports concurrent commands as complete before their own result is
   known.
+- **`select_source` is scoped to the list it offers.** Asking the media player for a channel that
+  the receiver has but the source list is not currently showing now says so, and names the two
+  ways on — switch „Bukiet", or use the `zap` action, which takes a service reference and ignores
+  the scope. Where the same name is in several bouquets, the copy in the bouquet on the list is
+  the one tuned. `play_media` with `channel_name` is unchanged and is not scoped.
 
 ### Documentation
 
