@@ -410,7 +410,11 @@ it, because such a process was started since, which is what a restart means. A s
 gains a member is an interface that never came back, which is what the timeout and the
 `restart_failed` refusal are for. An **empty** set beforehand is an ordinary answer — a box still
 booting, or one stopped on purpose — where it used to be refused as an ambiguous lifecycle; any
-pid at all afterwards is then the proof.
+pid at all afterwards is then the proof. The two halves are deliberately asymmetric about failing
+to read that set at all: the rollback suppresses it, because it runs against a receiver in its
+worst state and nothing measured there may veto the restore, so an unreadable set becomes an empty
+one and any pid afterwards satisfies the proof — while the install lets the failure stop it, since
+at that point nothing has been touched and there is no reason to accept a weaker proof.
 
 ### 18. A recovery that fails has to say why in the log
 

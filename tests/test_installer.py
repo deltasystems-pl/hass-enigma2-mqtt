@@ -51,6 +51,10 @@ class FakeReceiver:
     # Some images run a wrapper beside the interface it starts; the wrapper survives a
     # GUI restart and `pidof enigma2` reports both, for ever.
     enigma_wrapper_pid: int | None = None
+    enigma_running: bool = True
+    # A restart that takes the interface down and does not bring it back. On a wrapper
+    # image that still leaves a pid answering `pidof enigma2` — the wrapper's.
+    enigma_dies_at_restart: bool = False
     node_id: str = ""
     base_topic: str = "enigma2"
     enabled: bool = True
@@ -151,14 +155,23 @@ class FakeSession:
         if "rm -f /tmp/enigma2-mqtt-installer-" in command:
             receiver.helper_removed = True
         if command == "pidof enigma2":
-            if receiver.enigma_wrapper_pid is not None:
-                return CommandResult(
-                    0, f"{receiver.enigma_wrapper_pid} {receiver.enigma_pid}\n"
-                )
-            return CommandResult(0, f"{receiver.enigma_pid}\n")
+            pids = [receiver.enigma_wrapper_pid]
+            if receiver.enigma_running:
+                pids.append(receiver.enigma_pid)
+            running = [str(pid) for pid in pids if pid is not None]
+            if not running:
+                # What `pidof` does when nothing matches: exit 1, and say nothing.
+                return CommandResult(1, "", "")
+            return CommandResult(0, " ".join(running) + "\n")
         if command == "init 3" or 'trap "init 3"' in command:
             receiver.enigma_pid += 1
+        if command == "init 3":
+            # A rollback's restart is the one that works in these fakes; the install's
+            # is the one a test can break.
+            receiver.enigma_running = True
         if 'trap "init 3"' in command:
+            if receiver.enigma_dies_at_restart:
+                receiver.enigma_running = False
             # Enigma writes its settings out on the way down, which is why a rollback
             # has to stop it before restoring them.
             receiver.files["settings"] = "new"
@@ -431,6 +444,30 @@ async def test_an_image_that_runs_a_wrapper_beside_enigma_can_be_installed_on(
     assert result.restarted is True
     assert receiver.installed is True
     assert receiver.enigma_pid == 101
+
+
+async def test_an_interface_that_died_behind_its_wrapper_is_not_a_restart(
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+) -> None:
+    """The proof before the commit is a new process, not a different set of them.
+
+    On a wrapper image the wrapper answers `pidof enigma2` whether or not the interface
+    it started is there, so „the pids changed" is satisfied by the interface simply
+    dying: 42 and 100 before, 42 alone after. Only „a pid that was not running before"
+    tells those apart, and this is the last guard in front of the commit — after it the
+    lock is released and the install is declared good.
+    """
+    receiver = FakeReceiver(enigma_pid=100, enigma_wrapper_pid=42, enigma_dies_at_restart=True)
+
+    with pytest.raises(InstallerError) as raised:
+        await _async_committed_install(hass, install_request, tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.RESTART_FAILED
+    # And the receiver is put back rather than left on a plugin it never started.
+    assert receiver.rolled_back is True
+    assert receiver.files["plugin"] == "old"
 
 
 async def test_a_prune_that_fails_does_not_fail_a_committed_install(

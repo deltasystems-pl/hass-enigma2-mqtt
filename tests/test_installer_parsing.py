@@ -213,10 +213,21 @@ async def test_a_transport_failure_becomes_the_step_s_own_error_code() -> None:
     assert raised.value.code is InstallerErrorCode.UPLOAD_FAILED
 
 
-async def test_output_that_is_not_a_pid_list_is_refused() -> None:
-    """The restart proof is arithmetic on these numbers; a word in there is not one."""
+@pytest.mark.parametrize(
+    "result",
+    [
+        # The restart proof is arithmetic on these numbers; a word in there is not one.
+        CommandResult(0, "not-a-pid\n"),
+        # `pidof` says "no match" with 1 and nothing else with anything above it, so an
+        # exit status of its own is a question that was not answered — not a receiver
+        # with its interface down, which is what the empty set means.
+        CommandResult(2, ""),
+        CommandResult(127, "", "pidof: not found"),
+    ],
+)
+async def test_an_answer_that_is_not_a_pid_list_is_refused(result: CommandResult) -> None:
     with pytest.raises(InstallerError) as raised:
-        await _async_enigma_pids(_Fixed(CommandResult(0, "not-a-pid\n")))
+        await _async_enigma_pids(_Fixed(result))
 
     assert raised.value.code is InstallerErrorCode.RESTART_FAILED
 
