@@ -50,6 +50,7 @@ from .const import (
     CONF_NAME,
     CONF_NODE_ID,
     CONF_RECEIVER_HOST,
+    CONF_SOFTCAM_RESTART_ALLOWED,
     CONF_SOURCE_LIST_SCOPE,
     CONF_WOL_MAC,
     DEFAULT_BASE_TOPIC,
@@ -61,12 +62,18 @@ from .const import (
     EVENT_KEY,
     KEY_PREFIX,
     MANUFACTURERS,
+    MAX_SOFTCAM_EPOCH,
+    MAX_SOFTCAM_INSTANCES,
+    MAX_SOFTCAM_MANAGER_MINUTES,
+    MAX_SOFTCAM_RESTARTS_TODAY,
     PAYLOAD_ONLINE,
     POWER_ON,
     PRESS_LONG,
     PRESS_SHORT,
     PROBE_TIMEOUT,
     SERVICE_FIELDS,
+    SOFTCAM_NAME_MAX,
+    SOFTCAM_RESTART_REASONS,
     SOURCE_LIST_SCOPE_ACTIVE_BOUQUET,
     SUBSCRIBE_TIMEOUT,
     TOPIC_AVAILABILITY,
@@ -85,6 +92,7 @@ from .const import (
     TOPIC_RECORDING,
     TOPIC_SCREEN,
     TOPIC_SERVICE,
+    TOPIC_SOFTCAM,
     TOPIC_TIMERS,
     TOPIC_TUNER,
     TOPIC_VOLUME,
@@ -598,6 +606,7 @@ class Enigma2State:
     cam: dict[str, Any] | None = None
     oscam: dict[str, Any] | None = None
     process: dict[str, Any] | None = None
+    softcam: dict[str, Any] | None = None
     bouquet: dict[str, Any] | None = None
     channels: dict[str, Any] | None = None
     last_error: dict[str, Any] | None = None
@@ -718,6 +727,26 @@ class Enigma2Box:
         if not isinstance(settings, dict):
             return None
         value = settings.get(CONF_DEEP_STANDBY_ALLOWED)
+        return value if isinstance(value, bool) else None
+
+    @property
+    def softcam_restart_permission(self) -> bool | None:
+        """Return the box's own answer about restarting its softcam, if it gave one.
+
+        The same three-valued answer as `deep_standby_permission`, and for the same
+        reason: `softcam_restart_allowed` is set on the receiver's setup screen, cannot
+        be written over MQTT, and `None` is a plugin that has never been asked rather
+        than one that said no.
+
+        What differs is what `None` means to the caller. Deep standby had buttons before
+        it had a permission, so silence there has to keep them. Nothing has ever shipped
+        a „Restart softcamu" button, so silence here creates nothing — an older plugin
+        would only refuse the command anyway.
+        """
+        settings = self.state.info.get("settings")
+        if not isinstance(settings, dict):
+            return None
+        value = settings.get(CONF_SOFTCAM_RESTART_ALLOWED)
         return value if isinstance(value, bool) else None
 
     @property
@@ -1134,6 +1163,8 @@ class Enigma2Box:
             self._process_received(msg)
         elif suffix == TOPIC_OSCAM:
             self._oscam_received(msg)
+        elif suffix == TOPIC_SOFTCAM:
+            self._softcam_received(msg)
         elif suffix.startswith(f"{TOPIC_EPG_GRID}/"):
             self._epg_grid_received(suffix[len(TOPIC_EPG_GRID) + 1 :], msg.payload)
         elif (attribute := self._OBJECT_TOPICS.get(suffix)) is not None:
@@ -1449,6 +1480,114 @@ class Enigma2Box:
             return value if 0 <= value <= PROCESS_BOUNDS[key] else None
 
         return {key: bounded(key) for key in PROCESS_BOUNDS}
+
+    @callback
+    def _softcam_received(self, msg: ReceiveMessage) -> None:
+        """Cache the softcam snapshot, normalised to the published contract.
+
+        Three payloads, three different answers, and the difference is the whole of what
+        this handler does. An **empty payload is a retraction** — the plugin withdrawing
+        a retained topic — and it clears the sample, because the alternative is a reading
+        that outlives the thing it describes. A payload that is **not JSON** leaves the
+        last good sample exactly where it is: one malformed message is a bug at the other
+        end, not news about the softcam. Anything else is normalised and kept.
+
+        Unlike `cam` and `oscam` this needs no opt-in dance. Those two publish what a
+        household would not want on a public issue, so they are gated on a setting and
+        have to wait for `info` before they may be believed. This carries a binary name
+        and three counters, is gated on a capability the plugin only claims where a
+        restart is actually possible, and is therefore free to be read the moment it
+        arrives.
+        """
+        if not (decode_payload(msg.payload) or "").strip():
+            self._invalidate_softcam()
+            return
+        if (payload := parse_json_payload(msg.payload)) is None:
+            return
+        self.state.softcam = self._normalize_softcam(payload)
+        self._async_updated(TOPIC_SOFTCAM)
+
+    @staticmethod
+    def _normalize_softcam(payload: dict[str, Any]) -> dict[str, Any]:
+        """Strip an untrusted softcam payload to the bounded public contract.
+
+        Every key is always present and a value that could not be believed is `None`,
+        which is the same shape the topic promises — so a sensor reading this never has
+        to know whether a field was missing or nonsense.
+
+        🔴 Two traps are the reason this exists rather than the payload being used as it
+        arrives. **`True` is an `int` in Python**, so `running_instances: true` would be
+        stored as 1, graph as one healthy instance, and be indistinguishable from a
+        measurement; `isinstance(value, bool)` is checked first everywhere below.
+        And **`None` is not zero**: a count that could not be taken has to read `unknown`,
+        because `0` instances is a real and very interesting reading — it is a channel
+        that has stopped decoding.
+
+        Building a fresh dictionary rather than filtering the one that arrived is the
+        second half of it. The plugin's own detector reads `/tmp/ecm.info`, which carries
+        a card-sharing account, a server address and the live control words; nothing from
+        it belongs anywhere near Home Assistant, and a payload that grew an extra key
+        would otherwise put whatever it held onto a sensor attribute and into the
+        diagnostics download. Only the seven names below can pass, whatever arrives.
+        """
+
+        def counted(value: Any, maximum: int) -> int | None:
+            """Return a non-negative whole number inside its bounds, or None."""
+            return (
+                value
+                if isinstance(value, int)
+                and not isinstance(value, bool)
+                and 0 <= value <= maximum
+                else None
+            )
+
+        selected = payload.get("selected")
+        reason = payload.get("last_restart_reason")
+        check_on_start = payload.get("manager_check_on_start")
+        # Epoch seconds, so zero is a field that was never filled in rather than a
+        # restart in 1970 — the same reading `_refused_at` takes of a complaint's `ts`.
+        last_restart = counted(payload.get("last_restart"), MAX_SOFTCAM_EPOCH) or None
+        return {
+            "selected": (
+                selected
+                if isinstance(selected, str) and 0 < len(selected) <= SOFTCAM_NAME_MAX
+                else None
+            ),
+            "running_instances": counted(
+                payload.get("running_instances"), MAX_SOFTCAM_INSTANCES
+            ),
+            "last_restart": last_restart,
+            "last_restart_reason": (
+                reason if reason in SOFTCAM_RESTART_REASONS else None
+            ),
+            "restarts_today": counted(
+                payload.get("restarts_today"), MAX_SOFTCAM_RESTARTS_TODAY
+            ),
+            "manager_check_on_start": (
+                check_on_start if isinstance(check_on_start, bool) else None
+            ),
+            "manager_timer_minutes": counted(
+                payload.get("manager_timer_minutes"), MAX_SOFTCAM_MANAGER_MINUTES
+            ),
+        }
+
+    @callback
+    def _invalidate_softcam(self) -> None:
+        """Forget the softcam snapshot after the plugin retracted its topic.
+
+        The topic leaves `seen` as well as the state, so the sensor reports unavailable
+        rather than `unknown`. On a page whose job is "is anything wrong", a diagnostic
+        stuck at `unknown` reads as a fault; a receiver that has withdrawn the topic has
+        simply stopped answering, which is what unavailable says. This mirrors
+        `_invalidate_cam` deliberately — one rule in this file for a retracted topic, not
+        two.
+        """
+        self.state.softcam = None
+        self.seen.discard(TOPIC_SOFTCAM)
+        self.updates[TOPIC_SOFTCAM] = self.updates.get(TOPIC_SOFTCAM, 0) + 1
+        for listener in list(self._listeners):
+            if listener.wants(TOPIC_SOFTCAM):
+                listener.callback()
 
     @callback
     def _announcement_received(self, msg: ReceiveMessage) -> None:

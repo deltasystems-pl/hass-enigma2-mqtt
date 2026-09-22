@@ -52,6 +52,7 @@ import homeassistant.util.dt as dt_util
 from .box import Enigma2Box, Enigma2MqttConfigEntry, Enigma2State
 from .const import (
     CAPABILITY_PROCESS,
+    CAPABILITY_SOFTCAM,
     CONF_CAM_TELEMETRY,
     CONF_OSCAM_TELEMETRY,
     DOMAIN,
@@ -64,6 +65,7 @@ from .const import (
     TOPIC_PROCESS,
     TOPIC_RECORDING,
     TOPIC_SERVICE,
+    TOPIC_SOFTCAM,
     TOPIC_TUNER,
 )
 from .entity import Enigma2Entity, OptionalEntities
@@ -160,6 +162,41 @@ def _started(state: Enigma2State) -> datetime | None:
     """Return when the enigma2 process started, as a moment rather than a number."""
     value = _process_value(state, "started")
     return None if value is None else dt_util.utc_from_timestamp(value)
+
+
+def _softcam_attributes(state: Enigma2State) -> dict[str, Any]:
+    """Return everything the `softcam` topic carries besides the binary's name.
+
+    Read straight out of the normalised payload, because `box._normalize_softcam` has
+    already decided what each field is worth: every key is present there, a value that
+    could not be believed is `None`, and nothing that was not named in the contract
+    survived. Repeating those checks here would be a second opinion on the same bytes,
+    and the two would eventually disagree.
+
+    `last_restart` is the one that changes shape. The topic carries epoch seconds and
+    this file's convention is that a time in an attribute is an ISO 8601 string, because
+    that is what a template can read.
+
+    🔴 `running_instances` is `None` rather than `0` when the count could not be taken.
+    Zero instances is a real reading — it is a channel that has stopped decoding — and a
+    number that means "we do not know" would be the one thing an automation must never be
+    given here.
+    """
+    softcam = state.softcam or {}
+    return {
+        "running_instances": softcam.get("running_instances"),
+        "last_restart": _iso(softcam.get("last_restart")),
+        "last_restart_reason": softcam.get("last_restart_reason"),
+        "restarts_today": softcam.get("restarts_today"),
+        # Whether the image's own liveness check adds a copy of the cam at every GUI
+        # start on this box — the difference between a receiver that needs the restart
+        # button and one that merely has it.
+        "manager_check_on_start": softcam.get("manager_check_on_start"),
+        # The image's periodic check interval when it is switched on, and `None` when it
+        # is not. A box with it on gains an instance every interval for ever, which is
+        # the runaway worth seeing on a dashboard before it becomes a symptom.
+        "manager_timer_minutes": softcam.get("manager_timer_minutes"),
+    }
 
 
 def _cam_value(state: Enigma2State, key: str, expected: type) -> Any:
@@ -370,6 +407,20 @@ OSCAM_SENSORS: tuple[Enigma2SensorDescription, ...] = (
     ),
 )
 
+SOFTCAM_SENSORS: tuple[Enigma2SensorDescription, ...] = (
+    Enigma2SensorDescription(
+        key="softcam",
+        topics=(TOPIC_SOFTCAM,),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        # The binary the image selected for autostart, e.g. `OSCam_11718-r798`. Not a
+        # family name and not the protocol it speaks outward: on the receiver this was
+        # written against the binary is OSCam and the protocol is cccam, and confusing
+        # the two is how a support answer ends up about the wrong program.
+        value_fn=lambda state: (state.softcam or {}).get("selected"),
+        attributes_fn=_softcam_attributes,
+    ),
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -423,6 +474,30 @@ async def async_setup_entry(
                 async_add_entities,
             ).start()
         )
+
+    softcam = {description.key: description for description in SOFTCAM_SENSORS}
+    entry.async_on_unload(
+        OptionalEntities(
+            hass,
+            box,
+            "sensor",
+            list(softcam),
+            lambda key: Enigma2Sensor(box, softcam[key]),
+            lambda: CAPABILITY_SOFTCAM in box.capabilities,
+            # 🔴 Nothing here ever removes this sensor, which is why the "has the box
+            # answered" side is a flat no. The two above follow a *setting*: somebody
+            # turned the telemetry off, meant it, and an entity that can never say
+            # anything again is worse than none. This follows a *capability*, and a
+            # capability going quiet is not a decision anybody made — it is an older
+            # plugin, a hook that failed to attach on this boot, or a receiver that is
+            # simply not there. Deleting on that takes the rename, the area, the
+            # dashboard card and the whole history of a diagnostic with it, and the next
+            # payload brings it back as a stranger. It stays, and says nothing until the
+            # topic returns.
+            lambda: False,
+            async_add_entities,
+        ).start()
+    )
 
     # The manager is started whatever the box has said so far, because at this point it
     # has usually said nothing: `async_setup_entry` subscribes and returns, and the

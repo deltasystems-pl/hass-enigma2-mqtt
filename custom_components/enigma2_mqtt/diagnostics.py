@@ -118,6 +118,11 @@ async def async_get_config_entry_diagnostics(
             "cam": state.cam,
             "oscam": state.oscam,
             "process": state.process,
+            # The normalised snapshot, not the payload that arrived: the plugin's own
+            # auto-heal detector reads a file carrying a card-sharing account and the
+            # live control words, and the shape written here can only ever hold the seven
+            # fields the contract names.
+            "softcam": state.softcam,
             "channels": _summarise_channels(state.channels),
             "last_error": state.last_error,
             "screen": {

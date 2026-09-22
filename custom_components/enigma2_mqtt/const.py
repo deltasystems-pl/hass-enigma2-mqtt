@@ -40,12 +40,20 @@ CONF_SSH_HOST_KEY: Final = "ssh_host_key"
 CONF_KEEP_SSH_CREDENTIALS: Final = "keep_ssh_credentials"
 CONF_CHECK_GITHUB_RELEASES: Final = "check_github_releases"
 CONF_SOURCE_LIST_SCOPE: Final = "source_list_scope"
+CONF_SOFTCAM_AUTOHEAL: Final = "softcam_autoheal"
+CONF_SOFTCAM_AUTOHEAL_SECONDS: Final = "softcam_autoheal_seconds"
 
 # Read-only members of `info.settings`. They are settings a consumer may read, not ones
 # `cmd/config` will accept: `deep_standby_allowed` gates a command, and a setting that
 # enables a command can only be turned on by somebody standing in front of the
 # television. Presence in `info.settings` therefore says nothing about writability.
+#
+# `softcam_restart_allowed` is the second of them and follows the same rule for the same
+# reason. Note what is *not* here: `softcam_autoheal` and `softcam_autoheal_seconds` only
+# tune a command that is already permitted, so they are ordinary remotely-writable
+# settings and the options flow sends them like any other.
 CONF_DEEP_STANDBY_ALLOWED: Final = "deep_standby_allowed"
+CONF_SOFTCAM_RESTART_ALLOWED: Final = "softcam_restart_allowed"
 
 SCREENSHOT_OFF: Final = "off"
 SCREENSHOT_ON_ZAP: Final = "on_zap"
@@ -62,6 +70,42 @@ MIN_SCREENSHOT_INTERVAL: Final = 5
 MAX_SCREENSHOT_INTERVAL: Final = 3600
 MIN_SCREENSHOT_DELAY: Final = 1
 MAX_SCREENSHOT_DELAY: Final = 30
+
+# What the options form will accept for the auto-heal window, mirroring the range the
+# plugin's own setting declares. The plugin is the side that enforces it; this only keeps
+# a number the box would refuse from being sent at all.
+MIN_SOFTCAM_AUTOHEAL_SECONDS: Final = 30
+MAX_SOFTCAM_AUTOHEAL_SECONDS: Final = 600
+# Shown on the form only when the box reports a window that is not a number in that
+# range — which is a plugin that is misbehaving, not a value to be preserved. A box that
+# reports a usable window is its own default, so this is never the suggested value on a
+# receiver that is working. 🔴 It is deliberately *not* in `PLUGIN_SETTING_DEFAULTS`:
+# that table is checked against the bundled plugin's own source, and the bundle here is
+# 0.2.0, which has no such setting.
+DEFAULT_SOFTCAM_AUTOHEAL_SECONDS: Final = 90
+
+# The bounds the retained `softcam` payload is believed inside. Nothing here is a limit
+# the receiver enforces; they are the difference between a number and a value that has
+# arrived from somewhere over a broker.
+#
+# `running_instances` is deliberately generous. The runaway this field exists to make
+# visible adds one copy every six minutes for as long as nobody looks, so a tight ceiling
+# would blank the reading exactly when it had something to say; the ceiling is only here
+# so that a nonsense payload cannot be graphed.
+MAX_SOFTCAM_INSTANCES: Final = 10_000
+# The most restarts a day's counter is believed to hold. Same reasoning, same generosity.
+MAX_SOFTCAM_RESTARTS_TODAY: Final = 10_000
+# The image's own periodic check interval, in minutes. A day is already absurd for it.
+MAX_SOFTCAM_MANAGER_MINUTES: Final = 1440
+# The furthest into the future `last_restart` is read as a clock rather than as a
+# payload: 2100-01-01T00:00:00Z. Zero is rejected too — it is a field nobody filled in.
+MAX_SOFTCAM_EPOCH: Final = 4_102_444_800
+# The longest binary name that can be a sensor state at all: Home Assistant drops a state
+# over 255 characters rather than cutting it, so a longer one is not a name to show.
+SOFTCAM_NAME_MAX: Final = 255
+# What the plugin says caused the last restart. Anything else is not part of this
+# contract and is read as "it did not say".
+SOFTCAM_RESTART_REASONS: Final = ("manual", "autoheal")
 
 # What the media player's `source_list` offers. Every chosen bouquet is the default,
 # because it is what this integration has always done and narrowing it under somebody
@@ -198,6 +242,14 @@ TOPIC_PROCESS: Final = "process"
 # The capability the plugin announces when it publishes `process`. A box whose image
 # did not let it hook the measurement never names it, and the entities are never built.
 CAPABILITY_PROCESS: Final = "process"
+
+TOPIC_SOFTCAM: Final = "softcam"
+
+# The capability behind the softcam topic and its diagnostic sensor. The plugin claims it
+# only where restarting the selected cam is actually possible — the binary resolves under
+# `/usr/softcams/`, its family has a start line, and the image starts it through the
+# manager's poller rather than through `/etc/init.d/softcam`.
+CAPABILITY_SOFTCAM: Final = "softcam"
 
 PAYLOAD_ONLINE: Final = "online"
 PAYLOAD_OFFLINE: Final = "offline"

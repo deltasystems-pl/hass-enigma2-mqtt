@@ -19,6 +19,12 @@ republished announcement — that is the proof. Where there is none, because the
 about to disappear anyway, the wait is the error-grace window: a complaint raises,
 silence is success.
 
+„Restart softcamu" has one gate rather than two, and it is the box's. Restarting the
+card-sharing client costs a few seconds of a scrambled picture and nothing else, so there
+is no reason to hide it behind a Home Assistant option as well — but a box whose setup
+screen has not permitted it refuses the command, and a button that is always refused is
+one somebody presses twice and then reports.
+
 „Obudź (WoL)" is the one button that sends no command at all, and the one that works
 while the box is unreachable, because that is the only time it is worth pressing.
 """
@@ -144,6 +150,26 @@ CAPABILITY_BUTTONS: tuple[tuple[str, Enigma2ButtonDescription], ...] = (
     ),
 )
 
+# Created only while the box says the command is permitted, and behind no Home Assistant
+# option at all. There is nothing dangerous about it — a softcam restart costs a few
+# seconds of a scrambled picture — so the only question worth asking is whether the box
+# will do it, and the box answers that itself.
+#
+# Its proof is silence, like the three restarts above, and that is a measured decision
+# rather than a shortcut. The command's own sequence stops every instance, waits up to
+# five seconds for them to go, kills whatever survived, starts one, and settles another
+# five before it republishes `softcam` — so on a cam that ignores SIGTERM the topic moves
+# at about ten seconds, which is exactly the command timeout. Waiting for it would turn a
+# restart that worked into „the receiver did not carry this out" on the slowest boxes,
+# which is the one shape of bug this project has already paid for twice. Every refusal —
+# no permission, a recording, a recording due, the rate limit, the sixty seconds after a
+# start — arrives on `last_error` immediately, and that is what the grace window is for.
+SOFTCAM_BUTTON = Enigma2ButtonDescription(
+    key="softcam_restart",
+    device_class=ButtonDeviceClass.RESTART,
+    press_fn=_async_command("softcam_restart"),
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -179,7 +205,11 @@ async def async_setup_entry(
 
     by_key = {
         description.key: description
-        for description in (*DANGEROUS_BUTTONS, *(pair[1] for pair in CAPABILITY_BUTTONS))
+        for description in (
+            *DANGEROUS_BUTTONS,
+            *(pair[1] for pair in CAPABILITY_BUTTONS),
+            SOFTCAM_BUTTON,
+        )
     }
 
     def factory(key: str) -> Entity:
@@ -213,6 +243,27 @@ async def async_setup_entry(
             lambda: not wanted() or (
                 has_answered() and box.deep_standby_permission is not None
             ),
+            async_add_entities,
+        ).start()
+    )
+
+    entry.async_on_unload(
+        OptionalEntities(
+            hass,
+            box,
+            "button",
+            [SOFTCAM_BUTTON.key],
+            factory,
+            # A stated „yes" and nothing else. Silence is an older plugin, which would
+            # refuse the command anyway, and this button has never existed on one — so
+            # unlike deep standby there is no installation whose button has to survive a
+            # box that has not spoken. `info` has to have arrived at all, for the same
+            # reason it does there: the announcement carries no `settings`, so reading
+            # the permission before `info` lands reads „not said" on every start.
+            lambda: has_answered() and box.softcam_restart_permission is True,
+            # And only a stated „no" removes it. Somebody who turns the permission off at
+            # the television has decided; a receiver that has gone quiet has not.
+            lambda: has_answered() and box.softcam_restart_permission is False,
             async_add_entities,
         ).start()
     )

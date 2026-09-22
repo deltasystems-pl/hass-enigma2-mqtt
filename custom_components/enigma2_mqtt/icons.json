@@ -69,6 +69,9 @@
       "screenshot": {
         "default": "mdi:camera"
       },
+      "softcam_restart": {
+        "default": "mdi:shield-refresh"
+      },
       "wake": {
         "default": "mdi:sleep-off"
       }
@@ -183,6 +186,9 @@
       },
       "process_threads": {
         "default": "mdi:sitemap-outline"
+      },
+      "softcam": {
+        "default": "mdi:shield-lock-outline"
       },
       "uptime": {
         "default": "mdi:clock-start"

@@ -130,6 +130,8 @@
           "screenshot_delay": "Verzögerung nach dem Kanalwechsel (Sekunden)",
           "cam_telemetry": "Zugangsberechtigungs-Telemetrie veröffentlichen",
           "oscam_telemetry": "OSCam-Zustandstelemetrie veröffentlichen",
+          "softcam_autoheal": "Softcam selbsttätig neu starten, wenn die Entschlüsselung aussetzt",
+          "softcam_autoheal_seconds": "Wartezeit bis zum selbsttätigen Neustart (Sekunden)",
           "check_github_releases": "Auf veröffentlichte Plugin-Versionen prüfen",
           "configure_ssh": "SSH-Zugangsdaten für Plugin-Updates einrichten",
           "keep_ssh_credentials": "SSH-Zugangsdaten für Updates behalten",
@@ -145,6 +147,8 @@
           "screenshot_delay": "Wartezeit vor einem automatischen Bildschirmfoto nach dem Kanalwechsel, damit das neue Bild erscheinen kann.",
           "cam_telemetry": "Zeigt Verschlüsselung und ECM-Status des aktuellen Dienstes. Server-, Konto- und Kartendaten werden nicht veröffentlicht.",
           "oscam_telemetry": "Zeigt den neutralisierten Zustand von OSCam-Prozess, API, Lesern und Servern. Leserbezeichnungen, Adressen, Konten und Kartenkennungen werden nie veröffentlicht.",
+          "softcam_autoheal": "Standardmäßig aus. Eingeschaltet startet der Receiver sein Softcam selbst neu, wenn der Sender verschlüsselt ist und für die unten angegebene Zeit nicht entschlüsselt hat — höchstens einmal alle zehn Minuten und nie während einer laufenden oder unmittelbar bevorstehenden Aufnahme. Die Schaltfläche „Softcam neu starten“ ist dasselbe von Hand; ob der Receiver beides überhaupt ausführt, entscheidet seine eigene Berechtigung, die am Gerät unter Menü → Plugins → MQTT Bridge gesetzt wird, denn eine Einstellung, die einen Befehl freischaltet, bleibt bewusst außerhalb dessen, was etwas mit Schreibrechten am Broker erreichen kann.",
+          "softcam_autoheal_seconds": "Wie lange ein Sender nicht entschlüsseln darf, bevor der Receiver das Softcam neu startet. Ein gesunder verschlüsselter Sender erneuert etwa alle zehn Sekunden, ein kurzes Fenster meldet also einen Fehler auf einem funktionierenden Receiver; die neunzig Sekunden des Plugins sind etwa neun ausgebliebene Erneuerungen. Das Fenster beginnt bei jedem Senderwechsel von vorn. 30 bis 600 Sekunden.",
           "check_github_releases": "Standardmäßig aus, und aus bedeutet, dass diese Integration mit nichts außer deinem Broker spricht. Eingeschaltet fragt sie höchstens alle 24 Stunden beim Repository des Plugins nach der veröffentlichten Version und zeigt sie an der Versions-Entität an. Die Antwort und der Zeitpunkt der Abfrage werden gespeichert, sodass ein Neuladen des Receivers oder ein Neustart von Home Assistant das bereits Bekannte zeigt, statt erneut zu fragen. Sie lädt nichts herunter: Installiert wird weiterhin nur aus dem hier mitgelieferten Paket.",
           "source_list_scope": "Alle angebotenen Bouquets ergeben eine Liste aus allen — so hat diese Integration es bisher gehalten — und bei tausend Sendern ist das ein Auswahlfeld mit tausend Zeilen. Das aktive Bouquet ist die kurze Liste, auf der der Receiver selbst steht, dieselbe, die seine Sendertasten auf und ab durchlaufen, und dieselbe, die die Auswahl „Kanal“ zeigt. Ein Receiver, der kein aktives Bouquet veröffentlicht hat, behält die lange Liste, weil es nichts gibt, worauf sie zu kürzen wäre. In beiden Fällen wechselt die Auswahl „Bouquet“ das Bouquet, und die Aktion zap nimmt eine Dienstreferenz und ignoriert diese Einstellung."
         }
@@ -198,6 +202,9 @@
       },
       "refresh_epg": {
         "name": "EPG auffrischen"
+      },
+      "softcam_restart": {
+        "name": "Softcam neu starten"
       }
     },
     "event": {
@@ -303,6 +310,7 @@
       },
       "oscam_source_ready_cards": {"name": "Bereite Leser der OSCam-Quelle {id}"},
       "oscam_source_shared_cards": {"name": "Gemeldete Karten der OSCam-Quelle {id}"},
+      "softcam": {"name": "Softcam"},
       "last_error": {"name": "Letzter Fehler"}
     },
     "switch": {

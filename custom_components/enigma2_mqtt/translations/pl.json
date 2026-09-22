@@ -130,6 +130,8 @@
           "screenshot_delay": "Opóźnienie po zmianie kanału (sekundy)",
           "cam_telemetry": "Publikuj telemetrię dostępu warunkowego",
           "oscam_telemetry": "Publikuj telemetrię stanu OSCam",
+          "softcam_autoheal": "Restartuj softcam samoczynnie, gdy przestaje odkodowywać",
+          "softcam_autoheal_seconds": "Czas do samoczynnego restartu (sekundy)",
           "check_github_releases": "Sprawdzaj opublikowane wydania wtyczki",
           "configure_ssh": "Skonfiguruj dane SSH do aktualizacji wtyczki",
           "keep_ssh_credentials": "Zachowaj dane SSH do aktualizacji",
@@ -145,6 +147,8 @@
           "screenshot_delay": "Czas oczekiwania przed automatycznym zrzutem po zmianie kanału, aby nowy obraz zdążył się pojawić.",
           "cam_telemetry": "Udostępnia szyfrowanie bieżącej usługi i stan ECM. Dane serwera, konta ani karty nie są publikowane.",
           "oscam_telemetry": "Udostępnia stan procesu, API, czytników i serwerów OSCam bez danych prywatnych. Nazwy czytników, adresy, konta i identyfikatory kart nie są publikowane.",
+          "softcam_autoheal": "Domyślnie wyłączone. Włączone — dekoder sam restartuje softcam, gdy kanał jest zaszyfrowany i nie odkodowuje przez czas podany niżej: najwyżej raz na dziesięć minut i nigdy w trakcie nagrania ani tuż przed nim. Przycisk „Restart softcamu” robi to samo ręcznie; o tym, czy dekoder w ogóle na to pozwoli, decyduje jego własne uprawnienie, ustawiane na dekoderze w Menu → Wtyczki → MQTT Bridge, bo ustawienie włączające polecenie celowo pozostaje poza zasięgiem czegokolwiek, co może publikować na brokerze.",
+          "softcam_autoheal_seconds": "Jak długo kanał może nie odkodowywać, zanim dekoder zrestartuje softcam. Sprawny zaszyfrowany kanał odnawia się mniej więcej co dziesięć sekund, więc krótkie okno zgłasza awarię na działającym dekoderze; dziewięćdziesiąt sekund wtyczki to około dziewięciu nieodebranych odnowień. Okno zaczyna się od nowa przy każdej zmianie kanału. Od 30 do 600 sekund.",
           "check_github_releases": "Domyślnie wyłączone, a wyłączone znaczy, że ta integracja nie łączy się z niczym poza Twoim brokerem. Włączone — pyta repozytorium wtyczki o opublikowane wydanie nie częściej niż raz na 24 godziny i pokazuje je na encji wersji. Odpowiedź i godzina zapytania są zapisywane, więc przeładowanie dekodera albo restart Home Assistanta pokazuje to, co już wiadomo, zamiast pytać ponownie. Nic nie pobiera: instalacja nadal korzysta wyłącznie z pakietu dołączonego tutaj.",
           "source_list_scope": "Wszystkie oferowane bukiety to jedna lista ze wszystkich — tak ta integracja działała dotąd — a przy tysiącu kanałów jest to lista rozwijana o tysiącu pozycji. Aktywny bukiet to krótka lista, na której stoi sam dekoder, ta sama, po której chodzą kanał w górę i w dół, i ta sama, którą pokazuje wybór „Kanał”. Dekoder, który nie opublikował aktywnego bukietu, zostaje przy długiej liście, bo nie ma czym jej skrócić. Tak czy inaczej bukiet zmienia się wyborem „Bukiet”, a akcja zap przyjmuje referencję usługi i nie podlega temu ustawieniu."
         }
@@ -198,6 +202,9 @@
       },
       "refresh_epg": {
         "name": "Odśwież EPG"
+      },
+      "softcam_restart": {
+        "name": "Restart softcamu"
       }
     },
     "event": {
@@ -303,6 +310,7 @@
       },
       "oscam_source_ready_cards": {"name": "Gotowe czytniki źródła OSCam {id}"},
       "oscam_source_shared_cards": {"name": "Zgłoszone karty źródła OSCam {id}"},
+      "softcam": {"name": "Softcam"},
       "last_error": {"name": "Ostatni błąd"}
     },
     "switch": {

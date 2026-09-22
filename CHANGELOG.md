@@ -15,6 +15,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   answer if it was already collecting; the rest are switched off until something is wrong. They
   appear whenever the receiver announces the capability, and a receiver that stops announcing it
   never loses them.
+- **„Restart softcamu", a button that restarts the receiver's card-sharing client**, and a
+  „Softcam" diagnostic beside it. The household symptom is a channel that stops decoding;
+  underneath it, on images whose softcam binary has a long name, the image's own liveness
+  check cannot recognise the process it started and adds another copy at every interface
+  restart. The button stops every instance and starts exactly one, with the line the image
+  itself would have used, so it collapses the copies as well as unsticking a frozen cam.
+  The sensor states which binary the image selected — not a family name and not the
+  protocol it speaks outward — and carries the instance count, the last restart and its
+  reason, the restarts since local midnight, and two read-only facts about the image that
+  say whether this receiver is one that accumulates copies at all.
+- **Auto-heal, opt-in, on the options form.** With it on the receiver restarts its own
+  softcam when the channel is encrypted and has not decoded for a window of 30 to 600
+  seconds, at most once every ten minutes, and never while a recording is running or due —
+  the same guard a manual press goes through, because a restart landing on the opening
+  seconds of a recording is worse than a scrambled one.
+- 🔴 The **permission** behind both is `softcam_restart_allowed`, set on the receiver's own
+  setup screen and refused over MQTT, as `deep_standby_allowed` already is: a setting that
+  enables a command stays outside what anything with publish rights on the broker can
+  reach. It is therefore not on the options form, and the form says where it lives. A
+  plugin that does not report it gets no button, and a receiver that has simply gone quiet
+  keeps whatever it had.
 
 ### Changed
 

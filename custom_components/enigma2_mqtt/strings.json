@@ -156,6 +156,8 @@
           "screenshot_delay": "Delay after changing channel (seconds)",
           "cam_telemetry": "Publish conditional-access telemetry",
           "oscam_telemetry": "Publish OSCam health telemetry",
+          "softcam_autoheal": "Restart the softcam on its own when decoding stops",
+          "softcam_autoheal_seconds": "Wait before an automatic restart (seconds)",
           "check_github_releases": "Check for published plugin releases"
           ,"configure_ssh": "Configure SSH credentials for plugin updates"
           ,"keep_ssh_credentials": "Keep SSH credentials for updates"
@@ -171,6 +173,8 @@
           "screenshot_delay": "Wait before an automatic screenshot after a channel change, so the new picture has time to appear.",
           "cam_telemetry": "Expose the current service's encryption and ECM status. No server, account or card details are published.",
           "oscam_telemetry": "Expose privacy-neutral OSCam process, API, reader and server health. Reader labels, addresses, accounts and card identifiers are never published.",
+          "softcam_autoheal": "Off by default. On, the receiver restarts its own softcam when the channel is encrypted and has not been decoding for the time below — at most once every ten minutes, and never while a recording is running or due. The “Restart softcam” button is the manual version of the same thing; whether the receiver will do either is its own permission, set on the box under Menu → Plugins → MQTT Bridge, because a setting that enables a command is deliberately outside what anything with publish rights can reach.",
+          "softcam_autoheal_seconds": "How long a channel may go without decoding before the receiver restarts the softcam. A healthy encrypted channel renews about every ten seconds, so a short window reports a fault on a working receiver; the plugin's ninety seconds is about nine missed renewals. The window starts again at every channel change. 30 to 600 seconds.",
           "check_github_releases": "Off by default, and off means this integration talks to nothing but your broker. On, it asks the plugin's repository which release is published, at most once every 24 hours, and says so on the version entity. The answer and the time it was asked are saved, so reloading the receiver or restarting Home Assistant shows what is already known rather than asking again. It never downloads anything: installing still uses only the bundle shipped here.",
           "source_list_scope": "Every bouquet on offer is one list of all of them, which is what this integration has always done — on a receiver with a thousand channels that is a dropdown of a thousand rows. The active bouquet is the short list the receiver itself is on, the one its channel up and down walk, and the same one the “Channel” select shows; a receiver that has published no active bouquet keeps the long list, because there is nothing to shorten it to. Either way the “Bouquet” select changes bouquets, and the zap action takes a service reference and ignores this setting."
         }
@@ -224,6 +228,9 @@
       },
       "refresh_epg": {
         "name": "Refresh EPG"
+      },
+      "softcam_restart": {
+        "name": "Restart softcam"
       }
     },
     "event": {
@@ -329,6 +336,7 @@
       },
       "oscam_source_ready_cards": {"name": "OSCam source {id} ready readers"},
       "oscam_source_shared_cards": {"name": "OSCam source {id} reported shared cards"},
+      "softcam": {"name": "Softcam"},
       "last_error": {"name": "Last error"}
     },
     "switch": {

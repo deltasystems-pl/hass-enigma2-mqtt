@@ -61,6 +61,8 @@ from .const import (
     CONF_SCREENSHOT,
     CONF_SCREENSHOT_DELAY,
     CONF_SCREENSHOT_INTERVAL,
+    CONF_SOFTCAM_AUTOHEAL,
+    CONF_SOFTCAM_AUTOHEAL_SECONDS,
     CONF_SOURCE_LIST_SCOPE,
     CONF_SSH_HOST,
     CONF_SSH_HOST_KEY,
@@ -76,14 +78,17 @@ from .const import (
     DEFAULT_SCREENSHOT,
     DEFAULT_SCREENSHOT_DELAY,
     DEFAULT_SCREENSHOT_INTERVAL,
+    DEFAULT_SOFTCAM_AUTOHEAL_SECONDS,
     DEFAULT_SOURCE_LIST_SCOPE,
     DISCOVERY_PREFIX,
     DOMAIN,
     HA_MODE_INTEGRATION,
     MAX_SCREENSHOT_DELAY,
     MAX_SCREENSHOT_INTERVAL,
+    MAX_SOFTCAM_AUTOHEAL_SECONDS,
     MIN_SCREENSHOT_DELAY,
     MIN_SCREENSHOT_INTERVAL,
+    MIN_SOFTCAM_AUTOHEAL_SECONDS,
     PROBE_TIMEOUT,
     SCREENSHOT_MODES,
     SOURCE_LIST_SCOPES,
@@ -814,6 +819,17 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                 requested[CONF_CAM_TELEMETRY] = user_input[CONF_CAM_TELEMETRY]
             if requested is not None and CONF_OSCAM_TELEMETRY in current:
                 requested[CONF_OSCAM_TELEMETRY] = user_input[CONF_OSCAM_TELEMETRY]
+            # The auto-heal pair travels the same `cmd/config` path as everything else
+            # here, because both only tune a command the box has already permitted.
+            # 🔴 `softcam_restart_allowed` is deliberately absent: a setting that
+            # *enables* a command is set at the television and refused over MQTT, so
+            # putting it on this form would only build a control the box rejects.
+            if requested is not None and CONF_SOFTCAM_AUTOHEAL in current:
+                requested[CONF_SOFTCAM_AUTOHEAL] = user_input[CONF_SOFTCAM_AUTOHEAL]
+            if requested is not None and CONF_SOFTCAM_AUTOHEAL_SECONDS in current:
+                requested[CONF_SOFTCAM_AUTOHEAL_SECONDS] = user_input[
+                    CONF_SOFTCAM_AUTOHEAL_SECONDS
+                ]
             # An empty field means "use the address the box reports", which is the
             # common case and not an error. Anything else has to be an address before
             # it is stored: the value used to be passed through with nothing but a
@@ -978,6 +994,35 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                         ): bool
                     }
                 )
+            if CONF_SOFTCAM_AUTOHEAL in settings:
+                schema = schema.extend(
+                    {
+                        # `is True` rather than the reported value: a box that answers
+                        # with a string would otherwise put a value the checkbox cannot
+                        # render into the schema's own default.
+                        vol.Required(
+                            CONF_SOFTCAM_AUTOHEAL,
+                            default=settings[CONF_SOFTCAM_AUTOHEAL] is True,
+                        ): bool
+                    }
+                )
+            if CONF_SOFTCAM_AUTOHEAL_SECONDS in settings:
+                schema = schema.extend(
+                    {
+                        vol.Required(
+                            CONF_SOFTCAM_AUTOHEAL_SECONDS,
+                            default=_autoheal_seconds(
+                                settings[CONF_SOFTCAM_AUTOHEAL_SECONDS]
+                            ),
+                        ): vol.All(
+                            vol.Coerce(int),
+                            vol.Range(
+                                min=MIN_SOFTCAM_AUTOHEAL_SECONDS,
+                                max=MAX_SOFTCAM_AUTOHEAL_SECONDS,
+                            ),
+                        )
+                    }
+                )
         if CONF_SSH_PASSWORD in self.config_entry.data:
             schema = schema.extend(
                 {vol.Required(CONF_KEEP_SSH_CREDENTIALS, default=True): bool}
@@ -1124,6 +1169,24 @@ def _is_valid_topic(base_topic: str, node_id: str) -> bool:
     except vol.Invalid:
         return False
     return "+" not in base_topic and "#" not in base_topic and "+" not in node_id
+
+
+def _autoheal_seconds(reported: Any) -> int:
+    """Return the auto-heal window to show, given what the box reported.
+
+    The box's own value, whenever it is a whole number inside the range the plugin
+    declares. Anything else — a string, a boolean, a number outside the range — is a
+    plugin that is misbehaving rather than a value worth preserving, and a schema default
+    the form cannot render would be a page that does not open at all. The fallback is the
+    window the plugin declares as its default, which is also what the box would use.
+    """
+    if (
+        isinstance(reported, int)
+        and not isinstance(reported, bool)
+        and MIN_SOFTCAM_AUTOHEAL_SECONDS <= reported <= MAX_SOFTCAM_AUTOHEAL_SECONDS
+    ):
+        return reported
+    return DEFAULT_SOFTCAM_AUTOHEAL_SECONDS
 
 
 def _settings_match(actual: Any, requested: dict[str, Any]) -> bool:
