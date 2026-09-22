@@ -13,21 +13,28 @@ import glob
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import secrets
 import shutil
 import stat
 import sys
 import tempfile
 import time
+from typing import NamedTuple
 
 PACKAGE = "enigma2-plugin-extensions-mqttbridge"
 PLUGIN_DIR = "usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge"
 WEBIF_SHIM = (
     "usr/lib/enigma2/python/Plugins/Extensions/WebInterface/WebChilds/External/MQTTBridge.py"
 )
-OPKG_STATUS = "usr/lib/opkg/status"
-OPKG_INFO = "usr/lib/opkg/info"
+# Where opkg keeps its database is a configuration item, not a constant. OpenViX 6.6
+# ships `/etc/opkg/opkg.conf` naming `/var/lib/opkg`, and leaves `/usr/lib/opkg`
+# containing nothing but `alternatives/` — so a hard-coded `/usr/lib/opkg/status` found
+# no database at all, and the first snapshot of a guided install died on a box that was
+# perfectly healthy. Older images put it under `/usr/lib/opkg`, which is why both are
+# still searched when nothing says otherwise.
+OPKG_CONF_DIR = "etc/opkg"
+OPKG_DATABASES = ("var/lib/opkg", "usr/lib/opkg")
 SETTINGS = "etc/enigma2/settings"
 PROVISION = "etc/enigma2/mqttbridge.json"
 LOCK = "var/lock/opkg.lock"
@@ -41,6 +48,111 @@ STALE_LOCK_SECONDS = 30 * 60
 
 def _path(root: Path, relative: str) -> Path:
     return root / relative
+
+
+class OpkgPaths(NamedTuple):
+    """Where this receiver's opkg database actually is."""
+
+    status: Path
+    info: Path
+    # What was looked at to decide, so that a failure can say where it looked rather
+    # than name one path the box was never going to have.
+    searched: tuple
+
+
+def _opkg_config_files(root: Path) -> list[Path]:
+    """Return the configuration files opkg would read, in the order it reads them.
+
+    `opkg.conf` first and then the rest of `/etc/opkg/*.conf` in name order, because
+    that is the order in which a later `option` overrides an earlier one. A box with
+    two files disagreeing about the database is already in trouble; what matters here
+    is that this and opkg reach the same answer.
+    """
+    directory = _path(root, OPKG_CONF_DIR)
+    main = directory / "opkg.conf"
+    ordered = [main] + sorted(
+        Path(name) for name in glob.glob(str(directory / "*.conf")) if Path(name) != main
+    )
+    return [path for path in ordered if path.is_file()]
+
+
+def _opkg_options(root: Path) -> dict:
+    """Return the `option name value` settings from this receiver's opkg config.
+
+    Only the `option`/`opt` form is read, which is what every image in reach writes and
+    the only form the two settings this needs are given in. `dest`, `src` and `arch`
+    lines are not options and are ignored; on OpenViX the architectures are in a
+    separate `arch.conf` and have nothing to do with where the database lives.
+    """
+    options: dict = {}
+    for path in _opkg_config_files(root):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            # A conf that cannot be read is not a reason to abandon the ones that can;
+            # the defaults below are still there, and a missing status file is reported
+            # with every path that was considered.
+            continue
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            parts = stripped.split()
+            if len(parts) >= 3 and parts[0] in ("option", "opt"):
+                options[parts[1]] = parts[2]
+    return options
+
+
+def _configured_path(root: Path, configured: str) -> Path:
+    """Place a path out of the opkg config under the root this helper works against.
+
+    The config names absolute paths, and on the receiver the root is `/` so this is the
+    identity. It is not the identity in a test, or in anything that ever runs this
+    against a mounted image, so the join is written once and guarded once: a `..` in
+    there would reach outside the tree this is allowed to touch, and there is no
+    legitimate reason for one.
+    """
+    parts = [part for part in PurePosixPath(configured.strip()).parts if part not in ("/", "")]
+    if not parts or ".." in parts:
+        raise ValueError(f"opkg configuration names an unusable path: {configured}")
+    return root.joinpath(*parts)
+
+
+def opkg_paths(root: Path) -> OpkgPaths:
+    """Resolve the status file and info directory the way opkg itself does.
+
+    The configuration wins where it speaks. Where it does not, the database is looked
+    for in one place and then the other — and both halves are taken from the same one,
+    because a status file in `/var` and an info directory in `/usr` is not a layout any
+    image has, and writing one of each would be worse than failing.
+    """
+    options = _opkg_options(root)
+    bases = tuple(_path(root, base) for base in OPKG_DATABASES)
+    chosen = next((base for base in bases if (base / "status").is_file()), bases[0])
+    status_option = options.get("status_file")
+    info_option = options.get("info_dir")
+    return OpkgPaths(
+        status=(
+            _configured_path(root, status_option)
+            if status_option is not None
+            else chosen / "status"
+        ),
+        info=(
+            _configured_path(root, info_option) if info_option is not None else chosen / "info"
+        ),
+        searched=(bases if status_option is None else ()),
+    )
+
+
+def _missing_status(paths: OpkgPaths) -> str:
+    """Say which database was looked for, so the answer is not "no such file"."""
+    if not paths.searched:
+        return f"opkg status file {paths.status} does not exist"
+    considered = ", ".join(str(base / "status") for base in paths.searched)
+    return (
+        f"opkg status file {paths.status} does not exist; no opkg configuration named "
+        f"one and neither default is there ({considered})"
+    )
 
 
 def _stanzas(text: str) -> list[str]:
@@ -102,9 +214,10 @@ def snapshot(root: Path, backup: Path) -> dict[str, object]:
     backup.mkdir(mode=0o700, parents=True)
     with _lock(root):
         plugin = _path(root, PLUGIN_DIR)
-        status_path = _path(root, OPKG_STATUS)
+        opkg = opkg_paths(root)
+        status_path = opkg.status
         if not status_path.is_file():
-            raise FileNotFoundError(status_path)
+            raise FileNotFoundError(_missing_status(opkg))
         package_stanza = next(
             (
                 s
@@ -131,9 +244,7 @@ def snapshot(root: Path, backup: Path) -> dict[str, object]:
             for source in webif_cache_files:
                 shutil.copy2(source, cache_backup / source.name)
         info_backup = backup / "opkg-info"
-        info_files = [
-            Path(name) for name in glob.glob(str(_path(root, OPKG_INFO) / f"{PACKAGE}.*"))
-        ]
+        info_files = [Path(name) for name in glob.glob(str(opkg.info / f"{PACKAGE}.*"))]
         if info_files:
             info_backup.mkdir()
             for source in info_files:
@@ -210,14 +321,15 @@ def restore(
         required.append(backup / "webif-cache")
     if any(not path.exists() for path in required):
         raise ValueError("snapshot is incomplete")
-    status_path = _path(root, OPKG_STATUS)
-    info_dir = _path(root, OPKG_INFO)
+    opkg = opkg_paths(root)
+    status_path = opkg.status
+    info_dir = opkg.info
     plugin = _path(root, PLUGIN_DIR)
     webif_shim = _path(root, WEBIF_SHIM)
     if not status_path.is_file() or status_path.is_symlink():
-        raise ValueError("opkg status is unavailable or unsafe")
+        raise ValueError(f"opkg status is unavailable or unsafe: {status_path}")
     if not info_dir.is_dir() or info_dir.is_symlink():
-        raise ValueError("opkg metadata directory is unavailable or unsafe")
+        raise ValueError(f"opkg metadata directory is unavailable or unsafe: {info_dir}")
     if plugin.is_symlink():
         raise ValueError("live plugin directory may not be a symlink")
     if webif_shim.is_symlink() or (webif_shim.exists() and not webif_shim.is_file()):

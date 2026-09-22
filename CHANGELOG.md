@@ -121,6 +121,15 @@ have not been accepted on a receiver, and no tag has been cut.
 
 Found by running this release against a real receiver rather than a test one.
 
+- **The guided installer could not find opkg's database on OpenViX.** Where that database
+  lives is a setting, not a constant: OpenViX 6.6 keeps it under `/var/lib/opkg` and says so
+  in `/etc/opkg/opkg.conf`, leaving `/usr/lib/opkg` with nothing in it but `alternatives/`.
+  The installer looked only in `/usr/lib/opkg`, so the first snapshot of an install failed —
+  safely, before anything was touched, but on a receiver that was perfectly healthy — and a
+  rollback would have refused for the same reason. Both halves now read `/etc/opkg/*.conf`
+  the way opkg does, falling back to `/var/lib/opkg` and then `/usr/lib/opkg` when nothing
+  says otherwise, and a database that is genuinely missing is reported with the paths that
+  were looked at. Found during the release-gate session on hardware.
 - **The per-source OSCam entities now appear.** A receiver answers after Home Assistant has
   finished setting the integration up, and the entities for each reader and server were only
   created for a box that had already answered — so on a real receiver they were never created
