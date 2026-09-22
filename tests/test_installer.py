@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import hashlib
 import json
 from pathlib import Path
@@ -59,11 +59,13 @@ class FakeReceiver:
     # no line for. It has no line for any setting still at its default, so a receiver
     # whose plugin has never been configured says nothing about all four of these — and
     # one that has been configured normally still says nothing about its base topic.
-    # These defaults are therefore a real box, not an empty one.
+    # These defaults are therefore a real box, not an empty one — including a box with
+    # no name of its own, which is what a plugin that has never run leaves behind.
     node_id: str | None = None
     base_topic: str | None = None
     enabled: bool | None = None
     ha_mode: str | None = None
+    friendly_name: str | None = None
     closed: int = 0
     close_raises_on: set[int] = field(default_factory=set)
     free_bytes: int = 50_000_000
@@ -121,6 +123,7 @@ class FakeSession:
                         "base_topic": receiver.base_topic,
                         "enabled": receiver.enabled,
                         "ha_mode": receiver.ha_mode,
+                        "friendly_name": receiver.friendly_name,
                     }
                 ),
             )
@@ -426,6 +429,127 @@ async def test_a_committed_install_prunes_superseded_snapshots(
     assert receiver.commands[prune].endswith(
         f" prune /home/root/mqttbridge-backups --keep-name {snapshot.rsplit('/', 1)[-1]}"
     )
+
+
+def _named_install(credentials: SshCredentials, name: str | None) -> InstallRequest:
+    """One guided install of a box, with whatever the name field was left holding."""
+    return InstallRequest(
+        credentials,
+        Provisioning(
+            broker_host="192.0.2.10",
+            broker_port=1883,
+            broker_username="vuuno4kse_005301",
+            broker_password="not-a-real-broker-password",
+            node_id="vuuno4kse_005301",
+            friendly_name=name,
+        ),
+    )
+
+
+def _provisioned(receiver: FakeReceiver) -> dict[str, Any]:
+    """The provisioning document the transaction wrote to the receiver."""
+    return next(json.loads(value) for value in receiver.inputs if value.startswith(b"{"))
+
+
+def test_a_provisioning_document_treats_a_name_of_spaces_as_no_name() -> None:
+    """Otherwise a receiver ends up called `  ` and nothing says why.
+
+    The key has to be absent rather than empty: the plugin applies every key the
+    document holds, so an empty one is a rename to nothing, which the plugin then
+    fills with the box type on its next start.
+    """
+    blank = Provisioning(
+        broker_host="192.0.2.10",
+        broker_port=1883,
+        broker_username="vuuno4kse_005301",
+        broker_password="not-a-real-broker-password",
+        node_id="vuuno4kse_005301",
+        friendly_name="   ",
+    )
+
+    assert blank.display_name() == ""
+    assert "friendly_name" not in json.loads(blank.as_json())
+    assert "friendly_name" in json.loads(replace(blank, friendly_name=" Kitchen ").as_json())
+
+
+async def test_an_empty_name_leaves_the_receiver_s_own_name_alone_and_reports_it(
+    hass: HomeAssistant,
+    credentials: SshCredentials,
+    tmp_path: Path,
+) -> None:
+    """A name the receiver already holds is not this transaction's to rewrite.
+
+    The document says nothing about the name, so the plugin keeps it — and the caller
+    still has to be told what that name is, because it is what the box is called when
+    the install is over and the only thing the entry can sensibly be titled with.
+    """
+    receiver = FakeReceiver(
+        node_id="vuuno4kse_005301", base_topic="enigma2", friendly_name="Living room receiver"
+    )
+
+    result = await _async_committed_install(
+        hass, _named_install(credentials, None), tmp_path, receiver
+    )
+
+    assert "friendly_name" not in _provisioned(receiver)
+    assert result.friendly_name == "Living room receiver"
+
+
+async def test_a_name_of_nothing_but_spaces_is_the_same_as_an_empty_one(
+    hass: HomeAssistant,
+    credentials: SshCredentials,
+    tmp_path: Path,
+) -> None:
+    """Spaces must not reach the receiver, and must not win over its own name either."""
+    receiver = FakeReceiver(
+        node_id="vuuno4kse_005301", base_topic="enigma2", friendly_name="Living room receiver"
+    )
+
+    result = await _async_committed_install(
+        hass, _named_install(credentials, "   "), tmp_path, receiver
+    )
+
+    assert "friendly_name" not in _provisioned(receiver)
+    assert result.friendly_name == "Living room receiver"
+
+
+async def test_a_typed_name_outranks_the_one_the_receiver_holds(
+    hass: HomeAssistant,
+    credentials: SshCredentials,
+    tmp_path: Path,
+) -> None:
+    """Renaming a box is what the field is for."""
+    receiver = FakeReceiver(
+        node_id="vuuno4kse_005301", base_topic="enigma2", friendly_name="Living room receiver"
+    )
+
+    result = await _async_committed_install(
+        hass, _named_install(credentials, "Kitchen receiver"), tmp_path, receiver
+    )
+
+    assert _provisioned(receiver)["friendly_name"] == "Kitchen receiver"
+    assert result.friendly_name == "Kitchen receiver"
+
+
+async def test_a_box_with_no_name_is_provisioned_without_one(
+    hass: HomeAssistant,
+    credentials: SshCredentials,
+    tmp_path: Path,
+) -> None:
+    """A first install has no name from either side, and must not write a blank.
+
+    An empty value is a value: it would blank the setting, and the plugin fills a blank
+    name with the box type on its next start anyway. Omitting the key leaves that to
+    the plugin, which is where the rule lives.
+    """
+    receiver = FakeReceiver()
+
+    result = await _async_committed_install(
+        hass, _named_install(credentials, None), tmp_path, receiver
+    )
+
+    assert "friendly_name" not in _provisioned(receiver)
+    assert result.friendly_name == ""
 
 
 async def test_an_image_that_runs_a_wrapper_beside_enigma_can_be_installed_on(

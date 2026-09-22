@@ -64,6 +64,7 @@ def test_identity_is_printed_as_the_json_the_installer_parses(
         "base_topic": "enigma2",
         "enabled": True,
         "ha_mode": "integration",
+        "friendly_name": None,
     }
 
 

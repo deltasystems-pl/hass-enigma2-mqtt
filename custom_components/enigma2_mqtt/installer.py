@@ -207,6 +207,15 @@ class Provisioning:
     base_topic: str = DEFAULT_BASE_TOPIC
     friendly_name: str | None = None
 
+    def display_name(self) -> str:
+        """Return the name this document would set, or an empty string for none.
+
+        Spaces are not a name. A field left blank and a field holding two spaces are
+        the same intention, and telling them apart anywhere downstream would mean a
+        receiver named `  ` on somebody's wall.
+        """
+        return (self.friendly_name or "").strip()
+
     def as_json(self) -> bytes:
         """Return the provisioning document without ever logging it."""
         values: dict[str, Any] = {
@@ -219,8 +228,12 @@ class Provisioning:
             "base_topic": self.base_topic,
             "ha_mode": "integration",
         }
-        if self.friendly_name:
-            values["friendly_name"] = self.friendly_name
+        # Omitted rather than emitted empty, because the plugin applies every key the
+        # document holds and leaves every key it does not: a receiver whose name the
+        # form did not give keeps the one it has, and one that has none is named by
+        # the plugin after its box type, as it is on a first start.
+        if self.display_name():
+            values["friendly_name"] = self.display_name()
         return (json.dumps(values, separators=(",", ":")) + "\n").encode()
 
 
@@ -273,6 +286,11 @@ class InstallResult:
     version: str
     backup_created: bool
     restarted: bool
+    # What the receiver is called now the transaction is over: the name the form gave,
+    # or the one the receiver already held when the form gave none. Empty when nothing
+    # was provisioned — an update writes no settings — and the caller then keeps
+    # whatever name it already had for the box.
+    friendly_name: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -751,8 +769,14 @@ async def _async_validate_receiver_identity(
     session: InstallerSession,
     remote_helper: str,
     request: InstallRequest,
-) -> None:
+) -> str:
     """Refuse to update or overwrite a differently configured receiver.
+
+    Returns the name the receiver stores, stripped, or an empty string for a receiver
+    that stores none. It is not part of any comparison — a box may be called anything
+    — but this is the one point in the transaction that has already read the settings
+    file, and it is the only way to know what a box whose name the form did not give
+    is going to be called.
 
     What the helper reports is what the settings file holds, and a setting that is not
     in it is `null` rather than a value — enigma2 writes no line for a value that still
@@ -789,18 +813,21 @@ async def _async_validate_receiver_identity(
         "base_topic",
         "enabled",
         "ha_mode",
+        "friendly_name",
     }:
         raise InstallerError(
             InstallerErrorCode.PREFLIGHT_FAILED,
-            "the receiver did not report the four settings that bind it to an entry",
+            "the receiver did not report the settings that bind it to an entry",
         )
     stored_node = identity["node_id"]
     stored_base = identity["base_topic"]
+    stored_name = identity["friendly_name"]
     if (
         not isinstance(stored_node, (str, type(None)))
         or not isinstance(stored_base, (str, type(None)))
         or not isinstance(identity["enabled"], (bool, type(None)))
         or not isinstance(identity["ha_mode"], (str, type(None)))
+        or not isinstance(stored_name, (str, type(None)))
     ):
         raise InstallerError(
             InstallerErrorCode.PREFLIGHT_FAILED,
@@ -839,6 +866,7 @@ async def _async_validate_receiver_identity(
             f"{expected_node} on {expected_base}",
             placeholders,
         )
+    return (stored_name or "").strip()
 
 
 async def async_preflight(
@@ -1238,6 +1266,7 @@ async def _async_install_locked(
     backup_created = False
     remote_lock_claimed = False
     committed = False
+    provisioned_name = ""
     try:
         # Everything up to the transaction lock is a guard, and a guard that refuses
         # leaves the receiver as it found it. Each of those refusals is written to the
@@ -1270,7 +1299,9 @@ async def _async_install_locked(
                 input=helper_bytes,
                 detail="the installer helper could not be written to the receiver's /tmp",
             )
-            await _async_validate_receiver_identity(session, remote_helper, request)
+            stored_name = await _async_validate_receiver_identity(
+                session, remote_helper, request
+            )
         except InstallerError as err:
             _log_install_refusal(err)
             raise
@@ -1328,6 +1359,13 @@ async def _async_install_locked(
         if request.provisioning is not None:
             await _async_progress(progress_cb, "provision")
             provision_started = True
+            # What the receiver ends up called, which an empty name field leaves to the
+            # receiver: the document omits the key, the plugin keeps the name it holds,
+            # and this is only the answer to what that name is. Reported rather than
+            # written back — a value the box already holds is not this transaction's to
+            # rewrite, and writing it would make an install that changed nothing
+            # indistinguishable from one that renamed the box to the same thing.
+            provisioned_name = request.provisioning.display_name() or stored_name
             provisioning = request.provisioning.as_json()
             quoted_tmp = shlex.quote(remote_provision_tmp)
             await _run_checked(
@@ -1440,11 +1478,11 @@ async def _async_install_locked(
             await _async_progress(progress_cb, "done")
         except BaseException:
             _LOGGER.warning("Installed plugin verified; final progress callback failed")
-        return InstallResult(bundle.version, backup_created, True)
+        return InstallResult(bundle.version, backup_created, True, provisioned_name)
     except BaseException as err:
         if committed:
             _LOGGER.warning("Installed plugin verified; ignoring post-commit cleanup failure")
-            return InstallResult(bundle.version, backup_created, True)
+            return InstallResult(bundle.version, backup_created, True, provisioned_name)
         if session is not None:
             try:
                 await session.close()

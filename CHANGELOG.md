@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A guided install whose name field was left empty now titles the entry with the name the
+  receiver already has**, rather than with the node ID. Nothing is written to the receiver for an
+  empty field — a box that has a name keeps it, and one that has none is named after its box type
+  by the plugin, as on a first start — so this only changes what Home Assistant calls the entry it
+  creates. A name of nothing but spaces counts as empty on both sides, and a name that was typed is
+  written and wins as before.
+
 ## [0.2.0] - 2026-09-22
 
 The release that makes the receiver usable from Home Assistant: a media player, a remote, an
