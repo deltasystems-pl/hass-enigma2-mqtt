@@ -393,7 +393,14 @@ async def test_a_committed_install_prunes_superseded_snapshots(
         if sent.startswith("rm -f ") and "enigma2-mqtt-installer-" in sent
     )
     assert release < prune < removal
-    assert receiver.commands[prune].endswith(" prune /home/root/mqttbridge-backups")
+    # The snapshot this install just took is named, so that pruning cannot rank it by
+    # a receiver clock that was wrong when it was written and delete it.
+    snapshot = next(
+        sent.rsplit(" ", 1)[-1] for sent in receiver.commands if " snapshot " in sent
+    )
+    assert receiver.commands[prune].endswith(
+        f" prune /home/root/mqttbridge-backups --keep-name {snapshot.rsplit('/', 1)[-1]}"
+    )
 
 
 async def test_a_prune_that_fails_does_not_fail_a_committed_install(

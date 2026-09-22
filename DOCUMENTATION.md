@@ -98,11 +98,13 @@ it as able to publish anywhere on that broker.
 `/etc/enigma2/mqttbridge.json` — mode 0600, because it holds the broker password. Before anything
 is changed the installer takes a snapshot of everything it is about to touch into
 `/home/root/mqttbridge-backups/ha-installer-<nonce>/`, mode 0700; that is what a rollback restores
-from, and it is what to reach for to put a receiver back by hand later. A successful install prunes
-the snapshots that came before it and keeps the **two newest**, so the directory does not grow with
-every install; a rollback leaves its own snapshot behind, and the next successful install prunes
-that too. The uploaded package, the manifest and the helper script live in `/tmp` and are deleted
-when the transaction commits. Nothing else is written.
+from, and it is what to reach for to put a receiver back by hand later. A successful install keeps
+**its own snapshot and one more**, and removes the rest, so the directory does not grow with every
+install. Its own is kept by name rather than by timestamp, because a receiver without a
+battery-backed clock can stamp it before the time it was actually taken. A failed install leaves
+its snapshot behind as well; from then on it is an ordinary one, and it goes once two newer ones
+exist. The uploaded package, the manifest and the helper script live in `/tmp` and are deleted when
+the transaction commits. Nothing else is written.
 
 A box that has announced itself is usually being offered on the discovery card at the same time.
 Installing over SSH takes that offer down as soon as the credentials are submitted, so there is one

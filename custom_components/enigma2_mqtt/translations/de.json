@@ -52,7 +52,7 @@
         }
       }
     },
-    "progress": {"preflight": "Sicherheit und Kompatibilität des Receivers werden geprüft", "backup": "Aktuelle Installation wird gesichert", "upload": "Geprüftes Paket wird hochgeladen", "install": "Plugin wird installiert", "provision": "MQTT-Konfiguration wird geschrieben", "restart": "Enigma2-Oberfläche wird neu gestartet", "announcement": "Auf eine neue MQTT-Ankündigung wird gewartet", "done": "Installation verifiziert"},
+    "progress": {"installing": "Das Plugin wird auf dem Receiver installiert, die Oberfläche neu gestartet und auf seine Anmeldung gewartet"},
     "error": {
       "invalid_host": "Gib die Adresse des Receivers ein.",
       "ssh_unavailable": "Der SSH-Dienst des Receivers ist nicht erreichbar.",

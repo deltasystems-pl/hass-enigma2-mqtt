@@ -77,7 +77,7 @@
         }
       }
     },
-    "progress": {"preflight": "Checking receiver safety and compatibility", "backup": "Backing up the current installation", "upload": "Uploading the verified bundle", "install": "Installing the plugin", "provision": "Writing MQTT configuration", "restart": "Restarting the Enigma2 interface", "announcement": "Waiting for a fresh MQTT announcement", "done": "Installation verified"},
+    "progress": {"installing": "Installing the plugin on the receiver, restarting its interface and waiting for it to announce itself"},
     "error": {
       "invalid_host": "Enter a receiver host.",
       "ssh_unavailable": "The receiver's SSH service could not be reached.",

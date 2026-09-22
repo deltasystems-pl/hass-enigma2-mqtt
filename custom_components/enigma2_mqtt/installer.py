@@ -891,7 +891,8 @@ async def _async_install_locked(
     # could have pre-created as a symlink: this file holds the broker password, and a
     # fixed name following a planted link would write it wherever the link points.
     remote_provision_tmp = f"{PROVISION_PATH}.ha-{nonce}"
-    backup = f"{BACKUP_ROOT}/ha-installer-{nonce}"
+    backup_name = f"ha-installer-{nonce}"
+    backup = f"{BACKUP_ROOT}/{backup_name}"
     remote_lock = f"{BACKUP_ROOT}/.ha-installer.lock"
     session: InstallerSession | None = None
     watch: _RestartWatch | None = None
@@ -1046,7 +1047,8 @@ async def _async_install_locked(
             # install, and the ones from earlier installs have been superseded by it.
             try:
                 pruned = await cleanup.run(
-                    f"python3 {shlex.quote(remote_helper)} prune {shlex.quote(BACKUP_ROOT)}",
+                    f"python3 {shlex.quote(remote_helper)} prune {shlex.quote(BACKUP_ROOT)} "
+                    f"--keep-name {shlex.quote(backup_name)}",
                     timeout=30,
                 )
                 if pruned.exit_status:

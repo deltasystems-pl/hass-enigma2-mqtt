@@ -639,13 +639,21 @@ def release_transaction(lock_dir: Path) -> None:
     lock_dir.rmdir()
 
 
-def prune_snapshots(backups: Path, keep: int = KEEP_SNAPSHOTS) -> list[str]:
+def prune_snapshots(
+    backups: Path, keep: int = KEEP_SNAPSHOTS, keep_name: str = ""
+) -> list[str]:
     """Delete all but the newest `keep` installer snapshots, and report what went.
 
-    A snapshot is the only way back from an install, so one is kept — the newest, which
-    is the one taken by the install that just succeeded — and the one before it. Without
-    this, every guided install left another copy of the plugin directory on the
-    receiver's flash for ever.
+    A snapshot is the only way back from an install, so one is kept — the one taken by
+    the install that just succeeded — and one more behind it. Without this, every guided
+    install left another copy of the plugin directory on the receiver's flash for ever.
+
+    `keep_name` is that install's own snapshot, and it is never removed whatever its
+    timestamp says. The order here is the modification time, and on these receivers a
+    timestamp is not a clock: many have no battery-backed one, boot in 1970 and jump to
+    the real time when NTP answers — which can be after the snapshot was taken. Ranking
+    the newest snapshot last and deleting it would throw away the only way back from the
+    install that is committing.
 
     Only this installer's own directories are candidates: the name has to be exactly
     `ha-installer-<nonce>`, it has to be a directory, and it may not be a symlink, which
@@ -657,10 +665,14 @@ def prune_snapshots(backups: Path, keep: int = KEEP_SNAPSHOTS) -> list[str]:
     if backups.is_symlink() or not backups.is_dir():
         return []
     candidates = []
+    current_present = False
     for child in backups.iterdir():
         if child.is_symlink() or not child.is_dir():
             continue
         if not SNAPSHOT_NAME.fullmatch(child.name):
+            continue
+        if keep_name and child.name == keep_name:
+            current_present = True
             continue
         try:
             modified = child.stat().st_mtime
@@ -670,8 +682,10 @@ def prune_snapshots(backups: Path, keep: int = KEEP_SNAPSHOTS) -> list[str]:
     # The name breaks a tie, because two directories made in the same second are
     # otherwise ordered by whatever `iterdir` happened to return.
     candidates.sort(key=lambda candidate: (candidate[0], candidate[1].name))
+    # The one that is kept by name has already taken a place.
+    retain = max(0, keep - 1 if current_present else keep)
     removed = []
-    for _modified, child in candidates[: max(0, len(candidates) - keep)]:
+    for _modified, child in candidates[: max(0, len(candidates) - retain)]:
         shutil.rmtree(child, ignore_errors=True)
         removed.append(child.name)
     return removed
@@ -685,6 +699,9 @@ def main() -> int:
     )
     parser.add_argument("path", type=Path, nargs="?")
     parser.add_argument("--root", type=Path, default=Path("/"))
+    # The snapshot of the transaction that is committing, which `prune` keeps whatever
+    # the receiver's clock says about it.
+    parser.add_argument("--keep-name", default="")
     parser.add_argument("--provisioning", action="store_true")
     parser.add_argument("--settings", action="store_true")
     args = parser.parse_args()
@@ -697,7 +714,7 @@ def main() -> int:
     elif args.operation == "release":
         release_transaction(args.path)
     elif args.operation == "prune":
-        for name in prune_snapshots(args.path):
+        for name in prune_snapshots(args.path, keep_name=args.keep_name):
             print(f"pruned superseded installer snapshot {name}", file=sys.stderr)
     elif args.operation == "snapshot":
         snapshot(args.root, args.path)

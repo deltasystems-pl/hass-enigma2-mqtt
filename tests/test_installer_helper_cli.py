@@ -67,12 +67,15 @@ def test_identity_is_printed_as_the_json_the_installer_parses(
     }
 
 
+@pytest.mark.parametrize(
+    "operation", ["snapshot", "restore", "verify", "claim", "release", "prune"]
+)
 def test_identity_needs_no_path_and_the_others_refuse_without_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
 ) -> None:
     """A missing path would otherwise be a traceback on a box with no console."""
     with pytest.raises(SystemExit) as raised:
-        _run(monkeypatch, "snapshot", "--root", str(tmp_path))
+        _run(monkeypatch, operation, "--root", str(tmp_path))
 
     assert raised.value.code == 2
 
@@ -141,13 +144,24 @@ def test_prune_leaves_the_two_newest_snapshots_and_says_what_it_took(
         directory.mkdir()
         os.utime(directory, (1_700_000_000 + index, 1_700_000_000 + index))
 
-    assert _run(monkeypatch, "prune", str(backups)) == 0
+    assert (
+        _run(
+            monkeypatch,
+            "prune",
+            str(backups),
+            "--keep-name",
+            "ha-installer-aaaaaaaaaaaa",
+        )
+        == 0
+    )
 
+    # The one named on the command line stays whatever its timestamp says, and it
+    # takes one of the two places rather than being kept beside them.
     assert sorted(child.name for child in backups.iterdir()) == [
-        "ha-installer-bbbbbbbbbbbb",
+        "ha-installer-aaaaaaaaaaaa",
         "ha-installer-cccccccccccc",
     ]
-    assert "ha-installer-aaaaaaaaaaaa" in capsys.readouterr().err
+    assert "ha-installer-bbbbbbbbbbbb" in capsys.readouterr().err
 
 
 def test_claim_and_release_are_the_lock_the_installer_serialises_on(

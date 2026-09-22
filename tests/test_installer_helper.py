@@ -427,6 +427,37 @@ def test_pruning_keeps_the_newest_two_snapshots(tmp_path: Path) -> None:
     ]
 
 
+def test_pruning_never_removes_the_snapshot_of_the_install_that_is_committing(
+    tmp_path: Path,
+) -> None:
+    """A timestamp on these receivers is not a clock.
+
+    Many have no battery-backed one: they boot in 1970 and jump to the real time when
+    NTP answers, which can be minutes into an install and so after its snapshot was
+    taken. Ordering by modification time would then rank the snapshot that is the only
+    way back from the committing install as the oldest, and delete it.
+    """
+    backups = tmp_path / "mqttbridge-backups"
+    backups.mkdir()
+    for nonce, modified in (
+        ("aaaaaaaaaaaa", 1_700_000_100),
+        ("bbbbbbbbbbbb", 1_700_000_200),
+        # Taken last, stamped before the receiver's clock was corrected.
+        ("cccccccccccc", 1_000_000_000),
+    ):
+        directory = backups / f"ha-installer-{nonce}"
+        directory.mkdir()
+        os.utime(directory, (modified, modified))
+
+    removed = prune_snapshots(backups, keep_name="ha-installer-cccccccccccc")
+
+    assert removed == ["ha-installer-aaaaaaaaaaaa"]
+    assert sorted(child.name for child in backups.iterdir()) == [
+        "ha-installer-bbbbbbbbbbbb",
+        "ha-installer-cccccccccccc",
+    ]
+
+
 def test_pruning_touches_nothing_it_did_not_make(tmp_path: Path) -> None:
     """`rmtree` down a symlink would leave the backups directory altogether."""
     backups = tmp_path / "mqttbridge-backups"

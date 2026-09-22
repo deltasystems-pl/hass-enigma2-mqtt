@@ -52,7 +52,7 @@
         }
       }
     },
-    "progress": {"preflight": "Sprawdzanie bezpieczeństwa i zgodności dekodera", "backup": "Tworzenie kopii bieżącej instalacji", "upload": "Wysyłanie zweryfikowanego pakietu", "install": "Instalowanie wtyczki", "provision": "Zapisywanie konfiguracji MQTT", "restart": "Restartowanie interfejsu Enigma2", "announcement": "Oczekiwanie na świeże zgłoszenie MQTT", "done": "Instalacja zweryfikowana"},
+    "progress": {"installing": "Instalowanie wtyczki na dekoderze, restart interfejsu i oczekiwanie na zgłoszenie"},
     "error": {
       "invalid_host": "Podaj adres dekodera.",
       "ssh_unavailable": "Nie można połączyć się z usługą SSH dekodera.",

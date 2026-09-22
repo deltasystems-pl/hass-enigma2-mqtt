@@ -258,7 +258,13 @@ of those offers is therefore almost always waiting — and the guided install's
 `already_in_progress` at the one step where two passwords have just been typed.
 
 The offer and the install are about the same receiver, and the install is the one with a person
-behind it: it claims the unique id without raising, and retires the pending offers for that id.
+behind it: it claims the unique id without raising, and retires the **discovery offer** for that
+id. Only that one. Aborting every flow with the same unique id would mean a second guided install
+cancelling the first one's task in the middle of its transaction, and the first would then be
+unwinding a receiver the second is writing to. A flow of this handler parked on the progress step
+holds a transaction against a real box, so the second install is refused instead — it aborts
+itself with `already_in_progress`, which is what that string was always for.
+
 The reverse stays as it was — an announcement arriving while an install is running aborts, because
 the install owns the id from the moment the credentials are submitted. So does the manual path,
 which never raised on a pending offer and does not withdraw one either; Home Assistant retires it
@@ -275,10 +281,23 @@ reported when the work is already committed, microseconds before the task resolv
 
 Two posts then raced for one flow. The first created the entry and removed the flow; the second
 found nothing and was answered with „Invalid flow specified" — on the screen that should have said
-the receiver was ready, at the end of an install that had in fact succeeded. The phases are still
-reported and the progress bar still moves, but the last one no longer asks for a refresh: the
-notification Home Assistant sends when the task resolves is the only one left near the end, so
-there is one caller and one answer.
+the receiver was ready, at the end of an install that had in fact succeeded. It is worse on a
+**failure**: a phase reported shortly before an error produced the same race, and there the
+message that is lost is the reason, which is the only thing on that screen worth reading.
+
+**No phase asks the frontend for anything.** Suppressing the notification for the last phase only
+would have narrowed the window rather than closed it — every phase is followed by work that can
+fail quickly. The mechanism is the one Home Assistant's own integrations use: the flow is shown
+with a single `progress_action` for the whole install, and the phases drive
+`async_update_progress`, which reaches the frontend as a bar position without asking it to post.
+The only notification left is the one Home Assistant sends when the install task resolves, so
+there is one caller and one answer, on success and on failure alike.
+
+**The trade-off is the caption.** It no longer names the phase — eight per-phase strings became
+one sentence covering the whole install. A caption can only change when the step is entered again,
+and the step is only entered again on a post; with nothing asking for one, a phase in the caption
+would freeze on „preflight" for the length of the install and read as a receiver that had stopped.
+A bar that moves eight times says the true thing, and says it live.
 
 ### 14. A rollback has to delete the bytecode the receiver actually writes
 
@@ -295,11 +314,14 @@ that survives an image whose set of compiled files is not the set of files of an
 
 Every guided install left another full copy of the plugin directory under
 `/home/root/mqttbridge-backups/`, for ever, on a receiver's flash. A successful install now prunes
-its predecessors and keeps the two newest — the way back from this install and the way back from
-the one before it. Pruning happens after the transaction lock is released and before the helper
-that does it is deleted, it only ever considers directories named `ha-installer-<nonce>` that are
-not symlinks, and a failure to prune is logged and otherwise ignored: by then the plugin is
-installed and verified, and tidying cannot be a reason to undo that.
+its predecessors and keeps its own snapshot and one more. Its own is kept **by name**, not by
+timestamp: many receivers have no battery-backed clock, boot in 1970 and jump to the real time
+when NTP answers, which can be after the snapshot was written — so ordering by modification time
+can rank the only way back from the committing install as the oldest thing in the directory and
+delete it. Pruning happens after the transaction lock is released and before the helper that does
+it is deleted, it only ever considers directories named `ha-installer-<nonce>` that are not
+symlinks, and a failure to prune is logged and otherwise ignored: by then the plugin is installed
+and verified, and tidying cannot be a reason to undo that.
 
 ## Consequences
 
