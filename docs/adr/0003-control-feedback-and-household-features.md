@@ -2,6 +2,7 @@
 
 **Status:** accepted
 **Date:** 2026-09-21
+**Amended:** 2026-09-22 — the guided installer ran on a receiver for the first time
 
 ## Context
 
@@ -240,6 +241,87 @@ its warning that deep standby may be one-way until the drill passes on hardware*
 issues the right command is not a receiver that wakes up.
 
 Process and memory sensors ship as already drafted, gated on the receiver naming that capability.
+
+## Amendment — 2026-09-22: what the first guided install on a receiver found
+
+The decisions above were written while the guided installer had never been run on hardware. It has
+now been, and it found four defects. None of them changes a decision above; they are recorded here
+because two of them are about a mechanism nothing else in this integration uses, and a reader who
+only has the code will not see why it is written the way it is.
+
+### 12. A pending discovery flow may not block the guided install
+
+The plugin's announcement is retained, so Home Assistant offers a discovery card for the receiver
+again at every start and at every reconnect to the broker. On any box that has ever announced, one
+of those offers is therefore almost always waiting — and the guided install's
+`async_set_unique_id` refused to proceed beside it, so the install aborted with
+`already_in_progress` at the one step where two passwords have just been typed.
+
+The offer and the install are about the same receiver, and the install is the one with a person
+behind it: it claims the unique id without raising, and retires the **discovery offer** for that
+id. Only that one. Aborting every flow with the same unique id would mean a second guided install
+cancelling the first one's task in the middle of its transaction, and the first would then be
+unwinding a receiver the second is writing to. A flow of this handler parked on the progress step
+holds a transaction against a real box, so the second install is refused instead — it aborts
+itself with `already_in_progress`, which is what that string was always for.
+
+The reverse stays as it was — an announcement arriving while an install is running aborts, because
+the install owns the id from the moment the credentials are submitted. So does the manual path,
+which never raised on a pending offer and does not withdraw one either; Home Assistant retires it
+by itself once an entry claims the id, which is a moment the manual path reaches in seconds and
+the install does not reach for minutes.
+
+### 13. A progress flow has exactly one caller that may finish it
+
+Home Assistant advances a progress step itself when the task it was handed resolves, and then tells
+the frontend the flow changed; the frontend answers by posting to the flow, and that post is what
+creates the entry. The install also reports its own phases so that the card says what is happening,
+and each report asked the frontend for the same refresh — including the last phase, which is
+reported when the work is already committed, microseconds before the task resolves.
+
+Two posts then raced for one flow. The first created the entry and removed the flow; the second
+found nothing and was answered with „Invalid flow specified" — on the screen that should have said
+the receiver was ready, at the end of an install that had in fact succeeded. It is worse on a
+**failure**: a phase reported shortly before an error produced the same race, and there the
+message that is lost is the reason, which is the only thing on that screen worth reading.
+
+**No phase asks the frontend for anything.** Suppressing the notification for the last phase only
+would have narrowed the window rather than closed it — every phase is followed by work that can
+fail quickly. The mechanism is the one Home Assistant's own integrations use: the flow is shown
+with a single `progress_action` for the whole install, and the phases drive
+`async_update_progress`, which reaches the frontend as a bar position without asking it to post.
+The only notification left is the one Home Assistant sends when the install task resolves, so
+there is one caller and one answer, on success and on failure alike.
+
+**The trade-off is the caption.** It no longer names the phase — eight per-phase strings became
+one sentence covering the whole install. A caption can only change when the step is entered again,
+and the step is only entered again on a post; with nothing asking for one, a phase in the caption
+would freeze on „preflight" for the length of the install and read as a receiver that had stopped.
+A bar that moves eight times says the true thing, and says it live.
+
+### 14. A rollback has to delete the bytecode the receiver actually writes
+
+CPython compiles into `__pycache__/<module>.<tag>.pyc`; this image compiles into the legacy
+location, `<module>.pyc` beside the source. `opkg remove` deletes the files it installed, which are
+the `.py` files, so the rollback of a first install restored "there was no OpenWebif hook here" and
+left `MQTTBridge.pyc` next to where the source had been — and Python imports a legacy-location
+`.pyc` as a complete module, so the hook stayed importable and would go looking for a plugin that is
+no longer installed. Both locations are now snapshotted and restored as one thing. The plugin
+directory itself was already removed wholesale rather than file by file, which is the only approach
+that survives an image whose set of compiled files is not the set of files of any one build.
+
+### 15. Snapshots are pruned, and the newest two are kept
+
+Every guided install left another full copy of the plugin directory under
+`/home/root/mqttbridge-backups/`, for ever, on a receiver's flash. A successful install now prunes
+its predecessors and keeps its own snapshot and one more. Its own is kept **by name**, not by
+timestamp: many receivers have no battery-backed clock, boot in 1970 and jump to the real time
+when NTP answers, which can be after the snapshot was written — so ordering by modification time
+can rank the only way back from the committing install as the oldest thing in the directory and
+delete it. Pruning happens after the transaction lock is released and before the helper that does
+it is deleted, it only ever considers directories named `ha-installer-<nonce>` that are not
+symlinks, and a failure to prune is logged and otherwise ignored: by then the plugin is installed
+and verified, and tidying cannot be a reason to undo that.
 
 ## Consequences
 

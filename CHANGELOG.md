@@ -121,6 +121,34 @@ have not been accepted on a receiver, and no tag has been cut.
 
 Found by running this release against a real receiver rather than a test one.
 
+- **A receiver that had announced before could not be installed on from the guided flow.**
+  The plugin's announcement is retained, so Home Assistant offers a discovery card for the box
+  again at every start and at every reconnect to the broker — and the guided install refused to
+  run beside that waiting offer. It aborted with "this receiver is already being added" at the one
+  step where two passwords had just been typed. The install now takes the offer down instead of
+  giving way to it, so there is one card for one receiver. An announcement that arrives while an
+  install is running still stands aside, and adding a box by hand is unchanged. A second guided
+  install for a receiver that is already being installed on now waits its turn instead, rather
+  than cancelling the first one in the middle of its transaction.
+- **A guided install ended on "Invalid flow specified"** instead of on the new receiver or, worse,
+  instead of on the reason it failed. Each install phase asked the screen to re-read the flow, and
+  re-reading is what finishes it — so a phase reported close to the end of the transaction put a
+  second request on the flow at the same moment Home Assistant put its own there. One of them
+  finished the install and the other arrived to find nothing left. No phase asks for anything now:
+  the **progress bar still moves through all eight of them**, live, and the text beside it is one
+  sentence for the whole install rather than a caption that could only change when the screen was
+  asked to re-read — which is the thing that has been taken away.
+- **A rollback left the OpenWebif hook's compiled copy behind.** This image compiles into the
+  legacy location — `MQTTBridge.pyc` beside the source, not in `__pycache__` — and Python imports
+  that as a complete module. Undoing a first install therefore restored "there was no hook here"
+  and left an importable hook reaching for a plugin that had just been removed. Both locations are
+  now backed up and restored as one.
+- **Installer snapshots no longer accumulate on the receiver.** Every guided install left another
+  full copy of the plugin directory under `/home/root/mqttbridge-backups/`, for ever. A successful
+  install now keeps its own snapshot and one more, and removes the rest. Its own is kept by name
+  rather than by date, because a receiver without a battery-backed clock boots in 1970 and can
+  stamp its newest snapshot as the oldest one there. It only ever touches directories it made
+  itself, and a failure to tidy up is never a reason to undo an install that has been verified.
 - **The guided installer could not find opkg's database on OpenViX.** Where that database
   lives is a setting, not a constant: OpenViX 6.6 keeps it under `/var/lib/opkg` and says so
   in `/etc/opkg/opkg.conf`, leaving `/usr/lib/opkg` with nothing in it but `alternatives/`.

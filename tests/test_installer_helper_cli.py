@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -66,12 +67,15 @@ def test_identity_is_printed_as_the_json_the_installer_parses(
     }
 
 
+@pytest.mark.parametrize(
+    "operation", ["snapshot", "restore", "verify", "claim", "release", "prune"]
+)
 def test_identity_needs_no_path_and_the_others_refuse_without_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
 ) -> None:
     """A missing path would otherwise be a traceback on a box with no console."""
     with pytest.raises(SystemExit) as raised:
-        _run(monkeypatch, "snapshot", "--root", str(tmp_path))
+        _run(monkeypatch, operation, "--root", str(tmp_path))
 
     assert raised.value.code == 2
 
@@ -127,6 +131,37 @@ def test_verify_accepts_the_files_opkg_installed_and_refuses_a_changed_one(
     installed.write_text("tampered\n", encoding="utf-8")
     with pytest.raises(ValueError, match="digest mismatch"):
         _run(monkeypatch, "verify", str(manifest), "--root", str(root))
+
+
+def test_prune_leaves_the_two_newest_snapshots_and_says_what_it_took(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The last thing a successful install runs before deleting the helper itself."""
+    backups = tmp_path / "mqttbridge-backups"
+    backups.mkdir()
+    for index, nonce in enumerate(("aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc")):
+        directory = backups / f"ha-installer-{nonce}"
+        directory.mkdir()
+        os.utime(directory, (1_700_000_000 + index, 1_700_000_000 + index))
+
+    assert (
+        _run(
+            monkeypatch,
+            "prune",
+            str(backups),
+            "--keep-name",
+            "ha-installer-aaaaaaaaaaaa",
+        )
+        == 0
+    )
+
+    # The one named on the command line stays whatever its timestamp says, and it
+    # takes one of the two places rather than being kept beside them.
+    assert sorted(child.name for child in backups.iterdir()) == [
+        "ha-installer-aaaaaaaaaaaa",
+        "ha-installer-cccccccccccc",
+    ]
+    assert "ha-installer-bbbbbbbbbbbb" in capsys.readouterr().err
 
 
 def test_claim_and_release_are_the_lock_the_installer_serialises_on(

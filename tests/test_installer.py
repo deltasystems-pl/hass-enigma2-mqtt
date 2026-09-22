@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -324,6 +325,98 @@ async def test_install_streams_bundle_and_provisioning_then_cleans_up(
     joined = "\n".join(receiver.commands)
     assert "not-a-real-password" not in joined
     assert "not-a-real-broker-password" not in joined
+
+
+async def _async_committed_install(
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+    receiver: FakeReceiver,
+):
+    """Drive one install that reaches its commit, against a fake receiver."""
+    artifact = tmp_path / "plugin.ipk"
+    artifact.write_bytes(b"ipk bytes")
+    digest = hashlib.sha256(b"ipk bytes").hexdigest()
+    bundle = BundledPlugin(artifact, "0.1.0", digest, "1" * 40)
+    original_run = FakeSession.run
+
+    async def hash_aware_run(self: FakeSession, command: str, **kwargs: Any):
+        if "sha256sum" in command:
+            self.receiver.commands.append(command)
+            return CommandResult(0, digest + "\n")
+        return await original_run(self, command, **kwargs)
+
+    async def completed_watch(*args: Any, **kwargs: Any):
+        del args, kwargs
+        loop = asyncio.get_running_loop()
+        watch = type("Watch", (), {})()
+        watch.established = loop.create_future()
+        watch.completed = loop.create_future()
+        watch.established.set_result(None)
+        watch.completed.set_result(None)
+        watch.cancel = lambda: None
+        watch.arm = lambda: None
+        return watch
+
+    with (
+        patch("custom_components.enigma2_mqtt.installer.load_bundled_plugin", return_value=bundle),
+        patch(
+            "custom_components.enigma2_mqtt.installer._installed_hash_manifest",
+            return_value=b"hash  /file\n",
+        ),
+        patch("custom_components.enigma2_mqtt.installer._async_watch_restart", completed_watch),
+        patch.object(FakeSession, "run", hash_aware_run),
+    ):
+        return await async_install(hass, install_request, _connector=receiver.connect)
+
+
+async def test_a_committed_install_prunes_superseded_snapshots(
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+) -> None:
+    """Otherwise every guided install leaves another plugin directory on the flash.
+
+    It has to happen after the lock is released — the receiver is free at that point —
+    and before the helper that does it is deleted.
+    """
+    receiver = FakeReceiver()
+
+    result = await _async_committed_install(hass, install_request, tmp_path, receiver)
+
+    assert result.restarted is True
+    prune = next(index for index, sent in enumerate(receiver.commands) if " prune " in sent)
+    release = next(index for index, sent in enumerate(receiver.commands) if " release " in sent)
+    removal = next(
+        index
+        for index, sent in enumerate(receiver.commands)
+        if sent.startswith("rm -f ") and "enigma2-mqtt-installer-" in sent
+    )
+    assert release < prune < removal
+    # The snapshot this install just took is named, so that pruning cannot rank it by
+    # a receiver clock that was wrong when it was written and delete it.
+    snapshot = next(
+        sent.rsplit(" ", 1)[-1] for sent in receiver.commands if " snapshot " in sent
+    )
+    assert receiver.commands[prune].endswith(
+        f" prune /home/root/mqttbridge-backups --keep-name {snapshot.rsplit('/', 1)[-1]}"
+    )
+
+
+async def test_a_prune_that_fails_does_not_fail_a_committed_install(
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The plugin is installed and verified by then; tidying cannot undo that."""
+    receiver = FakeReceiver(fail_on=" prune ")
+
+    result = await _async_committed_install(hass, install_request, tmp_path, receiver)
+
+    assert result.version == "0.1.0"
+    assert receiver.installed is True
+    assert "superseded installer snapshots" in caplog.text
 
 
 async def test_install_failure_restores_preexisting_plugin(
