@@ -48,7 +48,8 @@
           "broker_host": "The broker address as the receiver reaches it. The receiver is the one that connects, so this has to work from the receiver's network — Home Assistant's own broker setting is not necessarily the same address.",
           "broker_port": "The broker's MQTT port. 1883 unless the broker was moved.",
           "broker_username": "The login created for this receiver alone. Do not reuse the one Home Assistant connects with.",
-          "broker_password": "Written to the receiver in a file only root can read. It never reaches a Home Assistant log or the diagnostics download."
+          "broker_password": "Written to the receiver in a file only root can read. It never reaches a Home Assistant log or the diagnostics download.",
+          "name": "What to call this receiver in Home Assistant. Left empty, a receiver that already has a name keeps it, and one that has none is named after its box type by the plugin."
         }
       },
       "install_progress": {"title": "Installing MQTT Bridge"},

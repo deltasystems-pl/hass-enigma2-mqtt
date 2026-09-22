@@ -493,6 +493,12 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
                 description_placeholders=self._install_placeholders or None,
             )
         assert self._install_request is not None
+        # An empty name field leaves the receiver called whatever it was already called,
+        # which this screen could not know: it is drawn before anything has logged in to
+        # the box. The transaction read it, so the entry is titled with it rather than
+        # with the node id. Equal to what was typed whenever anything was.
+        if self._install_result.friendly_name:
+            self._name = self._install_result.friendly_name
         data = {
             CONF_NODE_ID: self._node_id,
             CONF_BASE_TOPIC: self._base_topic,

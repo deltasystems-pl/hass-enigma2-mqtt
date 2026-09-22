@@ -281,7 +281,11 @@ async def test_a_damaged_distribution_is_named_rather_than_crashed_on(
         "not json",
         '"a string"',
         '{"node_id": "x"}',
-        '{"node_id": 1, "base_topic": "e", "enabled": true, "ha_mode": "integration"}',
+        '{"node_id": "x", "base_topic": "e", "enabled": true, "ha_mode": "integration"}',
+        '{"node_id": 1, "base_topic": "e", "enabled": true, "ha_mode": "integration",'
+        ' "friendly_name": null}',
+        '{"node_id": "x", "base_topic": "e", "enabled": true, "ha_mode": "integration",'
+        ' "friendly_name": 7}',
     ],
 )
 async def test_an_unreadable_receiver_identity_is_refused(

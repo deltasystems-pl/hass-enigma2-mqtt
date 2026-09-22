@@ -74,6 +74,12 @@ never arrived.
 SSH* reads the receiver's SSH host key, shows its fingerprint, and only then asks for the SSH
 password and the broker settings it will write onto the box.
 
+**The name field, left empty, changes nothing on the receiver.** The install writes no name, so a
+receiver that already has one keeps it, and one that has none is named after its box type by the
+plugin, as on a first start. The Home Assistant entry is then **titled with the name the receiver
+already has** rather than with the node ID. A name that was typed is written and wins; a field
+holding nothing but spaces counts as empty.
+
 🔴 **Give the receiver a broker login of its own.** The broker password ends up in a file on the
 receiver's own flash, and most Enigma2 images answer SSH with the image's default root password
 — so a login shared with Home Assistant is the whole broker, one box away. On a standalone

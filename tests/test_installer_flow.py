@@ -26,6 +26,7 @@ from custom_components.enigma2_mqtt.config_flow import (
 from custom_components.enigma2_mqtt.const import (
     CONF_BASE_TOPIC,
     CONF_KEEP_SSH_CREDENTIALS,
+    CONF_NAME,
     CONF_NODE_ID,
     CONF_SSH_HOST,
     CONF_SSH_HOST_KEY,
@@ -119,6 +120,45 @@ async def test_install_creates_entry_and_discards_credentials_by_default(
     entry = hass.config_entries.async_entries(DOMAIN)[0]
     assert CONF_SSH_PASSWORD not in entry.data
     assert entry.data[CONF_SSH_HOST] == "receiver.local"
+
+
+async def test_the_entry_is_titled_with_the_name_the_receiver_already_has(
+    hass: HomeAssistant, mqtt_mock
+) -> None:
+    """The name field was left empty, so the receiver keeps its name — and so does the entry.
+
+    Only the transaction can ask the receiver what it is called; the form is drawn
+    before anything has logged in to it. The title used to fall back to the node id,
+    which named the entry after something nobody says out loud while the box on the
+    same page was called something else.
+    """
+    result = await _install_form(hass)
+    with patch(
+        "custom_components.enigma2_mqtt.config_flow.async_install",
+        AsyncMock(return_value=InstallResult("0.1.0", True, True, "Living room receiver")),
+    ):
+        await hass.config_entries.flow.async_configure(result["flow_id"], _install_input())
+        await hass.async_block_till_done()
+
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    assert entry.title == "Living room receiver"
+    assert entry.data[CONF_NAME] == "Living room receiver"
+
+
+async def test_a_box_with_no_name_at_all_keeps_the_node_id_as_its_title(
+    hass: HomeAssistant, mqtt_mock
+) -> None:
+    """A first install of a box that had no name has nothing better to be called."""
+    result = await _install_form(hass)
+    with patch(
+        "custom_components.enigma2_mqtt.config_flow.async_install",
+        AsyncMock(return_value=InstallResult("0.1.0", True, True)),
+    ):
+        await hass.config_entries.flow.async_configure(result["flow_id"], _install_input())
+        await hass.async_block_till_done()
+
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    assert entry.title == NODE_ID
 
 
 async def test_install_keeps_credentials_only_with_explicit_consent(

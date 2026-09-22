@@ -671,7 +671,9 @@ def test_restore_refuses_live_symlink_before_metadata_changes(tmp_path: Path) ->
     assert status.read_bytes() == before
 
 
-def test_read_identity_exposes_only_binding_fields(tmp_path: Path) -> None:
+def test_read_identity_exposes_the_binding_fields_and_never_a_secret(
+    tmp_path: Path,
+) -> None:
     root = tmp_path / "root"
     _write(
         root,
@@ -689,6 +691,7 @@ def test_read_identity_exposes_only_binding_fields(tmp_path: Path) -> None:
         "base_topic": "enigma2/rooms",
         "enabled": True,
         "ha_mode": "integration",
+        "friendly_name": None,
     }
 
 
@@ -718,6 +721,7 @@ def test_read_identity_reports_a_setting_that_is_not_stored_as_absent(
         "base_topic": None,
         "enabled": None,
         "ha_mode": "off",
+        "friendly_name": None,
     }
 
 
@@ -748,7 +752,43 @@ def test_read_identity_of_a_receiver_with_no_settings_file_is_all_absent(
         "base_topic": None,
         "enabled": None,
         "ha_mode": None,
+        "friendly_name": None,
     }
+
+
+def test_read_identity_reports_the_name_the_receiver_stores_verbatim(
+    tmp_path: Path,
+) -> None:
+    """The name is reported as stored, so a reinstall can carry it forward.
+
+    Nothing compares it — a receiver may be called anything — but a guided reinstall
+    whose name field was left empty has to be able to put back the name the household
+    reads, and it can only do that if this reports it rather than a tidied version of
+    it. Leading and trailing spaces are left on: deciding whether they mean "no name"
+    belongs to the side that decides what to write.
+    """
+    root = tmp_path / "root"
+    _write(
+        root,
+        "etc/enigma2/settings",
+        "config.plugins.mqttbridge.node_id=vuuno4kse_005301\n"
+        "config.plugins.mqttbridge.friendly_name= Living room receiver \n",
+    )
+
+    identity = read_identity(root)
+
+    assert identity["friendly_name"] == " Living room receiver "
+
+
+def test_read_identity_tells_a_receiver_with_an_empty_name_from_one_with_none(
+    tmp_path: Path,
+) -> None:
+    """A receiver that has never run its plugin stores no name at all."""
+    root = tmp_path / "root"
+    _write(root, "etc/enigma2/settings", "config.plugins.mqttbridge.friendly_name=\n")
+
+    assert read_identity(root)["friendly_name"] == ""
+    assert read_identity(tmp_path / "other")["friendly_name"] is None
 
 
 def test_verify_manifest_checks_actual_installed_bytes(tmp_path: Path) -> None:

@@ -478,7 +478,7 @@ def verify_manifest(root: Path, manifest_path: Path) -> None:
 
 
 def read_identity(root: Path) -> dict[str, object]:
-    """Read only the non-secret settings which bind an HA entry to this box.
+    """Read the non-secret settings which bind an HA entry to this box, and its name.
 
     Raw facts, and `null` is one of them: it means enigma2's settings file has no line
     for that setting, which is neither an empty value nor a difference. Enigma2 never
@@ -489,6 +489,14 @@ def read_identity(root: Path) -> dict[str, object]:
     caller's job: they belong to the plugin, they are worth having in exactly one
     place, and this half of the installer runs on the receiver with no way to import
     anything of Home Assistant's.
+
+    `friendly_name` binds nothing and is reported for the opposite reason: it is the
+    name the household reads, and an install whose name field was left empty leaves
+    the receiver called this, so it is the only way for the caller to know what the box
+    it has just configured is called. Raw like the rest — an empty string is a receiver
+    that stores an empty name, and `null` a receiver that stores none — because the
+    caller decides what to do with a blank, and cannot if this has already flattened
+    the two.
     """
     settings = _path(root, SETTINGS)
     values: dict[str, str] = {}
@@ -505,6 +513,7 @@ def read_identity(root: Path) -> dict[str, object]:
         "base_topic": None if base_topic is None else base_topic.strip("/"),
         "enabled": None if enabled is None else enabled.strip().lower() == "true",
         "ha_mode": values.get("ha_mode"),
+        "friendly_name": values.get("friendly_name"),
     }
 
 
