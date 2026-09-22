@@ -106,6 +106,31 @@ its snapshot behind as well; from then on it is an ordinary one, and it goes onc
 exist. The uploaded package, the manifest and the helper script live in `/tmp` and are deleted when
 the transaction commits. Nothing else is written.
 
+**When an install fails.** Every failure ends on a sentence rather than a code, and the sentence
+says what state the receiver was left in. Most of them — no space, a recording running, a bad
+password, the plugin never announcing itself — mean the receiver was put back exactly as it was
+and there is nothing to do but fix the cause and press install again; the snapshot the run took
+stays behind as evidence and is pruned by the next two successful installs. Two are different:
+
+- *„…the receiver was put back as it was, but its interface did not start again. Restart the
+  receiver by hand."* The files, the plugin settings and the opkg database are back; only the
+  Enigma interface did not come up within two minutes of being told to. Power-cycle the receiver
+  or start it over SSH (`init 3`), then install again. Nothing needs undoing first.
+- *„…the receiver could not be put back as it was. Check the receiver by hand."* This one names
+  `/home/root/mqttbridge-backups`, and it is the only outcome that asks you to look at the box:
+  the restore itself did not complete, so the receiver may be part-way between the two versions.
+  The named `ha-installer-<nonce>` directory holds everything the install was about to change.
+- *„…but the installer's transaction lock could not be released."* The receiver is back as it
+  was and the only thing left behind is the lock that keeps two installs off one box. Delete
+  `/home/root/mqttbridge-backups/.ha-installer.lock` over SSH, or wait thirty minutes for it to
+  be judged stale; until then the next attempt is refused with "another installation is already
+  running".
+
+The installer releases that lock on the way out of every other failure, including one where the
+restore itself did not finish, so a receiver is not left refusing installs because a recovery
+went wrong. The Home Assistant log carries the reason for every step that failed, which the abort
+screen has no room for, and the rollback's own steps are logged as it takes them.
+
 A box that has announced itself is usually being offered on the discovery card at the same time.
 Installing over SSH takes that offer down as soon as the credentials are submitted, so there is one
 card for one receiver rather than two.

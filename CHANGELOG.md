@@ -209,6 +209,36 @@ Found by running this release against a real receiver rather than a test one.
   the string they had sent, so on a receiver that answers in its own spelling a command that had
   plainly worked was reported as a timeout ten seconds later. They now compare the fields that
   identify a service, by the same rule and the same field count as the receiver plugin.
+- **A rollback that had worked was reported as a rollback that had failed, and left the receiver
+  locked.** Undoing an install restarts the receiver's interface and then checks that it is
+  running — and it checked six seconds after asking, while the interface takes eleven to fourteen
+  to come back. So a box that was recovering normally was judged not to have recovered: the
+  screen said the receiver could not be put back and named a backup directory, instead of saying
+  why the install had failed, and the transaction lock was never released — so the next attempt,
+  on a receiver that was in perfect order, refused itself with "another installation is already
+  running" until the lock was deleted by hand. The restart is now waited for, for as long as the
+  install itself waits for the plugin to announce itself, and the lock is released whatever else
+  went wrong: a receiver that has been put back is not one to refuse the next install on, and the
+  next install snapshots again before it touches anything. A rollback that restored the files but
+  could not bring the interface back is now its own outcome — "restart the receiver by hand" —
+  rather than being reported as a receiver that needs inspecting, and a receiver that came back
+  but could not be unlocked is a third, naming the lock directory to delete. A rollback
+  interrupted by a shutdown now reports itself as interrupted instead of as a broken receiver.
+- **A receiver whose image runs a wrapper beside Enigma can be installed on at all.** Both the
+  install and its rollback proved a restart by asking for the running Enigma process and refusing
+  anything but exactly one — and images that start the interface from a wrapper report two, for
+  as long as the box is up. The guided install stopped with "the interface did not restart
+  safely" at the step immediately before the only disruptive command, on a receiver with nothing
+  wrong with it, and a rollback there waited out its whole timeout before reporting a restart
+  that had in fact happened. A restart is now proved by any process that was not running before
+  it, which is what a restart means; no process at all beforehand — a box still booting — is an
+  ordinary answer rather than a refusal.
+- **A failed rollback said so without saying why.** The log line named the backup directory and
+  dropped the exception that had caused it, so the only place left to find out what had gone
+  wrong was the receiver. Both that line and the one about a transaction lock that could not be
+  released now carry the cause, and the rollback's own steps — stopping the interface, restoring,
+  restarting, releasing the lock — are logged as they happen, so a bad day leaves a trail without
+  debug logging having been on beforehand.
 
 ### Changed
 

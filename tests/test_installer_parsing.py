@@ -26,7 +26,7 @@ from custom_components.enigma2_mqtt.installer import (
     InstallerErrorCode,
     InstallRequest,
     SshCredentials,
-    _async_enigma_pid,
+    _async_enigma_pids,
     _async_load_bundle,
     _async_validate_receiver_identity,
     _finite_timestamp,
@@ -213,13 +213,43 @@ async def test_a_transport_failure_becomes_the_step_s_own_error_code() -> None:
     assert raised.value.code is InstallerErrorCode.UPLOAD_FAILED
 
 
-@pytest.mark.parametrize("output", ["", "100 101\n", "not-a-pid\n"])
-async def test_an_ambiguous_enigma_lifecycle_is_refused(output: str) -> None:
-    """Two Enigma processes, or none, means the restart proof cannot be read."""
+@pytest.mark.parametrize(
+    "result",
+    [
+        # The restart proof is arithmetic on these numbers; a word in there is not one.
+        CommandResult(0, "not-a-pid\n"),
+        # `pidof` says "no match" with 1 and nothing else with anything above it, so an
+        # exit status of its own is a question that was not answered — not a receiver
+        # with its interface down, which is what the empty set means.
+        CommandResult(2, ""),
+        CommandResult(127, "", "pidof: not found"),
+    ],
+)
+async def test_an_answer_that_is_not_a_pid_list_is_refused(result: CommandResult) -> None:
     with pytest.raises(InstallerError) as raised:
-        await _async_enigma_pid(_Fixed(CommandResult(0, output)))
+        await _async_enigma_pids(_Fixed(result))
 
     assert raised.value.code is InstallerErrorCode.RESTART_FAILED
+
+
+@pytest.mark.parametrize(
+    ("result", "expected"),
+    [
+        # What `pidof` does when nothing matches. It is an interface that is down — a
+        # box still booting, or one stopped on purpose — not a receiver that failed to
+        # answer, and it used to be refused as an ambiguous lifecycle.
+        (CommandResult(1, ""), set()),
+        (CommandResult(0, "100\n"), {100}),
+        # A wrapper beside the interface it starts. Both are Enigma, for as long as the
+        # box is up, and refusing this shape meant no install could finish on such an
+        # image at all.
+        (CommandResult(0, "100 101\n"), {100, 101}),
+    ],
+)
+async def test_every_shape_pidof_reports_is_read_rather_than_refused(
+    result: CommandResult, expected: set[int]
+) -> None:
+    assert await _async_enigma_pids(_Fixed(result)) == expected
 
 
 @pytest.mark.parametrize(

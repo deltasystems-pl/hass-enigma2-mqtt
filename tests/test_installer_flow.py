@@ -410,6 +410,51 @@ async def test_a_successful_install_ends_on_the_created_entry(
     assert len(hass.config_entries.async_entries(DOMAIN)) == 1
 
 
+async def _rollback_restart_failed_install(_hass, _request, progress_cb):
+    """Fail after the receiver has been restored but not restarted."""
+    progress_cb("announcement")
+    await asyncio.sleep(0)
+    raise InstallerError(InstallerErrorCode.ROLLBACK_RESTART_FAILED)
+
+
+async def test_a_rollback_that_only_lost_the_interface_says_that_on_the_screen(
+    hass: HomeAssistant, mqtt_mock
+) -> None:
+    """The advice differs, so the abort reason has to.
+
+    A rollback whose restore worked and whose restart did not leaves a receiver that
+    needs a power cycle and nothing else. Reported as `rollback_failed` it sent the
+    person to inspect a backup directory instead, on a box with nothing wrong with its
+    files.
+    """
+    answers, _ = await _install_watching_the_frontend(hass, _rollback_restart_failed_install)
+
+    assert len(answers) == 1
+    assert answers[0]["type"] is FlowResultType.ABORT
+    # The literal, because that is the key the abort text is looked up by.
+    assert answers[0]["reason"] == "rollback_restart_failed"
+    assert hass.config_entries.async_entries(DOMAIN) == []
+
+
+async def _rollback_lock_failed_install(_hass, _request, progress_cb):
+    """Fail after the receiver has been restored but could not be unlocked."""
+    progress_cb("announcement")
+    await asyncio.sleep(0)
+    raise InstallerError(InstallerErrorCode.ROLLBACK_LOCK_FAILED)
+
+
+async def test_a_receiver_left_locked_says_that_on_the_screen(
+    hass: HomeAssistant, mqtt_mock
+) -> None:
+    """The next attempt is refused as busy, so this cannot be a log line only."""
+    answers, _ = await _install_watching_the_frontend(hass, _rollback_lock_failed_install)
+
+    assert len(answers) == 1
+    assert answers[0]["type"] is FlowResultType.ABORT
+    # The literal, because that is the key the abort text is looked up by.
+    assert answers[0]["reason"] == "rollback_lock_failed"
+
+
 async def test_a_failed_install_ends_on_its_reason(hass: HomeAssistant, mqtt_mock) -> None:
     """The abort screen is the one that has something worth reading on it.
 

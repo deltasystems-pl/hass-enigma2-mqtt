@@ -2,7 +2,8 @@
 
 **Status:** accepted
 **Date:** 2026-09-21
-**Amended:** 2026-09-22 — the guided installer ran on a receiver for the first time
+**Amended:** 2026-09-22 — the guided installer ran on a receiver for the first time, and its
+rollback ran on a receiver for the first time
 
 ## Context
 
@@ -323,6 +324,112 @@ it is deleted, it only ever considers directories named `ha-installer-<nonce>` t
 symlinks, and a failure to prune is logged and otherwise ignored: by then the plugin is installed
 and verified, and tidying cannot be a reason to undo that.
 
+## Amendment — 2026-09-22, second drill: the rollback path was never watched
+
+The first drill exercised an install that succeeded. The second deliberately gave the installer a
+broker password that would not authenticate, so that the rollback — the part of this transaction
+that only ever runs on a bad day — would run for the first time on hardware. It worked, and it
+reported that it had not.
+
+### 16. A rollback waits for the interface it restarted, exactly as the install does
+
+The plugin installed, the receiver restarted, the broker answered `Not authorized` seven times
+over 103 seconds, and no announcement arrived; the installer rolled back. Measured on the box:
+`init 4`, the restore, `init 3`, and eleven to fourteen seconds later the interface answering
+again — the same recovery time every restart took that day. Six seconds after `init 3`, Home
+Assistant reported that the rollback had failed.
+
+`init 3` is answered when the runlevel change is accepted, not when Enigma is up, and the rollback
+asked `pidof enigma2` once, straight afterwards. **The success path never made that mistake**: it
+waits up to two minutes for the plugin's fresh MQTT announcement before judging the restart. The
+rollback has no announcement coming — it has just put the old plugin back, or no plugin at all —
+so it now polls for the process instead, with the same timeout. A restart that genuinely does not
+come back is still a failure, but a truthful one.
+
+Two consequences followed from one wrong verdict, and both are worse than the verdict:
+
+**The reason for the failure was replaced.** After a rollback that succeeds, the abort names the
+*original* failure — here, that the plugin never announced itself — because that is the thing the
+person has to fix. A rollback that reports failure overwrites it with "the receiver could not be
+put back", which is both untrue and unactionable.
+
+**The receiver stayed locked.** The release of the durable transaction lock sat after the restart
+proof, so the false verdict skipped it. `owner.json` remained under
+`/home/root/mqttbridge-backups/.ha-installer.lock/`, and the operator's next attempt — on a
+receiver that was in perfect order — aborted with „Na tym dekoderze trwa już inna instalacja". It
+had to be deleted over SSH.
+
+### 17. The lock is released whatever else went wrong, and the two halves are told apart
+
+The order is restore, restart, prove the restart, release — and the release is reached from every
+path. A receiver whose files are back and whose interface did not start needs a person to restart
+it, not a lock that refuses the next install. **Even a restore that failed outright releases it**:
+the argument for holding it is that the box is in an unknown state and should be protected, but
+the next attempt takes its own snapshot before it touches anything, so the protection is worth
+little — while a lock nobody holds refuses every attempt for the full half-hour before it is
+judged stale, which is the failure the operator actually hit. The lock exists to keep two
+transactions off one receiver, not to quarantine a receiver.
+
+Because the steps fail for different reasons and leave the box in different states, they are now
+different outcomes. `rollback_failed` keeps its meaning — the restore itself did not complete, the
+receiver may be part-way between two versions, and the abort names the snapshot directory to look
+in. `rollback_restart_failed` is new: the files are back, only the interface did not come up, and
+the abort says to restart the receiver by hand and nothing else. Reporting both as the first sent
+a person to inspect a box that needed a power cycle.
+
+`rollback_lock_failed` is the third, and it exists because "release the lock from every path" is
+not the same as "the lock was released". A release that fails after an otherwise perfect rollback
+leaves the receiver correct and unusable by the installer, and reporting only the install's
+original reason would be true and useless — the person fixes what was wrong, presses install, and
+is refused as busy by a lock nobody holds. The abort names the directory and the half hour after
+which it is judged stale. The distinction is drawn on what actually happened, not on what was
+attempted: a release that succeeded and a tidy-up that failed after it is not this outcome, and
+the log line for it does not claim the receiver is locked.
+
+**A cancellation is not an outcome.** Home Assistant shutting down mid-transaction was being
+converted into `rollback_failed` — a verdict about a receiver, from an event that says nothing
+about one, and one that also left the task believing it had not been cancelled. It now propagates
+as itself from every step, with the lock release still attempted on the way out because it is one
+short command and the lock outlives the process holding it.
+
+### 19. The restart proof counts processes that are new, not processes that are singular
+
+`pidof enigma2` returning exactly one pid was treated as the only healthy shape, so the proof was
+"one pid, and a different one from before". Some images run a wrapper that survives a GUI restart
+beside the child that does not, and on such a receiver that proof is never satisfied.
+
+It is the **install** that this hurts most, and it was found by looking for the same narrowness
+elsewhere after the rollback was fixed rather than on the box: the install reads the pid at the
+step immediately before the only disruptive command, so a receiver of that shape was refused with
+`restart_failed` having had nothing done to it — the guided installer simply could not be used on
+that image. In the rollback the same proof cost the full two-minute timeout and then a false
+report of a restart that had happened.
+
+Both now take the set of pids before the interface is stopped and look for a pid that is not in
+it, because such a process was started since, which is what a restart means. A set that never
+gains a member is an interface that never came back, which is what the timeout and the
+`restart_failed` refusal are for. An **empty** set beforehand is an ordinary answer — a box still
+booting, or one stopped on purpose — where it used to be refused as an ambiguous lifecycle; any
+pid at all afterwards is then the proof. The two halves are deliberately asymmetric about failing
+to read that set at all: the rollback suppresses it, because it runs against a receiver in its
+worst state and nothing measured there may veto the restore, so an unreadable set becomes an empty
+one and any pid afterwards satisfies the proof — while the install lets the failure stop it, since
+at that point nothing has been touched and there is no reason to accept a weaker proof.
+
+### 18. A recovery that fails has to say why in the log
+
+`_LOGGER.error("Installer rollback failed; receiver backup remains at %s", backup)` dropped the
+exception that caused it, and the line about a lock that could not be released said only which
+receiver. During the drill that left the receiver as the only place to find out what had happened,
+which is exactly the position the log exists to avoid. Both lines now carry the cause, and the
+rollback's steps — stop, restore, restart, release — are logged at INFO as they happen, so the
+trail exists without debug logging having been turned on before the failure.
+
+Snapshot pruning is unchanged and was confirmed by the same drill: it runs only after a commit, so
+the failed run's snapshot stayed on the receiver and made three. That is correct — a failed run's
+snapshot is evidence — and the next successful install treats it as an ordinary candidate, keeping
+its own and the newest one behind it.
+
 ## Consequences
 
 - **Buttons can now raise.** An automation pressing a button that the receiver refuses will fail
@@ -339,6 +446,11 @@ and verified, and tidying cannot be a reason to undo that.
   the alternatives rather than just refusing.
 - **The remote is hidden on new installations only.** Two installations of the same version can
   therefore differ, which is the price of not rewriting somebody's dashboard.
+- **There are two more ways an install can end**, `rollback_restart_failed` and
+  `rollback_lock_failed`, whose advice is "restart the receiver and try again" and "delete the
+  lock, or wait, and try again" rather than "look at the receiver" or "fix this and press
+  install". Anything matching on abort reasons — a test, a script, a translation file — has to
+  carry them.
 - **The integration now remembers something the broker does not.** „Last error" is the first piece
   of state here that is not a projection of a topic. It is deliberate — the topic is cleared by
   design and the memory is the whole feature — but it means one entity survives a reload with a
