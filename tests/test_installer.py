@@ -48,6 +48,9 @@ class FakeReceiver:
     installed: bool = False
     rolled_back: bool = False
     enigma_pid: int = 100
+    # Some images run a wrapper beside the interface it starts; the wrapper survives a
+    # GUI restart and `pidof enigma2` reports both, for ever.
+    enigma_wrapper_pid: int | None = None
     node_id: str = ""
     base_topic: str = "enigma2"
     enabled: bool = True
@@ -148,6 +151,10 @@ class FakeSession:
         if "rm -f /tmp/enigma2-mqtt-installer-" in command:
             receiver.helper_removed = True
         if command == "pidof enigma2":
+            if receiver.enigma_wrapper_pid is not None:
+                return CommandResult(
+                    0, f"{receiver.enigma_wrapper_pid} {receiver.enigma_pid}\n"
+                )
             return CommandResult(0, f"{receiver.enigma_pid}\n")
         if command == "init 3" or 'trap "init 3"' in command:
             receiver.enigma_pid += 1
@@ -732,6 +739,132 @@ async def test_rollback_restarts_enigma_when_restore_transport_raises(
     assert raised.value.code is InstallerErrorCode.ROLLBACK_FAILED
     assert "init 4 || exit $?; sleep 3" in receiver.commands
     assert "init 3" in receiver.commands
+
+
+async def _rollback(credentials: SshCredentials, connect: Any) -> None:
+    """Run one rollback of a transaction that got as far as restarting the receiver."""
+    await _async_rollback(
+        credentials,
+        "/backup",
+        "/tmp/plugin.ipk",
+        "/tmp/helper.py",
+        "/tmp/manifest",
+        "/etc/enigma2/mqttbridge.json.ha-abc123",
+        "/tmp/lock",
+        True,
+        True,
+        True,
+        connect,
+    )
+
+
+async def test_a_receiver_that_always_reports_two_pids_is_not_a_failed_restart(
+    credentials: SshCredentials,
+) -> None:
+    """A wrapper beside the interface is a lifecycle, not an ambiguity.
+
+    The proof used to be "exactly one pid, and a different one from before". On an image
+    whose `pidof enigma2` always reports a wrapper and its child, that is never true, so
+    a rollback on a perfectly healthy receiver spent the whole two-minute timeout being
+    refused and then reported a restart that had in fact happened. The wrapper survives
+    the GUI restart and the child does not, so the child's new pid is the proof.
+    """
+    receiver = FakeReceiver(enigma_pid=100, enigma_wrapper_pid=42)
+
+    await _rollback(credentials, receiver.connect)
+
+    assert receiver.rolled_back is True
+    assert receiver.enigma_pid == 101
+    assert any(" release " in command for command in receiver.commands)
+
+
+async def test_a_rollback_whose_init_3_is_refused_is_a_restart_failure(
+    credentials: SshCredentials,
+) -> None:
+    """The command not being accepted is the same outcome as it not working."""
+    receiver = FakeReceiver(fail_on="init 3")
+
+    with pytest.raises(InstallerError) as raised:
+        await _rollback(credentials, receiver.connect)
+
+    assert raised.value.code is InstallerErrorCode.ROLLBACK_RESTART_FAILED
+    assert receiver.rolled_back is True
+    assert any(" release " in command for command in receiver.commands)
+
+
+async def test_a_rollback_that_cannot_unlock_says_so_rather_than_the_original_reason(
+    credentials: SshCredentials,
+) -> None:
+    """A receiver that is back but still locked is the incident this came from.
+
+    Reporting the install's original failure and nothing else is true and useless: the
+    box has been restored, the person fixes what was wrong and presses install again,
+    and that attempt is refused as busy by a lock nobody holds — for the half hour
+    before it is judged stale. The abort names the lock and where it is instead.
+    """
+    receiver = FakeReceiver(fail_on=" release ")
+
+    with pytest.raises(InstallerError) as raised:
+        await _rollback(credentials, receiver.connect)
+
+    assert raised.value.code is InstallerErrorCode.ROLLBACK_LOCK_FAILED
+    assert receiver.rolled_back is True
+    assert receiver.files == {
+        "plugin": "old",
+        "opkg": "old",
+        "settings": "old",
+        "provisioning": "old",
+    }
+
+
+async def test_a_lock_released_before_a_late_failure_is_not_reported_as_held(
+    credentials: SshCredentials,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Closing the session is not the lock, and the two used to share one message.
+
+    The release succeeded and the SSH session then failed to close, which sent the
+    person to delete a lock directory that was no longer there.
+    """
+    # The rollback opens one session for the restore and a second for the release.
+    receiver = FakeReceiver(close_raises_on={2})
+
+    await _rollback(credentials, receiver.connect)
+
+    assert any(" release " in command for command in receiver.commands)
+    assert "could not release the transaction lock" not in caplog.text
+    assert "the transaction lock was released" in caplog.text
+
+
+async def test_a_rollback_cancelled_at_the_restart_stays_cancelled(
+    credentials: SshCredentials,
+) -> None:
+    """A cancellation is not a verdict about the receiver.
+
+    Converting it into `rollback_failed` told Home Assistant that a shutdown had broken
+    a receiver, and left the task believing it had not been cancelled. The release is
+    still attempted on the way out — it is one short command and the lock outlives the
+    process that holds it.
+    """
+    receiver = FakeReceiver()
+    original = FakeSession.run
+    state = {"restarted": False}
+
+    async def cancelling(self: FakeSession, command: str, **kwargs: Any):
+        if command == "pidof enigma2" and state["restarted"]:
+            self.receiver.commands.append(command)
+            raise asyncio.CancelledError
+        result = await original(self, command, **kwargs)
+        if command == "init 3":
+            state["restarted"] = True
+        return result
+
+    with patch.object(FakeSession, "run", cancelling):
+        with pytest.raises(asyncio.CancelledError):
+            await _rollback(credentials, receiver.connect)
+
+    assert receiver.rolled_back is True
+    assert any(" release " in command for command in receiver.commands)
 
 
 async def test_restart_watch_ignores_retained_and_requires_upgrade_offline(

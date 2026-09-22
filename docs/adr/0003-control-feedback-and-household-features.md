@@ -370,12 +370,39 @@ little — while a lock nobody holds refuses every attempt for the full half-hou
 judged stale, which is the failure the operator actually hit. The lock exists to keep two
 transactions off one receiver, not to quarantine a receiver.
 
-Because the two halves fail for different reasons and leave the box in different states, they are
-now different outcomes. `rollback_failed` keeps its meaning — the restore itself did not complete,
-the receiver may be part-way between two versions, and the abort names the snapshot directory to
-look in. `rollback_restart_failed` is new: the files are back, only the interface did not come up,
-and the abort says to restart the receiver by hand and nothing else. Reporting both as the first
-sent a person to inspect a box that needed a power cycle.
+Because the steps fail for different reasons and leave the box in different states, they are now
+different outcomes. `rollback_failed` keeps its meaning — the restore itself did not complete, the
+receiver may be part-way between two versions, and the abort names the snapshot directory to look
+in. `rollback_restart_failed` is new: the files are back, only the interface did not come up, and
+the abort says to restart the receiver by hand and nothing else. Reporting both as the first sent
+a person to inspect a box that needed a power cycle.
+
+`rollback_lock_failed` is the third, and it exists because "release the lock from every path" is
+not the same as "the lock was released". A release that fails after an otherwise perfect rollback
+leaves the receiver correct and unusable by the installer, and reporting only the install's
+original reason would be true and useless — the person fixes what was wrong, presses install, and
+is refused as busy by a lock nobody holds. The abort names the directory and the half hour after
+which it is judged stale. The distinction is drawn on what actually happened, not on what was
+attempted: a release that succeeded and a tidy-up that failed after it is not this outcome, and
+the log line for it does not claim the receiver is locked.
+
+**A cancellation is not an outcome.** Home Assistant shutting down mid-transaction was being
+converted into `rollback_failed` — a verdict about a receiver, from an event that says nothing
+about one, and one that also left the task believing it had not been cancelled. It now propagates
+as itself from every step, with the lock release still attempted on the way out because it is one
+short command and the lock outlives the process holding it.
+
+### 19. The restart proof counts processes that are new, not processes that are singular
+
+`pidof enigma2` returning exactly one pid was treated as the only healthy shape, so the proof was
+"one pid, and a different one from before". Some images run a wrapper that survives a GUI restart
+beside the child that does not, and on such a receiver that proof is never satisfied: a rollback
+would spend the full two-minute timeout being refused by a box that had restarted correctly, and
+then report a failure. The proof is now any pid that was not in the set read before the interface
+was stopped — a process started since, which is what a restart means. A set that never gains a
+member is an interface that never came back, which is what the timeout is for. (The install's own
+restart proof still insists on a single pid; it is the same narrowness in a place this drill did
+not reach, and it is noted rather than changed here.)
 
 ### 18. A recovery that fails has to say why in the log
 
@@ -407,10 +434,11 @@ its own and the newest one behind it.
   the alternatives rather than just refusing.
 - **The remote is hidden on new installations only.** Two installations of the same version can
   therefore differ, which is the price of not rewriting somebody's dashboard.
-- **There is one more way an install can end**, `rollback_restart_failed`, and it is the only one
-  whose advice is "restart the receiver and try again" rather than "look at the receiver" or "fix
-  this and press install". Anything matching on abort reasons — a test, a script, a translation
-  file — has to carry it.
+- **There are two more ways an install can end**, `rollback_restart_failed` and
+  `rollback_lock_failed`, whose advice is "restart the receiver and try again" and "delete the
+  lock, or wait, and try again" rather than "look at the receiver" or "fix this and press
+  install". Anything matching on abort reasons — a test, a script, a translation file — has to
+  carry them.
 - **The integration now remembers something the broker does not.** „Last error" is the first piece
   of state here that is not a projection of a topic. It is deliberate — the topic is cleared by
   design and the memory is the whole feature — but it means one entity survives a reload with a

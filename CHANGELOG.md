@@ -221,7 +221,12 @@ Found by running this release against a real receiver rather than a test one.
   went wrong: a receiver that has been put back is not one to refuse the next install on, and the
   next install snapshots again before it touches anything. A rollback that restored the files but
   could not bring the interface back is now its own outcome — "restart the receiver by hand" —
-  rather than being reported as a receiver that needs inspecting.
+  rather than being reported as a receiver that needs inspecting, and a receiver that came back
+  but could not be unlocked is a third, naming the lock directory to delete. The restart is
+  proved by any process that was not running before it, rather than by there being exactly one:
+  an image that runs a wrapper beside the interface always reports two, and a rollback on such a
+  box waited out the whole timeout before reporting a restart that had happened. A rollback
+  interrupted by a shutdown now reports itself as interrupted instead of as a broken receiver.
 - **A failed rollback said so without saying why.** The log line named the backup directory and
   dropped the exception that had caused it, so the only place left to find out what had gone
   wrong was the receiver. Both that line and the one about a transaction lock that could not be

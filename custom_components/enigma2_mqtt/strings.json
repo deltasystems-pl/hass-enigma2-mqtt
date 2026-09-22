@@ -97,6 +97,7 @@
       "announcement_timeout": "The plugin did not publish a fresh MQTT announcement after restart.",
       "rollback_failed": "Installation failed and rollback also failed; inspect the receiver manually.",
       "rollback_restart_failed": "The receiver was put back as it was, but its interface did not start again.",
+      "rollback_lock_failed": "The receiver was put back as it was, but the installer's lock could not be released.",
       "busy": "Another installation is already running.",
       "identity_mismatch": "The receiver announced a different MQTT identity.",
       "host_key_changed": "The receiver's SSH host key changed.",
@@ -133,6 +134,7 @@
       ,"announcement_timeout": "The plugin did not announce itself after the restart. The receiver was put back as it was."
       ,"rollback_failed": "The installation failed and the receiver could not be put back as it was. Check the receiver by hand: the backup taken before the change is in /home/root/mqttbridge-backups."
       ,"rollback_restart_failed": "The installation failed and the receiver was put back as it was, but its interface did not start again. Restart the receiver by hand; nothing else needs undoing."
+      ,"rollback_lock_failed": "The receiver was put back as it was, but the installer's transaction lock could not be released. Delete /home/root/mqttbridge-backups/.ha-installer.lock on the receiver, or wait thirty minutes, before installing again."
       ,"busy": "Another installation is already running on this receiver."
       ,"identity_mismatch": "The receiver is configured for a different node ID or base topic. Nothing was changed."
       ,"unknown": "Installation failed unexpectedly; no entry was created."

@@ -120,11 +120,16 @@ stays behind as evidence and is pruned by the next two successful installs. Two 
   `/home/root/mqttbridge-backups`, and it is the only outcome that asks you to look at the box:
   the restore itself did not complete, so the receiver may be part-way between the two versions.
   The named `ha-installer-<nonce>` directory holds everything the install was about to change.
+- *„…but the installer's transaction lock could not be released."* The receiver is back as it
+  was and the only thing left behind is the lock that keeps two installs off one box. Delete
+  `/home/root/mqttbridge-backups/.ha-installer.lock` over SSH, or wait thirty minutes for it to
+  be judged stale; until then the next attempt is refused with "another installation is already
+  running".
 
-In both cases the installer still releases its transaction lock on the way out, so the next
-attempt is not refused as "another installation is already running" — and if even that fails, the
-Home Assistant log says which receiver is holding one. The log also carries the reason for every
-step that went wrong, which the abort screen has no room for.
+The installer releases that lock on the way out of every other failure, including one where the
+restore itself did not finish, so a receiver is not left refusing installs because a recovery
+went wrong. The Home Assistant log carries the reason for every step that failed, which the abort
+screen has no room for, and the rollback's own steps are logged as it takes them.
 
 A box that has announced itself is usually being offered on the discovery card at the same time.
 Installing over SSH takes that offer down as soon as the credentials are submitted, so there is one

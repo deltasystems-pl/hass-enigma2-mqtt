@@ -95,6 +95,7 @@ class InstallerErrorCode(StrEnum):
     ANNOUNCEMENT_TIMEOUT = "announcement_timeout"
     ROLLBACK_FAILED = "rollback_failed"
     ROLLBACK_RESTART_FAILED = "rollback_restart_failed"
+    ROLLBACK_LOCK_FAILED = "rollback_lock_failed"
     BUSY = "busy"
     IDENTITY_MISMATCH = "identity_mismatch"
 
@@ -109,18 +110,28 @@ class InstallerError(Exception):
 
 
 class _RollbackError(InstallerError):
-    """A rollback that went wrong, carrying what it managed to do anyway.
+    """A rollback step that failed, named by the outcome it leaves the receiver in.
 
-    The two halves of a rollback fail for different reasons and leave the receiver in
-    different states, and the transaction lock is released — or not — independently of
-    both. One exception with one code cannot say that, and the caller has to know: a
-    lock it wrongly believes is still held is the difference between "try again" and
-    "this receiver is busy" for every later install.
+    The steps of a rollback fail for different reasons and leave the receiver in
+    different states — files restored or not, interface up or not, lock released or
+    not — and telling a person to inspect a box that only needs restarting is as
+    unhelpful as the reverse. A marker class rather than a bare `InstallerError` so
+    that the caller can tell the rollback's own verdict from anything else.
     """
 
-    def __init__(self, code: InstallerErrorCode, *, lock_released: bool) -> None:
-        super().__init__(code)
-        self.lock_released = lock_released
+
+@dataclass(slots=True)
+class _RollbackProgress:
+    """What a rollback achieved, readable even when it ends in a cancellation.
+
+    The transaction lock is the part the caller must know about whatever happened: a
+    lock it wrongly believes is still held is an error line about a receiver that is
+    fine, and one it wrongly believes is gone is silence about a receiver that will
+    refuse the next install as busy. An exception cannot carry that when the exception
+    is a `CancelledError`, which has to stay exactly what it is.
+    """
+
+    lock_released: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -560,8 +571,27 @@ async def _async_enigma_pid(session: InstallerSession) -> int:
     return int(values[0])
 
 
-async def _async_wait_for_enigma(session: InstallerSession, old_pid: int | None) -> int:
-    """Wait for Enigma to be running again under a pid that is not the old one.
+async def _async_enigma_pids(session: InstallerSession) -> set[int]:
+    """Return every running Enigma PID, which on some images is more than one.
+
+    `pidof` exits 1 and says nothing when there is no match, which is a receiver with
+    its interface down rather than a receiver that failed to answer — the empty set is
+    the answer, not an error.
+    """
+    try:
+        result = await session.run("pidof enigma2", timeout=30)
+    except (OSError, TimeoutError) as err:
+        raise InstallerError(InstallerErrorCode.RESTART_FAILED) from err
+    if result.exit_status not in (0, 1):
+        raise InstallerError(InstallerErrorCode.RESTART_FAILED)
+    values = result.stdout.split()
+    if any(not value.isdigit() for value in values):
+        raise InstallerError(InstallerErrorCode.RESTART_FAILED)
+    return {int(value) for value in values}
+
+
+async def _async_wait_for_enigma(session: InstallerSession, old_pids: set[int]) -> set[int]:
+    """Wait until Enigma is running under a pid that was not there before.
 
     `init 3` returns as soon as the runlevel change is accepted, not when the interface
     is up, so asking `pidof` once straight afterwards asks a question the receiver
@@ -570,16 +600,19 @@ async def _async_wait_for_enigma(session: InstallerSession, old_pid: int | None)
     and, because that verdict came before the lock was released, it wedged every later
     install on that receiver.
 
-    A pid that is still the old one means the interface never went down, which is the
-    other half of the same proof and is also worth waiting for: the stop and the start
-    are seconds apart.
+    The proof is any pid that is not in the set read before the interface was stopped,
+    because such a process was started since. "One pid, and a different one" is too
+    narrow: some images run a wrapper that survives a GUI restart beside the child that
+    does not, and a receiver like that would spend the whole timeout being told it had
+    an ambiguous lifecycle. A set that never gains a member is an interface that never
+    came back, which is what the timeout is for.
     """
     deadline = time.monotonic() + ROLLBACK_RESTART_TIMEOUT
     while True:
         with suppress(InstallerError):
-            pid = await _async_enigma_pid(session)
-            if old_pid is None or pid != old_pid:
-                return pid
+            pids = await _async_enigma_pids(session)
+            if pids - old_pids:
+                return pids
         if time.monotonic() >= deadline:
             raise InstallerError(InstallerErrorCode.ROLLBACK_RESTART_FAILED)
         await asyncio.sleep(ROLLBACK_RESTART_POLL_SECONDS)
@@ -824,7 +857,8 @@ async def _async_rollback(
     provision_started: bool,
     restart_started: bool,
     connector: Connector,
-) -> bool:
+    progress: _RollbackProgress | None = None,
+) -> None:
     """Restore only installer-owned paths and the exact pre-transaction metadata.
 
     The order is restore, restart, prove the restart, release the lock, and the last of
@@ -834,14 +868,20 @@ async def _async_rollback(
     unlocked, because the next attempt takes its own snapshot before it touches
     anything, while a lock nobody holds refuses every attempt until it goes stale.
 
-    Returns whether the lock was released. Anything worse than that raises
-    `_RollbackError`, which says which half went wrong and carries the same answer.
+    Each step that failed raises a `_RollbackError` naming the outcome, and the first
+    failure wins because it is the one the later steps are working around. A
+    cancellation is not an outcome: the release is still attempted, and then the
+    cancellation is re-raised as itself. `progress` is how the caller learns about the
+    lock in that case, and it is filled in whatever this raises.
     """
+    progress = progress if progress is not None else _RollbackProgress()
     session: InstallerSession | None = None
     enigma_stopped = False
-    old_enigma_pid: int | None = None
+    old_enigma_pids: set[int] = set()
     restore_error: BaseException | None = None
     restart_error: BaseException | None = None
+    release_error: BaseException | None = None
+    cancelled: asyncio.CancelledError | None = None
     try:
         session = await connector(credentials)
         # This one goes first and outside every condition. It is the file holding the
@@ -859,10 +899,10 @@ async def _async_rollback(
             # down in exactly the failure this rollback exists for. Letting it raise
             # meant the restore never ran and the box was left on the new plugin, and
             # even suppressed it costs eight round trips against a receiver in its worst
-            # state. The pid is read because the restart proof below needs it, and its
-            # absence is not a reason to stop either.
+            # state. The pids are read because the restart proof below compares against
+            # them, and failing to read them is not a reason to stop either.
             with suppress(InstallerError):
-                old_enigma_pid = await _async_enigma_pid(session)
+                old_enigma_pids = await _async_enigma_pids(session)
             enigma_stopped = True
             _LOGGER.info("Installer rollback: stopping the receiver interface")
             stopped = await session.run("init 4 || exit $?; sleep 3", timeout=30)
@@ -881,6 +921,8 @@ async def _async_rollback(
             raise InstallerError(InstallerErrorCode.ROLLBACK_FAILED)
     except BaseException as err:
         restore_error = err
+        if isinstance(err, asyncio.CancelledError):
+            cancelled = err
     finally:
         if session is not None and enigma_stopped:
             try:
@@ -888,19 +930,20 @@ async def _async_rollback(
                 restart = await session.run("init 3", timeout=30)
                 if restart.exit_status:
                     raise InstallerError(InstallerErrorCode.ROLLBACK_RESTART_FAILED)
-                # `_async_enigma_pid` refuses anything but one running Enigma, so this
-                # proves the receiver came back. A pid that never changed means it never
-                # went down; no pid beforehand means Enigma was already stopped when the
-                # rollback began, and any single live process is then the proof. It is
+                # A pid that was not there before the interface was stopped proves the
+                # receiver came back; no pid beforehand means Enigma was already stopped
+                # when the rollback began, and any live process is then the proof. It is
                 # waited for rather than sampled, because `init 3` is answered long
                 # before the interface is.
-                restarted_pid = await _async_wait_for_enigma(session, old_enigma_pid)
+                restarted_pids = await _async_wait_for_enigma(session, old_enigma_pids)
                 _LOGGER.info(
                     "Installer rollback: the receiver interface is running again as pid %s",
-                    restarted_pid,
+                    ", ".join(str(pid) for pid in sorted(restarted_pids)),
                 )
             except BaseException as restart_err:
                 restart_error = restart_err
+                if cancelled is None and isinstance(restart_err, asyncio.CancelledError):
+                    cancelled = restart_err
         if session is not None:
             try:
                 await session.close()
@@ -908,7 +951,6 @@ async def _async_rollback(
                 # Never a reason to skip the release below: the lock is on the receiver
                 # and this is a socket on this end.
                 _LOGGER.warning("Installer rollback: closing the SSH session failed")
-    lock_released = False
     try:
         released = await connector(credentials)
         try:
@@ -918,34 +960,47 @@ async def _async_rollback(
             )
             if result.exit_status:
                 raise InstallerError(InstallerErrorCode.ROLLBACK_FAILED)
-            lock_released = True
+            progress.lock_released = True
             _LOGGER.info("Installer rollback: the transaction lock is released")
             # The helper had to outlive the restore that used it; nothing needs it now.
             await _async_remove_helper(released, remote_helper)
         finally:
             await released.close()
     except BaseException as release_err:
-        _LOGGER.error(
-            "Installer rollback could not release the transaction lock at %s; until it is "
-            "removed by hand or goes stale, every install on this receiver reports it as busy",
-            remote_lock,
-            exc_info=release_err,
-        )
-        # A cancellation is not a rollback outcome and there is nothing further to try
-        # under one; it stays a cancellation.
-        if isinstance(release_err, asyncio.CancelledError):
-            raise
+        release_error = release_err
+        if cancelled is None and isinstance(release_err, asyncio.CancelledError):
+            cancelled = release_err
+        if progress.lock_released:
+            # The lock went; something after it did not — closing the session, most
+            # likely. Saying the receiver is locked here would send somebody to delete a
+            # directory that is not there.
+            _LOGGER.warning(
+                "Installer rollback: the transaction lock was released, but tidying up "
+                "after it did not finish",
+                exc_info=release_err,
+            )
+        else:
+            _LOGGER.error(
+                "Installer rollback could not release the transaction lock at %s; until it is "
+                "removed by hand or goes stale, every install on this receiver reports it as busy",
+                remote_lock,
+                exc_info=release_err,
+            )
+    # A cancellation is what it is, and it outranks every verdict below: those describe a
+    # rollback that ran to its own conclusion, and this one did not.
+    if cancelled is not None:
+        raise cancelled
     if restore_error is not None:
         if restart_error is not None:
             restore_error.add_note("the receiver interface did not come back either")
-        raise _RollbackError(
-            InstallerErrorCode.ROLLBACK_FAILED, lock_released=lock_released
-        ) from restore_error
+        raise _RollbackError(InstallerErrorCode.ROLLBACK_FAILED) from restore_error
     if restart_error is not None:
-        raise _RollbackError(
-            InstallerErrorCode.ROLLBACK_RESTART_FAILED, lock_released=lock_released
-        ) from restart_error
-    return lock_released
+        raise _RollbackError(InstallerErrorCode.ROLLBACK_RESTART_FAILED) from restart_error
+    if release_error is not None and not progress.lock_released:
+        # The receiver is back as it was and the only thing wrong with it is a lock
+        # nobody holds. Reporting the original failure alone would be true and useless:
+        # the next attempt is refused as busy, which is the incident this came from.
+        raise _RollbackError(InstallerErrorCode.ROLLBACK_LOCK_FAILED) from release_error
 
 
 async def async_install(
@@ -1191,8 +1246,9 @@ async def _async_install_locked(
                 _LOGGER.warning("SSH close failed while preparing installer rollback")
             session = None
         if backup_created:
+            rollback = _RollbackProgress()
             try:
-                if await _async_rollback(
+                await _async_rollback(
                     request.credentials,
                     backup,
                     remote_ipk,
@@ -1204,14 +1260,19 @@ async def _async_install_locked(
                     provision_started,
                     restart_started,
                     connector,
-                ):
-                    remote_lock_claimed = False
+                    rollback,
+                )
+            except asyncio.CancelledError:
+                _LOGGER.error(
+                    "Installer rollback was cancelled; receiver backup remains at %s", backup
+                )
+                raise
             except Exception as rollback_err:
-                code = InstallerErrorCode.ROLLBACK_FAILED
-                if isinstance(rollback_err, _RollbackError):
-                    code = rollback_err.code
-                    if rollback_err.lock_released:
-                        remote_lock_claimed = False
+                code = (
+                    rollback_err.code
+                    if isinstance(rollback_err, _RollbackError)
+                    else InstallerErrorCode.ROLLBACK_FAILED
+                )
                 # The cause is the only thing that says which step went wrong, and it
                 # used to be dropped here: the log said a rollback had failed and the
                 # receiver was the only place left to find out why.
@@ -1225,6 +1286,12 @@ async def _async_install_locked(
                     err.add_note(f"rollback failed; backup remains at {backup}")
                 else:
                     raise InstallerError(code) from rollback_err
+            finally:
+                # Whatever the rollback raised, including a cancellation: this is the
+                # difference between an error line about a receiver that is fine and
+                # silence about one that will refuse the next install.
+                if rollback.lock_released:
+                    remote_lock_claimed = False
         elif remote_lock_claimed:
             try:
                 release = await connector(request.credentials)
