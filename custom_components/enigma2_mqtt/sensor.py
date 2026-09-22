@@ -412,7 +412,7 @@ SOFTCAM_SENSORS: tuple[Enigma2SensorDescription, ...] = (
         key="softcam",
         topics=(TOPIC_SOFTCAM,),
         entity_category=EntityCategory.DIAGNOSTIC,
-        # The binary the image selected for autostart, e.g. `OSCam_11718-r798`. Not a
+        # The binary the image selected for autostart, e.g. `OSCam_00000-r000`. Not a
         # family name and not the protocol it speaks outward: on the receiver this was
         # written against the binary is OSCam and the protocol is cccam, and confusing
         # the two is how a support answer ends up about the wrong program.

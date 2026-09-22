@@ -248,7 +248,7 @@ conditional ones are, in full:
 | 1 | „Softcam" | the receiver reports the `softcam` capability |
 | 5 | the enigma2 process diagnostics | the receiver reports the `process` capability |
 | 2 | „Głębokie uśpienie", „Restart" | the Home Assistant option asks for them **and** the receiver permits deep standby |
-| 1 | „Restart softcam" | the receiver permits a softcam restart |
+| 1 | „Restart softcam" | the receiver reports the `softcam` capability **and** permits a softcam restart |
 | 4 | the conditional-access diagnostics | the `cam_telemetry` option is on |
 | 12 | the OSCam aggregates | the `oscam_telemetry` option is on |
 | 3 per OSCam source | status, ready cards, shared cards | the `oscam_telemetry` option is on, for each reader or server that receiver reports |
@@ -398,7 +398,7 @@ readings, and neither is what "the plugin could not measure this" means.
 **Softcam** is the state of the card-sharing client the *image* starts, which is not the
 same thing as the conditional-access diagnostics above: those are about the channel being
 descrambled, this is about the program doing the descrambling. The state is the **binary
-the image selected for autostart** — `OSCam_11718-r798`, say — and not a family name and
+the image selected for autostart** — `OSCam_00000-r000`, say — and not a family name and
 not the protocol it speaks outward, which are three different things that a support
 thread will otherwise spend an afternoon confusing.
 
@@ -441,7 +441,7 @@ it is the opposite: the answer is coming, and the dashboard should not sit still
 | `screenshot` | *Zrzut ekranu* | `<node_id>_screenshot` | `cmd/screenshot` | `screen` is republished |
 | `refresh_discovery` | *Odśwież discovery* | `<node_id>_refresh_discovery` | `cmd/discovery` | the announcement is republished |
 | `refresh_epg` | *Odśwież EPG* | `<node_id>_refresh_epg` | `cmd/epg_grid` · only while the box names the `epg_grid` capability | silence |
-| `softcam_restart` | *Restart softcam* | `<node_id>_softcam_restart` | `cmd/softcam_restart` · only while the box permits it | silence |
+| `softcam_restart` | *Restart softcam* | `<node_id>_softcam_restart` | `cmd/softcam_restart` · **both gates below** | silence |
 | `plugin` | *Wtyczka MQTT Bridge* | `<node_id>_plugin` | an `update` entity: installed = `info.plugin`, latest = the plugin release this version was written against | — |
 
 **Every button waits for the receiver**, on the same path as the actions below. A refusal
@@ -467,12 +467,25 @@ when the receiver says it can do it rather than only at startup.
 **„Restart softcam"** stops every instance of the card-sharing client the image started
 and starts exactly one, with the line the image itself would have used. On a receiver
 whose cam binary has a long name it is mostly a way to **collapse the copies the image
-left behind**, which also fixes a frozen one. It has one gate and it is the box's:
-`softcam_restart_allowed`, set under *Menu → Plugins → MQTT Bridge* and not writable over
-MQTT, for the same reason as deep standby. There is no Home Assistant option beside it —
-the press costs a few seconds of a scrambled picture and nothing else — but a plugin that
-does not report the permission gets no button, because none has ever existed there to
-keep.
+left behind**, which also fixes a frozen one.
+
+**It needs two gates open and both of them are the receiver's**, because they answer
+different questions and a receiver gives the two answers independently. The permission
+`softcam_restart_allowed` is set under *Menu → Plugins → MQTT Bridge* and is not writable
+over MQTT, for the same reason as deep standby; it is a plain checkbox that exists on
+every installation and says whether the command is wanted. The **`softcam` capability**
+says whether the receiver could carry it out at all — the plugin claims it only where the
+cam binary resolves under the softcam directory, its family has a known start line, and
+the image starts it through its manager's poller rather than through an init script. A
+receiver with the permission on and no resolvable cam therefore reports the permission,
+claims no capability and refuses the command; no button is offered for it, which is also
+what the plugin's own MQTT discovery mode does with the same receiver.
+
+There is no Home Assistant option beside either gate — the press costs a few seconds of a
+scrambled picture and nothing else. A plugin that does not report the permission gets no
+button, because none has ever existed there to keep. Only a stated „no" to the
+*permission* takes an existing button away; a capability that stops being named does not,
+for the reason [§4](#4-entities) gives.
 
 The receiver refuses the command in six situations and says which in its own words on
 „Ostatni błąd": without the permission; while a recording is running; with one due in the

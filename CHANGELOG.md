@@ -30,12 +30,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   seconds, at most once every ten minutes, and never while a recording is running or due —
   the same guard a manual press goes through, because a restart landing on the opening
   seconds of a recording is worse than a scrambled one.
-- 🔴 The **permission** behind both is `softcam_restart_allowed`, set on the receiver's own
-  setup screen and refused over MQTT, as `deep_standby_allowed` already is: a setting that
-  enables a command stays outside what anything with publish rights on the broker can
-  reach. It is therefore not on the options form, and the form says where it lives. A
-  plugin that does not report it gets no button, and a receiver that has simply gone quiet
-  keeps whatever it had.
+- 🔴 The button needs **two gates** and both are the receiver's. The **permission**
+  `softcam_restart_allowed` is set on the receiver's own setup screen and refused over
+  MQTT, as `deep_standby_allowed` already is: a setting that enables a command stays
+  outside what anything with publish rights on the broker can reach. It is therefore not
+  on the options form, and the form says where it lives. The **`softcam` capability** is
+  the other, and it is claimed only where a cam binary actually resolves — a receiver with
+  the permission on and nothing to restart reports the permission, claims no capability
+  and refuses the command, so no button is offered for it. A plugin that does not report
+  the permission gets no button, and a receiver that has simply gone quiet keeps whatever
+  it had.
+- **[ADR-0005](docs/adr/0005-softcam-restart.md) records both gates and the rule behind
+  them**, mirroring the plugin's own ADR-0005. The decision worth knowing about is that
+  „Created on X" no longer implies „removed on not-X" here: a control that would be
+  permanently refused is removed when its capability says so, and a diagnostic with a
+  history is not, because deleting it takes the household's rename, area and recorded
+  history with it and a quiet capability is not a decision anybody made.
 
 ### Changed
 

@@ -19,11 +19,14 @@ republished announcement — that is the proof. Where there is none, because the
 about to disappear anyway, the wait is the error-grace window: a complaint raises,
 silence is success.
 
-„Restart softcam" has one gate rather than two, and it is the box's. Restarting the
+„Restart softcam" has two gates and both of them are the box's. Restarting the
 card-sharing client costs a few seconds of a scrambled picture and nothing else, so there
 is no reason to hide it behind a Home Assistant option as well — but a box whose setup
-screen has not permitted it refuses the command, and a button that is always refused is
-one somebody presses twice and then reports.
+screen has not permitted it refuses the command, and so does a box on which no cam binary
+resolves at all. Those are two different answers from two different parts of the plugin,
+and a receiver gives them independently: the permission is a checkbox every installation
+has, the capability is claimed only where the restart could actually be carried out. A
+button that is always refused is one somebody presses twice and then reports.
 
 „Obudź (WoL)" is the one button that sends no command at all, and the one that works
 while the box is unreachable, because that is the only time it is worth pressing.
@@ -45,7 +48,7 @@ from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .box import Enigma2Box, Enigma2MqttConfigEntry, async_send_magic_packet
-from .const import CONF_DANGEROUS_BUTTONS, TOPIC_SCREEN
+from .const import CAPABILITY_SOFTCAM, CONF_DANGEROUS_BUTTONS, TOPIC_SCREEN
 from .entity import Enigma2Entity, OptionalEntities
 
 PARALLEL_UPDATES = 0
@@ -150,10 +153,11 @@ CAPABILITY_BUTTONS: tuple[tuple[str, Enigma2ButtonDescription], ...] = (
     ),
 )
 
-# Created only while the box says the command is permitted, and behind no Home Assistant
-# option at all. There is nothing dangerous about it — a softcam restart costs a few
-# seconds of a scrambled picture — so the only question worth asking is whether the box
-# will do it, and the box answers that itself.
+# Created only while the box says the command is permitted *and* names the capability
+# that says it could carry it out, and behind no Home Assistant option at all. There is
+# nothing dangerous about it — a softcam restart costs a few seconds of a scrambled
+# picture — so the only questions worth asking are whether the box will do it and whether
+# it can, and the box answers both itself.
 #
 # Its proof is silence, like the three restarts above, and that is a measured decision
 # rather than a shortcut. The command's own sequence stops every instance, waits up to
@@ -254,15 +258,33 @@ async def async_setup_entry(
             "button",
             [SOFTCAM_BUTTON.key],
             factory,
-            # A stated „yes" and nothing else. Silence is an older plugin, which would
-            # refuse the command anyway, and this button has never existed on one — so
-            # unlike deep standby there is no installation whose button has to survive a
-            # box that has not spoken. `info` has to have arrived at all, for the same
-            # reason it does there: the announcement carries no `settings`, so reading
-            # the permission before `info` lands reads „not said" on every start.
-            lambda: has_answered() and box.softcam_restart_permission is True,
-            # And only a stated „no" removes it. Somebody who turns the permission off at
-            # the television has decided; a receiver that has gone quiet has not.
+            # 🔴 Two gates, because they answer two different questions and a receiver
+            # can easily give opposite answers to them. `softcam_restart_allowed` is a
+            # plain checkbox on every installation and says whether the household wants
+            # the command available; the `softcam` capability says whether the receiver
+            # can carry it out at all — it is claimed only where a cam binary actually
+            # resolves and its family has a start line. A box with the permission on and
+            # no resolvable cam publishes the permission, claims no capability, and
+            # refuses the command, which is exactly the button nobody should be offered.
+            #
+            # A stated „yes" to the permission and nothing weaker. Silence is an older
+            # plugin, which would refuse the command anyway, and this button has never
+            # existed on one — so unlike deep standby there is no installation whose
+            # button has to survive a box that has not spoken. `info` has to have arrived
+            # at all, for the same reason it does there: the announcement carries no
+            # `settings`, so reading the permission before `info` lands reads „not said"
+            # on every start.
+            lambda: (
+                CAPABILITY_SOFTCAM in box.capabilities
+                and has_answered()
+                and box.softcam_restart_permission is True
+            ),
+            # 🔴 And only a stated „no" to the *permission* removes it — the capability
+            # is deliberately not in this half. Somebody who turns the permission off at
+            # the television has decided; a capability that stops being named is an
+            # older plugin after a downgrade, a hook that failed to attach on one boot,
+            # or a receiver that has not answered yet, and none of those is a decision
+            # anybody made.
             lambda: has_answered() and box.softcam_restart_permission is False,
             async_add_entities,
         ).start()

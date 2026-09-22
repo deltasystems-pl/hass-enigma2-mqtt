@@ -74,7 +74,7 @@ SENSOR = "sensor.dekoder_salon_softcam"
 # A collapsed receiver: one instance of the cam the image selected, restarted by hand at
 # a known moment, on an image whose own liveness check adds a copy at every GUI start.
 SOFTCAM: dict[str, Any] = {
-    "selected": "OSCam_11718-r798",
+    "selected": "OSCam_00000-r000",
     "running_instances": 1,
     "last_restart": 1789459213,
     "last_restart_reason": "manual",
@@ -183,6 +183,63 @@ async def test_an_older_plugin_gets_no_button_at_all(
 
     assert hass.states.get(BUTTON) is None
     assert registered(hass, "button", "softcam_restart") is None
+
+
+async def test_the_permission_alone_is_not_enough_without_the_capability(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """🔴 The permission and the capability answer different questions.
+
+    `softcam_restart_allowed` is a plain checkbox on every installation and says whether
+    the household wants the command available. The `softcam` capability says whether the
+    receiver could carry it out — the plugin claims it only where a cam binary actually
+    resolves, its family has a known start line, and the image starts it through its
+    manager rather than through an init script. A receiver can perfectly well answer yes
+    to the first and nothing to the second: it publishes the permission, claims no
+    capability, and refuses the command.
+
+    Offering a button there would also make one receiver behave two ways, because the
+    plugin's own MQTT discovery mode creates no button for that box either.
+    """
+    box_on_the_broker[INFO_TOPIC] = info(softcam_restart_allowed=True)
+    config_entry.add_to_hass(hass)
+    touched: list[str] = []
+    hass.bus.async_listen(
+        er.EVENT_ENTITY_REGISTRY_UPDATED,
+        lambda event: touched.append(event.data["entity_id"]),
+    )
+
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    # The permission really did arrive, so the absence below is the capability talking.
+    assert config_entry.runtime_data.softcam_restart_permission is True
+    assert hass.states.get(BUTTON) is None
+    assert registered(hass, "button", "softcam_restart") is None
+    assert BUTTON not in touched
+
+
+async def test_the_capability_arriving_late_creates_the_permitted_button(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A cam that resolves only after a restart is still a receiver that can do this.
+
+    The gate listens rather than reading once, so the second half arriving later is
+    enough — no Home Assistant restart, and no button in the meantime.
+    """
+    box_on_the_broker[INFO_TOPIC] = info(softcam_restart_allowed=True)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    assert hass.states.get(BUTTON) is None
+
+    async_fire_mqtt_message(hass, INFO_TOPIC, with_softcam(softcam_restart_allowed=True))
+    await hass.async_block_till_done()
+
+    assert hass.states.get(BUTTON) is not None
 
 
 async def test_the_permission_creates_the_button_and_it_sends_the_command(
@@ -406,7 +463,7 @@ async def test_the_sensor_shows_the_binary_and_everything_around_it(
 
     state = hass.states.get(SENSOR)
     assert state is not None
-    assert state.state == "OSCam_11718-r798"
+    assert state.state == "OSCam_00000-r000"
     assert state.attributes["running_instances"] == 1
     # Epoch seconds on the topic, an ISO 8601 string in an attribute: that is this
     # file's convention, and it is the one a template can read.
@@ -526,12 +583,12 @@ async def test_a_payload_that_is_not_json_leaves_the_last_reading_alone(
 ) -> None:
     """One malformed message is a bug at the other end, not news about the softcam."""
     await _publish_softcam(hass, config_entry, box_on_the_broker, SOFTCAM)
-    assert hass.states.get(SENSOR).state == "OSCam_11718-r798"
+    assert hass.states.get(SENSOR).state == "OSCam_00000-r000"
 
     async_fire_mqtt_message(hass, SOFTCAM_TOPIC, "not json at all")
     await hass.async_block_till_done()
 
-    assert hass.states.get(SENSOR).state == "OSCam_11718-r798"
+    assert hass.states.get(SENSOR).state == "OSCam_00000-r000"
 
 
 async def test_an_empty_payload_retracts_the_reading(
@@ -547,7 +604,7 @@ async def test_an_empty_payload_retracts_the_reading(
     like a fault on a device page whose whole job is „is anything wrong".
     """
     await _publish_softcam(hass, config_entry, box_on_the_broker, SOFTCAM)
-    assert hass.states.get(SENSOR).state == "OSCam_11718-r798"
+    assert hass.states.get(SENSOR).state == "OSCam_00000-r000"
 
     async_fire_mqtt_message(hass, SOFTCAM_TOPIC, "")
     await hass.async_block_till_done()
