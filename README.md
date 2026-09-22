@@ -21,9 +21,8 @@ topics into a native `media_player`, a `remote`, an OSD `notify` target and devi
 
 > **Status — released as v0.2.0**, alongside the receiver plugin's own v0.2.0. The entity and
 > action surface, the guided SSH installer, the verified local plugin bundle and the update path
-> are all in this release. The installer has been run end to end on a receiver and a rollback
-> exercised for real; the run that closes M4 is the one after the defects those runs found —
-> see the [roadmap](#roadmap).
+> are all in this release, and the installer has been run end to end on a receiver — including a
+> real rollback — with the defects those runs found fixed and the run after them passing.
 
 ## What you get
 
@@ -197,21 +196,23 @@ quality bar we hold ourselves to is [docs/QUALITY.md](docs/QUALITY.md).
       long passive soak and the deep-standby drill are still open*
 - [x] **M3** — the entities above, actions, device triggers, diagnostics, translations. Released
       as **v0.2.0**, which is what HACS serves
-- [ ] **M4** — SSH installer, bundled IPK and `update`: *coded, reviewed and exercised on one
-      receiver.* The installer has been run end to end on a box that did not have the plugin, and
-      a rollback exercised for real — a deliberately wrong broker password, the plugin refused,
-      the receiver restored to the byte and its interface restarted. The four defects those runs
-      found are fixed in this release: a pending discovery offer blocked the guided install, the
-      success screen was lost, the rollback misjudged the restart and left its lock behind, and a
-      refusal over a mismatched identity named neither side. The run that ticks this box is the
-      one after those fixes
+- [x] **M4** — SSH installer, bundled IPK and `update`: *run end to end on a receiver, rollback
+      included.* The installer was run on a box that did not have the plugin, and a rollback
+      exercised for real — a deliberately wrong broker password, the plugin refused, the receiver
+      restored to the byte and its interface restarted. The four defects those runs found are
+      fixed in this release: a pending discovery offer blocked the guided install, the success
+      screen was lost, the rollback misjudged the restart and left its lock behind, and a refusal
+      over a mismatched identity named neither side. The run after those fixes closed it — the
+      rollback's verdict was right, its transaction lock released and the receiver reported as
+      restored, and a successful install ended on its own screen again. One box, one image: the
+      others still need testers
 - [ ] **M5** — public beta `v0.x`: releases, HACS custom repository, call for testers
 - [ ] **M6** — `v1.0.0`: HACS default store, deep standby and Wake-on-LAN drilled
 - [ ] **M7** — afterwards: broker-login provisioning, further images
 
 HACS serves **0.2.0** and the receiver plugin's feed serves its own **0.2.0**, so the two halves
 are in step and the version on a receiver or in HACS says which release you are running.
-Everything after M3 is unreleased.
+Everything after M4 is unreleased.
 
 ### What 0.2.0 shipped, and what 0.3.0 will carry
 

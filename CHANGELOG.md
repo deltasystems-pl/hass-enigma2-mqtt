@@ -23,8 +23,9 @@ while it says they are permitted.
 The guided installer has been run end to end on a receiver that had never had the plugin, and a
 rollback exercised for real with a deliberately wrong broker password: the plugin refused, the
 receiver was restored to the byte and its interface restarted. The four defects those runs found
-are fixed here. The receiver plugin bundled with this release is byte for byte the package
-published as the plugin's own v0.2.0 release.
+are fixed here, and the run after them passed — the rollback reported what had actually happened,
+released its lock, and a successful install ended on its own screen. The receiver plugin bundled
+with this release is byte for byte the package published as the plugin's own v0.2.0 release.
 
 ### Added
 
