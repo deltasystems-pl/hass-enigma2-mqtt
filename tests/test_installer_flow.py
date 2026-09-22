@@ -19,7 +19,10 @@ from homeassistant.helpers.service_info.mqtt import MqttServiceInfo
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.enigma2_mqtt.config_flow import INSTALL_PHASES
+from custom_components.enigma2_mqtt.config_flow import (
+    INSTALL_PHASES,
+    Enigma2MqttConfigFlow,
+)
 from custom_components.enigma2_mqtt.const import (
     CONF_BASE_TOPIC,
     CONF_KEEP_SSH_CREDENTIALS,
@@ -468,6 +471,86 @@ async def test_a_failed_install_ends_on_its_reason(hass: HomeAssistant, mqtt_moc
     assert answers[0]["type"] is FlowResultType.ABORT
     assert answers[0]["reason"] == InstallerErrorCode.NO_SPACE.value
     assert hass.config_entries.async_entries(DOMAIN) == []
+
+
+async def _identity_mismatch_install(_hass, _request, progress_cb):
+    """Refuse at preflight, which is where the box's own settings are read."""
+    progress_cb("preflight")
+    await asyncio.sleep(0)
+    raise InstallerError(
+        InstallerErrorCode.IDENTITY_MISMATCH,
+        "",
+        {
+            "box_node_id": "vuuno4kse_005301",
+            "box_base_topic": "(enigma2)",
+            "node_id": "vuuno4kse_005301",
+            "base_topic": "home/x",
+        },
+    )
+
+
+async def test_an_identity_mismatch_names_both_sides_on_the_screen(
+    hass: HomeAssistant, mqtt_mock
+) -> None:
+    """„Configured for a different node ID or base topic" is not something to act on.
+
+    Which of the two disagreed, and what the receiver actually holds, is the whole
+    diagnosis — and the abort screen is the only place it can be read, because the
+    flow is gone afterwards. The sentence has holes for both sides and the flow has to
+    fill them; an abort that carried no placeholders would put the braces themselves
+    in front of somebody.
+    """
+    answers, _ = await _install_watching_the_frontend(hass, _identity_mismatch_install)
+
+    assert len(answers) == 1
+    assert answers[0]["type"] is FlowResultType.ABORT
+    assert answers[0]["reason"] == InstallerErrorCode.IDENTITY_MISMATCH.value
+    assert answers[0]["description_placeholders"] == {
+        "box_node_id": "vuuno4kse_005301",
+        "box_base_topic": "(enigma2)",
+        "node_id": "vuuno4kse_005301",
+        "base_topic": "home/x",
+    }
+    assert hass.config_entries.async_entries(DOMAIN) == []
+
+
+async def test_a_retried_install_does_not_inherit_the_last_one_s_placeholders(
+    hass: HomeAssistant, mqtt_mock
+) -> None:
+    """One flow object outlives an install, and an outcome that fills no holes empties them.
+
+    Home Assistant discards placeholders a sentence has no holes for, so today this is
+    invisible — until the day one of the other abort sentences gains a hole and starts
+    rendering the node id of a failure two attempts ago.
+    """
+    flow = Enigma2MqttConfigFlow()
+    flow.hass = hass
+    flow._install_request = object()
+    placeholders = {
+        "box_node_id": "vuuno4kse_005301",
+        "box_base_topic": "(enigma2)",
+        "node_id": "vuuno4kse_005301",
+        "base_topic": "home/x",
+    }
+
+    with patch(
+        "custom_components.enigma2_mqtt.config_flow.async_install",
+        AsyncMock(
+            side_effect=InstallerError(
+                InstallerErrorCode.IDENTITY_MISMATCH, "", placeholders
+            )
+        ),
+    ):
+        await flow._async_run_install()
+    assert flow._install_placeholders == placeholders
+
+    with patch(
+        "custom_components.enigma2_mqtt.config_flow.async_install",
+        AsyncMock(side_effect=RuntimeError("something unexpected")),
+    ):
+        await flow._async_run_install()
+    assert flow._install_error == "unknown"
+    assert flow._install_placeholders == {}
 
 
 async def test_the_progress_bar_still_moves_through_every_phase(

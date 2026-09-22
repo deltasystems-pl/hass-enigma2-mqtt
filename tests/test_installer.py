@@ -55,10 +55,15 @@ class FakeReceiver:
     # A restart that takes the interface down and does not bring it back. On a wrapper
     # image that still leaves a pid answering `pidof enigma2` — the wrapper's.
     enigma_dies_at_restart: bool = False
-    node_id: str = ""
-    base_topic: str = "enigma2"
-    enabled: bool = True
-    ha_mode: str = "discovery"
+    # What `read_identity` answers, and `None` is the answer for a setting enigma2 has
+    # no line for. It has no line for any setting still at its default, so a receiver
+    # whose plugin has never been configured says nothing about all four of these — and
+    # one that has been configured normally still says nothing about its base topic.
+    # These defaults are therefore a real box, not an empty one.
+    node_id: str | None = None
+    base_topic: str | None = None
+    enabled: bool | None = None
+    ha_mode: str | None = None
     closed: int = 0
     close_raises_on: set[int] = field(default_factory=set)
     free_bytes: int = 50_000_000

@@ -25,6 +25,7 @@ from custom_components.enigma2_mqtt.installer import (
     InstallerError,
     InstallerErrorCode,
     InstallRequest,
+    Provisioning,
     SshCredentials,
     _async_enigma_pids,
     _async_load_bundle,
@@ -328,6 +329,192 @@ async def test_an_update_refuses_a_receiver_that_is_not_the_one_configured(
         )
 
     assert raised.value.code is InstallerErrorCode.IDENTITY_MISMATCH
+
+
+def _provisioning(node_id: str = "vuuno4kse_005301", base_topic: str = "enigma2"):
+    return Provisioning(
+        broker_host="192.0.2.10",
+        broker_port=1883,
+        broker_username="vuuno4kse_005301",
+        broker_password="not-a-real-broker-password",
+        node_id=node_id,
+        base_topic=base_topic,
+    )
+
+
+async def test_a_setting_the_receiver_never_stored_is_its_default_not_a_difference(
+    credentials: SshCredentials,
+) -> None:
+    """A reinstall over a plugin on the default base topic goes ahead.
+
+    Enigma2 writes no line for a setting whose value still equals its default, so a
+    receiver left on the default base topic has no `base_topic` in
+    `/etc/enigma2/settings` — a box measured after a normal install had ten of the
+    plugin's twenty-six settings stored and that was not one of them. That rule held
+    before this only because the receiver-side helper substituted the plugin's defaults
+    itself, where nothing checked them against the plugin and where absence and the
+    default value became the same answer. It is now a rule this side keeps, from a
+    table CI compares with the plugin's own `config.py`, and it is tested.
+    """
+    receiver = FakeReceiver(node_id="vuuno4kse_005301", base_topic=None, ha_mode="off")
+    request = InstallRequest(credentials, _provisioning())
+
+    await _async_validate_receiver_identity(FakeSession(receiver), "/tmp/helper.py", request)
+
+
+async def test_a_receiver_whose_plugin_has_never_been_configured_is_provisioned(
+    credentials: SshCredentials,
+) -> None:
+    """Nothing stored at all is a plugin that has never run, so there is nothing to steal.
+
+    The plugin derives `<boxtype>_<mac6>` on its first start and writes it, so a box
+    with no node id has never got that far. Refusing it would refuse the one case the
+    guided installer exists for, and accepting the form's node id is what provisioning
+    is about to write anyway.
+    """
+    request = InstallRequest(credentials, _provisioning())
+
+    await _async_validate_receiver_identity(
+        FakeSession(FakeReceiver()), "/tmp/helper.py", request
+    )
+
+
+async def test_a_receiver_on_another_base_topic_is_still_refused(
+    credentials: SshCredentials, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A stored value that differs is the mismatch this guard is for.
+
+    The abort sentence carries both sides, because on the screen where it is shown
+    there is no other way to find out which half disagreed — and a value the receiver
+    never stored is shown in brackets, so „the box says enigma2" and „the box says
+    nothing, and enigma2 is what that means" do not look identical.
+    """
+    receiver = FakeReceiver(node_id="vuuno4kse_005301", base_topic="home/x")
+    request = InstallRequest(credentials, _provisioning())
+
+    with pytest.raises(InstallerError) as raised:
+        await _async_validate_receiver_identity(
+            FakeSession(receiver), "/tmp/helper.py", request
+        )
+
+    assert raised.value.code is InstallerErrorCode.IDENTITY_MISMATCH
+    assert raised.value.placeholders == {
+        "box_node_id": "vuuno4kse_005301",
+        "box_base_topic": "home/x",
+        "node_id": "vuuno4kse_005301",
+        "base_topic": "enigma2",
+    }
+    # The facts travel with the refusal and are written where an install is being
+    # refused, not here: these same guards run for the options screen's no-write probe.
+    assert raised.value.detail
+    assert "home/x" in raised.value.detail
+    assert "vuuno4kse_005301" in raised.value.detail
+    assert [
+        record
+        for record in caplog.records
+        if record.levelname == "WARNING" and "refused" in record.getMessage()
+    ] == []
+
+
+async def test_a_base_topic_stored_as_empty_is_shown_as_stored_and_empty(
+    credentials: SshCredentials,
+) -> None:
+    """The one value that would otherwise be invisible in the middle of the sentence.
+
+    An empty string is a value the receiver holds, and it is a real difference from
+    `enigma2` — which is how it compares. Rendering it as the bracketed default would
+    have put "the box says `(enigma2)`, the form says `enigma2`, refused" back on the
+    screen, which is the problem this message exists to solve, one layer down.
+    """
+    receiver = FakeReceiver(node_id="vuuno4kse_005301", base_topic="")
+    request = InstallRequest(credentials, _provisioning())
+
+    with pytest.raises(InstallerError) as raised:
+        await _async_validate_receiver_identity(
+            FakeSession(receiver), "/tmp/helper.py", request
+        )
+
+    assert raised.value.code is InstallerErrorCode.IDENTITY_MISMATCH
+    assert raised.value.placeholders["box_base_topic"] == '""'
+    assert raised.value.placeholders["base_topic"] == "enigma2"
+
+
+async def test_the_default_base_topic_is_shown_as_a_default_when_the_node_id_differs(
+    credentials: SshCredentials,
+) -> None:
+    """The bracketed half is the one that makes an identical-looking pair readable."""
+    receiver = FakeReceiver(node_id="another_receiver", base_topic=None)
+    request = InstallRequest(credentials, _provisioning())
+
+    with pytest.raises(InstallerError) as raised:
+        await _async_validate_receiver_identity(
+            FakeSession(receiver), "/tmp/helper.py", request
+        )
+
+    assert raised.value.placeholders["box_base_topic"] == "(enigma2)"
+    assert raised.value.placeholders["base_topic"] == "enigma2"
+    assert raised.value.placeholders["box_node_id"] == "another_receiver"
+
+
+async def test_an_update_still_needs_the_settings_it_is_updating_against(
+    credentials: SshCredentials,
+) -> None:
+    """An update writes nothing, so a box that stores no node id is not its box.
+
+    Its `enabled` and `ha_mode` are read with the plugin's defaults applied like every
+    other setting — a receiver in `integration` mode has both stored — but the node id
+    has no default worth comparing against, and absence there means the plugin has
+    never run.
+    """
+    request = InstallRequest(
+        credentials, provisioning=None, node_id="vuuno4kse_005301", base_topic="enigma2"
+    )
+
+    with pytest.raises(InstallerError) as raised:
+        await _async_validate_receiver_identity(
+            FakeSession(FakeReceiver(ha_mode="integration")), "/tmp/helper.py", request
+        )
+
+    assert raised.value.code is InstallerErrorCode.IDENTITY_MISMATCH
+    assert raised.value.placeholders["box_node_id"] == "(-)"
+
+
+async def test_an_update_accepts_a_receiver_that_stores_only_what_it_changed(
+    credentials: SshCredentials,
+) -> None:
+    """`enabled` is on by default and therefore absent on every box that never touched it."""
+    receiver = FakeReceiver(node_id="vuuno4kse_005301", ha_mode="integration")
+    request = InstallRequest(
+        credentials, provisioning=None, node_id="vuuno4kse_005301", base_topic="enigma2"
+    )
+
+    await _async_validate_receiver_identity(FakeSession(receiver), "/tmp/helper.py", request)
+
+
+async def test_the_no_write_probe_does_not_report_a_refused_install(
+    credentials: SshCredentials, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Nothing is being installed here, so nothing can have been refused.
+
+    `async_preflight` is what the options screen runs when somebody asks it to retain
+    SSH credentials, and what reauthentication runs to check a password; both hand the
+    failure to a form and let it be retried. The guards it runs are the install's own,
+    and a guard that logged as it raised would put „receiver install refused before the
+    plugin or its settings were touched" in the log once per retry, for an install
+    nobody had started.
+    """
+    receiver = FakeReceiver(recording=True)
+
+    with pytest.raises(InstallerError) as raised:
+        await async_preflight(None, credentials, _connector=receiver.connect)
+
+    assert raised.value.code is InstallerErrorCode.RECORDING
+    assert [
+        record for record in caplog.records if "refused" in record.getMessage()
+    ] == []
+    # The session is still closed, and the facts still travel with the refusal.
+    assert receiver.closed == 1
+    assert "recording" in raised.value.detail
 
 
 async def test_the_no_write_preflight_closes_its_session(

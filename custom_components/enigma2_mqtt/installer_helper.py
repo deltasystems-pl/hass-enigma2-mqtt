@@ -478,7 +478,18 @@ def verify_manifest(root: Path, manifest_path: Path) -> None:
 
 
 def read_identity(root: Path) -> dict[str, object]:
-    """Read only the non-secret settings which bind an HA entry to this box."""
+    """Read only the non-secret settings which bind an HA entry to this box.
+
+    Raw facts, and `null` is one of them: it means enigma2's settings file has no line
+    for that setting, which is neither an empty value nor a difference. Enigma2 never
+    writes out a setting that still equals its default, so a receiver left on the
+    default base topic has no `base_topic` line at all, and this used to answer
+    `enigma2` for a box that had said nothing — the right answer, from a copy of the
+    plugin's defaults kept on the wrong side of the link. Applying the defaults is the
+    caller's job: they belong to the plugin, they are worth having in exactly one
+    place, and this half of the installer runs on the receiver with no way to import
+    anything of Home Assistant's.
+    """
     settings = _path(root, SETTINGS)
     values: dict[str, str] = {}
     if settings.is_file() and not settings.is_symlink():
@@ -487,11 +498,13 @@ def read_identity(root: Path) -> dict[str, object]:
                 continue
             name, value = line.split("=", 1)
             values[name.removeprefix(SETTINGS_PREFIX)] = value
+    base_topic = values.get("base_topic")
+    enabled = values.get("enabled")
     return {
-        "node_id": values.get("node_id", ""),
-        "base_topic": values.get("base_topic", "enigma2").strip("/"),
-        "enabled": values.get("enabled", "true").lower() == "true",
-        "ha_mode": values.get("ha_mode", "discovery"),
+        "node_id": values.get("node_id"),
+        "base_topic": None if base_topic is None else base_topic.strip("/"),
+        "enabled": None if enabled is None else enabled.strip().lower() == "true",
+        "ha_mode": values.get("ha_mode"),
     }
 
 

@@ -2,8 +2,9 @@
 
 **Status:** accepted, extended by [ADR-0004](0004-remote-uninstall.md)
 **Date:** 2026-09-21
-**Amended:** 2026-09-22 — the guided installer ran on a receiver for the first time, and its
-rollback ran on a receiver for the first time
+**Amended:** 2026-09-22 — the guided installer ran on a receiver for the first time, its
+rollback ran on a receiver for the first time, and it then ran against a receiver that already
+had the plugin on it
 
 ## Context
 
@@ -430,6 +431,103 @@ the failed run's snapshot stayed on the receiver and made three. That is correct
 snapshot is evidence — and the next successful install treats it as an ordinary candidate, keeping
 its own and the newest one behind it.
 
+## Amendment — 2026-09-22, third drill: installing over a plugin that was already there
+
+The first two drills ran against a receiver with no plugin on it. The third ran the guided
+installer against one that already had the plugin — working, at 0.2.0, with its Home Assistant
+entry deleted so that it had been told `ha_mode: off`. That is the ordinary reinstall, and it is
+the shape of every upgrade done through the flow rather than the update entity. It was refused
+immediately, before anything was touched, with „the receiver is configured for a different node
+ID or base topic. Nothing was changed."
+
+### 20. A refusal that names neither side cannot be acted on, or diagnosed
+
+That sentence is the whole of what the operator saw, and it was also the whole of what anybody
+looking afterwards had: the flow is gone once the screen is read, and the installer wrote nothing
+to the log (decision 21). Which of the two values disagreed, and what the receiver was actually
+configured for, were both unavailable — so the refusal could not be acted on, and the session
+that investigated it could not tell a wrong refusal from a right one without going to the box.
+
+The first theory was that the receiver's settings file was being misread. It holds ten
+`config.plugins.mqttbridge.*` lines out of the plugin's twenty-six settings — the ones somebody
+had changed — and `base_topic` is not among them, because the box is on `enigma2` and always has
+been; nor is `port`, nor `enabled`, because enigma2 writes no line for a setting whose value
+still equals its default. **Measured, and it is not what happened:** run against those exact
+eleven lines, the code in `main` answers `base_topic: enigma2` and accepts the install. The
+receiver-side helper substitutes the plugin's defaults itself, so absence and the default value
+are the same answer, and the comparison was never going to refuse on it.
+
+What is left is that one of the two values really did differ — a node id or a base topic on the
+form that was not the receiver's — and there was no way to see which, because the message named
+neither. That is the defect, and the fix is the message: it now carries the receiver's node id
+and base topic and the ones the form gave, in all three languages, through the config flow's
+`description_placeholders`.
+
+The theory was wrong but the thing it pointed at is real, and it is why the message could not
+have marked the difference even if it had tried. The plugin's defaults had a second copy, inside
+the helper — on the receiver's side of the link, in the process whose job is reading raw lines
+off a filesystem, where nothing compares it against the plugin it is a copy of. Downstream of it,
+"the settings file says nothing" and "the settings file says `enigma2`" are indistinguishable.
+The helper now reports raw facts, `null` for a setting with no line, and the defaults live on the
+Home Assistant side in one table — `PLUGIN_SETTING_DEFAULTS` — which a test reads out of the
+bundled plugin's own `config.py` and compares entry by entry. The bundle is pinned by digest and
+commit and is the same source as the package the installer ships, so this is a mirror that fails
+in CI rather than on a receiver. Brackets in the message then mean exactly one thing — the
+receiver has no line for this — and what is inside them is the default that applies in its place,
+so a default it is running on and a value it holds do not read the same. A setting stored as an
+empty string is stored, and is shown as `""` without brackets: it is a real difference from the
+default, it compares as one, and it is the one value that would otherwise appear as nothing at
+all in the middle of the sentence.
+
+What the installer accepts and refuses is unchanged by any of this. Two of the comparisons are
+deliberately not symmetrical. **`node_id` is not defaulted**: the plugin has
+no default worth comparing against, since it derives `<boxtype>_<mac6>` on its first start and
+writes it, so a receiver with no node id is one whose plugin has never run. Provisioning accepts
+such a box and writes the id the form gave — there is nothing there to take over — and an update,
+which writes no settings, still refuses it, because it has to find the box already correct.
+Deriving the expected id instead was considered and rejected: the only source for the MAC at that
+point in the transaction is an announcement a box in `ha_mode: off` is not publishing, so it
+would be a guess made to satisfy a check.
+
+**`enabled` and `ha_mode` are defaulted**, which keeps the update path working on the very boxes
+that would otherwise have broken next: `enabled` is on by default and therefore absent on every
+receiver that never turned it off.
+
+Brackets rather than a word for the unstored values, because the string is dropped into the
+Polish and German sentences unchanged and a word in it would be an English one.
+
+### 21. A refusal that changes nothing still has to be written down
+
+The refused install left **no log line at any level**. The only account of it was the sentence on
+a config-flow screen, which is gone the moment it is read; afterwards there was nothing to say an
+install had been attempted, let alone which check had refused it or what it had measured. Every
+guard that refuses before the receiver is touched now leaves one warning naming the check and its
+facts — the Python version and the floor, the free bytes against the bytes needed for each of the
+three filesystems, the running recording, the number of timers inside the guard window, the
+installed version against the bundled one, both halves of an identity, and, for the checks that
+fail closed on an answer they cannot parse, which answer that was. No credential, no address and
+no broker password is among them, because none of those is something a guard judges.
+
+Exactly one line per refused install, and the **guards themselves log nothing**. The facts
+travel with the refusal and a single boundary around the steps that run before the receiver is
+touched writes them. The alternative — each guard logging as it raises — is wrong twice over: the
+same guards are what `async_preflight` runs for the options screen's no-write credential probe
+and for reauthentication, where the failure goes to a form to be retried and a receiver that
+happens to be recording is not a refused install at all, so the log would fill with a sentence
+that was untrue once per retry; and a guard reached through a helper that re-raises would need a
+flag on the exception to avoid writing itself down twice. One place that knows an install was
+being attempted, one line.
+
+The line says what the receiver was left holding rather than „nothing was changed", because that
+is not quite true: no snapshot is taken and no transaction lock claimed, but the identity check
+reads the receiver's settings by running the installer's own helper, so a refusal at that check
+can leave that one file in `/tmp`. Uploading the helper after the check is not available — the
+check is what runs it.
+
+What a refusal still does not do is consume the discovery card the box is being offered on —
+measured across twenty-five samples of the refused install. That is correct and stays: the card
+is taken down when an install starts changing things, and this one never did.
+
 ## Consequences
 
 - **Buttons can now raise.** An automation pressing a button that the receiver refuses will fail
@@ -451,6 +549,10 @@ its own and the newest one behind it.
   lock, or wait, and try again" rather than "look at the receiver" or "fix this and press
   install". Anything matching on abort reasons — a test, a script, a translation file — has to
   carry them.
+- **A refused install is now noisy at WARNING.** An installation attempt that changes nothing
+  writes a line to the Home Assistant log, where before it wrote none. That is the point, and it
+  is visible to anybody watching the log: a receiver that is recording, or one an install is
+  retried on, produces a warning per attempt.
 - **The integration now remembers something the broker does not.** „Last error" is the first piece
   of state here that is not a projection of a topic. It is deliberate — the topic is cleared by
   design and the memory is the whole feature — but it means one entity survives a reload with a

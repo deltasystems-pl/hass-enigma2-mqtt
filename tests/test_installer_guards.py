@@ -217,6 +217,37 @@ async def test_provisioning_a_box_already_bound_to_another_node_is_refused(
     assert raised.value.code is InstallerErrorCode.IDENTITY_MISMATCH
 
 
+async def test_a_refusal_before_the_lock_leaves_exactly_one_warning(
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """One install, one line — whichever of the guards refused it, however deep.
+
+    The facts travel with the refusal and the transaction writes them, so a guard that
+    is reached twice, or through a helper that re-raises, cannot turn one refused
+    install into two entries in the log. The line says what the receiver was left with,
+    because "nothing was changed" is not quite true of the installer's own helper file.
+    """
+    receiver = FakeReceiver(recording=True)
+
+    code = await _install(hass, install_request, receiver, _bundle(tmp_path))
+
+    assert code is InstallerErrorCode.RECORDING
+    assert receiver.backup_exists is False
+    refusals = [
+        record
+        for record in caplog.records
+        if record.levelname == "WARNING" and "install refused" in record.getMessage()
+    ]
+    assert len(refusals) == 1
+    message = refusals[0].getMessage()
+    assert "recording" in message
+    assert "/tmp" in message
+    assert "no transaction lock" in message
+
+
 async def test_a_receiver_holding_the_durable_lock_is_busy(
     hass: HomeAssistant, install_request: InstallRequest, tmp_path: Path
 ) -> None:

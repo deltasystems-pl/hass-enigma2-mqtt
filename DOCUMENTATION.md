@@ -131,12 +131,46 @@ restore itself did not finish, so a receiver is not left refusing installs becau
 went wrong. The Home Assistant log carries the reason for every step that failed, which the abort
 screen has no room for, and the rollback's own steps are logged as it takes them.
 
+**A refusal before anything is changed** — the receiver's Python is too old, it is short of
+space, it is recording, a timer is about to start, it already runs a newer plugin, or its plugin
+settings say it is another box — leaves a warning in the Home Assistant log naming the check and
+what it measured, beside the sentence on the screen. The screen is gone as soon as it is read;
+the log line is what is left to look at afterwards. The receiver keeps its own state through all
+of it: no snapshot is taken, no transaction lock is claimed, and nothing of the plugin is
+touched. A refusal that happens after the identity is read can leave the installer's own helper
+script in `/tmp`, under a name of its own, which the next install replaces and a reboot clears. A
+discovery card the box was already being offered on is still waiting afterwards, because nothing
+ran that would have consumed it — measured across twenty-five samples of one refused install.
+
 A box that has announced itself is usually being offered on the discovery card at the same time.
 Installing over SSH takes that offer down as soon as the credentials are submitted, so there is one
 card for one receiver rather than two.
 
 The node id is the entry's unique id, so the same box cannot be added twice by either path,
 and a box that renames itself updates the entry it already owns.
+
+**Installing over a plugin that is already there.** Reinstalling, and upgrading through the
+guided flow rather than the update entity, are ordinary things to do — after deleting an entry
+and starting again, or to move a receiver to another broker. Before it writes anything the
+installer reads the plugin settings the receiver already holds and compares the **node ID** and
+the **base topic** with the ones on the form. They have to be the same box: re-provisioning a
+receiver that belongs to somebody else's Home Assistant would take it over silently, and that is
+what this refuses. Nothing else is compared, so a different broker, a different name or a
+different password is an ordinary change the install goes on to make.
+
+A receiver whose plugin has **never been configured** stores no node ID — the plugin derives
+`<boxtype>_<mac6>` on its first start and writes it then — and it is provisioned with the one the
+form gives, because there is nothing there to take over. A setting the receiver has never been
+moved off is not in its settings file at all, which is not the same as a difference: enigma2
+writes no line for a value that still equals its default, so a box on the default base topic
+`enigma2` says nothing about its base topic. The comparison supplies the plugin's defaults for
+anything the receiver has not stored. When it does refuse, the message names both sides, and a
+value in brackets is one the receiver has no line for, and what is inside the brackets is the
+default that applies in its place; a value stored as empty is shown as `""`.
+
+The **update entity** compares more, because it writes no settings and therefore has to find the
+box already correct: the node ID, the base topic, that the plugin is enabled, and that it is in
+`integration` mode.
 
 ### Options
 
