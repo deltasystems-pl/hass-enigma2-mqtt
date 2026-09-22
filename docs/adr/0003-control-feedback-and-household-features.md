@@ -1,6 +1,6 @@
 # ADR-0003: Control feedback and household features — the 0.2.0 and 0.3.0 plan
 
-**Status:** accepted
+**Status:** accepted, extended by [ADR-0004](0004-remote-uninstall.md)
 **Date:** 2026-09-21
 **Amended:** 2026-09-22 — the guided installer ran on a receiver for the first time, and its
 rollback ran on a receiver for the first time

@@ -272,6 +272,17 @@ Found by running this release against a real receiver rather than a test one.
 
 ### Documentation
 
+- **[ADR-0004](docs/adr/0004-remote-uninstall.md) records the remote-uninstall decision**, for
+  0.3.0. Removing the plugin from a receiver becomes an explicit, confirmed action — never a side
+  effect of deleting the configuration entry, which still only hands the box back to MQTT
+  discovery. The action is offered only while the receiver says it permits removal, a permission
+  that is off by default and granted on the box rather than over the broker; it prefers the SSH
+  path where the entry kept credentials, because that path can prove the outcome, and falls back
+  to the plugin's command otherwise. It is a one-way door — afterwards only SSH or the receiver's
+  own package manager can put the plugin back — and the confirmation says so, along with the fact
+  that the receiver keeps its settings for a later reinstall. The receiver's half, including the
+  order of operations that retracts the retained topics before anything is removed, is ADR-0004 in
+  the plugin repository.
 - **[ADR-0003](docs/adr/0003-control-feedback-and-household-features.md) carries a dated
   correction: the recorder diagnosis behind decision 5 was wrong.** A long source list was said to
   push the media player's attributes past the recorder's 16 KB limit and cost the entity its
