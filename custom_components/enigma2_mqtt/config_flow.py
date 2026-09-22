@@ -103,6 +103,19 @@ _LOGGER = logging.getLogger(__name__)
 # Shown in place of a field the box did not report.
 UNKNOWN_PLACEHOLDER = "—"
 
+# The backend's install phases, in the order it reports them. The last one is reported
+# when the work is already done and the install task is about to resolve.
+INSTALL_PHASES = (
+    "preflight",
+    "backup",
+    "upload",
+    "install",
+    "provision",
+    "restart",
+    "announcement",
+    "done",
+)
+
 STEP_USER_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_BASE_TOPIC, default=DEFAULT_BASE_TOPIC): str,
@@ -335,8 +348,17 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
             self._node_id = provisioning.node_id
             self._base_topic = provisioning.base_topic
             self._name = provisioning.friendly_name or provisioning.node_id
-            await self.async_set_unique_id(self._node_id)
+            # `raise_on_progress=False`, and then the pending flows are cleared rather
+            # than deferred to. The plugin's announcement is retained, so Home Assistant
+            # offers a `confirm` card for the box again at every start and at every
+            # reconnect to the broker — which means a receiver that has announced before
+            # nearly always has one waiting. Raising on it aborted the guided install
+            # with `already_in_progress` at this exact point: after the operator had
+            # typed the SSH password and the broker password. The waiting offer is about
+            # the same receiver this install is for, and it is the one that gives way.
+            await self.async_set_unique_id(self._node_id, raise_on_progress=False)
             self._abort_if_unique_id_configured()
+            self._async_abort_other_flows_for_this_box()
             self._install_task = self.hass.async_create_task(self._async_run_install())
             return await self.async_step_install_progress()
 
@@ -398,15 +420,25 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
             self._install_error = "unknown"
 
     def _async_install_progress(self, phase: str) -> None:
-        """Remember the backend phase without recording any credential or address."""
+        """Remember the backend phase without recording any credential or address.
+
+        The progress bar is moved for every phase. The frontend is only asked to
+        re-read the flow — which it answers by posting to it — while there is still
+        work left to report. The last phase is reported once the transaction is
+        committed, microseconds before the install task resolves, and Home Assistant
+        notifies the frontend itself the moment it does. Asking for a refresh here as
+        well puts two callers on one flow within milliseconds of each other: the first
+        finishes it and the second finds it gone, which is how a successful install
+        ended on „Invalid flow specified" instead of on the receiver's new entry.
+        """
         self._install_phase = phase
-        phases = (
-            "preflight", "backup", "upload", "install", "provision",
-            "restart", "announcement", "done",
+        if phase not in INSTALL_PHASES:
+            return
+        self.async_update_progress(
+            (INSTALL_PHASES.index(phase) + 1) / len(INSTALL_PHASES)
         )
-        if phase in phases:
-            self.async_update_progress((phases.index(phase) + 1) / len(phases))
-        self.async_notify_flow_changed()
+        if phase != INSTALL_PHASES[-1]:
+            self.async_notify_flow_changed()
 
     @callback
     def async_remove(self) -> None:
@@ -631,6 +663,20 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
             },
         )
         return self.async_abort(reason="reauth_successful")
+
+    @callback
+    def _async_abort_other_flows_for_this_box(self) -> None:
+        """Drop every other pending flow that is about the receiver being installed on.
+
+        In practice that is the discovery offer the retained announcement keeps
+        re-creating. It cannot become an entry any more — this flow owns the node id
+        now — and leaving it behind would put a second card for one receiver in front
+        of whoever finishes here.
+        """
+        for progress in self._async_in_progress(
+            include_uninitialized=True, match_context={"unique_id": self._node_id}
+        ):
+            self.hass.config_entries.flow.async_abort(progress["flow_id"])
 
     @callback
     def _async_forget_device(self, node_id: str, entry_id: str) -> None:

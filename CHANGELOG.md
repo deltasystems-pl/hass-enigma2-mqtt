@@ -121,6 +121,29 @@ have not been accepted on a receiver, and no tag has been cut.
 
 Found by running this release against a real receiver rather than a test one.
 
+- **A receiver that had announced before could not be installed on from the guided flow.**
+  The plugin's announcement is retained, so Home Assistant offers a discovery card for the box
+  again at every start and at every reconnect to the broker — and the guided install refused to
+  run beside that waiting offer. It aborted with "this receiver is already being added" at the one
+  step where two passwords had just been typed. The install now takes the offer down instead of
+  giving way to it, so there is one card for one receiver. An announcement that arrives while an
+  install is running still stands aside, and adding a box by hand is unchanged.
+- **A successful guided install ended on "Invalid flow specified"** instead of on the new receiver,
+  although the install had worked and every entity was there. The installer reports each phase so
+  the card can say what it is doing, and the last phase — reported once the work is committed —
+  asked the frontend to re-read the flow at the same moment Home Assistant did. The two requests
+  raced: one created the entry and closed the flow, and the other arrived to find it gone. The
+  phases and the progress bar are unchanged; the last one no longer adds a second caller.
+- **A rollback left the OpenWebif hook's compiled copy behind.** This image compiles into the
+  legacy location — `MQTTBridge.pyc` beside the source, not in `__pycache__` — and Python imports
+  that as a complete module. Undoing a first install therefore restored "there was no hook here"
+  and left an importable hook reaching for a plugin that had just been removed. Both locations are
+  now backed up and restored as one.
+- **Installer snapshots no longer accumulate on the receiver.** Every guided install left another
+  full copy of the plugin directory under `/home/root/mqttbridge-backups/`, for ever. A successful
+  install now keeps the two newest — the way back from it and the way back from the one before —
+  and removes the rest. It only ever touches directories it made itself, and a failure to tidy up
+  is never a reason to undo an install that has already been verified.
 - **The guided installer could not find opkg's database on OpenViX.** Where that database
   lives is a setting, not a constant: OpenViX 6.6 keeps it under `/var/lib/opkg` and says so
   in `/etc/opkg/opkg.conf`, leaving `/usr/lib/opkg` with nothing in it but `alternatives/`.

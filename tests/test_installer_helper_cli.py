@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -127,6 +128,26 @@ def test_verify_accepts_the_files_opkg_installed_and_refuses_a_changed_one(
     installed.write_text("tampered\n", encoding="utf-8")
     with pytest.raises(ValueError, match="digest mismatch"):
         _run(monkeypatch, "verify", str(manifest), "--root", str(root))
+
+
+def test_prune_leaves_the_two_newest_snapshots_and_says_what_it_took(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The last thing a successful install runs before deleting the helper itself."""
+    backups = tmp_path / "mqttbridge-backups"
+    backups.mkdir()
+    for index, nonce in enumerate(("aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc")):
+        directory = backups / f"ha-installer-{nonce}"
+        directory.mkdir()
+        os.utime(directory, (1_700_000_000 + index, 1_700_000_000 + index))
+
+    assert _run(monkeypatch, "prune", str(backups)) == 0
+
+    assert sorted(child.name for child in backups.iterdir()) == [
+        "ha-installer-bbbbbbbbbbbb",
+        "ha-installer-cccccccccccc",
+    ]
+    assert "ha-installer-aaaaaaaaaaaa" in capsys.readouterr().err
 
 
 def test_claim_and_release_are_the_lock_the_installer_serialises_on(

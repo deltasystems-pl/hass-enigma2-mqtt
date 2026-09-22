@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import secrets
 import shutil
 import stat
@@ -27,6 +28,12 @@ PLUGIN_DIR = "usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge"
 WEBIF_SHIM = (
     "usr/lib/enigma2/python/Plugins/Extensions/WebInterface/WebChilds/External/MQTTBridge.py"
 )
+# What the receiver actually compiles the hook into. CPython's default is
+# `__pycache__/MQTTBridge.<tag>.pyc`; OpenViX 6.6 writes the legacy name beside the
+# source instead, and Python imports that as a complete module. Both are treated as one
+# thing, because a restore that put back "no hook" and left either behind would leave an
+# importable hook reaching for a plugin that is no longer installed.
+WEBIF_LEGACY_BYTECODE = "MQTTBridge.pyc"
 # Where opkg keeps its database is a configuration item, not a constant. OpenViX 6.6
 # ships `/etc/opkg/opkg.conf` naming `/var/lib/opkg`, and leaves `/usr/lib/opkg`
 # containing nothing but `alternatives/` — so a hard-coded `/usr/lib/opkg/status` found
@@ -39,6 +46,14 @@ SETTINGS = "etc/enigma2/settings"
 PROVISION = "etc/enigma2/mqttbridge.json"
 LOCK = "var/lock/opkg.lock"
 SETTINGS_PREFIX = "config.plugins.mqttbridge."
+# The snapshot directories this installer makes, and nothing else. The nonce is
+# `secrets.token_hex(6)`; anything else under the backups directory belongs to whoever
+# put it there and is never a candidate for pruning.
+SNAPSHOT_NAME = re.compile(r"ha-installer-[0-9a-f]{12}")
+# The newest snapshot is the operator's rollback point. The one before it is kept so
+# that an install which has just replaced a rollback point still leaves the previous
+# one reachable; everything older has been superseded twice.
+KEEP_SNAPSHOTS = 2
 BOOT_ID_PATH = Path("/proc/sys/kernel/random/boot_id")
 UPTIME_PATH = Path("/proc/uptime")
 # Generous: the slowest measured install is minutes, and reclaiming too eagerly would
@@ -197,11 +212,22 @@ def _lock(root: Path):
     return handle
 
 
-def _webif_cache_files(root: Path) -> list[Path]:
-    cache_dir = _path(root, WEBIF_SHIM).parent / "__pycache__"
+def _webif_bytecode_files(root: Path) -> list[Path]:
+    """Return every compiled copy of the OpenWebif hook, in both locations.
+
+    The legacy sibling is the one this image writes, and it is the one a first
+    install's rollback used to leave behind: `opkg remove` deletes the files it
+    installed, the snapshot said there had been no hook, and `MQTTBridge.pyc` stayed
+    there importable.
+    """
+    shim = _path(root, WEBIF_SHIM)
+    cache_dir = shim.parent / "__pycache__"
     if cache_dir.is_symlink() or (cache_dir.exists() and not cache_dir.is_dir()):
         raise ValueError("OpenWebif bytecode directory is unsafe")
-    files = list(cache_dir.glob("MQTTBridge.*.pyc")) if cache_dir.is_dir() else []
+    files = sorted(cache_dir.glob("MQTTBridge.*.pyc")) if cache_dir.is_dir() else []
+    legacy = shim.parent / WEBIF_LEGACY_BYTECODE
+    if legacy.is_symlink() or legacy.exists():
+        files.append(legacy)
     if any(path.is_symlink() or not path.is_file() for path in files):
         raise ValueError("OpenWebif bytecode must be regular files")
     return files
@@ -237,7 +263,7 @@ def snapshot(root: Path, backup: Path) -> dict[str, object]:
             raise ValueError("OpenWebif shim must be a regular file")
         if webif_shim.is_file():
             shutil.copy2(webif_shim, backup / "webif-shim")
-        webif_cache_files = _webif_cache_files(root)
+        webif_cache_files = _webif_bytecode_files(root)
         if webif_cache_files:
             cache_backup = backup / "webif-cache"
             cache_backup.mkdir()
@@ -334,7 +360,7 @@ def restore(
         raise ValueError("live plugin directory may not be a symlink")
     if webif_shim.is_symlink() or (webif_shim.exists() and not webif_shim.is_file()):
         raise ValueError("live OpenWebif shim is unsafe")
-    live_cache_files = _webif_cache_files(root)
+    live_cache_files = _webif_bytecode_files(root)
     if metadata["plugin"] and (
         (backup / "plugin").is_symlink() or not (backup / "plugin").is_dir()
     ):
@@ -402,9 +428,15 @@ def restore(
         for cache_file in live_cache_files:
             cache_file.unlink()
         if metadata["webif_cache"]:
+            webif_shim.parent.mkdir(parents=True, exist_ok=True)
             cache_dir = webif_shim.parent / "__pycache__"
-            cache_dir.mkdir(exist_ok=True)
             for source in cache_sources:
+                # The name says which of the two locations it came out of: exactly
+                # `MQTTBridge.pyc` is the legacy sibling, anything else is a cache tag.
+                if source.name == WEBIF_LEGACY_BYTECODE:
+                    shutil.copy2(source, webif_shim.parent / source.name)
+                    continue
+                cache_dir.mkdir(exist_ok=True)
                 shutil.copy2(source, cache_dir / source.name)
 
         if restore_settings:
@@ -607,10 +639,49 @@ def release_transaction(lock_dir: Path) -> None:
     lock_dir.rmdir()
 
 
+def prune_snapshots(backups: Path, keep: int = KEEP_SNAPSHOTS) -> list[str]:
+    """Delete all but the newest `keep` installer snapshots, and report what went.
+
+    A snapshot is the only way back from an install, so one is kept — the newest, which
+    is the one taken by the install that just succeeded — and the one before it. Without
+    this, every guided install left another copy of the plugin directory on the
+    receiver's flash for ever.
+
+    Only this installer's own directories are candidates: the name has to be exactly
+    `ha-installer-<nonce>`, it has to be a directory, and it may not be a symlink, which
+    `shutil.rmtree` would otherwise be asked to follow out of the backups directory. The
+    transaction lock, and anything a person put there, is not touched.
+    """
+    if keep < 1:
+        raise ValueError("at least one snapshot is kept")
+    if backups.is_symlink() or not backups.is_dir():
+        return []
+    candidates = []
+    for child in backups.iterdir():
+        if child.is_symlink() or not child.is_dir():
+            continue
+        if not SNAPSHOT_NAME.fullmatch(child.name):
+            continue
+        try:
+            modified = child.stat().st_mtime
+        except OSError:
+            continue
+        candidates.append((modified, child))
+    # The name breaks a tie, because two directories made in the same second are
+    # otherwise ordered by whatever `iterdir` happened to return.
+    candidates.sort(key=lambda candidate: (candidate[0], candidate[1].name))
+    removed = []
+    for _modified, child in candidates[: max(0, len(candidates) - keep)]:
+        shutil.rmtree(child, ignore_errors=True)
+        removed.append(child.name)
+    return removed
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "operation", choices=("snapshot", "restore", "verify", "claim", "release", "identity")
+        "operation",
+        choices=("snapshot", "restore", "verify", "claim", "release", "prune", "identity"),
     )
     parser.add_argument("path", type=Path, nargs="?")
     parser.add_argument("--root", type=Path, default=Path("/"))
@@ -625,6 +696,9 @@ def main() -> int:
         claim_transaction(args.path)
     elif args.operation == "release":
         release_transaction(args.path)
+    elif args.operation == "prune":
+        for name in prune_snapshots(args.path):
+            print(f"pruned superseded installer snapshot {name}", file=sys.stderr)
     elif args.operation == "snapshot":
         snapshot(args.root, args.path)
     elif args.operation == "restore":

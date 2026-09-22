@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
-from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_USER
+from homeassistant.config_entries import SOURCE_MQTT, SOURCE_REAUTH, SOURCE_USER
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.data_entry_flow import EVENT_DATA_ENTRY_FLOW_PROGRESSED, FlowResultType
+from homeassistant.data_entry_flow import (
+    EVENT_DATA_ENTRY_FLOW_PROGRESSED,
+    FlowResultType,
+    UnknownFlow,
+)
+from homeassistant.helpers.service_info.mqtt import MqttServiceInfo
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -30,7 +37,16 @@ from custom_components.enigma2_mqtt.installer import (
     Preflight,
 )
 
-from .conftest import NODE_ID, async_setup_box
+from .conftest import (
+    ANNOUNCEMENT,
+    ANNOUNCEMENT_TOPIC,
+    BASE_TOPIC,
+    INFO,
+    INFO_TOPIC,
+    NODE_ID,
+    async_arm_ha_mode_ack,
+    async_setup_box,
+)
 
 HOST_KEY = HostKey("ssh-ed25519", "ssh-ed25519 AAAAtest", "SHA256:test")
 PREFLIGHT = Preflight("openvix", "3.12", 10_000_000, None, False, False, 0)
@@ -50,6 +66,22 @@ async def _install_form(hass: HomeAssistant):
         return await hass.config_entries.flow.async_configure(
             result["flow_id"], {CONF_SSH_HOST: "receiver.local", CONF_SSH_PORT: 22}
         )
+
+
+async def _announce(hass: HomeAssistant):
+    """Start the discovery flow the retained announcement keeps re-creating."""
+    return await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_MQTT},
+        data=MqttServiceInfo(
+            topic=ANNOUNCEMENT_TOPIC,
+            payload=json.dumps(ANNOUNCEMENT),
+            qos=0,
+            retain=True,
+            subscribed_topic="enigma2mqtt/discovery/#",
+            timestamp=0.0,
+        ),
+    )
 
 
 def _install_input(keep: bool = False):
@@ -100,6 +132,170 @@ async def test_install_keeps_credentials_only_with_explicit_consent(
     entry = hass.config_entries.async_entries(DOMAIN)[0]
     assert entry.data[CONF_SSH_PASSWORD] == "secret"
     assert entry.data[CONF_SSH_HOST_KEY] == HOST_KEY.public_key
+
+
+async def test_a_waiting_announcement_does_not_block_the_guided_install(
+    hass: HomeAssistant, mqtt_mock
+) -> None:
+    """The offer a receiver's retained announcement keeps making gives way.
+
+    The plugin's announcement is retained, so a box that has ever been on the broker
+    has a `confirm` card waiting at every Home Assistant start and every MQTT
+    reconnect. That is the same receiver the installer is being pointed at, and
+    treating it as a competing flow aborted the install with `already_in_progress`
+    the moment the SSH and broker passwords were submitted.
+    """
+    offer = await _announce(hass)
+    assert offer["type"] is FlowResultType.FORM
+
+    result = await _install_form(hass)
+    with patch(
+        "custom_components.enigma2_mqtt.config_flow.async_install",
+        AsyncMock(return_value=InstallResult("0.1.0", True, True)),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _install_input()
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+    assert hass.config_entries.flow.async_progress_by_handler(DOMAIN) == []
+
+
+async def test_an_announcement_during_an_install_gives_way_to_it(
+    hass: HomeAssistant, mqtt_mock
+) -> None:
+    """The other direction: the install owns the node id once it has started."""
+    running = asyncio.Event()
+    finish = asyncio.Event()
+
+    async def blocking_install(*_args):
+        running.set()
+        await finish.wait()
+        return InstallResult("0.1.0", True, True)
+
+    result = await _install_form(hass)
+    with patch(
+        "custom_components.enigma2_mqtt.config_flow.async_install",
+        AsyncMock(side_effect=blocking_install),
+    ):
+        progress = await hass.config_entries.flow.async_configure(
+            result["flow_id"], _install_input()
+        )
+        await running.wait()
+        assert progress["type"] is FlowResultType.SHOW_PROGRESS
+
+        offer = await _announce(hass)
+        assert offer["type"] is FlowResultType.ABORT
+        assert offer["reason"] == "already_in_progress"
+
+        finish.set()
+        await hass.async_block_till_done()
+        result = await hass.config_entries.flow.async_configure(progress["flow_id"])
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+
+async def test_the_manual_path_still_adds_a_box_that_is_being_offered(
+    hass: HomeAssistant, mqtt_mock, retained: dict[str, str]
+) -> None:
+    """Unchanged: it never raised on the offer, and it still does not.
+
+    Nothing here withdraws the offer either. Home Assistant retires it by itself once
+    an entry claims the unique id, which is the moment the manual path reaches — and
+    is exactly the moment the guided install does not reach for several minutes,
+    which is why that path has to take the offer out of the way on its own.
+    """
+    offer = await _announce(hass)
+    assert offer["type"] is FlowResultType.FORM
+
+    retained[INFO_TOPIC] = json.dumps(INFO)
+    await async_arm_ha_mode_ack(hass)
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": "manual"}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_BASE_TOPIC: BASE_TOPIC, CONF_NODE_ID: NODE_ID}
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+    assert hass.config_entries.flow.async_progress_by_handler(DOMAIN) == []
+
+
+async def test_a_successful_install_ends_on_the_created_entry(
+    hass: HomeAssistant, mqtt_mock
+) -> None:
+    """One caller finishes the flow, and it answers the client that is waiting.
+
+    Home Assistant advances a progress step itself when the task it was given
+    resolves, and notifies the frontend, which answers a notification by posting to
+    the flow. A phase reported after the work is finished adds a second notification
+    within milliseconds of that one — and then two posts race for one flow: the first
+    creates the entry and removes the flow, the second finds nothing and is answered
+    with „Invalid flow specified", which is what an operator saw at the end of an
+    install that had in fact succeeded.
+
+    The frontend is modelled here as it behaves: it posts once per notification, and
+    its post cannot arrive in the same loop iteration as the notification.
+    """
+    finish = asyncio.Event()
+    running = asyncio.Event()
+    answers: list[Any] = []
+    posts: list[asyncio.Task] = []
+
+    async def reporting_install(_hass, _request, progress_cb):
+        progress_cb("upload")
+        running.set()
+        await finish.wait()
+        progress_cb("done")
+        return InstallResult("0.1.0", True, True)
+
+    result = await _install_form(hass)
+    flow_id = result["flow_id"]
+
+    async def _post() -> None:
+        await asyncio.sleep(0)
+        try:
+            answers.append(await hass.config_entries.flow.async_configure(flow_id))
+        except UnknownFlow:
+            answers.append("invalid flow specified")
+
+    @callback
+    def _refresh_requested(event) -> None:
+        if event.data.get("flow_id") != flow_id or not event.data.get("refresh"):
+            return
+        posts.append(hass.async_create_task(_post()))
+
+    unsubscribe = hass.bus.async_listen(EVENT_DATA_ENTRY_FLOW_PROGRESSED, _refresh_requested)
+    try:
+        with patch(
+            "custom_components.enigma2_mqtt.config_flow.async_install",
+            AsyncMock(side_effect=reporting_install),
+        ):
+            progress = await hass.config_entries.flow.async_configure(flow_id, _install_input())
+            await running.wait()
+            assert progress["type"] is FlowResultType.SHOW_PROGRESS
+
+            finish.set()
+            await hass.async_block_till_done()
+            await asyncio.gather(*posts)
+    finally:
+        unsubscribe()
+
+    assert "invalid flow specified" not in answers
+    created = [
+        answer
+        for answer in answers
+        if isinstance(answer, dict) and answer["type"] is FlowResultType.CREATE_ENTRY
+    ]
+    assert len(created) == 1
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
 
 
 async def test_unexpected_install_exception_never_creates_an_entry(
@@ -165,9 +361,11 @@ async def test_aborting_progress_cancels_the_transaction_and_clears_secrets(
             EVENT_DATA_ENTRY_FLOW_PROGRESSED, progress_changed
         )
         try:
-            flow._async_install_progress("done")
+            # A phase from the middle of the transaction: the last one deliberately
+            # does not ask the frontend to re-read the flow, which is its own test.
+            flow._async_install_progress("upload")
             await asyncio.wait_for(progressed.wait(), timeout=1)
-            assert flow._install_phase == "done"
+            assert flow._install_phase == "upload"
             assert progressed.is_set()
         finally:
             unsubscribe()

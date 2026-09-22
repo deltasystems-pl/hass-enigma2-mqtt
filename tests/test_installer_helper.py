@@ -16,6 +16,7 @@ from custom_components.enigma2_mqtt.installer_helper import (
     STALE_LOCK_SECONDS,
     boot_id,
     claim_transaction,
+    prune_snapshots,
     read_identity,
     release_transaction,
     restore,
@@ -23,6 +24,9 @@ from custom_components.enigma2_mqtt.installer_helper import (
     uptime,
     verify_manifest,
 )
+
+WEBIF_DIR = "usr/lib/enigma2/python/Plugins/Extensions/WebInterface/WebChilds/External"
+PLUGIN_DIR = "usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge"
 
 
 def _write(root: Path, relative: str, value: str) -> Path:
@@ -317,6 +321,145 @@ def test_restore_removes_only_new_openwebif_shim(tmp_path: Path) -> None:
     assert not shim.exists()
     assert not generated.exists()
     assert sibling.read_text(encoding="utf-8") == "keep\n"
+
+
+def test_restore_removes_the_bytecode_the_receiver_actually_writes(tmp_path: Path) -> None:
+    """This image compiles the hook into the legacy location, beside the source.
+
+    `opkg remove` deletes the files it installed, which are the `.py` files, so the
+    rollback of a first install restores "there was no hook here" — and used to leave
+    `MQTTBridge.pyc` sitting next to where the source had been. Python imports a
+    legacy-location `.pyc` as a complete module, so the hook stayed importable and
+    would have gone looking for a plugin that is no longer installed.
+    """
+    root = tmp_path / "root"
+    backup = tmp_path / "backup"
+    _receiver_tree(root)
+    shim = root / WEBIF_DIR / "MQTTBridge.py"
+    shim.unlink()
+    for bytecode in (root / WEBIF_DIR / "__pycache__").glob("MQTTBridge.*.pyc"):
+        bytecode.unlink()
+
+    metadata = snapshot(root, backup)
+    assert metadata["webif_shim"] is False
+    assert metadata["webif_cache"] is False
+
+    shim.write_text("new shim\n", encoding="utf-8")
+    legacy = _write(root, f"{WEBIF_DIR}/MQTTBridge.pyc", "new bytecode\n")
+
+    restore(root, backup, restore_provisioning=True, restore_settings=True)
+
+    assert not shim.exists()
+    assert not legacy.exists()
+
+
+def test_the_legacy_bytecode_goes_back_where_the_receiver_put_it(tmp_path: Path) -> None:
+    """A rollback restores both locations, and does not confuse one for the other."""
+    root = tmp_path / "root"
+    backup = tmp_path / "backup"
+    _receiver_tree(root)
+    legacy = _write(root, f"{WEBIF_DIR}/MQTTBridge.pyc", "old bytecode\n")
+    cache = root / WEBIF_DIR / "__pycache__/MQTTBridge.cpython-312.pyc"
+
+    assert snapshot(root, backup)["webif_cache"] is True
+
+    legacy.write_text("new bytecode\n", encoding="utf-8")
+    cache.write_text("new bytecode\n", encoding="utf-8")
+
+    restore(root, backup, restore_provisioning=True, restore_settings=True)
+
+    assert legacy.read_text(encoding="utf-8") == "old bytecode\n"
+    assert cache.read_text(encoding="utf-8") == "old bytecode\n"
+    assert not (root / WEBIF_DIR / "__pycache__/MQTTBridge.pyc").exists()
+
+
+def test_restore_of_a_first_install_removes_the_whole_plugin_directory(
+    tmp_path: Path,
+) -> None:
+    """Including bytecode no build ever shipped, and the vendored subtree.
+
+    `setup.pyc` is on a real receiver because somebody opened the setup screen once,
+    so the set of compiled files is not the set of files of any one build. What proves
+    the plugin is gone is the directory, never a list of names.
+    """
+    root = tmp_path / "root"
+    backup = tmp_path / "backup"
+    _receiver_tree(root)
+    plugin = root / PLUGIN_DIR
+    (plugin / "plugin.py").unlink()
+    plugin.rmdir()
+
+    assert snapshot(root, backup)["plugin"] is False
+
+    _write(root, f"{PLUGIN_DIR}/plugin.py", "new\n")
+    _write(root, f"{PLUGIN_DIR}/plugin.pyc", "bytecode\n")
+    _write(root, f"{PLUGIN_DIR}/setup.pyc", "bytecode from a screen somebody opened\n")
+    _write(root, f"{PLUGIN_DIR}/_vendor/paho/mqtt/client.pyc", "vendored bytecode\n")
+
+    restore(root, backup, restore_provisioning=True, restore_settings=True)
+
+    assert not plugin.exists()
+
+
+def test_pruning_keeps_the_newest_two_snapshots(tmp_path: Path) -> None:
+    """Otherwise every guided install leaves another copy of the plugin on flash.
+
+    The newest is the way back from the install that has just succeeded, and the one
+    before it is the way back from the install before that. Older ones have been
+    superseded twice and nobody is going to reach for them.
+    """
+    backups = tmp_path / "mqttbridge-backups"
+    backups.mkdir()
+    for index, nonce in enumerate(
+        ("aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc", "dddddddddddd")
+    ):
+        directory = backups / f"ha-installer-{nonce}"
+        directory.mkdir()
+        (directory / "snapshot.json").write_text("{}", encoding="utf-8")
+        os.utime(directory, (1_700_000_000 + index, 1_700_000_000 + index))
+
+    removed = prune_snapshots(backups)
+
+    assert removed == ["ha-installer-aaaaaaaaaaaa", "ha-installer-bbbbbbbbbbbb"]
+    assert sorted(child.name for child in backups.iterdir()) == [
+        "ha-installer-cccccccccccc",
+        "ha-installer-dddddddddddd",
+    ]
+
+
+def test_pruning_touches_nothing_it_did_not_make(tmp_path: Path) -> None:
+    """`rmtree` down a symlink would leave the backups directory altogether."""
+    backups = tmp_path / "mqttbridge-backups"
+    backups.mkdir()
+    outside = tmp_path / "somebody-elses-data"
+    outside.mkdir()
+    (outside / "keep").write_text("keep\n", encoding="utf-8")
+    (backups / "ha-installer-000000000000").symlink_to(outside, target_is_directory=True)
+    (backups / "manual-backup-before-the-update").mkdir()
+    (backups / ".ha-installer.lock").mkdir()
+    (backups / "ha-installer-111111111111.tar").write_text("an archive\n", encoding="utf-8")
+    superseded = backups / "ha-installer-333333333333"
+    superseded.mkdir()
+    os.utime(superseded, (1_700_000_000, 1_700_000_000))
+    (backups / "ha-installer-222222222222").mkdir()
+
+    assert prune_snapshots(backups, keep=1) == ["ha-installer-333333333333"]
+
+    assert (outside / "keep").is_file()
+    assert sorted(child.name for child in backups.iterdir()) == [
+        ".ha-installer.lock",
+        "ha-installer-000000000000",
+        "ha-installer-111111111111.tar",
+        "ha-installer-222222222222",
+        "manual-backup-before-the-update",
+    ]
+
+
+def test_pruning_a_backups_directory_that_is_not_there_is_not_an_error(
+    tmp_path: Path,
+) -> None:
+    """It runs after the install is committed; nothing it finds may raise."""
+    assert prune_snapshots(tmp_path / "never-created") == []
 
 
 def test_snapshot_refuses_symlink_openwebif_shim(tmp_path: Path) -> None:

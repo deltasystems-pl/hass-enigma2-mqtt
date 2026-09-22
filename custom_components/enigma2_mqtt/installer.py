@@ -54,6 +54,9 @@ PROVISION_PATH = "/etc/enigma2/mqttbridge.json"
 # about where a database lives is a way for the two halves of this installer to
 # disagree, and neither half needs one.
 ENIGMA_SETTINGS = "/etc/enigma2/settings"
+# Where the pre-change snapshots and the durable transaction lock live on the receiver.
+# The abort messages name this directory, so it is a path a person is sent to.
+BACKUP_ROOT = "/home/root/mqttbridge-backups"
 MIN_PYTHON = (3, 9)
 MIN_FREE_BYTES = 2 * 1024 * 1024
 TIMER_GUARD_SECONDS = 10 * 60
@@ -888,8 +891,8 @@ async def _async_install_locked(
     # could have pre-created as a symlink: this file holds the broker password, and a
     # fixed name following a planted link would write it wherever the link points.
     remote_provision_tmp = f"{PROVISION_PATH}.ha-{nonce}"
-    backup = f"/home/root/mqttbridge-backups/ha-installer-{nonce}"
-    remote_lock = "/home/root/mqttbridge-backups/.ha-installer.lock"
+    backup = f"{BACKUP_ROOT}/ha-installer-{nonce}"
+    remote_lock = f"{BACKUP_ROOT}/.ha-installer.lock"
     session: InstallerSession | None = None
     watch: _RestartWatch | None = None
     install_started = False
@@ -917,7 +920,7 @@ async def _async_install_locked(
         )
         await _async_validate_receiver_identity(session, remote_helper, request)
         claim = await session.run(
-            f"mkdir -p /home/root/mqttbridge-backups && "
+            f"mkdir -p {shlex.quote(BACKUP_ROOT)} && "
             f"python3 {shlex.quote(remote_helper)} claim {shlex.quote(remote_lock)}",
             timeout=30,
         )
@@ -1038,6 +1041,26 @@ async def _async_install_locked(
                 raise InstallerError(InstallerErrorCode.ROLLBACK_FAILED)
             remote_lock_claimed = False
             committed = True
+            # Before the helper is deleted, and never a reason to fail an install that
+            # is already committed: the snapshot just taken is the way back from this
+            # install, and the ones from earlier installs have been superseded by it.
+            try:
+                pruned = await cleanup.run(
+                    f"python3 {shlex.quote(remote_helper)} prune {shlex.quote(BACKUP_ROOT)}",
+                    timeout=30,
+                )
+                if pruned.exit_status:
+                    _LOGGER.warning(
+                        "Installed plugin verified; superseded installer snapshots "
+                        "remain on the receiver under %s",
+                        BACKUP_ROOT,
+                    )
+            except BaseException:
+                _LOGGER.warning(
+                    "Installed plugin verified; superseded installer snapshots remain "
+                    "on the receiver under %s",
+                    BACKUP_ROOT,
+                )
             try:
                 await cleanup.run(
                     f"rm -f {shlex.quote(remote_ipk)} {shlex.quote(remote_helper)} "
