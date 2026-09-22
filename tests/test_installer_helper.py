@@ -458,6 +458,38 @@ def test_pruning_never_removes_the_snapshot_of_the_install_that_is_committing(
     ]
 
 
+def test_pruning_after_a_failed_install_still_leaves_exactly_two(tmp_path: Path) -> None:
+    """A failed run's snapshot is an ordinary candidate, not a third thing kept.
+
+    Pruning only runs once a transaction has committed, so a run that rolls back leaves
+    its snapshot behind — as it should, it is the evidence — and the directory is one
+    fuller than the rule allows until the next install succeeds. Observed on a receiver
+    after the rollback drill of 2026-09-22: two snapshots from earlier successes and one
+    from the failed run. The next success has to bring that back to two.
+    """
+    backups = tmp_path / "mqttbridge-backups"
+    backups.mkdir()
+    for nonce, modified in (
+        ("aaaaaaaaaaaa", 1_700_000_100),
+        ("bbbbbbbbbbbb", 1_700_000_200),
+        # The run that rolled back.
+        ("cccccccccccc", 1_700_000_300),
+        # The install that is committing now.
+        ("dddddddddddd", 1_700_000_400),
+    ):
+        directory = backups / f"ha-installer-{nonce}"
+        directory.mkdir()
+        os.utime(directory, (modified, modified))
+
+    removed = prune_snapshots(backups, keep_name="ha-installer-dddddddddddd")
+
+    assert removed == ["ha-installer-aaaaaaaaaaaa", "ha-installer-bbbbbbbbbbbb"]
+    assert sorted(child.name for child in backups.iterdir()) == [
+        "ha-installer-cccccccccccc",
+        "ha-installer-dddddddddddd",
+    ]
+
+
 def test_pruning_touches_nothing_it_did_not_make(tmp_path: Path) -> None:
     """`rmtree` down a symlink would leave the backups directory altogether."""
     backups = tmp_path / "mqttbridge-backups"

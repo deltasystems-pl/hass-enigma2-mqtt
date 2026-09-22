@@ -561,6 +561,142 @@ async def test_rollback_restores_a_receiver_whose_openwebif_died_at_the_restart(
     assert receiver.helper_removed is True
 
 
+def _slow_to_come_back(digest: str, misses: int) -> Any:
+    """Return a `run` whose Enigma takes `misses` polls to reappear after `init 3`.
+
+    This is the receiver measured in the second on-site drill: `init 3` is answered at
+    once and `pidof enigma2` says nothing for another eleven to fourteen seconds. A
+    negative `misses` never brings it back at all.
+    """
+    original = FakeSession.run
+    state = {"restarted": False, "polls": 0}
+
+    async def run(self: FakeSession, command: str, **kwargs: Any):
+        if "sha256sum" in command:
+            self.receiver.commands.append(command)
+            return CommandResult(0, digest + "\n")
+        if command == "pidof enigma2" and state["restarted"]:
+            state["polls"] += 1
+            if misses < 0 or state["polls"] <= misses:
+                self.receiver.commands.append(command)
+                # What `pidof` does when nothing matches: exit 1, and say nothing.
+                return CommandResult(1, "", "")
+        result = await original(self, command, **kwargs)
+        if command == "init 3":
+            state["restarted"] = True
+        return result
+
+    return run
+
+
+async def test_a_rollback_waits_for_the_interface_it_restarted(
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`init 3` is answered long before the interface is up.
+
+    The rollback asked `pidof enigma2` once, immediately afterwards, and a receiver that
+    was coming back perfectly normally answered nothing for another eleven seconds. That
+    verdict — "the restart failed" — replaced the real reason the install had failed, and
+    it came before the transaction lock was released, so the next install was refused as
+    busy on a box that was in order. Measured on an OpenViX 6.6 receiver, 2026-09-22.
+    """
+    artifact = tmp_path / "plugin.ipk"
+    artifact.write_bytes(b"ipk bytes")
+    digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    bundle = BundledPlugin(artifact, "0.1.0", digest, "1" * 40)
+    receiver = FakeReceiver(webif_dies_at_restart=True)
+
+    async def never_announced(*args: Any, **kwargs: Any):
+        del args, kwargs
+        loop = asyncio.get_running_loop()
+        watch = type("Watch", (), {})()
+        watch.established = loop.create_future()
+        watch.established.set_result(None)
+        watch.completed = loop.create_future()
+        watch.cancel = lambda: watch.completed.cancel()
+        watch.arm = lambda: None
+        return watch
+
+    with (
+        patch("custom_components.enigma2_mqtt.installer.load_bundled_plugin", return_value=bundle),
+        patch(
+            "custom_components.enigma2_mqtt.installer._installed_hash_manifest",
+            return_value=b"hash  /file\n",
+        ),
+        patch("custom_components.enigma2_mqtt.installer._async_watch_restart", never_announced),
+        patch("custom_components.enigma2_mqtt.installer.ANNOUNCEMENT_TIMEOUT", 0.01),
+        patch("custom_components.enigma2_mqtt.installer.ROLLBACK_RESTART_POLL_SECONDS", 0),
+        patch.object(FakeSession, "run", _slow_to_come_back(digest, 3)),
+    ):
+        with pytest.raises(InstallerError) as raised:
+            await async_install(hass, install_request, _connector=receiver.connect)
+
+    # The caller is told what actually went wrong, not that the recovery went wrong.
+    assert raised.value.code is InstallerErrorCode.ANNOUNCEMENT_TIMEOUT
+    assert receiver.rolled_back is True
+    assert any(" release " in command for command in receiver.commands)
+    assert receiver.helper_removed is True
+    assert "Installer transaction lock remains" not in caplog.text
+
+
+async def test_a_rollback_whose_interface_never_returns_says_so_and_still_unlocks(
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+) -> None:
+    """A receiver whose files are back is not a receiver to refuse the next install on.
+
+    The files were restored; only the interface did not come back, and the one thing
+    that fixes that is a person restarting the box. Holding the transaction lock as well
+    would make the next attempt — after that restart — refuse itself as busy.
+    """
+    artifact = tmp_path / "plugin.ipk"
+    artifact.write_bytes(b"ipk bytes")
+    digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    bundle = BundledPlugin(artifact, "0.1.0", digest, "1" * 40)
+    receiver = FakeReceiver(webif_dies_at_restart=True)
+
+    async def never_announced(*args: Any, **kwargs: Any):
+        del args, kwargs
+        loop = asyncio.get_running_loop()
+        watch = type("Watch", (), {})()
+        watch.established = loop.create_future()
+        watch.established.set_result(None)
+        watch.completed = loop.create_future()
+        watch.cancel = lambda: watch.completed.cancel()
+        watch.arm = lambda: None
+        return watch
+
+    with (
+        patch("custom_components.enigma2_mqtt.installer.load_bundled_plugin", return_value=bundle),
+        patch(
+            "custom_components.enigma2_mqtt.installer._installed_hash_manifest",
+            return_value=b"hash  /file\n",
+        ),
+        patch("custom_components.enigma2_mqtt.installer._async_watch_restart", never_announced),
+        patch("custom_components.enigma2_mqtt.installer.ANNOUNCEMENT_TIMEOUT", 0.01),
+        patch("custom_components.enigma2_mqtt.installer.ROLLBACK_RESTART_TIMEOUT", 0.05),
+        patch("custom_components.enigma2_mqtt.installer.ROLLBACK_RESTART_POLL_SECONDS", 0.01),
+        patch.object(FakeSession, "run", _slow_to_come_back(digest, -1)),
+    ):
+        with pytest.raises(InstallerError) as raised:
+            await async_install(hass, install_request, _connector=receiver.connect)
+
+    assert raised.value.code is InstallerErrorCode.ROLLBACK_RESTART_FAILED
+    # Distinct from `rollback_failed`, which says the receiver itself needs looking at.
+    assert receiver.rolled_back is True
+    assert receiver.files == {
+        "plugin": "old",
+        "opkg": "old",
+        "settings": "old",
+        "provisioning": "old",
+    }
+    assert any(" release " in command for command in receiver.commands)
+
+
 async def test_rollback_restarts_enigma_when_restore_transport_raises(
     credentials: SshCredentials,
 ) -> None:

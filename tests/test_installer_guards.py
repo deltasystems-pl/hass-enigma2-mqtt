@@ -236,7 +236,14 @@ async def test_a_failed_rollback_is_reported_as_such_and_names_the_backup(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """When the recovery itself fails there is nothing left to do but say where to look."""
+    """When the recovery itself fails there is nothing left to do but say where to look.
+
+    Two things are said, and both were missing. The **cause** — the log named a failed
+    rollback and nothing about which step failed or why, leaving the receiver as the only
+    place to find out. And the **lock**: the restore failing is not a reason to hold the
+    transaction lock, because the next attempt takes its own snapshot before it touches
+    anything, while a lock nobody holds refuses every attempt until it goes stale.
+    """
     receiver = FakeReceiver()
     bundle = _bundle(tmp_path)
     original = FakeSession.run
@@ -257,6 +264,12 @@ async def test_a_failed_rollback_is_reported_as_such_and_names_the_backup(
 
     assert code is InstallerErrorCode.ROLLBACK_FAILED
     assert "/home/root/mqttbridge-backups/ha-installer-" in caplog.text
+    assert any(" release " in command for command in receiver.commands)
+    assert "Installer transaction lock remains" not in caplog.text
+    reported = [record for record in caplog.records if "Installer rollback ended" in record.message]
+    assert len(reported) == 1
+    assert reported[0].exc_info is not None
+    assert "rollback_failed" in caplog.text
 
 
 async def test_a_lock_that_cannot_be_released_is_reported_not_forgotten(
@@ -265,7 +278,11 @@ async def test_a_lock_that_cannot_be_released_is_reported_not_forgotten(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A lock left behind wedges every later install, so it must reach the log."""
+    """A lock left behind wedges every later install, so it must reach the log.
+
+    With the reason it could not be released: the message says which receiver is wedged,
+    and only the chained cause says what the receiver answered when asked to let go.
+    """
     receiver = FakeReceiver()
     bundle = _bundle(tmp_path)
     original = FakeSession.run
@@ -289,6 +306,12 @@ async def test_a_lock_that_cannot_be_released_is_reported_not_forgotten(
     assert code is InstallerErrorCode.ROLLBACK_FAILED
     assert "Installer transaction lock remains on" in caplog.text
     assert receiver.backup_exists is False
+    reported = [
+        record
+        for record in caplog.records
+        if "Installer transaction lock remains on" in record.message and record.exc_info is not None
+    ]
+    assert reported, "the lock message does not carry why the release failed"
 
 
 async def test_the_uploaded_helper_is_removed_once_the_lock_is_released(

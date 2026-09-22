@@ -71,6 +71,7 @@
       "restart_failed": "Die Enigma2-Oberfläche wurde nicht sicher neu gestartet.",
       "announcement_timeout": "Das Plugin hat nach dem Neustart keine neue MQTT-Ankündigung veröffentlicht.",
       "rollback_failed": "Installation und Wiederherstellung sind fehlgeschlagen; prüfe den Receiver manuell.",
+      "rollback_restart_failed": "Der Receiver wurde zurückgesetzt, aber seine Oberfläche ist nicht wieder gestartet.",
       "busy": "Eine andere Installation läuft bereits.",
       "identity_mismatch": "Der Receiver hat eine andere MQTT-Identität angekündigt.",
       "host_key_changed": "Der SSH-Hostschlüssel des Receivers hat sich geändert.",
@@ -106,6 +107,7 @@
       "restart_failed": "Die Oberfläche des Receivers ist nicht sicher neu gestartet. Der Receiver wurde zurückgesetzt.",
       "announcement_timeout": "Das Plugin hat sich nach dem Neustart nicht angekündigt. Der Receiver wurde zurückgesetzt.",
       "rollback_failed": "Die Installation ist fehlgeschlagen und der Receiver konnte nicht zurückgesetzt werden. Prüfe den Receiver von Hand: Die Sicherung von vor der Änderung liegt in /home/root/mqttbridge-backups.",
+      "rollback_restart_failed": "Die Installation ist fehlgeschlagen. Der Receiver wurde zurückgesetzt, aber seine Oberfläche ist nicht wieder gestartet — starte den Receiver von Hand neu; sonst ist nichts rückgängig zu machen.",
       "busy": "Auf diesem Receiver läuft bereits eine andere Installation.",
       "identity_mismatch": "Der Receiver ist für eine andere Knoten-ID oder ein anderes Basisthema konfiguriert. Es wurde nichts geändert.",
       "unknown": "Installation ist unerwartet fehlgeschlagen; es wurde kein Eintrag erstellt."
