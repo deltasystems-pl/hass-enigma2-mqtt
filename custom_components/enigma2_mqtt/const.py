@@ -93,6 +93,54 @@ HA_MODE_INTEGRATION: Final = "integration"
 HA_MODE_OFF: Final = "off"
 HA_MODES: Final = (HA_MODE_DISCOVERY, HA_MODE_INTEGRATION, HA_MODE_OFF)
 
+# What the receiver plugin declares as each setting's default, mirroring the
+# `ConfigText`/`ConfigSelection`/… declarations in its own `src/MQTTBridge/config.py`.
+#
+# 🔴 Enigma2 does not write out a setting whose value still equals its default, so a
+# receiver that has never been moved off the default base topic has no `base_topic`
+# line in `/etc/enigma2/settings` at all — and nor has one on the default `port`, or
+# `enabled`, or any other untouched setting. A box measured after a working install had
+# exactly ten of these lines out of twenty-six settings. Anything here that reads a
+# stored plugin setting must therefore read an absent key as the value in this table;
+# reading absence as "some other value" would refuse a reinstall over a plugin that is
+# working perfectly. The receiver-side helper used to apply these itself, which put a
+# copy of them on the far side of the link where nothing compared it with the plugin,
+# and made "the settings file says nothing" indistinguishable from "it says `enigma2`"
+# for everything downstream — including the message a refusal puts on the screen.
+#
+# One table, because the alternative is a default written down beside each comparison
+# and one of them drifting. `tests/test_plugin_setting_defaults.py` reads the bundled
+# plugin's own source and checks every entry against it, so this is a mirror that is
+# verified rather than a comment that claims to be one.
+PLUGIN_SETTING_DEFAULTS: Final[dict[str, object]] = {
+    "enabled": True,
+    "host": "",
+    "port": 1883,
+    "tls": False,
+    "ca_file": "",
+    "username": "",
+    "password": "",
+    "node_id": "",
+    "friendly_name": "",
+    "base_topic": DEFAULT_BASE_TOPIC,
+    "ha_discovery_prefix": "homeassistant",
+    "ha_mode": HA_MODE_DISCOVERY,
+    "publish_keys": DEFAULT_PUBLISH_KEYS,
+    "screenshot": DEFAULT_SCREENSHOT,
+    "screenshot_interval": DEFAULT_SCREENSHOT_INTERVAL,
+    "screenshot_delay": DEFAULT_SCREENSHOT_DELAY,
+    "cam_telemetry": DEFAULT_CAM_TELEMETRY,
+    "oscam_telemetry": DEFAULT_OSCAM_TELEMETRY,
+    "oscam_port": 8888,
+    "oscam_username": "",
+    "oscam_password": "",
+    "oscam_identity_salt": "",
+    "bouquets_for_select": "",
+    "deep_standby_allowed": False,
+    "log_level": "info",
+    "epg_grid_events": 4,
+}
+
 # Seconds to wait for the plugin to echo a new `ha_mode` back on `info`. The plugin
 # answers within a publish burst; anything slower is a box that is not listening.
 ACK_TIMEOUT: Final = 10

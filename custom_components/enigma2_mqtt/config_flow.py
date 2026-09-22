@@ -157,6 +157,10 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
         self._install_task = None
         self._install_request: InstallRequest | None = None
         self._install_error: str | None = None
+        # What the abort sentence for that error needs filling in. Only one code has
+        # holes in its sentence today, and a code whose sentence has none is given an
+        # empty mapping rather than a guess.
+        self._install_placeholders: dict[str, str] = {}
         self._install_result = None
         self._install_phase = "preflight"
 
@@ -418,6 +422,7 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
             raise
         except InstallerError as err:
             self._install_error = err.code.value
+            self._install_placeholders = err.placeholders
         except Exception:
             # The flow only ever shows "unknown", which is all a user can act on, but a
             # bug report needs the traceback. The message carries no interpolation, so
@@ -476,7 +481,10 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
         """Create the MQTT entry only after the backend proved its announcement."""
         if self._install_error is not None or self._install_result is None:
             self._install_request = None
-            return self.async_abort(reason=self._install_error or "unknown")
+            return self.async_abort(
+                reason=self._install_error or "unknown",
+                description_placeholders=self._install_placeholders or None,
+            )
         assert self._install_request is not None
         data = {
             CONF_NODE_ID: self._node_id,

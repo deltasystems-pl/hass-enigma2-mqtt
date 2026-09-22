@@ -239,6 +239,30 @@ Found by running this release against a real receiver rather than a test one.
   released now carry the cause, and the rollback's own steps — stopping the interface, restoring,
   restarting, releasing the lock — are logged as they happen, so a bad day leaves a trail without
   debug logging having been on beforehand.
+- **"Configured for a different node ID or base topic" now says which, and what.** The sentence
+  named neither side, on the one screen where the answer could be read — the flow is gone
+  afterwards. An install over a receiver that already had the plugin on it was refused by it, and
+  from what was on the screen there was no way to tell whether the node ID or the base topic had
+  disagreed, or what the receiver was actually configured for. It now carries the receiver's node
+  ID and base topic and the ones the form gave; a value the receiver has never stored is shown in
+  brackets, because otherwise the default it is running on and a value it holds look identical.
+- **The plugin's defaults are read out of the plugin instead of being remembered twice.** Enigma2
+  writes no line for a setting whose value still equals its default, so a receiver left on the
+  default base topic has none in its settings file at all — a box measured today stored ten of
+  the plugin's twenty-six settings, and neither `base_topic` nor `port` was among them. The
+  receiver-side helper papered over that by substituting its own copy of the plugin's defaults,
+  which put a second copy of them in a place nothing compared against the plugin and made "the
+  settings file says nothing" indistinguishable from "the settings file says `enigma2`" for every
+  caller downstream — including the message above, which could not have marked the difference
+  even if it had wanted to. The helper now reports what the file holds and nothing else, and the
+  defaults live in one table here that a test checks entry by entry against the bundled plugin's
+  own `config.py`. What the installer accepts and refuses is unchanged.
+- **An install refused before anything was changed left nothing in the log.** No line at any
+  level: afterwards there was no way to tell an install had even been attempted, let alone which
+  check refused it. Every guard that refuses before the receiver is touched — the Python version,
+  free space, a recording, a timer about to start, a newer plugin already installed, a mismatched
+  identity, and each of the checks that fail closed on an answer they cannot read — now leaves one
+  warning naming the check and the facts it judged. No credential and no address is among them.
 
 ### Changed
 

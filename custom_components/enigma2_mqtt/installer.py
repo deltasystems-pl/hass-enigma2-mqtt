@@ -39,7 +39,12 @@ from packaging.version import InvalidVersion, Version
 from . import installer_helper
 from .box import parse_json_payload, state_topic
 from .bundle import BundledPlugin, BundleError, load_bundled_plugin
-from .const import TOPIC_INFO
+from .const import (
+    DEFAULT_BASE_TOPIC,
+    HA_MODE_INTEGRATION,
+    PLUGIN_SETTING_DEFAULTS,
+    TOPIC_INFO,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -103,10 +108,57 @@ class InstallerErrorCode(StrEnum):
 class InstallerError(Exception):
     """An expected installer failure with no credentials in its text."""
 
-    def __init__(self, code: InstallerErrorCode, detail: str = "") -> None:
+    def __init__(
+        self,
+        code: InstallerErrorCode,
+        detail: str = "",
+        placeholders: dict[str, str] | None = None,
+    ) -> None:
         super().__init__(code.value)
         self.code = code
         self.detail = detail
+        # What the abort sentence for this code needs filling in. Empty for every code
+        # whose sentence has no holes, which is all but one of them.
+        self.placeholders = placeholders or {}
+        # Whether this refusal has already reached the log. `_refuse` sets it; the
+        # boundary around the pre-change steps logs whatever reaches it without it, so
+        # that a refusal is written down exactly once however deep it was raised.
+        self.logged = False
+
+
+def _refuse(
+    code: InstallerErrorCode,
+    detail: str,
+    placeholders: dict[str, str] | None = None,
+) -> InstallerError:
+    """Build a refusal that has already said so in the log.
+
+    An install stopped before the receiver was touched used to leave nothing behind at
+    all: no line at INFO, none at WARNING, and the one sentence explaining it on a
+    config-flow screen that is gone the moment it is read. Asked afterwards why an
+    install had been refused, the log had no answer — measured on a receiver on
+    2026-09-22, where the refusal was also wrong and there was no way to see that.
+
+    Every guard that refuses before anything is changed goes through here, so each one
+    leaves which check refused and the facts it judged. Never a credential: the
+    addresses, passwords and keys this module handles are not facts a guard judges, and
+    none of them is passed in.
+    """
+    error = InstallerError(code, detail, placeholders)
+    _log_refusal(error)
+    return error
+
+
+def _log_refusal(error: InstallerError) -> None:
+    """Write one warning for a refusal, and never a second one for the same refusal."""
+    if error.logged:
+        return
+    error.logged = True
+    _LOGGER.warning(
+        "Receiver install refused before anything was changed (%s): %s",
+        error.code.value,
+        error.detail or "the receiver did not answer one of the checks in a usable form",
+    )
 
 
 class _RollbackError(InstallerError):
@@ -163,7 +215,7 @@ class Provisioning:
     broker_username: str
     broker_password: str = field(repr=False)
     node_id: str
-    base_topic: str = "enigma2"
+    base_topic: str = DEFAULT_BASE_TOPIC
     friendly_name: str | None = None
 
     def as_json(self) -> bytes:
@@ -192,7 +244,7 @@ class InstallRequest:
     keep_credentials: bool = False
     expect_running: bool = False
     node_id: str = ""
-    base_topic: str = "enigma2"
+    base_topic: str = DEFAULT_BASE_TOPIC
 
     def target(self) -> tuple[str, str]:
         """Return the expected MQTT target for fresh post-restart proof."""
@@ -357,14 +409,21 @@ async def _run_checked(
     *,
     input: bytes | None = None,
     timeout: float = 30,
+    detail: str = "",
 ) -> CommandResult:
-    """Run a fixed command and map failures without retaining its output."""
+    """Run a fixed command and map failures without retaining its output.
+
+    `detail` says what the command was for, never what it was: the command line is
+    fixed and uninteresting, and the caller's own words are what makes a refusal
+    readable in the log. It is not logged here, because this runs in steps that are
+    recovered from as well as in ones that refuse.
+    """
     try:
         result = await session.run(command, input=input, timeout=timeout)
     except (OSError, TimeoutError) as err:
-        raise InstallerError(code) from err
+        raise InstallerError(code, detail) from err
     if result.exit_status:
-        raise InstallerError(code)
+        raise InstallerError(code, detail)
     return result
 
 
@@ -465,6 +524,7 @@ async def _async_measure_preflight(session: InstallerSession, *, bundle_size: in
             session,
             "cat /etc/image-version 2>/dev/null || cat /etc/issue 2>/dev/null",
             InstallerErrorCode.PREFLIGHT_FAILED,
+            detail="the receiver did not say which image it runs",
         )
     ).stdout.strip()[:200]
     python_version = (
@@ -472,57 +532,88 @@ async def _async_measure_preflight(session: InstallerSession, *, bundle_size: in
             session,
             "python3 -c 'import sys; print(\".\".join(map(str, sys.version_info[:3])))'",
             InstallerErrorCode.PREFLIGHT_FAILED,
+            detail="the receiver did not say which Python it runs",
         )
     ).stdout.strip()
     if _python_version(python_version)[:2] < MIN_PYTHON:
-        raise InstallerError(InstallerErrorCode.UNSUPPORTED_PYTHON)
+        raise _refuse(
+            InstallerErrorCode.UNSUPPORTED_PYTHON,
+            f"the receiver runs Python {python_version}; this plugin needs "
+            f"{'.'.join(str(part) for part in MIN_PYTHON)} or newer",
+        )
     free_raw = (
         await _run_checked(
             session,
             "for p in /tmp /usr /etc; do df -Pk \"$p\" | awk 'NR==2 {print $4 * 1024}'; done",
             InstallerErrorCode.PREFLIGHT_FAILED,
+            detail="the free space on /tmp, /usr and /etc could not be read",
         )
     ).stdout.splitlines()
     try:
         free_values = [int(float(value)) for value in free_raw]
     except ValueError as err:
-        raise InstallerError(InstallerErrorCode.PREFLIGHT_FAILED) from err
+        raise _refuse(
+            InstallerErrorCode.PREFLIGHT_FAILED,
+            "the receiver's free-space figures are not numbers",
+        ) from err
     if len(free_values) != 3 or any(value < 0 for value in free_values):
-        raise InstallerError(InstallerErrorCode.PREFLIGHT_FAILED)
+        raise _refuse(
+            InstallerErrorCode.PREFLIGHT_FAILED,
+            f"the receiver reported {len(free_values)} free-space figures, expected three",
+        )
     plugin_size_raw = (
         await _run_checked(
             session,
             f"if test -d {PLUGIN_DIR}; then du -sk {PLUGIN_DIR} | awk '{{print $1 * 1024}}'; "
             "else echo 0; fi",
             InstallerErrorCode.PREFLIGHT_FAILED,
+            detail="the size of the installed plugin directory could not be read",
         )
     ).stdout.strip()
     try:
         plugin_size = int(float(plugin_size_raw))
     except ValueError as err:
-        raise InstallerError(InstallerErrorCode.PREFLIGHT_FAILED) from err
+        raise _refuse(
+            InstallerErrorCode.PREFLIGHT_FAILED,
+            "the size of the installed plugin directory is not a number",
+        ) from err
     required_tmp = max(MIN_FREE_BYTES, bundle_size * 2 + plugin_size + 1024 * 1024)
     required_usr = max(MIN_FREE_BYTES, bundle_size * 3 + plugin_size * 2)
     required_etc = 128 * 1024
+    required_values = (required_tmp, required_usr, required_etc)
     if any(
         free < required
-        for free, required in zip(
-            free_values, (required_tmp, required_usr, required_etc), strict=True
-        )
+        for free, required in zip(free_values, required_values, strict=True)
     ):
-        raise InstallerError(InstallerErrorCode.NO_SPACE)
+        raise _refuse(
+            InstallerErrorCode.NO_SPACE,
+            "the receiver has "
+            + ", ".join(
+                f"{where} {free} bytes free of {required} needed"
+                for where, free, required in zip(
+                    ("/tmp", "/usr", "/etc"), free_values, required_values, strict=True
+                )
+            ),
+        )
     await _run_checked(
         session,
         "command -v opkg >/dev/null && opkg --version >/dev/null",
         InstallerErrorCode.PREFLIGHT_FAILED,
+        detail="the receiver has no opkg, or it would not run",
     )
     files_result = await session.run(f"test -d {PLUGIN_DIR}", timeout=30)
     if files_result.exit_status not in (0, 1):
-        raise InstallerError(InstallerErrorCode.PREFLIGHT_FAILED)
+        raise _refuse(
+            InstallerErrorCode.PREFLIGHT_FAILED,
+            "the receiver would not say whether the plugin directory exists",
+        )
     plugin_files_present = files_result.exit_status == 0
     status_result = await session.run(f"opkg status {PACKAGE}", timeout=30)
     if status_result.exit_status not in (0, 1):
-        raise InstallerError(InstallerErrorCode.PREFLIGHT_FAILED)
+        raise _refuse(
+            InstallerErrorCode.PREFLIGHT_FAILED,
+            "`opkg status` failed on the receiver",
+        )
     installed = None
     if status_result.stdout.strip():
         package_seen = False
@@ -531,26 +622,41 @@ async def _async_measure_preflight(session: InstallerSession, *, bundle_size: in
                 package_seen = True
             if line.startswith("Version: "):
                 if installed is not None:
-                    raise InstallerError(InstallerErrorCode.PREFLIGHT_FAILED)
+                    raise _refuse(
+                        InstallerErrorCode.PREFLIGHT_FAILED,
+                        "`opkg status` reported the package twice",
+                    )
                 installed = line.removeprefix("Version: ").strip()
         if not package_seen or not installed:
-            raise InstallerError(InstallerErrorCode.PREFLIGHT_FAILED)
+            raise _refuse(
+                InstallerErrorCode.PREFLIGHT_FAILED,
+                "`opkg status` answered without naming the package and its version",
+            )
         _package_version(installed)
     status = await _run_checked(
         session,
         "wget -qO- http://127.0.0.1/api/statusinfo",
         InstallerErrorCode.PREFLIGHT_FAILED,
+        detail="OpenWebif did not answer, so whether the receiver is recording is unknown",
     )
     timers = await _run_checked(
         session,
         "wget -qO- http://127.0.0.1/api/timerlist",
         InstallerErrorCode.PREFLIGHT_FAILED,
+        detail="OpenWebif did not answer with the receiver's timers",
     )
     recording, timers_due = _timer_guard(status.stdout, timers.stdout)
     if recording:
-        raise InstallerError(InstallerErrorCode.RECORDING)
+        raise _refuse(
+            InstallerErrorCode.RECORDING,
+            "the receiver is recording, and a GUI restart would lose the recording",
+        )
     if timers_due:
-        raise InstallerError(InstallerErrorCode.TIMER_DUE)
+        raise _refuse(
+            InstallerErrorCode.TIMER_DUE,
+            f"{timers_due} recording(s) are due on the receiver within the next "
+            f"{TIMER_GUARD_SECONDS // 60} minutes",
+        )
     return Preflight(
         image,
         python_version,
@@ -615,12 +721,61 @@ async def _async_wait_for_enigma(session: InstallerSession, old_pids: set[int]) 
         await asyncio.sleep(ROLLBACK_RESTART_POLL_SECONDS)
 
 
+def _stored_setting(identity: dict[str, Any], name: str) -> Any:
+    """Return a stored plugin setting, reading an absent one as the plugin's default.
+
+    `None` from the receiver-side helper means the settings file has no line for this
+    setting, and enigma2 writes no line for a setting that still equals its default —
+    so absence is the default, never a difference. The defaults come from
+    `PLUGIN_SETTING_DEFAULTS`, which is the only copy of them on this side.
+    """
+    stored = identity.get(name)
+    return PLUGIN_SETTING_DEFAULTS[name] if stored is None else stored
+
+
+def _stored_for_display(identity: dict[str, Any], name: str) -> str:
+    """Render a stored setting for the abort sentence, marking one that is not stored.
+
+    A setting the receiver has never been given is not in its settings file, so there
+    is nothing to quote back and what applies is the plugin's default. Showing it in
+    brackets is the difference between "the box says `enigma2`" and "the box says
+    nothing and `enigma2` is what that means", which is the whole diagnosis when the
+    two sides look identical and the install was refused anyway. Brackets rather than a
+    word, because this string is dropped into the Polish and German sentences unchanged
+    and a word in them would be an English one.
+    """
+    stored = identity.get(name)
+    if stored is None or stored == "":
+        default = PLUGIN_SETTING_DEFAULTS[name]
+        return f"({default})" if default != "" else "(-)"
+    return str(stored)
+
+
 async def _async_validate_receiver_identity(
     session: InstallerSession,
     remote_helper: str,
     request: InstallRequest,
 ) -> None:
-    """Refuse to update or overwrite a differently configured receiver."""
+    """Refuse to update or overwrite a differently configured receiver.
+
+    What the helper reports is what the settings file holds, and a setting that is not
+    in it is `null` rather than a value — enigma2 writes no line for a value that still
+    equals its default, so a receiver on the default base topic stores no base topic.
+    Every comparison here is therefore made after the plugin's own defaults have been
+    applied, from `PLUGIN_SETTING_DEFAULTS`, which is the only copy of them on this
+    side and which CI compares against the bundled plugin's own `config.py`. The helper
+    used to apply them instead, on the receiver, where nothing checked them against the
+    plugin and where absence and the default value arrived here as the same answer.
+
+    An absent node id is the one that is not defaulted, because the plugin has no
+    default worth comparing against — it derives `<boxtype>_<mac6>` on its first run
+    and writes it, so a box with no node id is a box whose plugin has never started.
+    There is nothing there to take over, so provisioning proceeds and writes the one
+    the form gave. Deriving the expected id instead would mean guessing the MAC at a
+    point in the transaction where the only source for it is an announcement a box in
+    `ha_mode: off` is not publishing. An update, which writes no settings, still
+    refuses such a box: it has to already be the box the entry was made for.
+    """
     result = await _run_checked(
         session,
         f"python3 {shlex.quote(remote_helper)} identity",
@@ -629,29 +784,65 @@ async def _async_validate_receiver_identity(
     try:
         identity = json.loads(result.stdout)
     except (TypeError, ValueError) as err:
-        raise InstallerError(InstallerErrorCode.PREFLIGHT_FAILED) from err
+        raise _refuse(
+            InstallerErrorCode.PREFLIGHT_FAILED,
+            "the receiver's plugin settings could not be read as JSON",
+        ) from err
     if not isinstance(identity, dict) or set(identity) != {
         "node_id",
         "base_topic",
         "enabled",
         "ha_mode",
     }:
-        raise InstallerError(InstallerErrorCode.PREFLIGHT_FAILED)
-    configured_node = identity["node_id"]
-    configured_base = identity["base_topic"]
-    if not isinstance(configured_node, str) or not isinstance(configured_base, str):
-        raise InstallerError(InstallerErrorCode.PREFLIGHT_FAILED)
+        raise _refuse(
+            InstallerErrorCode.PREFLIGHT_FAILED,
+            "the receiver did not report the four settings that bind it to an entry",
+        )
+    stored_node = identity["node_id"]
+    stored_base = identity["base_topic"]
+    if (
+        not isinstance(stored_node, (str, type(None)))
+        or not isinstance(stored_base, (str, type(None)))
+        or not isinstance(identity["enabled"], (bool, type(None)))
+        or not isinstance(identity["ha_mode"], (str, type(None)))
+    ):
+        raise _refuse(
+            InstallerErrorCode.PREFLIGHT_FAILED,
+            "the receiver reported a plugin setting of the wrong type",
+        )
+    configured_base = _stored_setting(identity, "base_topic")
+    configured_enabled = _stored_setting(identity, "enabled")
+    configured_mode = _stored_setting(identity, "ha_mode")
     expected_base, expected_node = request.validate()
+    placeholders = {
+        "box_node_id": _stored_for_display(identity, "node_id"),
+        "box_base_topic": _stored_for_display(identity, "base_topic"),
+        "node_id": expected_node,
+        "base_topic": expected_base,
+    }
     if request.provisioning is None:
         if (
-            configured_node != expected_node
+            stored_node != expected_node
             or configured_base != expected_base
-            or identity["enabled"] is not True
-            or identity["ha_mode"] != "integration"
+            or configured_enabled is not True
+            or configured_mode != HA_MODE_INTEGRATION
         ):
-            raise InstallerError(InstallerErrorCode.IDENTITY_MISMATCH)
-    elif configured_node and (configured_node != expected_node or configured_base != expected_base):
-        raise InstallerError(InstallerErrorCode.IDENTITY_MISMATCH)
+            raise _refuse(
+                InstallerErrorCode.IDENTITY_MISMATCH,
+                f"the receiver is configured for node {placeholders['box_node_id']} on "
+                f"{placeholders['box_base_topic']} (enabled={configured_enabled}, "
+                f"ha_mode={configured_mode}), and this entry expects node "
+                f"{expected_node} on {expected_base} in integration mode",
+                placeholders,
+            )
+    elif stored_node and (stored_node != expected_node or configured_base != expected_base):
+        raise _refuse(
+            InstallerErrorCode.IDENTITY_MISMATCH,
+            f"the receiver is already configured for node {placeholders['box_node_id']} "
+            f"on {placeholders['box_base_topic']}, and the form gives node "
+            f"{expected_node} on {expected_base}",
+            placeholders,
+        )
 
 
 async def async_preflight(
@@ -1052,23 +1243,39 @@ async def _async_install_locked(
     remote_lock_claimed = False
     committed = False
     try:
-        await _async_progress(progress_cb, "preflight")
-        session = await connector(request.credentials)
-        preflight = await _async_measure_preflight(session, bundle_size=len(bundle_bytes))
-        if preflight.installed_version and _package_version(
-            preflight.installed_version
-        ) > _package_version(bundle.version):
-            raise InstallerError(InstallerErrorCode.NEWER_INSTALLED)
+        # Everything up to the transaction lock is a guard, and a guard that refuses
+        # leaves the receiver exactly as it found it. Each of those refusals is written
+        # to the log here — once — because the sentence a user is shown lives on a
+        # config-flow screen that is gone as soon as it is read, and afterwards there
+        # was nothing at all to say an install had even been attempted.
+        try:
+            await _async_progress(progress_cb, "preflight")
+            session = await connector(request.credentials)
+            preflight = await _async_measure_preflight(session, bundle_size=len(bundle_bytes))
+            if preflight.installed_version and _package_version(
+                preflight.installed_version
+            ) > _package_version(bundle.version):
+                raise _refuse(
+                    InstallerErrorCode.NEWER_INSTALLED,
+                    f"the receiver runs plugin {preflight.installed_version} and this "
+                    f"integration ships {bundle.version}",
+                )
 
-        await _async_progress(progress_cb, "backup")
-        helper_bytes = await hass.async_add_executor_job(Path(installer_helper.__file__).read_bytes)
-        await _run_checked(
-            session,
-            f"umask 077; cat > {shlex.quote(remote_helper)}",
-            InstallerErrorCode.INSTALL_FAILED,
-            input=helper_bytes,
-        )
-        await _async_validate_receiver_identity(session, remote_helper, request)
+            await _async_progress(progress_cb, "backup")
+            helper_bytes = await hass.async_add_executor_job(
+                Path(installer_helper.__file__).read_bytes
+            )
+            await _run_checked(
+                session,
+                f"umask 077; cat > {shlex.quote(remote_helper)}",
+                InstallerErrorCode.INSTALL_FAILED,
+                input=helper_bytes,
+                detail="the installer helper could not be written to the receiver's /tmp",
+            )
+            await _async_validate_receiver_identity(session, remote_helper, request)
+        except InstallerError as err:
+            _log_refusal(err)
+            raise
         claim = await session.run(
             f"mkdir -p {shlex.quote(BACKUP_ROOT)} && "
             f"python3 {shlex.quote(remote_helper)} claim {shlex.quote(remote_lock)}",

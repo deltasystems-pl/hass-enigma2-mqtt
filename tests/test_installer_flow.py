@@ -470,6 +470,47 @@ async def test_a_failed_install_ends_on_its_reason(hass: HomeAssistant, mqtt_moc
     assert hass.config_entries.async_entries(DOMAIN) == []
 
 
+async def _identity_mismatch_install(_hass, _request, progress_cb):
+    """Refuse at preflight, which is where the box's own settings are read."""
+    progress_cb("preflight")
+    await asyncio.sleep(0)
+    raise InstallerError(
+        InstallerErrorCode.IDENTITY_MISMATCH,
+        "",
+        {
+            "box_node_id": "vuuno4kse_005301",
+            "box_base_topic": "(enigma2)",
+            "node_id": "vuuno4kse_005301",
+            "base_topic": "home/x",
+        },
+    )
+
+
+async def test_an_identity_mismatch_names_both_sides_on_the_screen(
+    hass: HomeAssistant, mqtt_mock
+) -> None:
+    """„Configured for a different node ID or base topic" is not something to act on.
+
+    Which of the two disagreed, and what the receiver actually holds, is the whole
+    diagnosis — and the abort screen is the only place it can be read, because the
+    flow is gone afterwards. The sentence has holes for both sides and the flow has to
+    fill them; an abort that carried no placeholders would put the braces themselves
+    in front of somebody.
+    """
+    answers, _ = await _install_watching_the_frontend(hass, _identity_mismatch_install)
+
+    assert len(answers) == 1
+    assert answers[0]["type"] is FlowResultType.ABORT
+    assert answers[0]["reason"] == InstallerErrorCode.IDENTITY_MISMATCH.value
+    assert answers[0]["description_placeholders"] == {
+        "box_node_id": "vuuno4kse_005301",
+        "box_base_topic": "(enigma2)",
+        "node_id": "vuuno4kse_005301",
+        "base_topic": "home/x",
+    }
+    assert hass.config_entries.async_entries(DOMAIN) == []
+
+
 async def test_the_progress_bar_still_moves_through_every_phase(
     hass: HomeAssistant, mqtt_mock
 ) -> None:

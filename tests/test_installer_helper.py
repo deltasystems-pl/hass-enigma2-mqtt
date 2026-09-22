@@ -294,6 +294,65 @@ def test_restore_preserves_unrelated_package_and_settings(tmp_path: Path) -> Non
     assert (root / "etc/enigma2/mqttbridge.json").read_text() == '{"old":true}\n'
 
 
+def test_a_rollback_puts_back_the_plugin_and_the_mode_it_was_left_in(
+    tmp_path: Path,
+) -> None:
+    """The first drill over a plugin that was already installed, undone.
+
+    Every earlier drill ran against a receiver with no plugin on it, where a rollback
+    restores „there was nothing here". This is the other case: a plugin that had been
+    installed and configured, whose Home Assistant entry had since been deleted — so
+    the plugin had been told `ha_mode: off` and was sitting there working, announcing
+    nothing. An install over it writes a provisioning file that asks for `integration`,
+    and a rollback has to leave the receiver in the state that install found it in,
+    which includes the mode. Its settings are also a real box's: ten lines, with no
+    `base_topic` among them, because it had never been moved off the default.
+    """
+    root = tmp_path / "root"
+    backup = tmp_path / "backup"
+    _receiver_tree(root)
+    _write(
+        root,
+        "etc/enigma2/settings",
+        "config.misc.keep=true\n"
+        "config.plugins.mqttbridge.host=old-broker\n"
+        "config.plugins.mqttbridge.node_id=vuuno4kse_005301\n"
+        "config.plugins.mqttbridge.ha_mode=off\n",
+    )
+    # The plugin deletes its provisioning file as it imports it, so a box that has been
+    # configured for a while has none.
+    (root / "etc/enigma2/mqttbridge.json").unlink()
+
+    metadata = snapshot(root, backup)
+    assert metadata["plugin"] is True
+    assert metadata["provisioning"] is False
+
+    _write(root, f"{PLUGIN_DIR}/plugin.py", "new plugin\n")
+    _write(root, "etc/enigma2/mqttbridge.json", '{"ha_mode":"integration"}\n')
+    _write(
+        root,
+        "etc/enigma2/settings",
+        "config.misc.keep=true\n"
+        "config.plugins.mqttbridge.host=new-broker\n"
+        "config.plugins.mqttbridge.node_id=vuuno4kse_005301\n"
+        "config.plugins.mqttbridge.ha_mode=integration\n",
+    )
+
+    restore(root, backup, restore_provisioning=True, restore_settings=True)
+
+    assert (root / PLUGIN_DIR / "plugin.py").read_text() == "old plugin\n"
+    settings = (root / "etc/enigma2/settings").read_text()
+    assert "config.plugins.mqttbridge.ha_mode=off" in settings
+    assert "ha_mode=integration" not in settings
+    assert "config.plugins.mqttbridge.host=old-broker" in settings
+    assert "config.plugins.mqttbridge.node_id=vuuno4kse_005301" in settings
+    # Absent before, absent after: a rollback that invented a line here would be
+    # configuring the receiver, not putting it back.
+    assert "base_topic" not in settings
+    assert "config.misc.keep=true" in settings
+    assert not (root / "etc/enigma2/mqttbridge.json").exists()
+
+
 def test_restore_removes_only_new_openwebif_shim(tmp_path: Path) -> None:
     root = tmp_path / "root"
     backup = tmp_path / "backup"
@@ -630,6 +689,47 @@ def test_read_identity_exposes_only_binding_fields(tmp_path: Path) -> None:
         "base_topic": "enigma2/rooms",
         "enabled": True,
         "ha_mode": "integration",
+    }
+
+
+def test_read_identity_reports_a_setting_that_is_not_stored_as_absent(
+    tmp_path: Path,
+) -> None:
+    """Enigma2 writes no line for a setting still at its default, and this says so.
+
+    A receiver measured after a working install held exactly these keys and no
+    `base_topic`, because it had never been moved off `enigma2`. This used to answer
+    `enigma2` for that — the right value, from a copy of the plugin's defaults kept on
+    the receiver's side of the link, where it was invisible to the half that compares.
+    `None` is the fact; applying the default is the caller's job.
+    """
+    root = tmp_path / "root"
+    _write(
+        root,
+        "etc/enigma2/settings",
+        "config.misc.keep=true\n"
+        "config.plugins.mqttbridge.host=broker.example\n"
+        "config.plugins.mqttbridge.node_id=vuuno4kse_005301\n"
+        "config.plugins.mqttbridge.ha_mode=off\n",
+    )
+
+    assert read_identity(root) == {
+        "node_id": "vuuno4kse_005301",
+        "base_topic": None,
+        "enabled": None,
+        "ha_mode": "off",
+    }
+
+
+def test_read_identity_of_a_receiver_with_no_settings_file_is_all_absent(
+    tmp_path: Path,
+) -> None:
+    """Nothing stored is not the same as stored empty, and neither is a difference."""
+    assert read_identity(tmp_path / "root") == {
+        "node_id": None,
+        "base_topic": None,
+        "enabled": None,
+        "ha_mode": None,
     }
 
 
