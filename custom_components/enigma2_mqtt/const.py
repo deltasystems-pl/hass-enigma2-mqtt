@@ -251,6 +251,16 @@ TOPIC_SOFTCAM: Final = "softcam"
 # manager's poller rather than through `/etc/init.d/softcam`.
 CAPABILITY_SOFTCAM: Final = "softcam"
 
+# The two capabilities the „EPG – aktywny bukiet" sensor needs: the per-bouquet grids it
+# reads, and the channel-list context that says which of them is the one in use.
+CAPABILITY_EPG_GRID: Final = "epg_grid"
+CAPABILITY_BOUQUET_CONTEXT: Final = "bouquet_context"
+
+# How much of a programme title the active-bouquet sensor carries. A few titles run to a
+# whole sentence of episode blurb, and the sensor holds one per channel twice over; eighty
+# characters is a full title on any card that will show it.
+EPG_TITLE_MAX: Final = 80
+
 PAYLOAD_ONLINE: Final = "online"
 PAYLOAD_OFFLINE: Final = "offline"
 

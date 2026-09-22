@@ -922,6 +922,10 @@ PROCESS_ENTITY_IDS = {
     "sensor.dekoder_salon_enigma2_started",
 }
 
+# The EPG sensor for the active bouquet, item j, merged after the softcam pair. Named
+# for the same reason as the process rows: so that losing it is noticed here too.
+EPG_ENTITY_IDS = {"sensor.dekoder_salon_epg_active_bouquet"}
+
 EVERYTHING_ON = {
     "deep_standby_allowed": True,
     "cam_telemetry": True,
@@ -965,14 +969,14 @@ async def test_no_entity_id_this_integration_already_had_changes(
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """0.3.0 so far adds seven entities and renames none.
+    """0.3.0 so far adds eight entities and renames none.
 
     Renaming a translation key renames the entity it builds, and the household's
     automations, dashboards and recorded history all follow the old name into nothing.
 
     The receiver here names every capability this integration knows, so the count is the
-    whole fleet rather than one item's corner of it: five process diagnostics from the
-    work merged before this branch, and the softcam pair from this one. A guard that only
+    whole fleet rather than one item's corner of it: five process diagnostics, the
+    softcam pair, and the EPG sensor for the active bouquet. A guard that only
     knew about its own entities would not notice a rebase that lost somebody else's.
     """
     capabilities = [
@@ -1004,4 +1008,9 @@ async def test_no_entity_id_this_integration_already_had_changes(
         for entry in er.async_entries_for_config_entry(registry, config_entry.entry_id)
     }
     assert ENTITY_IDS_BEFORE_0_3_0 <= built
-    assert built - ENTITY_IDS_BEFORE_0_3_0 == {BUTTON, SENSOR, *PROCESS_ENTITY_IDS}
+    assert built - ENTITY_IDS_BEFORE_0_3_0 == {
+        BUTTON,
+        SENSOR,
+        *PROCESS_ENTITY_IDS,
+        *EPG_ENTITY_IDS,
+    }

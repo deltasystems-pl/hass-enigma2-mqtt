@@ -46,6 +46,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   permanently refused is removed when its capability says so, and a diagnostic with a
   history is not, because deleting it takes the household's rename, area and recorded
   history with it and a quiet capability is not a decision anybody made.
+- **„EPG – aktywny bukiet", what is on now and next across the bouquet the receiver is
+  walking.** The state is how many of its channels have something to show; the `channels`
+  attribute lists every channel of that bouquet with its programme now and next (title, begin
+  and end), read from the grid the receiver already publishes for it. It follows the bouquet:
+  switching bouquets on the remote or through „Bukiet" switches the list, and a grid for any
+  other bouquet leaves it alone. Now and next follow the clock as well as the grid, so a
+  programme that has ended stops being „now" when it ends rather than at the next grid refresh.
+  A receiver in no bouquet at all reads `0`; a bouquet whose grid has not arrived reads
+  `unknown`, so „no grid" and „nothing on" stay apart. 🔴 The channel list is excluded from the
+  recorder — Home Assistant does not do that for an attribute of ours on its own, and a
+  bouquet's worth of programmes rewritten every time one of them ends does not belong in the
+  database. Created while the receiver announces both the `epg_grid` and `bouquet_context`
+  capabilities, and never removed when they go quiet.
 
 ### Changed
 

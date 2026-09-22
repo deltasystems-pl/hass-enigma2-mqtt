@@ -236,7 +236,7 @@ everything.
 
 ## 4. Entities
 
-**Twenty-five entities on every receiver**, and twenty-eight more that exist only while
+**Twenty-five entities on every receiver**, and twenty-nine more that exist only while
 something says they should — plus one set of three per OSCam source, which has no fixed
 number because it follows however many readers and servers that receiver has. The
 conditional ones are, in full:
@@ -245,6 +245,7 @@ conditional ones are, in full:
 |---|---|---|
 | 2 | „Bukiet" and „Kanał" | the receiver reports the `channels` **and** `bouquet_context` capabilities |
 | 1 | „Odśwież EPG" | the receiver reports the `epg_grid` capability |
+| 1 | „EPG – aktywny bukiet" | the receiver reports the `epg_grid` **and** `bouquet_context` capabilities |
 | 1 | „Softcam" | the receiver reports the `softcam` capability |
 | 5 | the enigma2 process diagnostics | the receiver reports the `process` capability |
 | 2 | „Głębokie uśpienie", „Restart" | the Home Assistant option asks for them **and** the receiver permits deep standby |
@@ -258,8 +259,8 @@ splits on it. A row that follows an **option or a permission** is removed on a s
 „no": somebody decided, at the television or on the options form, and an entity that can
 never say anything again is worse than none. A row that follows a **capability** is
 removed only where the control behind it would be permanently refused — „Odśwież EPG" on
-a receiver that builds no grids. „Softcam" and the five process diagnostics are neither:
-they are diagnostics with a history, and a capability that stops being named is an older
+a receiver that builds no grids. „Softcam", „EPG – aktywny bukiet" and the five process
+diagnostics are neither: they are sensors with a history, and a capability that stops being named is an older
 plugin after a downgrade, a hook that failed to attach on one boot, or a receiver that has
 not answered yet. None of those is a decision, so they stay and say nothing until the
 topic returns.
@@ -355,6 +356,7 @@ while the box is unreachable, because that is precisely when somebody wants to w
 | `agc` | *AGC* | `<node_id>_agc` | `tuner` | % · diagnostic · **disabled by default** |
 | `ber` | *BER* | `<node_id>_ber` | `tuner` | count · diagnostic · **disabled by default** |
 | `uptime` | *Czas pracy* | `<node_id>_uptime` | `info` | seconds · diagnostic · **disabled by default** |
+| `epg_active_bouquet` | *EPG – aktywny bukiet* | `<node_id>_epg_active_bouquet` | `bouquet`, `epg_grid/<bouquet_slug>` | how many channels of the active bouquet have a programme now or next · no unit · attribute `channels` (**not recorded**) · only while the receiver names the `epg_grid` and `bouquet_context` capabilities |
 | `softcam` | *Softcam* | `<node_id>_softcam` | `softcam` | the selected cam binary · diagnostic · only while the receiver names the `softcam` capability |
 | `last_error` | *Ostatni błąd* | `<node_id>_last_error` | `last_error` | the refused command's name · diagnostic · attributes `error` and `time` |
 | `process_memory` | *Pamięć Enigma2* | `<node_id>_process_memory` | `process` | MiB · `data_size` · diagnostic · **on by default** |
@@ -410,6 +412,38 @@ thread will otherwise spend an afternoon confusing.
 | `restarts_today` | restarts since local midnight. It lives in the receiver's memory and the topic is retained, so after a receiver reboot this shows the last published number until the plugin publishes again: it is a counter, not a durable total |
 | `manager_check_on_start` | whether the image's own softcam liveness check will add a copy at every interface restart on this box. This is the difference between a receiver that needs the restart button and one that merely has it |
 | `manager_timer_minutes` | the image's periodic check interval when it is switched on, `unknown` when it is not. A receiver with both this and `manager_check_on_start` gains an instance every interval, for ever — which is the runaway worth seeing on a dashboard before it becomes a household symptom |
+
+**EPG – aktywny bukiet** is what is on across the bouquet the receiver's channel ± is
+walking — the same list its own EPG would show for it. It reads the retained grid whose
+`bouquet` names the active context, so switching bouquets on the remote or through „Bukiet"
+switches it, and a grid for any other bouquet leaves it untouched. The `channels` attribute
+is every channel of that bouquet, in the receiver's order:
+
+| Field | What |
+|---|---|
+| `name`, `sref` | the channel, as the grid names it |
+| `now` | `{title, begin, end}` for the programme on air, or `null` |
+| `next` | the same for the one after it, or `null` |
+
+`begin` and `end` are **epoch seconds**, not ISO strings — the one exception to the rule
+below, because a card drawing a progress bar for two hundred channels wants numbers it can
+subtract. Titles are cut at 80 characters. **`now` and `next` follow the clock**: the plugin
+republishes a grid only when its content changes, so the sensor re-reads the grid itself the
+moment any channel's programme ends (or, on a channel between programmes, the moment the
+next one starts) instead of showing a finished programme until the next publish.
+
+The state keeps three answers apart. A receiver in **no bouquet** — the radio list, the movie
+list — is `0` with an empty list. An active bouquet whose **grid has not arrived**, was
+retracted, or is not one the receiver builds grids for is `unknown` with an empty list: that is
+„no grid", not „nothing on". Only a grid that is here can say `0` about itself. There is no
+unit and no state class; it is a completeness indicator, not a measurement.
+
+🔴 **`channels` is excluded from the recorder.** Home Assistant excludes a media player's
+`source_list` on its own, but this is an attribute of ours on an ordinary sensor, and a
+bouquet's worth of programmes rewritten every time one of them ends would otherwise go into
+the database each time. History keeps the count; the list is only ever the current one. The
+full multi-event grids stay in the [`get_epg_grid`](#get_epg_grid) action, which returns them
+and stores nothing.
 
 Times in attributes are ISO 8601 strings rather than the epoch seconds the topics carry,
 because a template can read one and not the other. The long programme description and the list

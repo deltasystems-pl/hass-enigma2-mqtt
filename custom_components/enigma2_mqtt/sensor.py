@@ -11,7 +11,9 @@ only time anybody goes looking for it is after something has already gone wrong.
 The rest depend on what the plugin announced. The `process` group — what enigma2 itself
 is using — appears when the box names that capability. The conditional-access and OSCam
 groups follow a setting instead of a capability, because they are a choice about privacy
-rather than about what the image allows.
+rather than about what the image allows. „EPG – aktywny bukiet" follows two capabilities
+at once — the grids and the channel-list context — and is the one sensor here whose state
+moves with the clock as well as with the topics.
 
 Two conventions run through the file. Epoch seconds from the topics become ISO strings
 in attributes and `datetime` objects in states, because those are what a template and a
@@ -42,23 +44,29 @@ from homeassistant.const import (
     UnitOfInformation,
     UnitOfTime,
 )
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.typing import StateType
 import homeassistant.util.dt as dt_util
 
 from .box import Enigma2Box, Enigma2MqttConfigEntry, Enigma2State
 from .const import (
+    CAPABILITY_BOUQUET_CONTEXT,
+    CAPABILITY_EPG_GRID,
     CAPABILITY_PROCESS,
     CAPABILITY_SOFTCAM,
     CONF_CAM_TELEMETRY,
     CONF_OSCAM_TELEMETRY,
     DOMAIN,
+    EPG_TITLE_MAX,
     ERROR_TEXT_MAX,
+    TOPIC_BOUQUET,
     TOPIC_CAM,
     TOPIC_EPG,
+    TOPIC_EPG_GRID,
     TOPIC_INFO,
     TOPIC_LAST_ERROR,
     TOPIC_OSCAM,
@@ -205,6 +213,63 @@ def _cam_value(state: Enigma2State, key: str, expected: type) -> Any:
     if expected is int and isinstance(value, bool):
         return None
     return value if isinstance(value, expected) else None
+
+
+def _epoch(value: Any) -> int | None:
+    """Return a whole number of epoch seconds, or None.
+
+    `True` is an `int` in Python, and a programme that began at second one of 1970 is a
+    field nobody filled in; neither is a time a card should draw.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
+def _grid_events(channel: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return one channel's usable events, as `{title, begin, end}`, in time order.
+
+    The grid arrives from a box and is not trusted to be what the contract says: an event
+    without a title or with an end that is not after its begin is left out, rather than
+    drawn as a programme that lasts no time at all. The title is capped here, once, so
+    everything downstream — the attribute and the comparison that decides whether the
+    state moved — sees the same string.
+    """
+    events = channel.get("events")
+    if not isinstance(events, list):
+        return []
+    usable: list[dict[str, Any]] = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        title = event.get("title")
+        begin = _epoch(event.get("begin"))
+        end = _epoch(event.get("end"))
+        if not isinstance(title, str) or not title or begin is None or end is None:
+            continue
+        if end <= begin:
+            continue
+        usable.append({"title": title[:EPG_TITLE_MAX], "begin": begin, "end": end})
+    usable.sort(key=lambda event: event["begin"])
+    return usable
+
+
+def _now_and_next(
+    events: list[dict[str, Any]], now: float
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Return the programme on air at `now` and the one after it.
+
+    Read against the clock rather than taken from the order of the list: the plugin
+    republishes a grid only when its content changes, so the first event in a payload an
+    hour old is very likely over. A channel between two programmes has no `now` and still
+    has a `next`, which is what its own EPG would show.
+    """
+    upcoming = [event for event in events if event["end"] > now]
+    if not upcoming:
+        return None, None
+    if upcoming[0]["begin"] <= now:
+        return upcoming[0], upcoming[1] if len(upcoming) > 1 else None
+    return None, upcoming[0]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -421,6 +486,15 @@ SOFTCAM_SENSORS: tuple[Enigma2SensorDescription, ...] = (
     ),
 )
 
+KEY_EPG_ACTIVE_BOUQUET = "epg_active_bouquet"
+
+# The grids to read, and the context that says which one is in use. A box that publishes
+# grids but no context has no „active" bouquet to speak of, and one with a context but no
+# grids has nothing to show for it.
+EPG_ACTIVE_BOUQUET_CAPABILITIES = frozenset(
+    {CAPABILITY_EPG_GRID, CAPABILITY_BOUQUET_CONTEXT}
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -499,6 +573,24 @@ async def async_setup_entry(
         ).start()
     )
 
+    entry.async_on_unload(
+        OptionalEntities(
+            hass,
+            box,
+            "sensor",
+            (KEY_EPG_ACTIVE_BOUQUET,),
+            lambda _key: Enigma2EpgActiveBouquetSensor(box),
+            lambda: EPG_ACTIVE_BOUQUET_CAPABILITIES.issubset(box.capabilities),
+            # Never removed, for the reason the softcam sensor above gives: two
+            # capabilities that go quiet are an older plugin or a box that has not
+            # answered, and a household's dashboard card and history are not the price
+            # of either. A box that stops building grids leaves this sensor saying
+            # nothing new, which is the truth.
+            lambda: False,
+            async_add_entities,
+        ).start()
+    )
+
     # The manager is started whatever the box has said so far, because at this point it
     # has usually said nothing: `async_setup_entry` subscribes and returns, and the
     # retained burst that carries `info` — and with it the capability list — arrives
@@ -531,6 +623,142 @@ class Enigma2Sensor(Enigma2Entity, SensorEntity):
         self._attr_native_value = description.value_fn(self.box.state)
         if description.attributes_fn is not None:
             self._attr_extra_state_attributes = description.attributes_fn(self.box.state)
+
+
+class Enigma2EpgActiveBouquetSensor(Enigma2Entity, SensorEntity):
+    """What is on now and next across the bouquet the receiver is walking.
+
+    The plugin publishes one retained grid per configured bouquet and, separately, which
+    bouquet the receiver's channel ± is in. This joins the two: it reads the grid whose
+    `bouquet` names the active context, so switching bouquets — on the remote or through
+    „Bukiet" — switches what it shows, and a grid for any other bouquet leaves it alone.
+    The grid's `bouquet` field is matched rather than its topic's slug, because the
+    contract says the slug is only an address and the payload carries the name.
+
+    **The state is how many channels have something to show**, and it keeps three
+    situations apart that a single number would merge. No active bouquet at all — the
+    radio list, the movie list — is `0` with an empty list: the receiver is not in a
+    bouquet, so there is nothing to count. An active bouquet whose grid has not arrived,
+    was retracted, or was never configured on the box is `unknown` with an empty list:
+    that is „no grid", and reporting it as „a grid with nothing in it" would tell an
+    automation the EPG is empty when nobody has looked. Only a grid that is here can say
+    zero about itself.
+
+    **`now` and `next` follow the clock.** The plugin republishes a grid only when its
+    content changes, so between two publishes the programme that was on can end without
+    any message saying so. Each read therefore picks `now` and `next` against the current
+    time, and arms one timer for the earliest moment any channel's answer changes: the end
+    of a programme on air, or the start of one on a channel that is between programmes.
+    The timer is re-armed on every read and cancelled when the entity goes, so there is
+    only ever one.
+
+    🔴 **`channels` is declared unrecorded, and that is not optional.** Home Assistant
+    excludes `source_list` and a select's `options` on its own; this is an attribute of
+    ours on an ordinary sensor, so it is written to the database on every change unless
+    it is named here. A bouquet of two hundred channels is tens of kilobytes, rewritten
+    every time a programme ends somewhere in it.
+    """
+
+    _unrecorded_attributes = frozenset({"channels"})
+
+    def __init__(self, box: Enigma2Box) -> None:
+        """Follow the context and every grid; available once the context has arrived."""
+        super().__init__(
+            box,
+            KEY_EPG_ACTIVE_BOUQUET,
+            topics=(TOPIC_BOUQUET, TOPIC_EPG_GRID),
+            requires=TOPIC_BOUQUET,
+        )
+        self._attr_native_value = None
+        self._attr_extra_state_attributes = {"channels": []}
+        self._cancel_clock: CALLBACK_TYPE | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Start listening, and make sure a pending timer dies with the entity."""
+        self.async_on_remove(self._disarm)
+        await super().async_added_to_hass()
+
+    @callback
+    def _disarm(self) -> None:
+        """Cancel the timer for the next programme change, if one is armed."""
+        if self._cancel_clock is not None:
+            self._cancel_clock()
+            self._cancel_clock = None
+
+    def _active_grid(self) -> tuple[bool, dict[str, Any] | None]:
+        """Return whether the receiver is in a bouquet, and that bouquet's grid.
+
+        Both fields of the context being null is ordinary operation and means „not in a
+        bouquet"; a context without a readable name is read the same way, since there
+        is nothing to match a grid against.
+        """
+        name = (self.box.state.bouquet or {}).get("name")
+        if not isinstance(name, str) or not name:
+            return False, None
+        for grid in self.box.state.epg_grid.values():
+            if isinstance(grid, dict) and grid.get("bouquet") == name:
+                return True, grid
+        return True, None
+
+    @callback
+    def _async_read_state(self) -> None:
+        """Rebuild the list against the current time, and arm the next change."""
+        self._disarm()
+        in_bouquet, grid = self._active_grid()
+        if not in_bouquet:
+            self._attr_native_value = 0
+            self._attr_extra_state_attributes = {"channels": []}
+            return
+        grid_channels = (grid or {}).get("channels")
+        if not isinstance(grid_channels, list):
+            self._attr_native_value = None
+            self._attr_extra_state_attributes = {"channels": []}
+            return
+
+        now = dt_util.utcnow().timestamp()
+        channels: list[dict[str, Any]] = []
+        with_data = 0
+        wake: int | None = None
+        for channel in grid_channels:
+            if not isinstance(channel, dict):
+                continue
+            current, following = _now_and_next(_grid_events(channel), now)
+            if current is not None or following is not None:
+                with_data += 1
+            # The moment this channel's answer changes: its programme ends, or — on a
+            # channel between programmes — the next one starts.
+            change = (
+                current["end"]
+                if current is not None
+                else following["begin"]
+                if following is not None
+                else None
+            )
+            if change is not None and (wake is None or change < wake):
+                wake = change
+            name = channel.get("name")
+            sref = channel.get("sref")
+            channels.append(
+                {
+                    "name": name if isinstance(name, str) else None,
+                    "sref": sref if isinstance(sref, str) else None,
+                    "now": current,
+                    "next": following,
+                }
+            )
+        self._attr_native_value = with_data
+        self._attr_extra_state_attributes = {"channels": channels}
+        if wake is not None:
+            self._cancel_clock = async_track_point_in_utc_time(
+                self.hass, self._clock_moved, dt_util.utc_from_timestamp(wake)
+            )
+
+    @callback
+    def _clock_moved(self, _now: datetime) -> None:
+        """A programme ended or began somewhere in the bouquet: read again."""
+        self._cancel_clock = None
+        self._async_read_state()
+        self.async_write_ha_state()
 
 
 class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
