@@ -396,13 +396,21 @@ short command and the lock outlives the process holding it.
 
 `pidof enigma2` returning exactly one pid was treated as the only healthy shape, so the proof was
 "one pid, and a different one from before". Some images run a wrapper that survives a GUI restart
-beside the child that does not, and on such a receiver that proof is never satisfied: a rollback
-would spend the full two-minute timeout being refused by a box that had restarted correctly, and
-then report a failure. The proof is now any pid that was not in the set read before the interface
-was stopped — a process started since, which is what a restart means. A set that never gains a
-member is an interface that never came back, which is what the timeout is for. (The install's own
-restart proof still insists on a single pid; it is the same narrowness in a place this drill did
-not reach, and it is noted rather than changed here.)
+beside the child that does not, and on such a receiver that proof is never satisfied.
+
+It is the **install** that this hurts most, and it was found by looking for the same narrowness
+elsewhere after the rollback was fixed rather than on the box: the install reads the pid at the
+step immediately before the only disruptive command, so a receiver of that shape was refused with
+`restart_failed` having had nothing done to it — the guided installer simply could not be used on
+that image. In the rollback the same proof cost the full two-minute timeout and then a false
+report of a restart that had happened.
+
+Both now take the set of pids before the interface is stopped and look for a pid that is not in
+it, because such a process was started since, which is what a restart means. A set that never
+gains a member is an interface that never came back, which is what the timeout and the
+`restart_failed` refusal are for. An **empty** set beforehand is an ordinary answer — a box still
+booting, or one stopped on purpose — where it used to be refused as an ambiguous lifecycle; any
+pid at all afterwards is then the proof.
 
 ### 18. A recovery that fails has to say why in the log
 

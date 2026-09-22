@@ -431,9 +431,28 @@ async def test_a_rollback_that_only_lost_the_interface_says_that_on_the_screen(
 
     assert len(answers) == 1
     assert answers[0]["type"] is FlowResultType.ABORT
-    assert answers[0]["reason"] == InstallerErrorCode.ROLLBACK_RESTART_FAILED.value
-    assert answers[0]["reason"] != InstallerErrorCode.ROLLBACK_FAILED.value
+    # The literal, because that is the key the abort text is looked up by.
+    assert answers[0]["reason"] == "rollback_restart_failed"
     assert hass.config_entries.async_entries(DOMAIN) == []
+
+
+async def _rollback_lock_failed_install(_hass, _request, progress_cb):
+    """Fail after the receiver has been restored but could not be unlocked."""
+    progress_cb("announcement")
+    await asyncio.sleep(0)
+    raise InstallerError(InstallerErrorCode.ROLLBACK_LOCK_FAILED)
+
+
+async def test_a_receiver_left_locked_says_that_on_the_screen(
+    hass: HomeAssistant, mqtt_mock
+) -> None:
+    """The next attempt is refused as busy, so this cannot be a log line only."""
+    answers, _ = await _install_watching_the_frontend(hass, _rollback_lock_failed_install)
+
+    assert len(answers) == 1
+    assert answers[0]["type"] is FlowResultType.ABORT
+    # The literal, because that is the key the abort text is looked up by.
+    assert answers[0]["reason"] == "rollback_lock_failed"
 
 
 async def test_a_failed_install_ends_on_its_reason(hass: HomeAssistant, mqtt_mock) -> None:

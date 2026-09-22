@@ -410,6 +410,29 @@ async def test_a_committed_install_prunes_superseded_snapshots(
     )
 
 
+async def test_an_image_that_runs_a_wrapper_beside_enigma_can_be_installed_on(
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+) -> None:
+    """Two Enigma processes is a lifecycle some images have, not a fault.
+
+    The install's restart proof read `pidof enigma2` and refused anything but exactly
+    one pid — before the restart as well as after it — so on an image that runs a
+    wrapper beside the interface it starts, the guided install stopped with
+    `restart_failed` at the step in front of the only disruptive command, on a receiver
+    with nothing wrong with it. The wrapper survives the restart and the interface does
+    not, so the proof is the child's new pid.
+    """
+    receiver = FakeReceiver(enigma_pid=100, enigma_wrapper_pid=42)
+
+    result = await _async_committed_install(hass, install_request, tmp_path, receiver)
+
+    assert result.restarted is True
+    assert receiver.installed is True
+    assert receiver.enigma_pid == 101
+
+
 async def test_a_prune_that_fails_does_not_fail_a_committed_install(
     hass: HomeAssistant,
     install_request: InstallRequest,

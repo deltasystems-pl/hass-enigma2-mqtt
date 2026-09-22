@@ -562,21 +562,18 @@ async def _async_measure_preflight(session: InstallerSession, *, bundle_size: in
     )
 
 
-async def _async_enigma_pid(session: InstallerSession) -> int:
-    """Return the single running Enigma PID, refusing an ambiguous lifecycle."""
-    result = await _run_checked(session, "pidof enigma2", InstallerErrorCode.RESTART_FAILED)
-    values = result.stdout.split()
-    if len(values) != 1 or not values[0].isdigit():
-        raise InstallerError(InstallerErrorCode.RESTART_FAILED)
-    return int(values[0])
-
-
 async def _async_enigma_pids(session: InstallerSession) -> set[int]:
     """Return every running Enigma PID, which on some images is more than one.
 
+    This used to insist on exactly one and refuse anything else as an ambiguous
+    lifecycle. Images that run a wrapper beside the interface it starts report two for
+    as long as the box is up, so on one of those the restart proof could never be
+    satisfied and neither an install nor a rollback could finish on a receiver that was
+    working perfectly.
+
     `pidof` exits 1 and says nothing when there is no match, which is a receiver with
-    its interface down rather than a receiver that failed to answer — the empty set is
-    the answer, not an error.
+    its interface down — a box still booting, or one stopped on purpose — rather than a
+    receiver that failed to answer. The empty set is the answer, not an error.
     """
     try:
         result = await session.run("pidof enigma2", timeout=30)
@@ -1145,7 +1142,11 @@ async def _async_install_locked(
 
         # The guard is measured again immediately before the only disruptive step.
         await _async_measure_preflight(session, bundle_size=len(bundle_bytes))
-        old_enigma_pid = await _async_enigma_pid(session)
+        # Read before the restart, so that afterwards a process that was not running
+        # then is proof the interface really went down and came back. An empty set is a
+        # perfectly ordinary answer — a box still booting has no Enigma yet — and any
+        # pid at all afterwards is then the proof.
+        old_enigma_pids = await _async_enigma_pids(session)
         base_topic, node_id = request.target()
         watch = await _async_watch_restart(
             hass,
@@ -1184,7 +1185,7 @@ async def _async_install_locked(
 
         cleanup = await connector(request.credentials)
         try:
-            if await _async_enigma_pid(cleanup) == old_enigma_pid:
+            if not await _async_enigma_pids(cleanup) - old_enigma_pids:
                 raise InstallerError(InstallerErrorCode.RESTART_FAILED)
             released = await cleanup.run(
                 f"python3 {shlex.quote(remote_helper)} release {shlex.quote(remote_lock)}",

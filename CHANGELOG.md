@@ -222,11 +222,17 @@ Found by running this release against a real receiver rather than a test one.
   next install snapshots again before it touches anything. A rollback that restored the files but
   could not bring the interface back is now its own outcome — "restart the receiver by hand" —
   rather than being reported as a receiver that needs inspecting, and a receiver that came back
-  but could not be unlocked is a third, naming the lock directory to delete. The restart is
-  proved by any process that was not running before it, rather than by there being exactly one:
-  an image that runs a wrapper beside the interface always reports two, and a rollback on such a
-  box waited out the whole timeout before reporting a restart that had happened. A rollback
+  but could not be unlocked is a third, naming the lock directory to delete. A rollback
   interrupted by a shutdown now reports itself as interrupted instead of as a broken receiver.
+- **A receiver whose image runs a wrapper beside Enigma can be installed on at all.** Both the
+  install and its rollback proved a restart by asking for the running Enigma process and refusing
+  anything but exactly one — and images that start the interface from a wrapper report two, for
+  as long as the box is up. The guided install stopped with "the interface did not restart
+  safely" at the step immediately before the only disruptive command, on a receiver with nothing
+  wrong with it, and a rollback there waited out its whole timeout before reporting a restart
+  that had in fact happened. A restart is now proved by any process that was not running before
+  it, which is what a restart means; no process at all beforehand — a box still booting — is an
+  ordinary answer rather than a refusal.
 - **A failed rollback said so without saying why.** The log line named the backup directory and
   dropped the exception that had caused it, so the only place left to find out what had gone
   wrong was the receiver. Both that line and the one about a transaction lock that could not be
