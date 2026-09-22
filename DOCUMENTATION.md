@@ -34,8 +34,8 @@ created twice.
 ## 2. Installation
 
 See the [README](README.md#installation) for HACS and manual installation, and
-[§3 Configuration](#3-configuration) for what the flow asks. The plugin must be on the box;
-from M4 the integration can put it there over SSH.
+[§3 Configuration](#3-configuration) for what the flow asks. The plugin must be on the box, and
+the integration can put it there over SSH.
 
 🔴 **Never keep a backup copy of this component inside `custom_components/`.** Home Assistant
 reads the `manifest.json` of every directory it finds there, and a copy declares the same
@@ -49,7 +49,7 @@ else: `/config/enigma2_mqtt-backups/` is one directory up and out of reach of th
 
 ## 3. Configuration
 
-The config flow has two entries today and a third in M4.
+The config flow has three entries.
 
 **Discovered.** The plugin publishes a retained announcement on
 `enigma2mqtt/discovery/<node_id>/config`, and the integration's manifest subscribes to that

@@ -19,9 +19,11 @@ inside enigma2 and publishes the moment something happens — a zap, a programme
 standby, a recording, a volume step, a key on the remote. This integration turns those
 topics into a native `media_player`, a `remote`, an OSD `notify` target and device triggers.
 
-> **Status — M4 development candidate.** The entity and action surface is implemented and the
-> guided SSH installer, local verified plugin bundle and update action are now in code. They
-> have not completed live installation acceptance and are not a published release yet.
+> **Status — released as v0.2.0**, alongside the receiver plugin's own v0.2.0. The entity and
+> action surface, the guided SSH installer, the verified local plugin bundle and the update path
+> are all in this release. The installer has been run end to end on a receiver and a rollback
+> exercised for real; the run that closes M4 is the one after the defects those runs found —
+> see the [roadmap](#roadmap).
 
 ## What you get
 
@@ -87,11 +89,13 @@ about 45 seconds instead of at the end of a poll cycle.
 
 | Integration | Plugin | Status |
 |---|---|---|
-| 0.2.0 (unreleased) | 0.2.0 (unreleased) | in development |
-| 0.1.0 | 0.1.0 | current release |
+| 0.2.0 | 0.2.0 | current release |
+| 0.1.0 | 0.1.0 | superseded |
 
-The integration ships the plugin it was built against, so the two move together. The bundled
-build of an unreleased integration is an unreleased plugin build.
+The integration ships the plugin it was built against, so the two move together. The bundle in
+this release is byte for byte the package on the plugin's own
+[releases page](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/tag/v0.2.0), and
+`custom_components/enigma2_mqtt/bundled/metadata.json` carries the SHA-256 to check it with.
 
 The integration refuses nothing when the versions differ, but the `update` entity tells you
 when the box runs a plugin older than the one this release was written against.
@@ -187,29 +191,35 @@ quality bar we hold ourselves to is [docs/QUALITY.md](docs/QUALITY.md).
       [ADR-0001](docs/adr/0001-m0-decisions.md)); the scope added since is
       [ADR-0002](docs/adr/0002-scope-after-m0.md)
 - [x] **M1** — config flow (discovered + manual), the device page, diagnostics. Released as
-      **v0.1.0**, which is what HACS still serves
-- [ ] **M2** — plugin state and discovery complete, commands with guards: *the receiver plugin's
-      milestone — code complete and running, its long soak and the deep-standby drill still open*
-- [ ] **M3** — the entities above, actions, device triggers, diagnostics, translations: *live on
-      the maintainer's Home Assistant, not released*
-- [ ] **M4** — SSH installer, bundled IPK and `update`: *coded and reviewed, awaiting acceptance.*
-      The installer has never been run end to end on a receiver without the plugin, and no real
-      rollback has been exercised
+      **v0.1.0**
+- [x] **M2** — plugin state and discovery complete, commands with guards: *the receiver plugin's
+      milestone, released as its **v0.2.0**, which is what its feed and releases page serve. Its
+      long passive soak and the deep-standby drill are still open*
+- [x] **M3** — the entities above, actions, device triggers, diagnostics, translations. Released
+      as **v0.2.0**, which is what HACS serves
+- [ ] **M4** — SSH installer, bundled IPK and `update`: *coded, reviewed and exercised on one
+      receiver.* The installer has been run end to end on a box that did not have the plugin, and
+      a rollback exercised for real — a deliberately wrong broker password, the plugin refused,
+      the receiver restored to the byte and its interface restarted. The four defects those runs
+      found are fixed in this release: a pending discovery offer blocked the guided install, the
+      success screen was lost, the rollback misjudged the restart and left its lock behind, and a
+      refusal over a mismatched identity named neither side. The run that ticks this box is the
+      one after those fixes
 - [ ] **M5** — public beta `v0.x`: releases, HACS custom repository, call for testers
 - [ ] **M6** — `v1.0.0`: HACS default store, deep standby and Wake-on-LAN drilled
 - [ ] **M7** — afterwards: broker-login provisioning, further images
 
-Everything after M1 is unreleased: **0.1.0 is still the only published version of either half**,
-and a coordinated 0.2.0 tag with the plugin has not been cut. Development builds already report
-`0.2.0`, so the version on a receiver or in HACS says which of the two you are running.
+HACS serves **0.2.0** and the receiver plugin's feed serves its own **0.2.0**, so the two halves
+are in step and the version on a receiver or in HACS says which release you are running.
+Everything after M3 is unreleased.
 
-### What 0.2.0 and 0.3.0 will carry
+### What 0.2.0 shipped, and what 0.3.0 will carry
 
-Two days of household use produced a list of problems and a list of wants, and they are split into
-two releases. The reasoning is in
+Two days of household use produced a list of problems and a list of wants, and they were split
+into two releases. The reasoning is in
 [ADR-0003](docs/adr/0003-control-feedback-and-household-features.md).
 
-**0.2.0 — fixes.** Cut after the guided installer has been run end to end on a receiver.
+**0.2.0 — fixes**, released 2026-09-22 alongside the plugin's own 0.2.0.
 
 - [x] **Buttons wait for the receiver and raise when it refuses**, instead of publishing and
   returning. A refused button used to be indistinguishable from a broken one.
@@ -228,12 +238,22 @@ two releases. The reasoning is in
   dropdown nobody can use. It defaults to every bouquet you have chosen, which is what the media
   player has always offered.
 - [x] **A button that rebuilds the EPG grid.**
+- [x] **The four defects the first real installs found**, which are what a guided installer that
+  had only ever been run in tests was always going to have: a discovery offer left waiting for the
+  same receiver refused the install, the success screen was lost at the end of the transaction, a
+  rollback that had worked was reported as a failure and left its lock behind, and a receiver
+  refused over a mismatched identity said neither what it held nor what it had been asked for.
+
+The full list is in [CHANGELOG.md](CHANGELOG.md).
 
 **0.3.0 — features**, following the receiver plugin: a **second notify entity** for the discreet
 toast and a `style` field on the `message` action; a **softcam** button and sensor (the auto-heal
 settings are in the options, the permission is not); an **EPG import** button and status sensor; an
-**EPG sensor for the active bouquet** whose payload is declared unrecorded; and the **process**
-sensors, already in review.
+**EPG sensor for the active bouquet** whose payload is declared unrecorded; the **process**
+sensors, already in review; and a **remote uninstall** — removing the plugin from the receiver as
+an explicit, confirmed action rather than a side effect of deleting the configuration entry,
+offered only while the box says it permits removal, and a one-way door
+([ADR-0004](docs/adr/0004-remote-uninstall.md)).
 
 **Testers wanted: open an issue.** OpenATV, OpenPLi and OpenBH have no test box. There is no
 per-image thread to find yet — yours would start it.
