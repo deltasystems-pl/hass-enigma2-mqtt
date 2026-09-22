@@ -42,6 +42,7 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from custom_components.enigma2_mqtt.const import (
+    CAPABILITY_SOFTCAM,
     CONF_PUBLISH_KEYS,
     CONF_SCREENSHOT,
     CONF_SCREENSHOT_INTERVAL,
@@ -381,6 +382,57 @@ async def test_an_info_that_says_nothing_about_the_permission_removes_nothing(
     again = er.async_get(hass).async_get(BUTTON)
     assert again is not None
     assert again.id == before.id
+
+
+async def test_the_button_survives_the_capability_going_quiet(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """🔴 The capability gates creating this button and must never gate removing it.
+
+    This is ADR-0005 §2, and it is the one decision in this file that looks like an
+    inconsistency and is not. The two predicates are deliberately asymmetrical: a
+    capability belongs in the half that asks „can this receiver do it", and nowhere near
+    the half that asks „did somebody decide against it". Written symmetrically — which
+    is exactly what a later tidy-up or a reviewer „fixing" it would do — a receiver
+    downgraded to an older plugin, or one whose hook failed to attach on a single boot,
+    loses the button *from the registry*, and with it the household's rename, its area,
+    its place on a dashboard and its history. The next payload brings it back as a
+    stranger under a new id, so nothing in the end state looks wrong afterwards.
+
+    Which is why the registry is watched rather than the state machine. An end-state
+    assertion cannot tell „never removed" from „removed and created again", and the
+    entity id is what every automation and every recorded row knows this button by.
+    """
+    box_on_the_broker[INFO_TOPIC] = with_softcam(softcam_restart_allowed=True)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    registry = er.async_get(hass)
+    before = registry.async_get(BUTTON)
+    assert before is not None
+
+    removals: list[str] = []
+    hass.bus.async_listen(
+        er.EVENT_ENTITY_REGISTRY_UPDATED,
+        lambda event: (
+            removals.append(event.data["entity_id"])
+            if event.data.get("action") == "remove"
+            else None
+        ),
+    )
+
+    # The permission is unchanged and still granted; only the capability stops being
+    # named — a downgraded plugin, or a hook that did not attach on this boot.
+    async_fire_mqtt_message(hass, INFO_TOPIC, info(softcam_restart_allowed=True))
+    await hass.async_block_till_done()
+
+    assert config_entry.runtime_data.softcam_restart_permission is True
+    assert CAPABILITY_SOFTCAM not in config_entry.runtime_data.capabilities
+    again = registry.async_get(BUTTON)
+    assert again is not None
+    assert again.id == before.id
+    assert BUTTON not in removals
 
 
 # --------------------------------------------------------------------- the sensor
