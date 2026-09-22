@@ -46,8 +46,13 @@ _LOGGER = logging.getLogger(__name__)
 PACKAGE = "enigma2-plugin-extensions-mqttbridge"
 PLUGIN_DIR = "/usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge"
 PROVISION_PATH = "/etc/enigma2/mqttbridge.json"
-OPKG_STATUS = "/usr/lib/opkg/status"
-OPKG_INFO_GLOB = f"/usr/lib/opkg/info/{PACKAGE}.*"
+# There is deliberately no opkg database path here. Preflight asks `opkg status` and
+# opkg resolves its own configuration; the helper, which has to touch the files, does
+# the same resolution itself in `installer_helper.opkg_paths`. Two constants naming
+# `/usr/lib/opkg` used to sit here, unused, and they were wrong: OpenViX 6.6 keeps the
+# database under `/var/lib/opkg` and says so in `/etc/opkg/opkg.conf`. A second opinion
+# about where a database lives is a way for the two halves of this installer to
+# disagree, and neither half needs one.
 ENIGMA_SETTINGS = "/etc/enigma2/settings"
 MIN_PYTHON = (3, 9)
 MIN_FREE_BYTES = 2 * 1024 * 1024
