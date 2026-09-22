@@ -279,6 +279,21 @@
       "uptime": {
         "name": "Uptime"
       },
+      "process_memory": {
+        "name": "Enigma2 memory"
+      },
+      "process_memory_peak": {
+        "name": "Enigma2 memory (peak)"
+      },
+      "process_threads": {
+        "name": "Enigma2 threads"
+      },
+      "process_open_files": {
+        "name": "Enigma2 open files"
+      },
+      "process_started": {
+        "name": "Enigma2 started"
+      },
       "cam_system": {
         "name": "Conditional-access system"
       },

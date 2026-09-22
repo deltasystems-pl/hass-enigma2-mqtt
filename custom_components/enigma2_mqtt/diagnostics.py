@@ -117,6 +117,7 @@ async def async_get_config_entry_diagnostics(
             "bouquet": state.bouquet,
             "cam": state.cam,
             "oscam": state.oscam,
+            "process": state.process,
             "channels": _summarise_channels(state.channels),
             "last_error": state.last_error,
             "screen": {

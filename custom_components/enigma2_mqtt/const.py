@@ -193,6 +193,11 @@ TOPIC_EPG_GRID: Final = "epg_grid"
 TOPIC_CAM: Final = "cam"
 TOPIC_BOUQUET: Final = "bouquet"
 TOPIC_OSCAM: Final = "oscam"
+TOPIC_PROCESS: Final = "process"
+
+# The capability the plugin announces when it publishes `process`. A box whose image
+# did not let it hook the measurement never names it, and the entities are never built.
+CAPABILITY_PROCESS: Final = "process"
 
 PAYLOAD_ONLINE: Final = "online"
 PAYLOAD_OFFLINE: Final = "offline"

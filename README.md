@@ -37,6 +37,7 @@ One receiver becomes **one device** with these entities (display names are Polis
 | `event` | *Pilot – klawisz* | every remote key as an event, with `press` = short or long |
 | `image` | *Ekran* | the last screen grab from the box |
 | `sensor` | *Kanał*, *Program*, *Następny program*, *Aktywne nagrania*, *Następny timer*, *SNR*, *AGC*, *BER*, *Czas pracy*, *Ostatni błąd* | what is on, what is next, recordings and timers, tuner quality, uptime (tuner and uptime sensors off by default), and the receiver's last refusal in its own words, kept across a restart |
+| `sensor` (diagnostics) | *Pamięć Enigma2*, *Pamięć Enigma2 (szczyt)*, *Wątki Enigma2*, *Otwarte pliki Enigma2*, *Start Enigma2* | what the enigma2 process itself is using, when the receiver plugin can measure it. The memory is on by default, because a curve over weeks cannot be collected after the question is asked; the rest are off until something is wrong |
 | `binary_sensor` | *Nagrywanie*, *Dysk nagrań* | whether a recording is running, whether the recording disk is mounted |
 | `switch` | *Zasilanie*, *Wyciszenie* | standby, mute |
 | `number` | *Głośność* | volume 0–100 |
