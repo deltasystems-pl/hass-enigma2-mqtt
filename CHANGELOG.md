@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   answer if it was already collecting; the rest are switched off until something is wrong. They
   appear whenever the receiver announces the capability, and a receiver that stops announcing it
   never loses them.
-- **„Restart softcamu", a button that restarts the receiver's card-sharing client**, and a
+- **„Restart softcam", a button that restarts the receiver's card-sharing client**, and a
   „Softcam" diagnostic beside it. The household symptom is a channel that stops decoding;
   underneath it, on images whose softcam binary has a long name, the image's own liveness
   check cannot recognise the process it started and adds another copy at every interface

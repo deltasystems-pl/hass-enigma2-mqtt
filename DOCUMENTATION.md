@@ -248,7 +248,7 @@ conditional ones are, in full:
 | 1 | „Softcam" | the receiver reports the `softcam` capability |
 | 5 | the enigma2 process diagnostics | the receiver reports the `process` capability |
 | 2 | „Głębokie uśpienie", „Restart" | the Home Assistant option asks for them **and** the receiver permits deep standby |
-| 1 | „Restart softcamu" | the receiver permits a softcam restart |
+| 1 | „Restart softcam" | the receiver permits a softcam restart |
 | 4 | the conditional-access diagnostics | the `cam_telemetry` option is on |
 | 12 | the OSCam aggregates | the `oscam_telemetry` option is on |
 | 3 per OSCam source | status, ready cards, shared cards | the `oscam_telemetry` option is on, for each reader or server that receiver reports |
@@ -441,7 +441,7 @@ it is the opposite: the answer is coming, and the dashboard should not sit still
 | `screenshot` | *Zrzut ekranu* | `<node_id>_screenshot` | `cmd/screenshot` | `screen` is republished |
 | `refresh_discovery` | *Odśwież discovery* | `<node_id>_refresh_discovery` | `cmd/discovery` | the announcement is republished |
 | `refresh_epg` | *Odśwież EPG* | `<node_id>_refresh_epg` | `cmd/epg_grid` · only while the box names the `epg_grid` capability | silence |
-| `softcam_restart` | *Restart softcamu* | `<node_id>_softcam_restart` | `cmd/softcam_restart` · only while the box permits it | silence |
+| `softcam_restart` | *Restart softcam* | `<node_id>_softcam_restart` | `cmd/softcam_restart` · only while the box permits it | silence |
 | `plugin` | *Wtyczka MQTT Bridge* | `<node_id>_plugin` | an `update` entity: installed = `info.plugin`, latest = the plugin release this version was written against | — |
 
 **Every button waits for the receiver**, on the same path as the actions below. A refusal
@@ -464,7 +464,7 @@ plugin's `epg_grid_events` setting at zero there are no grids to rebuild, the ca
 absent, and the button is not created. A capability can also arrive late, so the button appears
 when the receiver says it can do it rather than only at startup.
 
-**„Restart softcamu"** stops every instance of the card-sharing client the image started
+**„Restart softcam"** stops every instance of the card-sharing client the image started
 and starts exactly one, with the line the image itself would have used. On a receiver
 whose cam binary has a long name it is mostly a way to **collapse the copies the image
 left behind**, which also fixes a frozen one. It has one gate and it is the box's:

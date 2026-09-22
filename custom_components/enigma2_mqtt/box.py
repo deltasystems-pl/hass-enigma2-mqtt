@@ -740,7 +740,7 @@ class Enigma2Box:
 
         What differs is what `None` means to the caller. Deep standby had buttons before
         it had a permission, so silence there has to keep them. Nothing has ever shipped
-        a „Restart softcamu" button, so silence here creates nothing — an older plugin
+        a „Restart softcam" button, so silence here creates nothing — an older plugin
         would only refuse the command anyway.
         """
         settings = self.state.info.get("settings")

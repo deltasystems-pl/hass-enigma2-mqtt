@@ -41,7 +41,7 @@ One receiver becomes **one device** with these entities (display names are Polis
 | `binary_sensor` | *Nagrywanie*, *Dysk nagrań* | whether a recording is running, whether the recording disk is mounted |
 | `switch` | *Zasilanie*, *Wyciszenie* | standby, mute |
 | `number` | *Głośność* | volume 0–100 |
-| `button` | *Głębokie uśpienie*, *Restart GUI*, *Restart*, *Obudź (WoL)*, *Zrzut ekranu*, *Odśwież discovery*, *Odśwież EPG*, *Restart softcamu* | one-shot box actions, each waiting for the receiver and raising its own words when it refuses; deep standby and reboot need both the option and the receiver's own permission; *Odśwież EPG* exists only where the receiver publishes grids; *Restart softcamu* collapses the copies of the card-sharing client the image left behind, and exists only while the receiver permits it |
+| `button` | *Głębokie uśpienie*, *Restart GUI*, *Restart*, *Obudź (WoL)*, *Zrzut ekranu*, *Odśwież discovery*, *Odśwież EPG*, *Restart softcam* | one-shot box actions, each waiting for the receiver and raising its own words when it refuses; deep standby and reboot need both the option and the receiver's own permission; *Odśwież EPG* exists only where the receiver publishes grids; *Restart softcam* collapses the copies of the card-sharing client the image left behind, and exists only while the receiver permits it |
 | `update` | *Wtyczka MQTT Bridge* | the installed plugin version and, when SSH credentials were retained, a guarded reinstall/update from the verified local bundle |
 | `select` | *Bukiet*, *Kanał* | the bouquet the receiver's channel ± walks, and the channels inside it; only on a plugin that can switch a bouquet |
 | device triggers | red / green / yellow / blue × short / long | remote keys as automation triggers |

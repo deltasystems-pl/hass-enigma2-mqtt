@@ -19,7 +19,7 @@ republished announcement — that is the proof. Where there is none, because the
 about to disappear anyway, the wait is the error-grace window: a complaint raises,
 silence is success.
 
-„Restart softcamu" has one gate rather than two, and it is the box's. Restarting the
+„Restart softcam" has one gate rather than two, and it is the box's. Restarting the
 card-sharing client costs a few seconds of a scrambled picture and nothing else, so there
 is no reason to hide it behind a Home Assistant option as well — but a box whose setup
 screen has not permitted it refuses the command, and a button that is always refused is
