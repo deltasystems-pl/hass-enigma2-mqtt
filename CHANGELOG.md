@@ -191,7 +191,12 @@ Found by running this release against a real receiver rather than a test one.
   plugin error no longer reports concurrent commands as complete before their own result is
   known.
 - **The bundled receiver plugin is rebuilt from a newer pinned commit**, which reports whether the
-  box permits deep standby and clears bytecode an upgrade has orphaned. Its version is unchanged.
+  box permits deep standby, clears bytecode an upgrade has orphaned, and — since the rebuild from
+  [`6a18b81`](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/tree/6a18b810e677eac14350e5dfc3b4208dcf255495)
+  — sweeps compiled bytecode when the package is removed. Removal used to leave the `.pyc` files
+  the image had compiled beside the sources, and the next GUI restart loaded them as a complete
+  module, so a plugin opkg said was gone reconnected to the broker anyway. Its version is
+  unchanged.
 - **„Pilot" is hidden on the device page of a new installation.** Home Assistant gives every
   remote entity a power toggle, which put three controls that all switch power on one device and
   no way to tell which was the real one; „Zasilanie" is the labelled one. The remote is hidden,
