@@ -7,9 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Planned as 0.2.0. Everything below has landed since 0.1.0 and is not released yet: the
-guided installer, the update path and the new diagnostics have been tested locally but
-have not been accepted on a receiver, and no tag has been cut.
+## [0.2.0] - 2026-09-22
+
+The release that makes the receiver usable from Home Assistant: a media player, a remote, an
+OSD notify target, the sensors, the switches, the buttons, the two selects and ten actions —
+and a guided installer that puts the receiver plugin on a box that has never had it.
+
+0.1.0 set a receiver up and gave it a device page. This one builds everything on top of that
+page, and answers the question the first release could not: what happened when a control did
+nothing. Every button and every action waits for the receiver and raises the receiver's own
+sentence when it refuses; „Ostatni błąd" keeps that refusal after the plugin has cleared its
+topic; and the two controls a box can always refuse — deep standby and reboot — appear only
+while it says they are permitted.
+
+The guided installer has been run end to end on a receiver that had never had the plugin, and a
+rollback exercised for real with a deliberately wrong broker password: the plugin refused, the
+receiver was restored to the byte and its interface restarted. The four defects those runs found
+are fixed here, and the run after them passed — the rollback reported what had actually happened,
+released its lock, and a successful install ended on its own screen. The receiver plugin bundled
+with this release is byte for byte the package published as the plugin's own v0.2.0 release.
 
 ### Added
 
@@ -275,13 +291,14 @@ Found by running this release against a real receiver rather than a test one.
 - Command cleanup now retires internal waiters without spurious asyncio errors. Clearing an old
   plugin error no longer reports concurrent commands as complete before their own result is
   known.
-- **The bundled receiver plugin is rebuilt from a newer pinned commit**, which reports whether the
-  box permits deep standby, clears bytecode an upgrade has orphaned, and — since the rebuild from
-  [`6a18b81`](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/tree/6a18b810e677eac14350e5dfc3b4208dcf255495)
-  — sweeps compiled bytecode when the package is removed. Removal used to leave the `.pyc` files
-  the image had compiled beside the sources, and the next GUI restart loaded them as a complete
-  module, so a plugin opkg said was gone reconnected to the broker anyway. Its version is
-  unchanged.
+- **The bundled receiver plugin is the plugin's own 0.2.0 release.** It reports whether the box
+  permits deep standby, clears bytecode an upgrade has orphaned, and sweeps compiled bytecode when
+  the package is removed — removal used to leave the `.pyc` files the image had compiled beside
+  the sources, and the next GUI restart loaded them as a complete module, so a plugin opkg said
+  was gone reconnected to the broker anyway. It is built from the tag's own commit
+  [`edc7ca6`](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/tree/edc7ca6b37d0bc06ce485613e7a7ecb8f7ee7d3a)
+  and is byte for byte the package published on that release, which anyone can check against the
+  SHA-256 in `bundled/metadata.json`.
 - **„Pilot" is hidden on the device page of a new installation.** Home Assistant gives every
   remote entity a power toggle, which put three controls that all switch power on one device and
   no way to tell which was the real one; „Zasilanie" is the labelled one. The remote is hidden,
@@ -341,8 +358,8 @@ Found by running this release against a real receiver rather than a test one.
   platform for bouquet and channel, a source list that can follow the active bouquet, and a button
   for the EPG grid. 0.3.0 follows the receiver: a second notify entity for the
   discreet toast, softcam and EPG-import controls gated on box-side permissions, and an EPG sensor
-  whose payload is declared unrecorded. The 0.2.0 fixes above are landing against that plan; the
-  README's roadmap says which of them are done.
+  whose payload is declared unrecorded. The 0.2.0 fixes above are this release, against that plan;
+  the README's roadmap says which of them are done.
 
 ## [0.1.0] - 2026-09-16
 
@@ -376,5 +393,6 @@ actions the README describes arrive in a later release.
   every push, every pull request, once a week and on the release tag itself, and a release
   is only published when the tag, the manifest version and the changelog agree.
 
-[Unreleased]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/releases/tag/v0.1.0
