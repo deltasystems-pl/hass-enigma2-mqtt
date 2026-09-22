@@ -23,7 +23,7 @@ from homeassistant.const import (
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 import pytest
 from pytest_homeassistant_custom_component.common import (
@@ -41,6 +41,7 @@ from .conftest import (
     NODE_ID,
     SLUG,
     async_setup_box,
+    async_setup_box_then_retained,
 )
 
 PROCESS_TOPIC = f"{BASE_TOPIC}/{NODE_ID}/process"
@@ -133,6 +134,30 @@ async def test_a_capability_that_arrives_after_setup_still_builds_them(
     # entity whose topic has never arrived says unavailable rather than inventing a zero.
     assert hass.states.get(MEMORY) is not None
     assert hass.states.get(MEMORY).state == STATE_UNAVAILABLE
+
+
+async def test_a_restart_finds_a_box_that_already_said_it_can_measure(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Home Assistant restarts; the receiver has been publishing all along.
+
+    The capability and the reading are both already retained, and both arrive in the
+    burst the broker sends after the subscription lands — which is after the platforms
+    have been set up, not before. `async_setup_box_then_retained` is the only harness
+    that produces that order; the other one delivers retained payloads inside
+    `async_subscribe`, which no broker does and which would let a capability read once
+    during setup look as though it worked.
+    """
+    box_on_the_broker[INFO_TOPIC] = json.dumps(WITH_PROCESS)
+    box_on_the_broker[PROCESS_TOPIC] = json.dumps(SAMPLE)
+
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    assert hass.states.get(MEMORY) is not None
+    assert hass.states.get(MEMORY).state == "179.0"
 
 
 async def test_the_numbers_arrive_as_numbers_somebody_would_graph(
@@ -272,6 +297,37 @@ async def test_a_payload_that_is_not_the_contract_keeps_the_last_good_sample(
     assert hass.states.get(MEMORY).state == "179.0"
 
 
+async def test_a_boolean_is_refused_where_the_reading_is_stored(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """`True` is an `int` in Python, and `False` is a zero that graphs as a reading.
+
+    The sensors refuse a boolean a second time on the way to the screen, so a state
+    cannot say whether the cached payload was cleaned — and everything else that reads
+    the cache, the diagnostics download included, would carry the boolean through. This
+    therefore asserts on what was stored rather than on what is displayed.
+    """
+    from custom_components.enigma2_mqtt.diagnostics import (
+        async_get_config_entry_diagnostics,
+    )
+
+    await async_setup_box(hass, config_entry)
+    await _announce_capability(hass, box_on_the_broker)
+    await _publish(hass, {**SAMPLE, "hwm_kb": True, "threads": False})
+
+    cached = (await async_get_config_entry_diagnostics(hass, config_entry))["topics"][
+        "process"
+    ]
+    assert cached["hwm_kb"] is None
+    assert cached["threads"] is None
+    # The fields either side of them are untouched: one bad value is not five.
+    assert cached["rss_kb"] == SAMPLE["rss_kb"]
+    assert cached["fds"] == SAMPLE["fds"]
+
+
 async def test_an_empty_payload_is_a_retraction_and_says_so(
     hass: HomeAssistant,
     mqtt_mock,
@@ -303,14 +359,30 @@ async def test_a_capability_that_stops_being_named_takes_nothing_away(
     Silence is not a decision. Removing these would delete the renames, the areas, the
     dashboards and the history a household had built on them, over a payload that simply
     did not mention something.
+
+    Asserted on the registry's own events and not only on what is there at the end,
+    because an end state cannot tell „never removed" from „removed and created again" —
+    and it is the second that quietly takes all of that with it while leaving a registry
+    that looks untouched.
     """
     await async_setup_box(hass, config_entry)
     await _announce_capability(hass, box_on_the_broker)
     assert hass.states.get(MEMORY) is not None
 
+    touched: list[tuple[str, str]] = []
+
+    # On the loop: `async_listen` runs a plain callable as an executor job, and this
+    # list would then be appended to in whatever order the thread pool got to it.
+    @callback
+    def _record(event: Event) -> None:
+        touched.append((event.data["entity_id"], event.data["action"]))
+
+    hass.bus.async_listen(er.EVENT_ENTITY_REGISTRY_UPDATED, _record)
+
     async_fire_mqtt_message(hass, INFO_TOPIC, json.dumps(INFO))
     await hass.async_block_till_done()
 
+    assert [entry for entry in touched if entry[0] in ALL_PROCESS] == []
     registry = er.async_get(hass)
     assert registry.async_get_entity_id(
         "sensor", "enigma2_mqtt", f"{NODE_ID}_process_memory"
