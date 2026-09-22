@@ -205,6 +205,23 @@ there — is saying nothing, and nothing leaves the per-source OSCam entities ex
 are, with the names, areas and history they have been given. Switch the option off to remove
 them.
 
+The same form carries the two **softcam auto-heal** fields where the plugin advertises
+them. *Restart the softcam on its own when decoding stops* is off by default; with it on,
+the receiver restarts its own card-sharing client when the channel is encrypted and has
+not been decoding for the window in the second field — at most once every ten minutes, and
+never while a recording is running or due. That is the identical guard a manual press goes
+through, deliberately: a restart landing on the opening seconds of a recording is worse
+than a scrambled recording, because a scrambled one is recoverable and a truncated one is
+not. The window defaults to ninety seconds, takes 30 to 600, and starts again at every
+channel change; a healthy encrypted channel renews about every ten seconds, so a short
+window reports a fault on a receiver that is working.
+
+🔴 **The permission behind both is not on this form and cannot be.** Whether the receiver
+will restart its softcam at all is `softcam_restart_allowed`, set on the box under *Menu →
+Plugins → MQTT Bridge*. A setting that *enables* a command is deliberately outside what
+anything holding publish rights on the broker can reach, so the plugin refuses it on
+`cmd/config`; these two only tune a command it has already been permitted to run.
+
 ### Reconfigure
 
 *…→ Enigma2 MQTT → the receiver → Reconfigure.* This is for following a box whose **node ID**
@@ -219,7 +236,7 @@ everything.
 
 ## 4. Entities
 
-**Twenty-five entities on every receiver**, and twenty-one more that exist only while
+**Twenty-five entities on every receiver**, and twenty-eight more that exist only while
 something says they should — plus one set of three per OSCam source, which has no fixed
 number because it follows however many readers and servers that receiver has. The
 conditional ones are, in full:
@@ -228,10 +245,24 @@ conditional ones are, in full:
 |---|---|---|
 | 2 | „Bukiet" and „Kanał" | the receiver reports the `channels` **and** `bouquet_context` capabilities |
 | 1 | „Odśwież EPG" | the receiver reports the `epg_grid` capability |
+| 1 | „Softcam" | the receiver reports the `softcam` capability |
+| 5 | the enigma2 process diagnostics | the receiver reports the `process` capability |
 | 2 | „Głębokie uśpienie", „Restart" | the Home Assistant option asks for them **and** the receiver permits deep standby |
+| 1 | „Restart softcam" | the receiver reports the `softcam` capability **and** permits a softcam restart |
 | 4 | the conditional-access diagnostics | the `cam_telemetry` option is on |
 | 12 | the OSCam aggregates | the `oscam_telemetry` option is on |
 | 3 per OSCam source | status, ready cards, shared cards | the `oscam_telemetry` option is on, for each reader or server that receiver reports |
+
+**What takes one away again is not the same question as what creates it**, and the table
+splits on it. A row that follows an **option or a permission** is removed on a stated
+„no": somebody decided, at the television or on the options form, and an entity that can
+never say anything again is worse than none. A row that follows a **capability** is
+removed only where the control behind it would be permanently refused — „Odśwież EPG" on
+a receiver that builds no grids. „Softcam" and the five process diagnostics are neither:
+they are diagnostics with a history, and a capability that stops being named is an older
+plugin after a downgrade, a hook that failed to attach on one boot, or a receiver that has
+not answered yet. None of those is a decision, so they stay and say nothing until the
+topic returns.
 
 Unique ids follow one scheme: `<node_id>_<key>`, where the
 key is the English translation key of the entity. Entity ids derive from the same key, so
@@ -324,6 +355,7 @@ while the box is unreachable, because that is precisely when somebody wants to w
 | `agc` | *AGC* | `<node_id>_agc` | `tuner` | % · diagnostic · **disabled by default** |
 | `ber` | *BER* | `<node_id>_ber` | `tuner` | count · diagnostic · **disabled by default** |
 | `uptime` | *Czas pracy* | `<node_id>_uptime` | `info` | seconds · diagnostic · **disabled by default** |
+| `softcam` | *Softcam* | `<node_id>_softcam` | `softcam` | the selected cam binary · diagnostic · only while the receiver names the `softcam` capability |
 | `last_error` | *Ostatni błąd* | `<node_id>_last_error` | `last_error` | the refused command's name · diagnostic · attributes `error` and `time` |
 | `process_memory` | *Pamięć Enigma2* | `<node_id>_process_memory` | `process` | MiB · `data_size` · diagnostic · **on by default** |
 | `process_memory_peak` | *Pamięć Enigma2 (szczyt)* | `<node_id>_process_memory_peak` | `process` | MiB · the high-water mark since the process started · diagnostic · **disabled by default** |
@@ -363,6 +395,22 @@ the question has been asked. Every field of the topic may be `null`, and a null 
 rather than a zero: a process with no threads and one that started at the epoch are both
 readings, and neither is what "the plugin could not measure this" means.
 
+**Softcam** is the state of the card-sharing client the *image* starts, which is not the
+same thing as the conditional-access diagnostics above: those are about the channel being
+descrambled, this is about the program doing the descrambling. The state is the **binary
+the image selected for autostart** — `OSCam_00000-r000`, say — and not a family name and
+not the protocol it speaks outward, which are three different things that a support
+thread will otherwise spend an afternoon confusing.
+
+| Attribute | What |
+|---|---|
+| `running_instances` | how many **instances** are running, counting a supervisor and the worker it keeps as one. A healthy receiver reports **1**; more than one is the fault this exists for. `unknown` means the count could not be taken — it is never reported as `0`, because no instances at all is a real and very interesting reading |
+| `last_restart` | when this integration's button or the receiver's own auto-heal last restarted it, ISO 8601 |
+| `last_restart_reason` | `manual` or `autoheal` |
+| `restarts_today` | restarts since local midnight. It lives in the receiver's memory and the topic is retained, so after a receiver reboot this shows the last published number until the plugin publishes again: it is a counter, not a durable total |
+| `manager_check_on_start` | whether the image's own softcam liveness check will add a copy at every interface restart on this box. This is the difference between a receiver that needs the restart button and one that merely has it |
+| `manager_timer_minutes` | the image's periodic check interval when it is switched on, `unknown` when it is not. A receiver with both this and `manager_check_on_start` gains an instance every interval, for ever — which is the runaway worth seeing on a dashboard before it becomes a household symptom |
+
 Times in attributes are ISO 8601 strings rather than the epoch seconds the topics carry,
 because a template can read one and not the other. The long programme description and the list
 of running recordings are excluded from the recorder: they are kilobytes that change every
@@ -393,6 +441,7 @@ it is the opposite: the answer is coming, and the dashboard should not sit still
 | `screenshot` | *Zrzut ekranu* | `<node_id>_screenshot` | `cmd/screenshot` | `screen` is republished |
 | `refresh_discovery` | *Odśwież discovery* | `<node_id>_refresh_discovery` | `cmd/discovery` | the announcement is republished |
 | `refresh_epg` | *Odśwież EPG* | `<node_id>_refresh_epg` | `cmd/epg_grid` · only while the box names the `epg_grid` capability | silence |
+| `softcam_restart` | *Restart softcam* | `<node_id>_softcam_restart` | `cmd/softcam_restart` · **both gates below** | silence |
 | `plugin` | *Wtyczka MQTT Bridge* | `<node_id>_plugin` | an `update` entity: installed = `info.plugin`, latest = the plugin release this version was written against | — |
 
 **Every button waits for the receiver**, on the same path as the actions below. A refusal
@@ -414,6 +463,42 @@ its own — and the alternative is a correlation id the contract does not have.
 plugin's `epg_grid_events` setting at zero there are no grids to rebuild, the capability is
 absent, and the button is not created. A capability can also arrive late, so the button appears
 when the receiver says it can do it rather than only at startup.
+
+**„Restart softcam"** stops every instance of the card-sharing client the image started
+and starts exactly one, with the line the image itself would have used. On a receiver
+whose cam binary has a long name it is mostly a way to **collapse the copies the image
+left behind**, which also fixes a frozen one.
+
+**It needs two gates open and both of them are the receiver's**, because they answer
+different questions and a receiver gives the two answers independently. The permission
+`softcam_restart_allowed` is set under *Menu → Plugins → MQTT Bridge* and is not writable
+over MQTT, for the same reason as deep standby; it is a plain checkbox that exists on
+every installation and says whether the command is wanted. The **`softcam` capability**
+says whether the receiver could carry it out at all — the plugin claims it only where the
+cam binary resolves under the softcam directory, its family has a known start line, and
+the image starts it through its manager's poller rather than through an init script. A
+receiver with the permission on and no resolvable cam therefore reports the permission,
+claims no capability and refuses the command; no button is offered for it, which is also
+what the plugin's own MQTT discovery mode does with the same receiver.
+
+There is no Home Assistant option beside either gate — the press costs a few seconds of a
+scrambled picture and nothing else. A plugin that does not report the permission gets no
+button, because none has ever existed there to keep. Only a stated „no" to the
+*permission* takes an existing button away; a capability that stops being named does not,
+for the reason [§4](#4-entities) gives.
+
+The receiver refuses the command in six situations and says which in its own words on
+„Ostatni błąd": without the permission; while a recording is running; with one due in the
+next ten minutes; when the image will not say whether it is recording at all; inside the
+rate limit of one manual restart a minute; and for the first minute after the plugin
+starts, because the image's own liveness check fires about a second after every interface
+start and restarting into that races a copy that is already on its way.
+
+The press is proved by **silence**, like the other restarts. The receiver's own sequence
+can take about ten seconds before it republishes `softcam` — it waits for the instances to
+go, kills what survives, starts one and lets it settle — and waiting for that topic would
+report „the receiver did not carry this out" for a restart that worked on exactly the
+slowest boxes. Every refusal arrives immediately, which is what the wait is for.
 
 **„Głębokie uśpienie" and „Restart" need two gates open**: the Home Assistant option
 [below](#options), and the receiver's own `deep_standby_allowed`, which is set on the box under
