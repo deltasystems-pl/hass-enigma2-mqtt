@@ -165,7 +165,8 @@ moved off is not in its settings file at all, which is not the same as a differe
 writes no line for a value that still equals its default, so a box on the default base topic
 `enigma2` says nothing about its base topic. The comparison supplies the plugin's defaults for
 anything the receiver has not stored. When it does refuse, the message names both sides, and a
-value in brackets is one the receiver has no line for, so the default is what applies.
+value in brackets is one the receiver has no line for, and what is inside the brackets is the
+default that applies in its place; a value stored as empty is shown as `""`.
 
 The **update entity** compares more, because it writes no settings and therefore has to find the
 box already correct: the node ID, the base topic, that the plugin is enabled, and that it is in

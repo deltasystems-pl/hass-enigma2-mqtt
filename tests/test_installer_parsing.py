@@ -404,16 +404,39 @@ async def test_a_receiver_on_another_base_topic_is_still_refused(
         "node_id": "vuuno4kse_005301",
         "base_topic": "enigma2",
     }
-    # A refused install used to leave nothing in the log at all, so afterwards there
-    # was no way to tell one had even been attempted, let alone which check refused it.
-    refusals = [
+    # The facts travel with the refusal and are written where an install is being
+    # refused, not here: these same guards run for the options screen's no-write probe.
+    assert raised.value.detail
+    assert "home/x" in raised.value.detail
+    assert "vuuno4kse_005301" in raised.value.detail
+    assert [
         record
         for record in caplog.records
         if record.levelname == "WARNING" and "refused" in record.getMessage()
-    ]
-    assert len(refusals) == 1
-    assert "home/x" in refusals[0].getMessage()
-    assert "vuuno4kse_005301" in refusals[0].getMessage()
+    ] == []
+
+
+async def test_a_base_topic_stored_as_empty_is_shown_as_stored_and_empty(
+    credentials: SshCredentials,
+) -> None:
+    """The one value that would otherwise be invisible in the middle of the sentence.
+
+    An empty string is a value the receiver holds, and it is a real difference from
+    `enigma2` — which is how it compares. Rendering it as the bracketed default would
+    have put "the box says `(enigma2)`, the form says `enigma2`, refused" back on the
+    screen, which is the problem this message exists to solve, one layer down.
+    """
+    receiver = FakeReceiver(node_id="vuuno4kse_005301", base_topic="")
+    request = InstallRequest(credentials, _provisioning())
+
+    with pytest.raises(InstallerError) as raised:
+        await _async_validate_receiver_identity(
+            FakeSession(receiver), "/tmp/helper.py", request
+        )
+
+    assert raised.value.code is InstallerErrorCode.IDENTITY_MISMATCH
+    assert raised.value.placeholders["box_base_topic"] == '""'
+    assert raised.value.placeholders["base_topic"] == "enigma2"
 
 
 async def test_the_default_base_topic_is_shown_as_a_default_when_the_node_id_differs(
@@ -466,6 +489,32 @@ async def test_an_update_accepts_a_receiver_that_stores_only_what_it_changed(
     )
 
     await _async_validate_receiver_identity(FakeSession(receiver), "/tmp/helper.py", request)
+
+
+async def test_the_no_write_probe_does_not_report_a_refused_install(
+    credentials: SshCredentials, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Nothing is being installed here, so nothing can have been refused.
+
+    `async_preflight` is what the options screen runs when somebody asks it to retain
+    SSH credentials, and what reauthentication runs to check a password; both hand the
+    failure to a form and let it be retried. The guards it runs are the install's own,
+    and a guard that logged as it raised would put „receiver install refused before the
+    plugin or its settings were touched" in the log once per retry, for an install
+    nobody had started.
+    """
+    receiver = FakeReceiver(recording=True)
+
+    with pytest.raises(InstallerError) as raised:
+        await async_preflight(None, credentials, _connector=receiver.connect)
+
+    assert raised.value.code is InstallerErrorCode.RECORDING
+    assert [
+        record for record in caplog.records if "refused" in record.getMessage()
+    ] == []
+    # The session is still closed, and the facts still travel with the refusal.
+    assert receiver.closed == 1
+    assert "recording" in raised.value.detail
 
 
 async def test_the_no_write_preflight_closes_its_session(

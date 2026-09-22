@@ -120,42 +120,31 @@ class InstallerError(Exception):
         # What the abort sentence for this code needs filling in. Empty for every code
         # whose sentence has no holes, which is all but one of them.
         self.placeholders = placeholders or {}
-        # Whether this refusal has already reached the log. `_refuse` sets it; the
-        # boundary around the pre-change steps logs whatever reaches it without it, so
-        # that a refusal is written down exactly once however deep it was raised.
-        self.logged = False
 
 
-def _refuse(
-    code: InstallerErrorCode,
-    detail: str,
-    placeholders: dict[str, str] | None = None,
-) -> InstallerError:
-    """Build a refusal that has already said so in the log.
+def _log_install_refusal(error: InstallerError) -> None:
+    """Write the one warning an install refused before any change leaves behind.
 
-    An install stopped before the receiver was touched used to leave nothing behind at
-    all: no line at INFO, none at WARNING, and the one sentence explaining it on a
-    config-flow screen that is gone the moment it is read. Asked afterwards why an
-    install had been refused, the log had no answer — measured on a receiver on
-    2026-09-22, where the refusal was also wrong and there was no way to see that.
+    An install stopped before the receiver was touched used to leave nothing at all: no
+    line at INFO, none at WARNING, and the one sentence explaining it on a config-flow
+    screen that is gone the moment it is read. Asked afterwards why an install had been
+    refused, the log had no answer — measured on a receiver on 2026-09-22.
 
-    Every guard that refuses before anything is changed goes through here, so each one
-    leaves which check refused and the facts it judged. Never a credential: the
-    addresses, passwords and keys this module handles are not facts a guard judges, and
-    none of them is passed in.
+    Every guard carries the facts it judged in `detail`; this is the only thing that
+    writes them, and only on the install path. The same guards are what the options
+    screen's no-write credential probe and reauthentication run, and there a receiver
+    that happens to be recording is a message on a form to be retried, not a refused
+    install — a line claiming otherwise, once per retry, would be a false one. One
+    boundary, one line, and nothing to keep in step about which of two places has
+    already logged.
+
+    Never a credential: the addresses, passwords and keys this module handles are not
+    facts a guard judges, and no guard puts one in `detail`.
     """
-    error = InstallerError(code, detail, placeholders)
-    _log_refusal(error)
-    return error
-
-
-def _log_refusal(error: InstallerError) -> None:
-    """Write one warning for a refusal, and never a second one for the same refusal."""
-    if error.logged:
-        return
-    error.logged = True
     _LOGGER.warning(
-        "Receiver install refused before anything was changed (%s): %s",
+        "Receiver install refused before the plugin or its settings were touched "
+        "(%s): %s. No snapshot was taken and no transaction lock claimed; the "
+        "installer's own helper script may remain in the receiver's /tmp.",
         error.code.value,
         error.detail or "the receiver did not answer one of the checks in a usable form",
     )
@@ -536,7 +525,7 @@ async def _async_measure_preflight(session: InstallerSession, *, bundle_size: in
         )
     ).stdout.strip()
     if _python_version(python_version)[:2] < MIN_PYTHON:
-        raise _refuse(
+        raise InstallerError(
             InstallerErrorCode.UNSUPPORTED_PYTHON,
             f"the receiver runs Python {python_version}; this plugin needs "
             f"{'.'.join(str(part) for part in MIN_PYTHON)} or newer",
@@ -552,12 +541,12 @@ async def _async_measure_preflight(session: InstallerSession, *, bundle_size: in
     try:
         free_values = [int(float(value)) for value in free_raw]
     except ValueError as err:
-        raise _refuse(
+        raise InstallerError(
             InstallerErrorCode.PREFLIGHT_FAILED,
             "the receiver's free-space figures are not numbers",
         ) from err
     if len(free_values) != 3 or any(value < 0 for value in free_values):
-        raise _refuse(
+        raise InstallerError(
             InstallerErrorCode.PREFLIGHT_FAILED,
             f"the receiver reported {len(free_values)} free-space figures, expected three",
         )
@@ -573,7 +562,7 @@ async def _async_measure_preflight(session: InstallerSession, *, bundle_size: in
     try:
         plugin_size = int(float(plugin_size_raw))
     except ValueError as err:
-        raise _refuse(
+        raise InstallerError(
             InstallerErrorCode.PREFLIGHT_FAILED,
             "the size of the installed plugin directory is not a number",
         ) from err
@@ -585,7 +574,7 @@ async def _async_measure_preflight(session: InstallerSession, *, bundle_size: in
         free < required
         for free, required in zip(free_values, required_values, strict=True)
     ):
-        raise _refuse(
+        raise InstallerError(
             InstallerErrorCode.NO_SPACE,
             "the receiver has "
             + ", ".join(
@@ -603,14 +592,14 @@ async def _async_measure_preflight(session: InstallerSession, *, bundle_size: in
     )
     files_result = await session.run(f"test -d {PLUGIN_DIR}", timeout=30)
     if files_result.exit_status not in (0, 1):
-        raise _refuse(
+        raise InstallerError(
             InstallerErrorCode.PREFLIGHT_FAILED,
             "the receiver would not say whether the plugin directory exists",
         )
     plugin_files_present = files_result.exit_status == 0
     status_result = await session.run(f"opkg status {PACKAGE}", timeout=30)
     if status_result.exit_status not in (0, 1):
-        raise _refuse(
+        raise InstallerError(
             InstallerErrorCode.PREFLIGHT_FAILED,
             "`opkg status` failed on the receiver",
         )
@@ -622,13 +611,13 @@ async def _async_measure_preflight(session: InstallerSession, *, bundle_size: in
                 package_seen = True
             if line.startswith("Version: "):
                 if installed is not None:
-                    raise _refuse(
+                    raise InstallerError(
                         InstallerErrorCode.PREFLIGHT_FAILED,
                         "`opkg status` reported the package twice",
                     )
                 installed = line.removeprefix("Version: ").strip()
         if not package_seen or not installed:
-            raise _refuse(
+            raise InstallerError(
                 InstallerErrorCode.PREFLIGHT_FAILED,
                 "`opkg status` answered without naming the package and its version",
             )
@@ -647,12 +636,12 @@ async def _async_measure_preflight(session: InstallerSession, *, bundle_size: in
     )
     recording, timers_due = _timer_guard(status.stdout, timers.stdout)
     if recording:
-        raise _refuse(
+        raise InstallerError(
             InstallerErrorCode.RECORDING,
             "the receiver is recording, and a GUI restart would lose the recording",
         )
     if timers_due:
-        raise _refuse(
+        raise InstallerError(
             InstallerErrorCode.TIMER_DUE,
             f"{timers_due} recording(s) are due on the receiver within the next "
             f"{TIMER_GUARD_SECONDS // 60} minutes",
@@ -736,19 +725,26 @@ def _stored_setting(identity: dict[str, Any], name: str) -> Any:
 def _stored_for_display(identity: dict[str, Any], name: str) -> str:
     """Render a stored setting for the abort sentence, marking one that is not stored.
 
-    A setting the receiver has never been given is not in its settings file, so there
-    is nothing to quote back and what applies is the plugin's default. Showing it in
-    brackets is the difference between "the box says `enigma2`" and "the box says
-    nothing and `enigma2` is what that means", which is the whole diagnosis when the
-    two sides look identical and the install was refused anyway. Brackets rather than a
-    word, because this string is dropped into the Polish and German sentences unchanged
-    and a word in them would be an English one.
+    Brackets mean exactly one thing: the receiver has no line for this setting. What is
+    inside them is the plugin's default, which is what applies, or `-` where the plugin
+    has none to apply. That is the difference between "the box says `enigma2`" and "the
+    box says nothing and `enigma2` is what that means", which is the whole diagnosis
+    when the two sides look identical and the install was refused anyway.
+
+    A setting stored as an empty string is stored, so it gets no brackets: it is shown
+    as `""`, because it is the one value that would otherwise appear as nothing at all
+    in the middle of a sentence — and because it is a real difference from the default,
+    which is how `_stored_setting` compares it. Collapsing the two would put the same
+    two-identical-looking-values problem back, one layer down.
+
+    Punctuation rather than words throughout, because this string is dropped into the
+    Polish and German sentences unchanged and a word in them would be an English one.
     """
     stored = identity.get(name)
-    if stored is None or stored == "":
+    if stored is None:
         default = PLUGIN_SETTING_DEFAULTS[name]
         return f"({default})" if default != "" else "(-)"
-    return str(stored)
+    return str(stored) if stored != "" else '""'
 
 
 async def _async_validate_receiver_identity(
@@ -784,7 +780,7 @@ async def _async_validate_receiver_identity(
     try:
         identity = json.loads(result.stdout)
     except (TypeError, ValueError) as err:
-        raise _refuse(
+        raise InstallerError(
             InstallerErrorCode.PREFLIGHT_FAILED,
             "the receiver's plugin settings could not be read as JSON",
         ) from err
@@ -794,7 +790,7 @@ async def _async_validate_receiver_identity(
         "enabled",
         "ha_mode",
     }:
-        raise _refuse(
+        raise InstallerError(
             InstallerErrorCode.PREFLIGHT_FAILED,
             "the receiver did not report the four settings that bind it to an entry",
         )
@@ -806,7 +802,7 @@ async def _async_validate_receiver_identity(
         or not isinstance(identity["enabled"], (bool, type(None)))
         or not isinstance(identity["ha_mode"], (str, type(None)))
     ):
-        raise _refuse(
+        raise InstallerError(
             InstallerErrorCode.PREFLIGHT_FAILED,
             "the receiver reported a plugin setting of the wrong type",
         )
@@ -827,7 +823,7 @@ async def _async_validate_receiver_identity(
             or configured_enabled is not True
             or configured_mode != HA_MODE_INTEGRATION
         ):
-            raise _refuse(
+            raise InstallerError(
                 InstallerErrorCode.IDENTITY_MISMATCH,
                 f"the receiver is configured for node {placeholders['box_node_id']} on "
                 f"{placeholders['box_base_topic']} (enabled={configured_enabled}, "
@@ -836,7 +832,7 @@ async def _async_validate_receiver_identity(
                 placeholders,
             )
     elif stored_node and (stored_node != expected_node or configured_base != expected_base):
-        raise _refuse(
+        raise InstallerError(
             InstallerErrorCode.IDENTITY_MISMATCH,
             f"the receiver is already configured for node {placeholders['box_node_id']} "
             f"on {placeholders['box_base_topic']}, and the form gives node "
@@ -1244,10 +1240,12 @@ async def _async_install_locked(
     committed = False
     try:
         # Everything up to the transaction lock is a guard, and a guard that refuses
-        # leaves the receiver exactly as it found it. Each of those refusals is written
-        # to the log here — once — because the sentence a user is shown lives on a
-        # config-flow screen that is gone as soon as it is read, and afterwards there
-        # was nothing at all to say an install had even been attempted.
+        # leaves the receiver as it found it. Each of those refusals is written to the
+        # log here — the one place that knows an install was being attempted — because
+        # the sentence a user is shown lives on a config-flow screen that is gone as
+        # soon as it is read, and afterwards there was nothing at all to say one had
+        # even happened. The guards themselves log nothing: the same code runs for the
+        # options screen's no-write probe, where there is no install to refuse.
         try:
             await _async_progress(progress_cb, "preflight")
             session = await connector(request.credentials)
@@ -1255,7 +1253,7 @@ async def _async_install_locked(
             if preflight.installed_version and _package_version(
                 preflight.installed_version
             ) > _package_version(bundle.version):
-                raise _refuse(
+                raise InstallerError(
                     InstallerErrorCode.NEWER_INSTALLED,
                     f"the receiver runs plugin {preflight.installed_version} and this "
                     f"integration ships {bundle.version}",
@@ -1274,7 +1272,7 @@ async def _async_install_locked(
             )
             await _async_validate_receiver_identity(session, remote_helper, request)
         except InstallerError as err:
-            _log_refusal(err)
+            _log_install_refusal(err)
             raise
         claim = await session.run(
             f"mkdir -p {shlex.quote(BACKUP_ROOT)} && "

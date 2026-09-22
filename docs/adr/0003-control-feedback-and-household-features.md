@@ -472,8 +472,12 @@ The helper now reports raw facts, `null` for a setting with no line, and the def
 Home Assistant side in one table — `PLUGIN_SETTING_DEFAULTS` — which a test reads out of the
 bundled plugin's own `config.py` and compares entry by entry. The bundle is pinned by digest and
 commit and is the same source as the package the installer ships, so this is a mirror that fails
-in CI rather than on a receiver. A value the receiver has no line for is then shown in brackets,
-so the default it is running on and a value it holds do not read the same.
+in CI rather than on a receiver. Brackets in the message then mean exactly one thing — the
+receiver has no line for this — and what is inside them is the default that applies in its place,
+so a default it is running on and a value it holds do not read the same. A setting stored as an
+empty string is stored, and is shown as `""` without brackets: it is a real difference from the
+default, it compares as one, and it is the one value that would otherwise appear as nothing at
+all in the middle of the sentence.
 
 What the installer accepts and refuses is unchanged by any of this. Two of the comparisons are
 deliberately not symmetrical. **`node_id` is not defaulted**: the plugin has
@@ -501,10 +505,24 @@ guard that refuses before the receiver is touched now leaves one warning naming 
 facts — the Python version and the floor, the free bytes against the bytes needed for each of the
 three filesystems, the running recording, the number of timers inside the guard window, the
 installed version against the bundled one, both halves of an identity, and, for the checks that
-fail closed on an answer they cannot parse, which answer that was. Exactly one line per refusal:
-the guards that name themselves log as they raise, and a single boundary around the pre-change
-steps logs anything that reaches it unlogged. No credential, no address and no broker password is
-among the facts, because none of them is something a guard judges.
+fail closed on an answer they cannot parse, which answer that was. No credential, no address and
+no broker password is among them, because none of those is something a guard judges.
+
+Exactly one line per refused install, and the **guards themselves log nothing**. The facts
+travel with the refusal and a single boundary around the steps that run before the receiver is
+touched writes them. The alternative — each guard logging as it raises — is wrong twice over: the
+same guards are what `async_preflight` runs for the options screen's no-write credential probe
+and for reauthentication, where the failure goes to a form to be retried and a receiver that
+happens to be recording is not a refused install at all, so the log would fill with a sentence
+that was untrue once per retry; and a guard reached through a helper that re-raises would need a
+flag on the exception to avoid writing itself down twice. One place that knows an install was
+being attempted, one line.
+
+The line says what the receiver was left holding rather than „nothing was changed", because that
+is not quite true: no snapshot is taken and no transaction lock claimed, but the identity check
+reads the receiver's settings by running the installer's own helper, so a refusal at that check
+can leave that one file in `/tmp`. Uploading the helper after the check is not available — the
+check is what runs it.
 
 What a refusal still does not do is consume the discovery card the box is being offered on —
 measured across twenty-five samples of the refused install. That is correct and stays: the card

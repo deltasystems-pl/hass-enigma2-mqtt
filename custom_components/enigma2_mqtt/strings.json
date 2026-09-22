@@ -136,7 +136,7 @@
       ,"rollback_restart_failed": "The installation failed and the receiver was put back as it was, but its interface did not start again. Restart the receiver by hand; nothing else needs undoing."
       ,"rollback_lock_failed": "The receiver was put back as it was, but the installer's transaction lock could not be released. Delete /home/root/mqttbridge-backups/.ha-installer.lock on the receiver, or wait thirty minutes, before installing again."
       ,"busy": "Another installation is already running on this receiver."
-      ,"identity_mismatch": "The receiver is configured for node ID {box_node_id} and base topic {box_base_topic}, and the form gives {node_id} and {base_topic}. A value in brackets is the plugin's default, because the receiver has none of its own stored. Nothing was changed."
+      ,"identity_mismatch": "The receiver is configured for node ID {box_node_id} and base topic {box_base_topic}, and the form gives {node_id} and {base_topic}. A value in brackets is one the receiver has not stored, and shows the plugin's default where there is one. Nothing was changed."
       ,"unknown": "Installation failed unexpectedly; no entry was created."
     }
   },

@@ -111,7 +111,7 @@
       "rollback_restart_failed": "Die Installation ist fehlgeschlagen. Der Receiver wurde zurückgesetzt, aber seine Oberfläche ist nicht wieder gestartet — starte den Receiver von Hand neu; sonst ist nichts rückgängig zu machen.",
       "rollback_lock_failed": "Der Receiver wurde zurückgesetzt, aber die Sperre des Installers konnte nicht freigegeben werden — lösche /home/root/mqttbridge-backups/.ha-installer.lock von Hand oder warte 30 Minuten, bevor du erneut installierst.",
       "busy": "Auf diesem Receiver läuft bereits eine andere Installation.",
-      "identity_mismatch": "Der Receiver ist für die Knoten-ID {box_node_id} und das Basisthema {box_base_topic} konfiguriert, das Formular nennt {node_id} und {base_topic}. Ein Wert in Klammern ist die Voreinstellung des Plugins, weil der Receiver keine eigene gespeichert hat. Es wurde nichts geändert.",
+      "identity_mismatch": "Der Receiver ist für die Knoten-ID {box_node_id} und das Basisthema {box_base_topic} konfiguriert, das Formular nennt {node_id} und {base_topic}. Ein Wert in Klammern ist auf dem Receiver nicht gespeichert; gezeigt wird die Voreinstellung des Plugins, sofern es eine gibt. Es wurde nichts geändert.",
       "unknown": "Installation ist unerwartet fehlgeschlagen; es wurde kein Eintrag erstellt."
     }
   },

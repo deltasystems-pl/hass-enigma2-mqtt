@@ -721,6 +721,24 @@ def test_read_identity_reports_a_setting_that_is_not_stored_as_absent(
     }
 
 
+def test_read_identity_tells_a_stored_empty_value_from_an_absent_one(
+    tmp_path: Path,
+) -> None:
+    """`base_topic=` is a line, and a line is a value the receiver holds."""
+    root = tmp_path / "root"
+    _write(
+        root,
+        "etc/enigma2/settings",
+        "config.plugins.mqttbridge.node_id=vuuno4kse_005301\n"
+        "config.plugins.mqttbridge.base_topic=\n",
+    )
+
+    identity = read_identity(root)
+
+    assert identity["base_topic"] == ""
+    assert identity["ha_mode"] is None
+
+
 def test_read_identity_of_a_receiver_with_no_settings_file_is_all_absent(
     tmp_path: Path,
 ) -> None:

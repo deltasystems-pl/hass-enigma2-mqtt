@@ -419,6 +419,12 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
             )
         except asyncio.CancelledError:
             self._install_error = "install_cancelled"
+            # A retried install reuses this flow object, so an outcome that fills no
+            # holes has to empty the ones the last one filled. Left behind, they would
+            # be handed to a sentence that does not take them — which Home Assistant
+            # ignores, until the day that sentence gains a placeholder of its own and
+            # starts rendering another failure's node id.
+            self._install_placeholders = {}
             raise
         except InstallerError as err:
             self._install_error = err.code.value
@@ -429,6 +435,7 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
             # no credential or provisioning value can reach the log through it.
             _LOGGER.exception("Unexpected failure while installing the receiver plugin")
             self._install_error = "unknown"
+            self._install_placeholders = {}
 
     def _async_install_progress(self, phase: str) -> None:
         """Move the bar, and record nothing that is a credential or an address.

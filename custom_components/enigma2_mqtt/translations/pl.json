@@ -111,7 +111,7 @@
       "rollback_restart_failed": "Instalacja nie powiodła się. Dekoder został przywrócony, ale interfejs nie uruchomił się ponownie — zrestartuj dekoder ręcznie; nic więcej nie wymaga cofnięcia.",
       "rollback_lock_failed": "Dekoder został przywrócony, ale nie udało się zwolnić blokady instalatora — usuń katalog /home/root/mqttbridge-backups/.ha-installer.lock ręcznie lub odczekaj 30 minut.",
       "busy": "Na tym dekoderze trwa już inna instalacja.",
-      "identity_mismatch": "Dekoder jest skonfigurowany dla węzła {box_node_id} i tematu bazowego {box_base_topic}, a formularz podaje {node_id} i {base_topic}. Wartość w nawiasie to wartość domyślna wtyczki, bo dekoder nie ma zapisanej własnej. Nic nie zostało zmienione.",
+      "identity_mismatch": "Dekoder jest skonfigurowany dla węzła {box_node_id} i tematu bazowego {box_base_topic}, a formularz podaje {node_id} i {base_topic}. Wartość w nawiasie nie jest zapisana w dekoderze — pokazana jest wartość domyślna wtyczki, o ile taka istnieje. Nic nie zostało zmienione.",
       "unknown": "Instalacja nieoczekiwanie nie powiodła się; wpisu nie utworzono."
     }
   },

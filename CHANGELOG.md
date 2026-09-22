@@ -262,7 +262,10 @@ Found by running this release against a real receiver rather than a test one.
   check refused it. Every guard that refuses before the receiver is touched — the Python version,
   free space, a recording, a timer about to start, a newer plugin already installed, a mismatched
   identity, and each of the checks that fail closed on an answer they cannot read — now leaves one
-  warning naming the check and the facts it judged. No credential and no address is among them.
+  warning naming the check and the facts it judged, and saying what the receiver was left holding.
+  No credential and no address is among them. The no-write credential probe the options screen and
+  reauthentication run goes through the same checks and stays silent, because a receiver that
+  happens to be recording while a password is being tested is not a refused install.
 
 ### Changed
 
