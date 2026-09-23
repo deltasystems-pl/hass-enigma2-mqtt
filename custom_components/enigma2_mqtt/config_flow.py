@@ -12,6 +12,11 @@ id is a changed identity, so it takes the old device with it rather than leaving
 beside the new one. **Options** are the three preferences that are about this end of the
 link rather than about the box: whether the two buttons that can end the evening appear,
 which address a magic packet goes to, and which bouquets are worth browsing.
+
+**Removing the plugin** from the receiver lives in the options flow too, as a menu entry
+beside them, and only while the receiver itself says it may be removed (ADR-0004). It is a
+flow step because a flow step is the only confirmation Home Assistant has, and it ends in
+an abort rather than a saved entry: it changes the receiver, never the entry.
 """
 
 from __future__ import annotations
@@ -51,6 +56,7 @@ from .const import (
     CONF_BOUQUETS,
     CONF_CAM_TELEMETRY,
     CONF_CHECK_GITHUB_RELEASES,
+    CONF_CONFIRM_UNINSTALL,
     CONF_DANGEROUS_BUTTONS,
     CONF_KEEP_SSH_CREDENTIALS,
     CONF_NAME,
@@ -102,6 +108,12 @@ from .installer import (
     async_install,
     async_preflight,
     async_probe_host_key,
+)
+from .uninstall import (
+    UninstallOutcome,
+    UninstallResult,
+    async_uninstall,
+    credentials_from_entry,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -795,8 +807,28 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
         self._ssh_host = ""
         self._ssh_port = 22
         self._ssh_host_key = None
+        self._uninstall_task: asyncio.Task[UninstallResult] | None = None
+        self._uninstall_error: str | None = None
 
     async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Open on the options, or on a menu when the receiver permits its removal.
+
+        The menu exists only while removing the plugin is on offer, so for nearly every
+        receiver — the permission is off as shipped — Configure opens straight on the
+        form, as it always has. It is a menu entry rather than a button because Home
+        Assistant has no confirmation for a button or an action: a flow step is the only
+        place the one-way door can be stated before it is opened (ADR-0004).
+        """
+        box = self._box()
+        if box is not None and box.uninstall_offered:
+            return self.async_show_menu(
+                step_id="init", menu_options=["settings", "uninstall"]
+            )
+        return await self.async_step_settings()
+
+    async def async_step_settings(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Show the options, and save them."""
@@ -1037,12 +1069,92 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
             suggested.update(settings)
 
         return self.async_show_form(
-            step_id="init",
+            step_id="settings",
             data_schema=self.add_suggested_values_to_schema(
                 schema, user_input or suggested
             ),
             errors=errors,
             description_placeholders={"mac": mac or UNKNOWN_PLACEHOLDER},
+        )
+
+    async def async_step_uninstall(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """State the one-way door, and remove the plugin only once it is ticked.
+
+        The receiver is asked again at the moment of the click, not only when the menu
+        was drawn: a form can stay open while the box goes offline or its permission is
+        switched off at the television, and either of those withdraws the offer. An
+        unticked form publishes nothing and connects to nothing.
+        """
+        box = self._box()
+        if box is None or not box.uninstall_offered:
+            return self.async_abort(reason="uninstall_not_offered")
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if user_input.get(CONF_CONFIRM_UNINSTALL) is not True:
+                errors["base"] = "uninstall_not_confirmed"
+            else:
+                credentials = credentials_from_entry(self.config_entry.data)
+                self._uninstall_task = self.hass.async_create_task(
+                    self._async_run_uninstall(box, credentials)
+                )
+                return await self.async_step_uninstall_progress()
+        return self.async_show_form(
+            step_id="uninstall",
+            data_schema=vol.Schema(
+                {vol.Required(CONF_CONFIRM_UNINSTALL, default=False): bool}
+            ),
+            errors=errors,
+            description_placeholders={"name": self.config_entry.title},
+        )
+
+    async def _async_run_uninstall(
+        self, box: Enigma2Box, credentials: SshCredentials | None
+    ) -> UninstallResult:
+        """Run the removal, turning what it raises into an abort reason."""
+        try:
+            return await async_uninstall(self.hass, box, credentials)
+        except InstallerError as err:
+            # Only the two guards reach here — the receiver is recording or about to —
+            # and both are refusals made before anything was published.
+            self._uninstall_error = err.code.value
+        except HomeAssistantError:
+            self._uninstall_error = "mqtt_unavailable"
+        except Exception:
+            _LOGGER.exception("Unexpected failure while removing the receiver plugin")
+            self._uninstall_error = "unknown"
+        return UninstallResult(UninstallOutcome.NO_ACTION)
+
+    async def async_step_uninstall_progress(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Wait for the receiver, and for the SSH readbacks when there are any."""
+        assert self._uninstall_task is not None
+        if self._uninstall_task.done():
+            return self.async_show_progress_done(next_step_id="uninstall_finish")
+        return self.async_show_progress(
+            step_id="uninstall_progress",
+            progress_action="uninstalling",
+            progress_task=self._uninstall_task,
+        )
+
+    async def async_step_uninstall_finish(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """End on what was shown, never on a success nobody saw.
+
+        An abort rather than `create_entry`, so the options are not saved and the entry
+        is not reloaded: nothing about this end of the link changed, and the entry, its
+        entities and their history stay exactly where they are.
+        """
+        assert self._uninstall_task is not None
+        if self._uninstall_error is not None:
+            return self.async_abort(reason=self._uninstall_error)
+        result = self._uninstall_task.result()
+        return self.async_abort(
+            reason=result.outcome.value,
+            description_placeholders={"detail": result.detail or UNKNOWN_PLACEHOLDER},
         )
 
     async def async_step_ssh_host(

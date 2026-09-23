@@ -43,6 +43,7 @@ from .const import (
     ATTR_KEY,
     ATTR_NODE_ID,
     ATTR_PRESS,
+    CAPABILITY_UNINSTALL,
     COMMAND_TIMEOUT,
     CONF_BASE_TOPIC,
     CONF_BOUQUETS,
@@ -53,6 +54,7 @@ from .const import (
     CONF_RECEIVER_HOST,
     CONF_SOFTCAM_RESTART_ALLOWED,
     CONF_SOURCE_LIST_SCOPE,
+    CONF_UNINSTALL_ALLOWED,
     CONF_WOL_MAC,
     DEFAULT_BASE_TOPIC,
     DEFAULT_MANUFACTURER,
@@ -659,6 +661,11 @@ class Enigma2Box:
         self._pending_cam: object = _NO_PENDING_CAM
         self._pending_oscam: object = _NO_PENDING_OSCAM
         self._subscribed = asyncio.Event()
+        # Whether the last `info` the broker delivered was empty — the plugin retracting
+        # it, which an uninstall does and nothing else a running plugin does for long.
+        # The last good payload is kept for everything that reads it, as it always was;
+        # this flag only withdraws what that payload *permitted*. See `uninstall_offered`.
+        self.info_retracted: bool = False
         # The bouquet the source list scope last complained about, so that it is said
         # once rather than on every republished channel list.
         self._scope_fallback_warned: str | None = None
@@ -796,6 +803,35 @@ class Enigma2Box:
             return None
         value = settings.get(CONF_EPG_IMPORT_ALLOWED)
         return value if isinstance(value, bool) else None
+
+    @property
+    def uninstall_offered(self) -> bool:
+        """Return whether removing the plugin may be offered right now.
+
+        Three conditions, all read from what the receiver is saying *now*: it is on the
+        broker, its current `info` states `uninstall_allowed: true`, and the same `info`
+        names the `uninstall` capability. The announcement is not consulted, although
+        `capabilities` falls back on it: a capability is the plugin's own finding about the
+        box it runs on, and only `info` carries the permission beside it.
+
+        🔴 The polarity is the opposite of `deep_standby_permission`'s, deliberately
+        (ADR-0004): silence — an older plugin, a payload that cannot be read, a box that has
+        not answered — offers nothing, because the act behind it cannot be undone from here.
+        An empty `info` counts as silence even though the last good payload is still held:
+        it is what the plugin publishes on its way out, and a menu entry left standing for
+        a receiver whose plugin has gone would be a control that can only ever time out.
+        """
+        if not self.available or self.info_retracted:
+            return False
+        info = self.state.info
+        settings = info.get("settings")
+        capabilities = info.get("capabilities")
+        return (
+            isinstance(settings, dict)
+            and settings.get(CONF_UNINSTALL_ALLOWED) is True
+            and isinstance(capabilities, list)
+            and CAPABILITY_UNINSTALL in capabilities
+        )
 
     @property
     def is_on(self) -> bool:
@@ -1259,9 +1295,22 @@ class Enigma2Box:
 
     @callback
     def _info_received(self, msg: ReceiveMessage) -> None:
-        """Track the box's `info` topic and keep the device page current."""
+        """Track the box's `info` topic and keep the device page current.
+
+        A payload that does not parse leaves the last good one alone, as it always has. An
+        empty one is different in one respect only: it is a retraction, and it withdraws
+        the permission `uninstall_offered` reads — the rest of the last payload stays,
+        because every entity reading it would otherwise lose its device details to a
+        receiver that is merely resetting.
+        """
+        if not msg.payload:
+            if not self.info_retracted:
+                self.info_retracted = True
+                self._async_updated(TOPIC_INFO)
+            return
         if (info := parse_json_payload(msg.payload)) is None:
             return
+        self.info_retracted = False
         self.state.info = info
         if self.cam_enabled and self._pending_cam is not _NO_PENDING_CAM:
             pending, self._pending_cam = self._pending_cam, _NO_PENDING_CAM

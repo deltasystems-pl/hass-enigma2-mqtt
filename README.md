@@ -254,8 +254,10 @@ settings are in the options, the permission is not); an **EPG import** button an
 **EPG sensor for the active bouquet** whose payload is declared unrecorded; the **process**
 sensors, already in review; and a **remote uninstall** — removing the plugin from the receiver as
 an explicit, confirmed action rather than a side effect of deleting the configuration entry,
-offered only while the box says it permits removal, and a one-way door
-([ADR-0004](docs/adr/0004-remote-uninstall.md)).
+offered only while the box says it permits removal, and a one-way door; the receiver removes
+itself in the order only it can keep, and SSH, where the installer's credentials were kept, only
+verifies ([ADR-0004](docs/adr/0004-remote-uninstall.md),
+[ADR-0006](docs/adr/0006-remote-uninstall-plugin-acts-ssh-verifies.md)).
 
 **Testers wanted: open an issue.** OpenATV, OpenPLi and OpenBH have no test box. There is no
 per-image thread to find yet — yours would start it.

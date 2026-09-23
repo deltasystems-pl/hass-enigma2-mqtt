@@ -149,7 +149,8 @@
   },
   "options": {
     "step": {
-      "init": {
+      "init": {"title": "Receiver options", "description": "Change the options for this end of the link, or remove the plugin from the receiver. This receiver permits its removal; that permission is set on the box itself.", "menu_options": {"settings": "Options", "uninstall": "Remove the plugin from the receiver"}},
+      "settings": {
         "title": "Receiver options",
         "description": "The receiver reports the MAC address {mac}. Magic packets go there unless another one is given below.",
         "data": {
@@ -187,12 +188,27 @@
       }
       ,"ssh_host": {"title": "Connect to the receiver", "data": {"ssh_host": "Receiver host", "ssh_port": "SSH port"}}
       ,"ssh_confirm": {"title": "Confirm SSH identity", "description": "Confirm receiver fingerprint `{fingerprint}` before sending credentials.", "data": {"ssh_username": "SSH username", "ssh_password": "SSH password"}}
+      ,"uninstall": {"title": "Remove the plugin from the receiver", "description": "This removes the MQTT Bridge plugin from {name}. It is a one-way door: once the plugin is gone nothing here can bring it back — only SSH or the receiver's own package manager (Menu → Plugins → download → Extensions) can. The receiver keeps its plugin settings, so a reinstall starts on the same broker, node ID and mode, and this entry picks it up again with every entity as it was. Until then the device looks exactly like a switched-off receiver: every entity unavailable. The receiver restarts its interface at the end, and it refuses while it is recording or a recording is about to start.", "data": {"confirm_uninstall": "I understand that only SSH or the receiver's package manager can bring the plugin back"}}
     },
     "error": {
       "plugin_unavailable": "The receiver is not connected, so its privacy settings were not changed. Try again when it is online.",
       "plugin_config_failed": "The receiver did not confirm the new privacy settings. Its previous settings and these Home Assistant options were kept.",
-      "invalid_mac": "That is not a MAC address. Write it as `00:00:5e:00:53:01`, `00-00-5e-00-53-01`, `0000.5e00.5301` or `00005e005301`, or leave the field empty to use the address the receiver reports."
-    }
+      "invalid_mac": "That is not a MAC address. Write it as `00:00:5e:00:53:01`, `00-00-5e-00-53-01`, `0000.5e00.5301` or `00005e005301`, or leave the field empty to use the address the receiver reports.",
+      "uninstall_not_confirmed": "Tick the box to remove the plugin. Nothing has been sent to the receiver."
+    },
+    "abort": {
+      "uninstall_not_offered": "The receiver no longer permits removing its plugin, or it is not connected. Nothing was sent."
+      ,"uninstall_verified": "The plugin was removed from the receiver and verified over SSH: the package and its files are gone, and the receiver's plugin settings are unchanged. The entry stays; delete it if you do not plan to reinstall."
+      ,"uninstall_not_verified": "The receiver said it removed the plugin — it retracted its topics and went offline — but SSH could not confirm it. Disagreed or could not be read: {detail}."
+      ,"uninstall_reported": "The receiver said it removed the plugin: it retracted its topics and went offline. Without stored SSH credentials that is all that can be shown from here."
+      ,"uninstall_refused": "The receiver refused: {detail}"
+      ,"uninstall_no_action": "The receiver did not act: nothing in the shape of a removal arrived within a minute. The plugin is most likely still installed; check that the receiver is on and connected."
+      ,"recording": "The receiver is recording. Nothing was sent; try again when the recording has finished."
+      ,"timer_due": "A recording is about to start on the receiver. Nothing was sent; try again later."
+      ,"mqtt_unavailable": "The MQTT integration is not available, so nothing was sent to the receiver."
+      ,"unknown": "Removing the plugin failed unexpectedly; the log has the details."
+    },
+    "progress": {"uninstalling": "Asking the receiver to remove its plugin, and waiting for it to retract its topics and go offline"}
   },
   "entity": {
     "binary_sensor": {

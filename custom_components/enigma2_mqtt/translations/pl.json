@@ -123,7 +123,8 @@
   },
   "options": {
     "step": {
-      "init": {
+      "init": {"title": "Opcje dekodera", "description": "Zmień opcje po tej stronie połączenia albo usuń wtyczkę z dekodera. Ten dekoder zezwala na jej usunięcie; to zezwolenie ustawia się na samym dekoderze.", "menu_options": {"settings": "Opcje", "uninstall": "Usuń wtyczkę z dekodera"}},
+      "settings": {
         "title": "Opcje dekodera",
         "description": "Dekoder zgłasza adres MAC {mac}. Pakiety budzące trafią tam, o ile poniżej nie zostanie podany inny.",
         "data": {
@@ -161,12 +162,27 @@
       },
       "ssh_host": {"title": "Połącz z dekoderem", "data": {"ssh_host": "Adres dekodera", "ssh_port": "Port SSH"}},
       "ssh_confirm": {"title": "Potwierdź tożsamość SSH", "description": "Potwierdź odcisk dekodera `{fingerprint}` przed wysłaniem danych logowania.", "data": {"ssh_username": "Użytkownik SSH", "ssh_password": "Hasło SSH"}}
+      ,"uninstall": {"title": "Usuń wtyczkę z dekodera", "description": "Wtyczka MQTT Bridge zostanie usunięta z dekodera {name}. Tego nie da się cofnąć stąd: gdy wtyczki nie będzie, nic w Home Assistancie jej nie przywróci — tylko SSH albo menedżer pakietów dekodera (Menu → Wtyczki → pobierz → Extensions). Dekoder zachowa ustawienia wtyczki, więc po ponownej instalacji połączy się z tym samym brokerem, z tym samym identyfikatorem węzła i w tym samym trybie, a ten wpis podejmie go ze wszystkimi encjami takimi jak dotąd. Do tego czasu urządzenie wygląda dokładnie jak wyłączony dekoder: wszystkie encje są niedostępne. Na koniec dekoder zrestartuje interfejs; odmówi, jeśli nagrywa albo zaraz zacznie nagrywać.", "data": {"confirm_uninstall": "Rozumiem, że wtyczkę przywróci tylko SSH albo menedżer pakietów dekodera"}}
     },
     "error": {
       "plugin_unavailable": "Dekoder nie jest połączony, więc jego ustawienia prywatności nie zostały zmienione. Spróbuj ponownie, gdy będzie dostępny.",
       "plugin_config_failed": "Dekoder nie potwierdził nowych ustawień prywatności. Zachowano poprzednie ustawienia dekodera i opcje Home Assistanta.",
-      "invalid_mac": "To nie jest adres MAC. Wpisz go jako `00:00:5e:00:53:01`, `00-00-5e-00-53-01`, `0000.5e00.5301` albo `00005e005301`, albo zostaw pole puste, żeby użyć adresu zgłaszanego przez dekoder."
-    }
+      "invalid_mac": "To nie jest adres MAC. Wpisz go jako `00:00:5e:00:53:01`, `00-00-5e-00-53-01`, `0000.5e00.5301` albo `00005e005301`, albo zostaw pole puste, żeby użyć adresu zgłaszanego przez dekoder.",
+      "uninstall_not_confirmed": "Zaznacz pole, aby usunąć wtyczkę. Do dekodera nic nie zostało wysłane."
+    },
+    "abort": {
+      "uninstall_not_offered": "Dekoder nie zezwala już na usunięcie wtyczki albo nie jest połączony. Nic nie zostało wysłane."
+      ,"uninstall_verified": "Wtyczka została usunięta z dekodera i sprawdzona przez SSH: pakietu i jego plików już nie ma, a ustawienia wtyczki na dekoderze są niezmienione. Wpis zostaje; usuń go, jeśli nie planujesz ponownej instalacji."
+      ,"uninstall_not_verified": "Dekoder zgłosił usunięcie wtyczki — wycofał swoje tematy i przeszedł w tryb offline — ale SSH tego nie potwierdził. Nie zgadza się albo nie dało się odczytać: {detail}."
+      ,"uninstall_reported": "Dekoder zgłosił usunięcie wtyczki: wycofał swoje tematy i przeszedł w tryb offline. Bez zapisanych danych SSH nic więcej nie da się stąd pokazać."
+      ,"uninstall_refused": "Dekoder odmówił: {detail}"
+      ,"uninstall_no_action": "Dekoder nie zareagował: w ciągu minuty nie nadeszło nic, co wyglądałoby na usunięcie. Wtyczka jest najpewniej nadal zainstalowana; sprawdź, czy dekoder jest włączony i połączony."
+      ,"recording": "Dekoder nagrywa. Nic nie zostało wysłane — spróbuj ponownie po zakończeniu nagrania."
+      ,"timer_due": "Na dekoderze zaraz zacznie się nagranie. Nic nie zostało wysłane — spróbuj ponownie później."
+      ,"mqtt_unavailable": "Integracja MQTT jest niedostępna, więc do dekodera nic nie zostało wysłane."
+      ,"unknown": "Usuwanie wtyczki nieoczekiwanie nie powiodło się; szczegóły są w logu."
+    },
+    "progress": {"uninstalling": "Dekoder usuwa wtyczkę; oczekiwanie, aż wycofa swoje tematy i przejdzie w tryb offline"}
   },
   "entity": {
     "binary_sensor": {
