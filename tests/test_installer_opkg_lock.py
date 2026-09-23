@@ -31,6 +31,7 @@ import pytest
 from custom_components.enigma2_mqtt import installer_helper
 from custom_components.enigma2_mqtt.installer_helper import (
     EXIT_OPKG_BUSY,
+    EXIT_OPKG_LOCK_LOST,
     PACKAGE,
     OpkgBusyError,
     OpkgLockLostError,
@@ -471,3 +472,28 @@ def test_a_lock_error_that_is_not_busy_is_raised_rather_than_waited_on(
     assert not isinstance(raised.value, OpkgBusyError)
     assert time.monotonic() - started < 2
     assert not (tmp_path / "backup").exists()
+
+
+def test_a_restore_that_lost_the_lock_exits_with_its_own_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The restore's files are written by then, which the installer has to be able to say."""
+    root = tmp_path / "root"
+    _receiver(root)
+    backup = tmp_path / "backup"
+    snapshot(root, backup)
+    lock_path = root / "run/opkg.lock"
+    real_atomic_text = installer_helper._atomic_text
+
+    def written_while_the_lock_file_is_replaced(path: Path, text: str) -> None:
+        real_atomic_text(path, text)
+        lock_path.unlink()
+        lock_path.write_text("someone else's\n", encoding="utf-8")
+
+    monkeypatch.setattr(installer_helper, "_atomic_text", written_while_the_lock_file_is_replaced)
+    monkeypatch.setattr(
+        sys, "argv", ["installer_helper.py", "--root", str(root), "restore", str(backup)]
+    )
+
+    assert installer_helper.main() == EXIT_OPKG_LOCK_LOST
+    assert "replaced while the helper held it" in capsys.readouterr().err

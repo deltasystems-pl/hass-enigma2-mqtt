@@ -107,6 +107,7 @@ class InstallerErrorCode(StrEnum):
     ROLLBACK_RESTART_FAILED = "rollback_restart_failed"
     ROLLBACK_LOCK_FAILED = "rollback_lock_failed"
     ROLLBACK_OPKG_BUSY = "rollback_opkg_busy"
+    ROLLBACK_OPKG_OVERLAP = "rollback_opkg_overlap"
     BUSY = "busy"
     OPKG_BUSY = "opkg_busy"
     IDENTITY_MISMATCH = "identity_mismatch"
@@ -1146,9 +1147,17 @@ async def _async_rollback(
         result = await session.run("set -eu; " + "; ".join(commands), timeout=RESTORE_TIMEOUT)
         if install_started and result.exit_status == installer_helper.EXIT_OPKG_BUSY:
             # Nothing was restored: the helper takes opkg's lock before it touches a
-            # file. The receiver is still on the new plugin, and says so differently
-            # from a restore that broke half-way.
+            # file. Which plugin the receiver is on depends on how far the install got —
+            # the likeliest way here is an opkg run from the receiver's menu that also
+            # made the install's own `opkg install` fail on the lock, and then nothing
+            # had changed — so this says „not restored", not „on the new plugin", and
+            # apart from a restore that broke half-way.
             raise InstallerError(InstallerErrorCode.ROLLBACK_OPKG_BUSY)
+        if install_started and result.exit_status == installer_helper.EXIT_OPKG_LOCK_LOST:
+            # The files are back; what is in doubt is opkg's database, which an opkg run
+            # may have written at the same time. „Could not be put back" would send
+            # somebody to redo a restore that happened.
+            raise InstallerError(InstallerErrorCode.ROLLBACK_OPKG_OVERLAP)
         if result.exit_status:
             raise InstallerError(InstallerErrorCode.ROLLBACK_FAILED)
     except BaseException as err:
@@ -1225,13 +1234,16 @@ async def _async_rollback(
     if restore_error is not None:
         if restart_error is not None:
             restore_error.add_note("the receiver interface did not come back either")
-        busy = (
-            isinstance(restore_error, InstallerError)
-            and restore_error.code is InstallerErrorCode.ROLLBACK_OPKG_BUSY
+        # The two opkg outcomes are verdicts of their own; everything else that went
+        # wrong in the restore is the restore failing.
+        code = (
+            restore_error.code
+            if isinstance(restore_error, InstallerError)
+            and restore_error.code
+            in (InstallerErrorCode.ROLLBACK_OPKG_BUSY, InstallerErrorCode.ROLLBACK_OPKG_OVERLAP)
+            else InstallerErrorCode.ROLLBACK_FAILED
         )
-        raise _RollbackError(
-            InstallerErrorCode.ROLLBACK_OPKG_BUSY if busy else InstallerErrorCode.ROLLBACK_FAILED
-        ) from restore_error
+        raise _RollbackError(code) from restore_error
     if restart_error is not None:
         raise _RollbackError(InstallerErrorCode.ROLLBACK_RESTART_FAILED) from restart_error
     if release_error is not None and not progress.lock_released:

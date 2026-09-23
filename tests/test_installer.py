@@ -14,7 +14,7 @@ from unittest.mock import patch
 from homeassistant.core import HomeAssistant
 import pytest
 
-from custom_components.enigma2_mqtt import installer_helper
+from custom_components.enigma2_mqtt import installer, installer_helper
 from custom_components.enigma2_mqtt.bundle import BundledPlugin
 from custom_components.enigma2_mqtt.installer import (
     CommandResult,
@@ -43,6 +43,11 @@ class FakeReceiver:
     # A helper step refused because opkg's lock stayed held: the helper's own exit
     # status for it, and nothing done.
     busy_on: str | None = None
+    # A helper step that finished and then found opkg's lock file had lost its name.
+    lock_lost_on: str | None = None
+    # The timeout each command was run under, in order, so that a test can see that a
+    # step runs under the bound its helper's wait was sized for.
+    timeouts: list[tuple[str, float]] = field(default_factory=list)
     installed_version: str | None = "0.0.9"
     recording: bool = False
     timers: list[dict[str, Any]] = field(default_factory=list)
@@ -103,13 +108,17 @@ class FakeSession:
     async def run(
         self, command: str, *, input: bytes | None = None, timeout: float = 30
     ) -> CommandResult:
-        del timeout
         receiver = self.receiver
         receiver.commands.append(command)
+        receiver.timeouts.append((command, timeout))
         if input is not None:
             receiver.inputs.append(input)
         if receiver.fail_on and receiver.fail_on in command:
             return CommandResult(1, "", "deliberately failed")
+        if receiver.lock_lost_on and receiver.lock_lost_on in command:
+            return CommandResult(
+                installer_helper.EXIT_OPKG_LOCK_LOST, "", "opkg's lock file was replaced"
+            )
         if receiver.busy_on and receiver.busy_on in command:
             return CommandResult(
                 installer_helper.EXIT_OPKG_BUSY, "", "opkg is busy: /run/opkg.lock is held"
@@ -1249,8 +1258,6 @@ def test_the_helpers_waits_end_inside_the_commands_that_run_them() -> None:
     The margin is for the work each step does after it has the lock, which on a
     receiver's flash is seconds, not the wait.
     """
-    from custom_components.enigma2_mqtt import installer  # noqa: PLC0415
-
     margin = 5
     assert (
         installer_helper.OPKG_LOCK_WAIT_SNAPSHOT_SECONDS + margin <= installer.SNAPSHOT_TIMEOUT
@@ -1264,3 +1271,43 @@ def test_the_helpers_waits_end_inside_the_commands_that_run_them() -> None:
         installer_helper.OPKG_LOCK_WAIT_RESTORE_SECONDS
         > installer_helper.OPKG_LOCK_WAIT_SNAPSHOT_SECONDS
     )
+
+
+async def test_a_restore_that_lost_opkgs_lock_says_it_was_put_back(
+    credentials: SshCredentials,
+) -> None:
+    """The files are back; only what opkg recorded meanwhile is in doubt.
+
+    „Could not be put back as it was" would send somebody to redo a restore that
+    happened, so this is its own outcome rather than the restore failing.
+    """
+    receiver = FakeReceiver(lock_lost_on=" restore ")
+
+    with pytest.raises(InstallerError) as raised:
+        await _rollback(credentials, receiver.connect)
+
+    assert raised.value.code is InstallerErrorCode.ROLLBACK_OPKG_OVERLAP
+    assert "init 3" in receiver.commands
+    assert any(" release " in command for command in receiver.commands)
+
+
+async def test_the_lock_taking_steps_run_under_the_timeouts_their_waits_fit(
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+) -> None:
+    """The bounds are only safe if the commands are actually given them.
+
+    The helper waits up to 20 s for opkg in a snapshot and 40 s in a restore; a
+    command cut off before that leaves a helper still waiting, which then takes the
+    lock from under nobody.
+    """
+    receiver = FakeReceiver(fail_on="cat > /etc/enigma2/mqttbridge.json.ha-")
+
+    with pytest.raises(InstallerError):
+        await _install_with_the_bundle(hass, install_request, tmp_path, receiver)
+
+    snapshot_timeouts = [t for command, t in receiver.timeouts if " snapshot " in command]
+    restore_timeouts = [t for command, t in receiver.timeouts if " restore " in command]
+    assert snapshot_timeouts == [installer.SNAPSHOT_TIMEOUT]
+    assert restore_timeouts == [installer.RESTORE_TIMEOUT]

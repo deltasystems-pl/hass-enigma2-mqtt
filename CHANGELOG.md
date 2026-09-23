@@ -143,7 +143,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generic failure, because the helper's explanation went out on output the installer discards.
   A snapshot refused this way no longer leaves an empty snapshot directory behind for the
   pruning to count, and a lock lost while the helper was inside fails the step rather than
-  passing off work an opkg run may have overlapped.
+  passing off work an opkg run may have overlapped. For a rollback's restore that has its own
+  sentence, because the files *are* back: the receiver was put back, but opkg's record of the
+  plugin is worth checking before installing again.
 
 ## [0.2.0] - 2026-09-22
 

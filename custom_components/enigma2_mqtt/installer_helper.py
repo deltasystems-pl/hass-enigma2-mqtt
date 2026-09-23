@@ -81,6 +81,10 @@ OPKG_LOCK_SETTLE_SECONDS = 0.1
 # The exit status of a helper that could not get opkg's lock within its bound, so that
 # the installer can tell "opkg is busy, try again" from every other failure. EX_TEMPFAIL.
 EXIT_OPKG_BUSY = 75
+# The exit status of a step that finished its work and then found that opkg's lock file
+# had lost its name while the helper held it. For a restore that is its own outcome: the
+# files are back, but an opkg run may have written the database at the same time.
+EXIT_OPKG_LOCK_LOST = 76
 SETTINGS_PREFIX = "config.plugins.mqttbridge."
 # The snapshot directories this installer makes, and nothing else. The nonce is
 # `secrets.token_hex(6)`; anything else under the backups directory belongs to whoever
@@ -912,6 +916,9 @@ def main() -> int:
             # person at the other end can do something about: wait, and press again.
             print(str(error), file=sys.stderr)
             return EXIT_OPKG_BUSY
+        except OpkgLockLostError as error:
+            print(str(error), file=sys.stderr)
+            return EXIT_OPKG_LOCK_LOST
     else:
         verify_manifest(args.root, args.path)
     return 0
