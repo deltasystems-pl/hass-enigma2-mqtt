@@ -183,7 +183,15 @@
     },
     "button": {
       "deep_standby": {
-        "name": "Tiefschlaf"
+        "name": "Tiefschlaf",
+        "state_attributes": {
+          "wake_on_lan": {
+            "name": "Wake-on-LAN",
+            "state": {
+              "not_supported": "Nicht unterstützt: Dieser Receiver lässt sich aus dem Tiefschlaf nicht über das Netzwerk wecken, nur mit der Fernbedienung, der Taste an der Front oder einem Timer"
+            }
+          }
+        }
       },
       "restart_gui": {
         "name": "GUI neu starten"
@@ -192,7 +200,15 @@
         "name": "Neustart"
       },
       "wake": {
-        "name": "Wecken (WoL)"
+        "name": "Wecken (WoL)",
+        "state_attributes": {
+          "wake_on_lan": {
+            "name": "Wake-on-LAN",
+            "state": {
+              "not_supported": "Nicht unterstützt: Das Magic Packet wird gesendet, aber dieser Receiver wacht dadurch nicht aus dem Tiefschlaf auf, nur mit der Fernbedienung, der Taste an der Front oder einem Timer"
+            }
+          }
+        }
       },
       "screenshot": {
         "name": "Bildschirmfoto"

@@ -209,7 +209,15 @@
     },
     "button": {
       "deep_standby": {
-        "name": "Deep standby"
+        "name": "Deep standby",
+        "state_attributes": {
+          "wake_on_lan": {
+            "name": "Wake-on-LAN",
+            "state": {
+              "not_supported": "Not supported: this receiver cannot be woken over the network from deep standby, only by its remote, its front button or a timer"
+            }
+          }
+        }
       },
       "restart_gui": {
         "name": "Restart GUI"
@@ -218,7 +226,15 @@
         "name": "Reboot"
       },
       "wake": {
-        "name": "Wake"
+        "name": "Wake",
+        "state_attributes": {
+          "wake_on_lan": {
+            "name": "Wake-on-LAN",
+            "state": {
+              "not_supported": "Not supported: the magic packet is sent, but this receiver cannot be woken by it from deep standby, only by its remote, its front button or a timer"
+            }
+          }
+        }
       },
       "screenshot": {
         "name": "Screenshot"

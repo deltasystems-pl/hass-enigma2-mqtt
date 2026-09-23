@@ -63,6 +63,7 @@ from .const import (
     ERROR_GRACE,
     ERROR_TEXT_MAX,
     EVENT_KEY,
+    INFO_WOL,
     KEY_PREFIX,
     MANUFACTURERS,
     MAX_EPG_IMPORT_EPOCH,
@@ -740,6 +741,25 @@ class Enigma2Box:
         if not isinstance(settings, dict):
             return None
         value = settings.get(CONF_DEEP_STANDBY_ALLOWED)
+        return value if isinstance(value, bool) else None
+
+    @property
+    def wake_on_lan_supported(self) -> bool | None:
+        """Return whether the receiver says a magic packet can wake it, if it said.
+
+        `info.wol.supported` is the image's own answer: whether it found the
+        front-processor switch through which it arms Wake-on-LAN for deep standby. It is
+        not the network card's `Supports Wake-on`, which describes a suspend path these
+        images never take, so a receiver can report `false` here while `ethtool` says the
+        opposite — and `false` is the answer that matches what happens. Three values,
+        like the permissions: `None` is a plugin that does not report `wol` at all, or a
+        value that is not a boolean, and must not be read as `false`, because that would
+        tell a household its receiver cannot be woken when nobody has said so.
+        """
+        wol = self.state.info.get(INFO_WOL)
+        if not isinstance(wol, dict):
+            return None
+        value = wol.get("supported")
         return value if isinstance(value, bool) else None
 
     @property

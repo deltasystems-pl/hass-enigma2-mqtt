@@ -57,6 +57,14 @@ CONF_SOFTCAM_RESTART_ALLOWED: Final = "softcam_restart_allowed"
 # The third, for the on-demand EPG import (item i), under the same rule.
 CONF_EPG_IMPORT_ALLOWED: Final = "epg_import_allowed"
 
+# `info.wol`: `{supported, armed, iface, mechanism}`, what the receiver's image can do
+# about Wake-on-LAN from deep standby (plugin 0.3.0 onward). Only `supported` is read
+# here. Where it is `false`, the two buttons it concerns carry `ATTR_WAKE_ON_LAN`, whose
+# one value is translated per button into what the household can do instead.
+INFO_WOL: Final = "wol"
+ATTR_WAKE_ON_LAN: Final = "wake_on_lan"
+WAKE_ON_LAN_NOT_SUPPORTED: Final = "not_supported"
+
 SCREENSHOT_OFF: Final = "off"
 SCREENSHOT_ON_ZAP: Final = "on_zap"
 SCREENSHOT_INTERVAL: Final = "interval"

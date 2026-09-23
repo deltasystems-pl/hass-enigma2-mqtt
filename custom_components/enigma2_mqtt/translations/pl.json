@@ -183,7 +183,15 @@
     },
     "button": {
       "deep_standby": {
-        "name": "Głębokie uśpienie"
+        "name": "Głębokie uśpienie",
+        "state_attributes": {
+          "wake_on_lan": {
+            "name": "Wake-on-LAN",
+            "state": {
+              "not_supported": "Nieobsługiwane: tego dekodera nie da się wybudzić z głębokiego uśpienia przez sieć, tylko pilotem, przyciskiem na panelu przednim albo timerem"
+            }
+          }
+        }
       },
       "restart_gui": {
         "name": "Restart GUI"
@@ -192,7 +200,15 @@
         "name": "Restart"
       },
       "wake": {
-        "name": "Obudź (WoL)"
+        "name": "Obudź (WoL)",
+        "state_attributes": {
+          "wake_on_lan": {
+            "name": "Wake-on-LAN",
+            "state": {
+              "not_supported": "Nieobsługiwane: pakiet zostanie wysłany, ale ten dekoder nie obudzi się nim z głębokiego uśpienia, tylko pilotem, przyciskiem na panelu przednim albo timerem"
+            }
+          }
+        }
       },
       "screenshot": {
         "name": "Zrzut ekranu"

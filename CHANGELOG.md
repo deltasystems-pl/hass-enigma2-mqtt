@@ -88,6 +88,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `epg_import` capability, claimed only where the plugin found the importer loaded and able to
   import in place. Only a stated „no" to the permission removes the button; the sensor, which
   follows the capability alone, is never removed.
+- **„Głębokie uśpienie" and „Obudź (WoL)" say so when the receiver cannot be woken over the
+  network.** From plugin 0.3.0 the receiver reports `info.wol`, read from its image's own
+  Wake-on-LAN switch. Where it reports `supported: false` — as a receiver whose image has no
+  such switch does — both buttons carry a `wake_on_lan` attribute,
+  shown in their more-info dialog as „Wake-on-LAN" with a sentence saying that the receiver
+  wakes from deep standby only by its remote, its front button or a timer; on „Obudź (WoL)" it
+  adds that the packet is still sent. The raw value is `not_supported`, for automations. Where
+  the receiver reports `supported: true`, or an older plugin reports nothing, the buttons are
+  exactly as they were. Neither button is renamed in any language, so no entity id moves.
 
 ### Changed
 

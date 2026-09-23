@@ -313,7 +313,8 @@ while the box is unreachable, because that is precisely when somebody wants to w
   takes a name. The browser sends the first.
 - **Volume** — set, step and mute, on the box's own 0–100 scale underneath.
 - **Turning on** — `cmd/power on` when the box is listening, a Wake-on-LAN magic packet when
-  it is not. Turning off is always `cmd/power standby`; nothing here sends deep standby.
+  it is not; the packet wakes nothing from deep standby on a receiver that reports it cannot be
+  woken over the network ([§4.5](#45-buttons-and-update)). Turning off is always `cmd/power standby`; nothing here sends deep standby.
 - **Picture** — the retained `screen` JPEG is both the media image and the entity picture, and
   its hash changes with every frame so the browser fetches the new one.
 - **Position** — from `epg.now`, so the progress bar is the programme, not a stream.
@@ -510,10 +511,10 @@ it is the opposite: the answer is coming, and the dashboard should not sit still
 
 | Key | Polish name | unique_id | Command | What proves it |
 |---|---|---|---|---|
-| `deep_standby` | *Głębokie uśpienie* | `<node_id>_deep_standby` | `cmd/deep_standby` · **both gates below** | silence |
+| `deep_standby` | *Głębokie uśpienie* | `<node_id>_deep_standby` | `cmd/deep_standby` · **both gates below**; attribute `wake_on_lan` where the receiver cannot be woken over the network | silence |
 | `restart_gui` | *Restart GUI* | `<node_id>_restart_gui` | `cmd/restart_gui` | silence |
 | `reboot` | *Restart* | `<node_id>_reboot` | `cmd/reboot` · **both gates below** | silence |
-| `wake` | *Obudź (WoL)* | `<node_id>_wake` | `wake_on_lan.send_magic_packet` — no MQTT, and available while the box is not | — |
+| `wake` | *Obudź (WoL)* | `<node_id>_wake` | `wake_on_lan.send_magic_packet` — no MQTT, and available while the box is not; attribute `wake_on_lan` where the receiver cannot be woken over the network | — |
 | `screenshot` | *Zrzut ekranu* | `<node_id>_screenshot` | `cmd/screenshot` | `screen` is republished |
 | `refresh_discovery` | *Odśwież discovery* | `<node_id>_refresh_discovery` | `cmd/discovery` | the announcement is republished |
 | `refresh_epg` | *Odśwież EPG* | `<node_id>_refresh_epg` | `cmd/epg_grid` · only while the box names the `epg_grid` capability | silence |
@@ -535,6 +536,20 @@ publishes on its own interval, or a retained picture or announcement replayed by
 after a reconnect, can end a press's wait. The press then reports success for something it did
 not cause. It is benign — the command was sent, and the receiver carries it out or complains on
 its own — and the alternative is a correlation id the contract does not have.
+
+**A receiver that cannot be woken over the network says so on „Głębokie uśpienie" and „Obudź
+(WoL)".** From plugin 0.3.0 the receiver reports `info.wol`, whose `supported` is the image's own
+answer — whether it found a switch to arm Wake-on-LAN for deep standby — and not the network
+card's `Supports Wake-on`, which describes a suspend path these images do not take. Where it is
+`false`, both buttons carry the attribute `wake_on_lan` with the value `not_supported`, which the
+more-info dialog shows as „Wake-on-LAN" followed by a sentence in the household's language:
+from deep standby that receiver is woken only by its remote, its front button or a timer, and on
+„Obudź (WoL)" the magic packet is still sent but will not wake it. The same applies to
+`media_player.turn_on` while the box is in deep standby, which sends the same packet. A button
+has no description of its own in Home Assistant; an attribute is what its dialog shows, what an
+automation can read, and it leaves the name — and so the entity id — alone. Where the receiver
+reports `supported: true`, or an older plugin reports no `wol` at all, or `supported` is not a
+boolean, neither button has the attribute and nothing else changes.
 
 **„Odśwież EPG"** exists only while the receiver names the `epg_grid` capability. With the
 plugin's `epg_grid_events` setting at zero there are no grids to rebuild, the capability is

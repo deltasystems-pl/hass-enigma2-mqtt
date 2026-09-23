@@ -1,7 +1,7 @@
 """The buttons: one press, one command, and an answer.
 
 Two of them can end the evening. „Głębokie uśpienie" shuts the receiver down to the
-point where only a magic packet brings it back, and „Restart" reboots it; on a
+point where at best a magic packet brings it back, and „Restart" reboots it; on a
 dashboard that a household shares, both sit one mis-tap away from the volume. So they
 are not created at all unless the option asks for them — and unless the box itself says
 they are permitted, because `deep_standby_allowed` is set on the receiver's own setup
@@ -30,6 +30,19 @@ button that is always refused is one somebody presses twice and then reports.
 
 „Obudź (WoL)" is the one button that sends no command at all, and the one that works
 while the box is unreachable, because that is the only time it is worth pressing.
+
+Both of them promise something about Wake-on-LAN — „Głębokie uśpienie" that a magic
+packet brings the receiver back, „Obudź (WoL)" that the packet will — and on many
+receivers neither is true: the image has no way to arm the network port for deep standby,
+and the box stays dark whatever arrives. A receiver that says so (`info.wol.supported`
+is `false`) gets the `wake_on_lan` attribute on those two buttons, and its one value is
+translated per button into what the household can do instead: the remote, the front
+button or a timer. A button has no description of its own in Home Assistant; an
+attribute is what its more-info dialog shows beside the press, it can be read by an
+automation, and it changes neither the name nor the entity id, which on a Polish
+installation is derived from the Polish name. A receiver that says Wake-on-LAN works, or
+a plugin that says nothing, gets no attribute: nothing changes where nobody has said it
+does not work.
 """
 
 from __future__ import annotations
@@ -54,12 +67,14 @@ from .box import (
     async_send_magic_packet,
 )
 from .const import (
+    ATTR_WAKE_ON_LAN,
     CAPABILITY_EPG_IMPORT,
     CAPABILITY_SOFTCAM,
     CONF_DANGEROUS_BUTTONS,
     DOMAIN,
     TOPIC_EPG_IMPORT,
     TOPIC_SCREEN,
+    WAKE_ON_LAN_NOT_SUPPORTED,
 )
 from .entity import Enigma2Entity, OptionalEntities
 
@@ -165,6 +180,9 @@ class Enigma2ButtonDescription(ButtonEntityDescription):
     press_fn: Callable[[Enigma2Box], Coroutine[Any, Any, None]]
     # Whether this button works while the box is unreachable.
     offline: bool = False
+    # Whether what this button promises depends on the receiver waking to a magic
+    # packet, so that a receiver which says it cannot has to be named on it.
+    wake_on_lan_note: bool = False
 
 
 BUTTONS: tuple[Enigma2ButtonDescription, ...] = (
@@ -176,6 +194,7 @@ BUTTONS: tuple[Enigma2ButtonDescription, ...] = (
     Enigma2ButtonDescription(
         key="wake",
         offline=True,
+        wake_on_lan_note=True,
         press_fn=async_send_magic_packet,
     ),
     Enigma2ButtonDescription(
@@ -194,6 +213,7 @@ DANGEROUS_BUTTONS: tuple[Enigma2ButtonDescription, ...] = (
     Enigma2ButtonDescription(
         key="deep_standby",
         press_fn=_async_command("deep_standby"),
+        wake_on_lan_note=True,
     ),
     Enigma2ButtonDescription(
         key="reboot",
@@ -417,6 +437,22 @@ class Enigma2Button(Enigma2Entity, ButtonEntity):
         if self.entity_description.offline:
             return True
         return super().available
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Name a receiver that cannot be woken over the network, and only that one.
+
+        Read from the box on every write rather than cached, and kept while the box is
+        unreachable: `info` is retained, so the last thing the receiver said about
+        itself is still the truth when it is asleep — which is exactly when somebody
+        looks at „Obudź (WoL)".
+        """
+        if (
+            self.entity_description.wake_on_lan_note
+            and self.box.wake_on_lan_supported is False
+        ):
+            return {ATTR_WAKE_ON_LAN: WAKE_ON_LAN_NOT_SUPPORTED}
+        return None
 
     async def async_press(self) -> None:
         """Send the command and wait for the box to answer for it."""
