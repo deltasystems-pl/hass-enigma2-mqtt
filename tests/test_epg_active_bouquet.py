@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import logging
 from typing import Any
 
 from freezegun.api import FrozenDateTimeFactory
@@ -29,12 +30,14 @@ from homeassistant.core import Event, EventStateChangedData, HomeAssistant, call
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.json import json_bytes
 import homeassistant.util.dt as dt_util
+import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_fire_mqtt_message,
     async_fire_time_changed,
 )
 
+from custom_components.enigma2_mqtt import sensor as sensor_module
 from custom_components.enigma2_mqtt.const import (
     CAPABILITY_BOUQUET_CONTEXT,
     DOMAIN,
@@ -489,6 +492,120 @@ async def test_the_sensor_is_unavailable_until_the_context_arrives(
     await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
 
     assert hass.states.get(SENSOR).state == STATE_UNAVAILABLE
+
+
+@pytest.fixture
+def armed_clocks(monkeypatch: pytest.MonkeyPatch) -> list[list[bool]]:
+    """Record every programme-change timer the sensor arms, and whether it is still live.
+
+    An end state cannot show a timer outliving its entity — the entity is gone, and the
+    timer fires later into nothing anybody asserts on — so the arming itself is watched.
+    """
+    timers: list[list[bool]] = []
+    real = sensor_module.async_track_point_in_utc_time
+
+    def track(hass: HomeAssistant, action: Any, when: datetime) -> Any:
+        live = [True]
+        timers.append(live)
+
+        def fire(now: datetime) -> None:
+            live[0] = False
+            action(now)
+
+        cancel = real(hass, fire, when)
+
+        def disarm() -> None:
+            live[0] = False
+            cancel()
+
+        return disarm
+
+    monkeypatch.setattr(sensor_module, "async_track_point_in_utc_time", track)
+    return timers
+
+
+@pytest.mark.parametrize("remove", ["unload", "registry"])
+async def test_the_timer_dies_with_the_entity(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+    armed_clocks: list[list[bool]],
+    remove: str,
+) -> None:
+    """Unloading the entry or deleting the entity leaves no programme timer behind."""
+    freezer.move_to(TEN_MINUTES_IN)
+    _capable_box(box_on_the_broker)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    await _publish(hass, BOUQUET_TOPIC, SPORT_CONTEXT)
+    await _publish(hass, BOUQUET_TOPIC, BOUQUET)
+    assert sum(timer[0] for timer in armed_clocks) == 1
+
+    if remove == "unload":
+        assert await hass.config_entries.async_unload(config_entry.entry_id)
+    else:
+        er.async_get(hass).async_remove(SENSOR)
+    await hass.async_block_till_done()
+
+    assert sum(timer[0] for timer in armed_clocks) == 0
+
+
+async def test_a_time_too_large_to_be_a_date_does_not_raise(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The one change on the grid is an end no clock can be set to.
+
+    Arming a timer for it would raise on the callback that feeds every topic, on every
+    message, and leave the sensor at whatever it said before.
+    """
+    freezer.move_to(TEN_MINUTES_IN)
+    grid = {
+        **FAVOURITES_GRID,
+        "channels": [{"sref": SREF, "name": "Broken", "events": [_event("x", NEWS_BEGIN, 10**13)]}],
+    }
+    _capable_box(box_on_the_broker, favourites=grid)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    await _publish(hass, BOUQUET_TOPIC, SPORT_CONTEXT)
+    await _publish(hass, BOUQUET_TOPIC, BOUQUET)
+
+    assert hass.states.get(SENSOR).state == "0"
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+
+
+async def test_a_time_too_large_to_be_a_date_leaves_that_event_out(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Dropped like a time that is not a number: not counted, and not drawn."""
+    freezer.move_to(TEN_MINUTES_IN)
+    grid = {
+        **FAVOURITES_GRID,
+        "channels": [
+            *FAVOURITES_GRID["channels"],
+            {"sref": SREF_TWO, "name": "Broken", "events": [_event("x", NEWS_BEGIN, 10**13)]},
+        ],
+    }
+    _capable_box(box_on_the_broker, favourites=grid)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    assert hass.states.get(SENSOR).state == "1"
+    broken = _channels(hass)[2]
+    assert broken["now"] is None and broken["next"] is None
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+
+    # The sane channel still moves with the clock.
+    await _move_clock(hass, freezer, dt_util.utc_from_timestamp(NEWS_END))
+    assert _channels(hass)[0]["now"]["title"] == "Pogoda"
 
 
 async def _move_clock(

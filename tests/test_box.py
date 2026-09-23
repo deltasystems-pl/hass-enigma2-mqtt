@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import gc
 import json
+import logging
 
 from homeassistant.core import HomeAssistant
 import pytest
@@ -152,6 +153,39 @@ async def test_a_listener_always_hears_availability(
 
     assert len(heard) == 1
     remove()
+
+
+async def test_a_listener_that_raises_does_not_silence_the_others(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """One entity's bug costs that entity, and one traceback, not every message's."""
+    await async_setup_box(hass, config_entry)
+    box = config_entry.runtime_data
+
+    def broken() -> None:
+        raise ValueError("year 300000 is out of range")
+
+    heard: list[None] = []
+    remove_broken = box.async_add_listener(broken, (TOPIC_SERVICE,))
+    remove_heard = box.async_add_listener(lambda: heard.append(None), (TOPIC_SERVICE,))
+
+    for _ in range(3):
+        async_fire_mqtt_message(hass, SERVICE_TOPIC, json.dumps(SERVICE))
+        await hass.async_block_till_done()
+
+    assert len(heard) == 3
+    tracebacks = [
+        record
+        for record in caplog.records
+        if record.levelno >= logging.ERROR and record.exc_info is not None
+    ]
+    assert len(tracebacks) == 1
+    remove_broken()
+    remove_heard()
 
 
 async def test_a_command_whose_effect_already_happened_does_not_wait(

@@ -436,7 +436,10 @@ The state keeps three answers apart. A receiver in **no bouquet** — the radio 
 list — is `0` with an empty list. An active bouquet whose **grid has not arrived**, was
 retracted, or is not one the receiver builds grids for is `unknown` with an empty list: that is
 „no grid", not „nothing on". Only a grid that is here can say `0` about itself. There is no
-unit and no state class; it is a completeness indicator, not a measurement.
+unit and no state class; it is a completeness indicator, not a measurement. The sensor shows the
+bouquet the **receiver** is using and does **not** apply the **Bouquets to offer** option, so a
+bouquet left out there still shows its programme titles in this sensor's attributes whenever
+the receiver is on it.
 
 🔴 **`channels` is excluded from the recorder.** Home Assistant excludes a media player's
 `source_list` on its own, but this is an attribute of ours on an ordinary sensor, and a

@@ -220,8 +220,18 @@ def _epoch(value: Any) -> int | None:
 
     `True` is an `int` in Python, and a programme that began at second one of 1970 is a
     field nobody filled in; neither is a time a card should draw.
+
+    A number too large to be a date is refused here too, by asking the same conversion
+    the clock timer will make rather than by guessing a ceiling: the grid is read on the
+    callback that feeds every topic, and one event ending in the year 300 000 would
+    otherwise raise out of it on every message for as long as that bouquet is active.
+    Such an event is left out, exactly like one whose time is not a number at all.
     """
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    try:
+        dt_util.utc_from_timestamp(value)
+    except (OverflowError, OSError, ValueError):
         return None
     return value
 
