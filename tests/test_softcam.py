@@ -926,6 +926,13 @@ PROCESS_ENTITY_IDS = {
 # for the same reason as the process rows: so that losing it is noticed here too.
 EPG_ENTITY_IDS = {"sensor.dekoder_salon_epg_active_bouquet"}
 
+# The on-demand EPG import, item i: its button and its diagnostic. English ids, because
+# the suite runs as an English installation; `test_epg_import.py` pins the Polish ones.
+EPG_IMPORT_ENTITY_IDS = {
+    "button.dekoder_salon_import_epg",
+    "sensor.dekoder_salon_epg_import",
+}
+
 EVERYTHING_ON = {
     "deep_standby_allowed": True,
     "cam_telemetry": True,
@@ -935,6 +942,7 @@ EVERYTHING_ON = {
     "screenshot_interval": 60,
     "screenshot_delay": 4,
     "softcam_restart_allowed": True,
+    "epg_import_allowed": True,
 }
 OSCAM_PAYLOAD: dict[str, Any] = {
     "software": "OSCam",
@@ -969,14 +977,14 @@ async def test_no_entity_id_this_integration_already_had_changes(
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """0.3.0 so far adds eight entities and renames none.
+    """0.3.0 so far adds ten entities and renames none.
 
     Renaming a translation key renames the entity it builds, and the household's
     automations, dashboards and recorded history all follow the old name into nothing.
 
     The receiver here names every capability this integration knows, so the count is the
     whole fleet rather than one item's corner of it: five process diagnostics, the
-    softcam pair, and the EPG sensor for the active bouquet. A guard that only
+    softcam pair, the EPG sensor for the active bouquet and the EPG import pair. A guard that only
     knew about its own entities would not notice a rebase that lost somebody else's.
     """
     capabilities = [
@@ -986,6 +994,7 @@ async def test_no_entity_id_this_integration_already_had_changes(
         "bouquet_context",
         "process",
         "softcam",
+        "epg_import",
     ]
     box_on_the_broker[INFO_TOPIC] = json.dumps(
         {**INFO, "capabilities": capabilities, "settings": EVERYTHING_ON}
@@ -1013,4 +1022,5 @@ async def test_no_entity_id_this_integration_already_had_changes(
         SENSOR,
         *PROCESS_ENTITY_IDS,
         *EPG_ENTITY_IDS,
+        *EPG_IMPORT_ENTITY_IDS,
     }

@@ -47,6 +47,7 @@ from .const import (
     CONF_BASE_TOPIC,
     CONF_BOUQUETS,
     CONF_DEEP_STANDBY_ALLOWED,
+    CONF_EPG_IMPORT_ALLOWED,
     CONF_NAME,
     CONF_NODE_ID,
     CONF_RECEIVER_HOST,
@@ -58,10 +59,14 @@ from .const import (
     DEFAULT_SOURCE_LIST_SCOPE,
     DISCOVERY_PREFIX,
     DOMAIN,
+    EPG_IMPORT_STATES,
     ERROR_GRACE,
+    ERROR_TEXT_MAX,
     EVENT_KEY,
     KEY_PREFIX,
     MANUFACTURERS,
+    MAX_EPG_IMPORT_EPOCH,
+    MAX_EPG_IMPORT_EVENTS,
     MAX_SOFTCAM_EPOCH,
     MAX_SOFTCAM_INSTANCES,
     MAX_SOFTCAM_MANAGER_MINUTES,
@@ -82,6 +87,7 @@ from .const import (
     TOPIC_CHANNELS,
     TOPIC_EPG,
     TOPIC_EPG_GRID,
+    TOPIC_EPG_IMPORT,
     TOPIC_HDD,
     TOPIC_INFO,
     TOPIC_KEY,
@@ -609,6 +615,7 @@ class Enigma2State:
     oscam: dict[str, Any] | None = None
     process: dict[str, Any] | None = None
     softcam: dict[str, Any] | None = None
+    epg_import: dict[str, Any] | None = None
     bouquet: dict[str, Any] | None = None
     channels: dict[str, Any] | None = None
     last_error: dict[str, Any] | None = None
@@ -749,6 +756,21 @@ class Enigma2Box:
         if not isinstance(settings, dict):
             return None
         value = settings.get(CONF_SOFTCAM_RESTART_ALLOWED)
+        return value if isinstance(value, bool) else None
+
+    @property
+    def epg_import_permission(self) -> bool | None:
+        """Return the box's own answer about importing EPG on demand, if it gave one.
+
+        Read exactly like `softcam_restart_permission`, and silence means the same
+        thing: `epg_import_allowed` is set on the receiver's setup screen, cannot be
+        written over MQTT, and no „Pobierz EPG" button has ever shipped that silence
+        would have to keep.
+        """
+        settings = self.state.info.get("settings")
+        if not isinstance(settings, dict):
+            return None
+        value = settings.get(CONF_EPG_IMPORT_ALLOWED)
         return value if isinstance(value, bool) else None
 
     @property
@@ -1167,6 +1189,8 @@ class Enigma2Box:
             self._oscam_received(msg)
         elif suffix == TOPIC_SOFTCAM:
             self._softcam_received(msg)
+        elif suffix == TOPIC_EPG_IMPORT:
+            self._epg_import_received(msg)
         elif suffix.startswith(f"{TOPIC_EPG_GRID}/"):
             self._epg_grid_received(suffix[len(TOPIC_EPG_GRID) + 1 :], msg.payload)
         elif (attribute := self._OBJECT_TOPICS.get(suffix)) is not None:
@@ -1584,6 +1608,58 @@ class Enigma2Box:
         self.seen.discard(TOPIC_SOFTCAM)
         self.updates[TOPIC_SOFTCAM] = self.updates.get(TOPIC_SOFTCAM, 0) + 1
         self._notify_listeners(TOPIC_SOFTCAM)
+
+    @callback
+    def _epg_import_received(self, msg: ReceiveMessage) -> None:
+        """Cache the EPG import's state, normalised to the published contract.
+
+        The same three answers as `_softcam_received`, for the same reasons: an empty
+        payload is a retraction and clears the reading, a payload that is not JSON
+        leaves the last good one alone, and anything else is normalised and kept.
+        """
+        if not (decode_payload(msg.payload) or "").strip():
+            self.state.epg_import = None
+            self.seen.discard(TOPIC_EPG_IMPORT)
+            self.updates[TOPIC_EPG_IMPORT] = self.updates.get(TOPIC_EPG_IMPORT, 0) + 1
+            self._notify_listeners(TOPIC_EPG_IMPORT)
+            return
+        if (payload := parse_json_payload(msg.payload)) is None:
+            return
+        self.state.epg_import = self._normalize_epg_import(payload)
+        self._async_updated(TOPIC_EPG_IMPORT)
+
+    @staticmethod
+    def _normalize_epg_import(payload: dict[str, Any]) -> dict[str, Any]:
+        """Strip an untrusted `epg_import` payload to the five fields of the contract.
+
+        Every key is always present and a value that could not be believed is `None`.
+        `True` is an `int` in Python and is refused wherever a number is expected; a
+        time of zero is a field nobody filled in, not an import in 1970. `events`
+        may be zero — an import that finished with nothing is exactly the failure the
+        plugin reports — so zero is kept there. The error is the receiver's sentence,
+        cut where a Home Assistant attribute stays readable.
+        """
+
+        def whole(value: Any, minimum: int, maximum: int) -> int | None:
+            return (
+                value
+                if isinstance(value, int)
+                and not isinstance(value, bool)
+                and minimum <= value <= maximum
+                else None
+            )
+
+        state = payload.get("state")
+        error = payload.get("error")
+        return {
+            "state": state if state in EPG_IMPORT_STATES else None,
+            "started": whole(payload.get("started"), 1, MAX_EPG_IMPORT_EPOCH),
+            "finished": whole(payload.get("finished"), 1, MAX_EPG_IMPORT_EPOCH),
+            "events": whole(payload.get("events"), 0, MAX_EPG_IMPORT_EVENTS),
+            "error": (
+                error[:ERROR_TEXT_MAX] if isinstance(error, str) and error else None
+            ),
+        }
 
     @callback
     def _announcement_received(self, msg: ReceiveMessage) -> None:

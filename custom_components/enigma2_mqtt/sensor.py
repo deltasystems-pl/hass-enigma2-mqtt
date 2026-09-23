@@ -56,17 +56,20 @@ from .box import Enigma2Box, Enigma2MqttConfigEntry, Enigma2State
 from .const import (
     CAPABILITY_BOUQUET_CONTEXT,
     CAPABILITY_EPG_GRID,
+    CAPABILITY_EPG_IMPORT,
     CAPABILITY_PROCESS,
     CAPABILITY_SOFTCAM,
     CONF_CAM_TELEMETRY,
     CONF_OSCAM_TELEMETRY,
     DOMAIN,
+    EPG_IMPORT_STATES,
     EPG_TITLE_MAX,
     ERROR_TEXT_MAX,
     TOPIC_BOUQUET,
     TOPIC_CAM,
     TOPIC_EPG,
     TOPIC_EPG_GRID,
+    TOPIC_EPG_IMPORT,
     TOPIC_INFO,
     TOPIC_LAST_ERROR,
     TOPIC_OSCAM,
@@ -496,6 +499,26 @@ SOFTCAM_SENSORS: tuple[Enigma2SensorDescription, ...] = (
     ),
 )
 
+# „Import EPG": what the receiver's own EPG-Importer is doing, whoever started it. The
+# state is the topic's `state`; the attributes are the rest of the contract, with the two
+# times as ISO strings like every other time in an attribute here.
+EPG_IMPORT_SENSORS: tuple[Enigma2SensorDescription, ...] = (
+    Enigma2SensorDescription(
+        key="epg_import",
+        topics=(TOPIC_EPG_IMPORT,),
+        device_class=SensorDeviceClass.ENUM,
+        options=list(EPG_IMPORT_STATES),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda state: (state.epg_import or {}).get("state"),
+        attributes_fn=lambda state: {
+            "started": _iso((state.epg_import or {}).get("started")),
+            "finished": _iso((state.epg_import or {}).get("finished")),
+            "events": (state.epg_import or {}).get("events"),
+            "error": (state.epg_import or {}).get("error"),
+        },
+    ),
+)
+
 KEY_EPG_ACTIVE_BOUQUET = "epg_active_bouquet"
 
 # The grids to read, and the context that says which one is in use. A box that publishes
@@ -578,6 +601,23 @@ async def async_setup_entry(
             # dashboard card and the whole history of a diagnostic with it, and the next
             # payload brings it back as a stranger. It stays, and says nothing until the
             # topic returns.
+            lambda: False,
+            async_add_entities,
+        ).start()
+    )
+
+    epg_import = {description.key: description for description in EPG_IMPORT_SENSORS}
+    entry.async_on_unload(
+        OptionalEntities(
+            hass,
+            box,
+            "sensor",
+            list(epg_import),
+            lambda key: Enigma2Sensor(box, epg_import[key]),
+            lambda: CAPABILITY_EPG_IMPORT in box.capabilities,
+            # Never removed, for the reason the softcam sensor above gives: a capability
+            # that goes quiet is not a decision, and the history of a diagnostic is not
+            # the price of a downgrade or a receiver that has not answered yet.
             lambda: False,
             async_add_entities,
         ).start()

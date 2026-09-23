@@ -123,6 +123,7 @@ async def async_get_config_entry_diagnostics(
             # live control words, and the shape written here can only ever hold the seven
             # fields the contract names.
             "softcam": state.softcam,
+            "epg_import": state.epg_import,
             "channels": _summarise_channels(state.channels),
             "last_error": state.last_error,
             "screen": {
