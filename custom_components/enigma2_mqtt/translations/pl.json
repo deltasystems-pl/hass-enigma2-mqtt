@@ -310,6 +310,7 @@
       },
       "oscam_source_ready_cards": {"name": "Gotowe czytniki źródła OSCam {id}"},
       "oscam_source_shared_cards": {"name": "Zgłoszone karty źródła OSCam {id}"},
+      "epg_active_bouquet": {"name": "EPG – aktywny bukiet"},
       "softcam": {"name": "Softcam"},
       "last_error": {"name": "Ostatni błąd"}
     },

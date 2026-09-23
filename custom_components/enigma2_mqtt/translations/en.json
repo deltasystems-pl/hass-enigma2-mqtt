@@ -336,6 +336,7 @@
       },
       "oscam_source_ready_cards": {"name": "OSCam source {id} ready readers"},
       "oscam_source_shared_cards": {"name": "OSCam source {id} reported shared cards"},
+      "epg_active_bouquet": {"name": "EPG, active bouquet"},
       "softcam": {"name": "Softcam"},
       "last_error": {"name": "Last error"}
     },

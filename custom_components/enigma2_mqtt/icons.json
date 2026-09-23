@@ -120,6 +120,9 @@
       "channel": {
         "default": "mdi:television-classic"
       },
+      "epg_active_bouquet": {
+        "default": "mdi:television-guide"
+      },
       "last_error": {
         "default": "mdi:alert-circle-outline"
       },

@@ -578,6 +578,8 @@ class _Listener:
 
     callback: Callable[[], None]
     topics: frozenset[str] | None = None
+    # Whether this callback's last call raised, so a run of failures is logged once.
+    failed: bool = False
 
     def wants(self, suffix: str) -> bool:
         """Return whether this listener should hear about a topic."""
@@ -1309,9 +1311,7 @@ class Enigma2Box:
         self.state.cam = None
         self.seen.discard(TOPIC_CAM)
         self.updates[TOPIC_CAM] = self.updates.get(TOPIC_CAM, 0) + 1
-        for listener in list(self._listeners):
-            if listener.wants(TOPIC_CAM):
-                listener.callback()
+        self._notify_listeners(TOPIC_CAM)
 
     @property
     def oscam_enabled(self) -> bool:
@@ -1428,9 +1428,7 @@ class Enigma2Box:
         self.state.oscam = None
         self.seen.discard(TOPIC_OSCAM)
         self.updates[TOPIC_OSCAM] = self.updates.get(TOPIC_OSCAM, 0) + 1
-        for listener in list(self._listeners):
-            if listener.wants(TOPIC_OSCAM):
-                listener.callback()
+        self._notify_listeners(TOPIC_OSCAM)
 
     @callback
     def _process_received(self, msg: ReceiveMessage) -> None:
@@ -1585,9 +1583,7 @@ class Enigma2Box:
         self.state.softcam = None
         self.seen.discard(TOPIC_SOFTCAM)
         self.updates[TOPIC_SOFTCAM] = self.updates.get(TOPIC_SOFTCAM, 0) + 1
-        for listener in list(self._listeners):
-            if listener.wants(TOPIC_SOFTCAM):
-                listener.callback()
+        self._notify_listeners(TOPIC_SOFTCAM)
 
     @callback
     def _announcement_received(self, msg: ReceiveMessage) -> None:
@@ -1683,9 +1679,45 @@ class Enigma2Box:
         for pending in list(self._pending):
             if pending.predicate():
                 pending.resolve()
+        self._notify_listeners(suffix)
+
+    @callback
+    def _notify_listeners(self, suffix: str) -> None:
+        """Call every listener of a topic, and keep one that raises from stopping the rest.
+
+        This runs on the callback that feeds every topic, so an exception in one entity's
+        read would otherwise skip every listener after it for that message, and reach the
+        MQTT client, which logs a traceback on each message for as long as the entity
+        keeps raising. The first failure of a listener is logged with its traceback, at
+        error level, because it is a bug; the repeats go to debug, because the tenth copy
+        of the same traceback on every grid refresh only buries the log around it. A
+        successful call ends the run, so the next failure — which may be a different bug
+        entirely — is logged at error level again rather than hidden until a reload.
+        """
         for listener in list(self._listeners):
-            if listener.wants(suffix):
+            if not listener.wants(suffix):
+                continue
+            try:
                 listener.callback()
+            except Exception:
+                if listener.failed:
+                    _LOGGER.debug(
+                        "A listener of receiver %s failed again on %s",
+                        self.node_id,
+                        suffix,
+                        exc_info=True,
+                    )
+                else:
+                    listener.failed = True
+                    _LOGGER.exception(
+                        "A listener of receiver %s failed on %s; the others still ran, "
+                        "and its further failures are logged at debug level until it "
+                        "next succeeds",
+                        self.node_id,
+                        suffix,
+                    )
+            else:
+                listener.failed = False
 
 
 async def async_send_magic_packet(box: Enigma2Box) -> None:

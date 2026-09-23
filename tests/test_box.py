@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import gc
 import json
+import logging
 
 from homeassistant.core import HomeAssistant
 import pytest
@@ -15,15 +16,20 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.enigma2_mqtt.box import normalise_mac, picon_url
 from custom_components.enigma2_mqtt.const import (
+    TOPIC_CAM,
     TOPIC_EPG_GRID,
     TOPIC_SCREEN,
     TOPIC_SERVICE,
 )
 
 from .conftest import (
+    BASE_TOPIC,
     EPG_GRID,
     EPG_GRID_TOPIC,
+    INFO,
+    INFO_TOPIC,
     IP,
+    NODE_ID,
     PICON_URL,
     SCREEN,
     SCREEN_TOPIC,
@@ -34,6 +40,8 @@ from .conftest import (
     async_setup_box,
     command_topic,
 )
+
+CAM_TOPIC = f"{BASE_TOPIC}/{NODE_ID}/cam"
 
 
 async def test_one_subscription_collects_every_topic(
@@ -152,6 +160,107 @@ async def test_a_listener_always_hears_availability(
 
     assert len(heard) == 1
     remove()
+
+
+async def test_a_listener_that_raises_does_not_silence_the_others(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """One entity's bug costs that entity, and one traceback, not every message's."""
+    await async_setup_box(hass, config_entry)
+    box = config_entry.runtime_data
+
+    def broken() -> None:
+        raise ValueError("year 300000 is out of range")
+
+    heard: list[None] = []
+    remove_broken = box.async_add_listener(broken, (TOPIC_SERVICE,))
+    remove_heard = box.async_add_listener(lambda: heard.append(None), (TOPIC_SERVICE,))
+
+    for _ in range(3):
+        async_fire_mqtt_message(hass, SERVICE_TOPIC, json.dumps(SERVICE))
+        await hass.async_block_till_done()
+
+    assert len(heard) == 3
+    tracebacks = [
+        record
+        for record in caplog.records
+        if record.levelno >= logging.ERROR and record.exc_info is not None
+    ]
+    assert len(tracebacks) == 1
+    remove_broken()
+    remove_heard()
+
+
+async def test_a_listener_that_recovers_and_fails_again_is_logged_again(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A second run of failures may be a different bug, so it is not hidden at debug."""
+    await async_setup_box(hass, config_entry)
+    box = config_entry.runtime_data
+
+    outcomes = iter([True, False, True])
+
+    def sometimes_broken() -> None:
+        if next(outcomes):
+            raise ValueError("broken this time")
+
+    remove = box.async_add_listener(sometimes_broken, (TOPIC_SERVICE,))
+    for _ in range(3):
+        async_fire_mqtt_message(hass, SERVICE_TOPIC, json.dumps(SERVICE))
+        await hass.async_block_till_done()
+
+    tracebacks = [
+        record
+        for record in caplog.records
+        if record.levelno >= logging.ERROR and record.exc_info is not None
+    ]
+    assert len(tracebacks) == 2
+    remove()
+
+
+async def test_a_retraction_reaches_every_listener_past_one_that_raises(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The CAM retraction tells its listeners through the same guarded dispatch."""
+    box_on_the_broker[INFO_TOPIC] = json.dumps(
+        {
+            **INFO,
+            "capabilities": [*INFO["capabilities"], "cam"],
+            "settings": {"cam_telemetry": True},
+        }
+    )
+    box_on_the_broker[CAM_TOPIC] = json.dumps(
+        {"system": "Irdeto", "active": True, "encrypted": True, "ecm_ms": 184}
+    )
+    await async_setup_box(hass, config_entry)
+    box = config_entry.runtime_data
+    assert box.state.cam is not None
+
+    def broken() -> None:
+        raise ValueError("broken")
+
+    heard: list[None] = []
+    remove_broken = box.async_add_listener(broken, (TOPIC_CAM,))
+    remove_heard = box.async_add_listener(lambda: heard.append(None), (TOPIC_CAM,))
+
+    async_fire_mqtt_message(hass, CAM_TOPIC, "")
+    await hass.async_block_till_done()
+
+    assert box.state.cam is None
+    assert len(heard) == 1
+    remove_broken()
+    remove_heard()
 
 
 async def test_a_command_whose_effect_already_happened_does_not_wait(
