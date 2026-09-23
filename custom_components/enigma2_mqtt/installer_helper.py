@@ -8,6 +8,8 @@ same functions against a temporary root.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+import errno
 import fcntl
 import glob
 import hashlib
@@ -44,7 +46,24 @@ OPKG_CONF_DIR = "etc/opkg"
 OPKG_DATABASES = ("var/lib/opkg", "usr/lib/opkg")
 SETTINGS = "etc/enigma2/settings"
 PROVISION = "etc/enigma2/mqttbridge.json"
-LOCK = "var/lock/opkg.lock"
+# opkg's own lock, which this helper takes around every change to opkg's database so
+# that no opkg run — the image's daily update check, a plugin browser in the GUI — can
+# read or rewrite that database halfway through. Which file that is depends on the opkg:
+# `option lock_file` in its configuration when there is one, otherwise the default it
+# was built with. opkg 0.6.3 on OpenViX 6.6 is built with `/run/opkg.lock` and never
+# touches `/var/lock/opkg.lock`, which is where this helper used to lock — so for as
+# long as it did, it excluded nothing. Older opkg releases were built with the
+# `/var/lock` default, and nothing on the receiver says which one this is without
+# running opkg, so when the configuration is silent both are taken.
+OPKG_LOCK_OPTION = "lock_file"
+OPKG_DEFAULT_LOCKS = ("run/opkg.lock", "var/lock/opkg.lock")
+# opkg does not wait for its lock: it tries once and fails "Could not lock". This helper
+# waits a little, because a snapshot refused for an update check that would have ended
+# in seconds is a worse install than one that starts late — but not for ever, because
+# it runs under the installer's command timeout, and a helper still blocked after the
+# installer gave up would take the lock later, from under nobody.
+OPKG_LOCK_WAIT_SECONDS = 20.0
+OPKG_LOCK_POLL_SECONDS = 0.25
 SETTINGS_PREFIX = "config.plugins.mqttbridge."
 # The snapshot directories this installer makes, and nothing else. The nonce is
 # `secrets.token_hex(6)`; anything else under the backups directory belongs to whoever
@@ -202,14 +221,88 @@ def _atomic_text(path: Path, text: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def opkg_lock_paths(root: Path) -> tuple:
+    """Return the lock files an opkg run on this receiver could be holding.
+
+    The configuration wins where it speaks, exactly as it does for the database: an
+    image that moved the lock says so in `option lock_file`, and then that file is the
+    only one opkg will ever take. Where it is silent, both built-in defaults are
+    returned, newest first, because the default is compiled into opkg and cannot be
+    read from here. Taking a lock no opkg uses costs nothing; missing the one it does
+    use is the defect this replaced.
+    """
+    configured = _opkg_options(root).get(OPKG_LOCK_OPTION)
+    if configured is not None:
+        return (_configured_path(root, configured),)
+    return tuple(_path(root, name) for name in OPKG_DEFAULT_LOCKS)
+
+
+def _same_file(first: os.stat_result, second: os.stat_result) -> bool:
+    return (first.st_dev, first.st_ino) == (second.st_dev, second.st_ino)
+
+
+def _take_opkg_lock(path: Path, deadline: float) -> int:
+    """Hold `path` the way opkg holds it, or raise once `deadline` has passed.
+
+    opkg creates the file and takes a POSIX record lock on the whole of it with
+    `lockf`; `lockf` here joins that same lock domain, where `flock` would not. opkg
+    also deletes the file when it lets go. A process that was waiting on the old file
+    then holds a lock on a name nobody can see any more, and the next opkg creates a
+    fresh file and locks that one unopposed — so a lock only counts once the name
+    still leads to the file that is locked, and otherwise it is taken again.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    while True:
+        descriptor = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o640)
+        try:
+            fcntl.lockf(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            os.close(descriptor)
+            if error.errno not in (errno.EACCES, errno.EAGAIN):
+                raise
+        else:
+            try:
+                if _same_file(os.fstat(descriptor), os.stat(str(path))):
+                    return descriptor
+            except FileNotFoundError:
+                pass
+            os.close(descriptor)
+        if time.monotonic() >= deadline:
+            raise TimeoutError(
+                f"opkg is busy: {path} is held by another opkg run (the image's update "
+                f"check, or a package manager in the receiver's menu); waited "
+                f"{OPKG_LOCK_WAIT_SECONDS:.0f} s"
+            )
+        time.sleep(OPKG_LOCK_POLL_SECONDS)
+
+
+def _release_opkg_lock(path: Path, descriptor: int) -> None:
+    """Let go the way opkg does — remove the file, then close it.
+
+    Only while the name is still ours: removing a file somebody else has since
+    created and locked would hand the next opkg an unopposed lock.
+    """
+    try:
+        if _same_file(os.fstat(descriptor), os.stat(str(path))):
+            path.unlink()
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
+
+
+@contextmanager
 def _lock(root: Path):
-    lock_path = _path(root, LOCK)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    handle = lock_path.open("a+")
-    # opkg uses a POSIX record lock on this file. `lockf`, unlike `flock`, joins
-    # that lock domain.
-    fcntl.lockf(handle.fileno(), fcntl.LOCK_EX)
-    return handle
+    """Hold every lock opkg could be using on this receiver, in a fixed order."""
+    deadline = time.monotonic() + OPKG_LOCK_WAIT_SECONDS
+    held: list = []
+    try:
+        for path in opkg_lock_paths(root):
+            held.append((path, _take_opkg_lock(path, deadline)))
+        yield
+    finally:
+        for path, descriptor in reversed(held):
+            _release_opkg_lock(path, descriptor)
 
 
 def _webif_bytecode_files(root: Path) -> list[Path]:
