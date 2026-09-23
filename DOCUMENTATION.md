@@ -601,7 +601,9 @@ ten minutes, because the final save holds up the thread that starts recordings; 
 minutes of the importer's own scheduled run; and when no sources are selected. The press waits
 for a **new** `epg_import` payload saying `running` — the one already held does not count, since
 an import the schedule started is already `running` and the receiver refuses a second one. If
-the new payload says `failed` instead, the press raises its `error`. While an import runs the
+the new payload says `failed` instead, the press raises its `error`; the first answer stands.
+A retained copy the broker replays after a reconnect is never the answer, because it may
+describe the previous run. While an import runs the
 receiver also refuses its own deep standby, reboot and interface restart, which would lose it.
 
 **„Głębokie uśpienie" and „Restart" need two gates open**: the Home Assistant option

@@ -128,7 +128,17 @@ async def _async_epg_import(box: Enigma2Box) -> None:
     answer: dict[str, Any] = {}
 
     def answered() -> bool:
+        # The first answer stands. The waiter resumes a tick after the future is set,
+        # and every payload in between re-runs this check: a `failed` followed at once
+        # by a `running` must still read as the failure it was.
+        if answer:
+            return True
         if box.updates.get(TOPIC_EPG_IMPORT, 0) <= before:
+            return False
+        # A retained delivery is what the broker already held — after a reconnect
+        # Home Assistant resubscribes and the broker replays it — so it may be the
+        # previous run's `failed`. It updates the sensor and answers nothing.
+        if box.state.epg_import_retained:
             return False
         payload = box.state.epg_import or {}
         if payload.get("state") in ("running", "failed"):

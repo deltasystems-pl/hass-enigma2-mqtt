@@ -616,6 +616,10 @@ class Enigma2State:
     process: dict[str, Any] | None = None
     softcam: dict[str, Any] | None = None
     epg_import: dict[str, Any] | None = None
+    # Whether the last `epg_import` payload arrived with the retain flag set: a replay of
+    # what the broker already held, which can describe an earlier run and is therefore
+    # never the answer to a press — the same reading `last_error_retained` gives.
+    epg_import_retained: bool = False
     bouquet: dict[str, Any] | None = None
     channels: dict[str, Any] | None = None
     last_error: dict[str, Any] | None = None
@@ -1626,6 +1630,7 @@ class Enigma2Box:
         if (payload := parse_json_payload(msg.payload)) is None:
             return
         self.state.epg_import = self._normalize_epg_import(payload)
+        self.state.epg_import_retained = msg.retain
         self._async_updated(TOPIC_EPG_IMPORT)
 
     @staticmethod

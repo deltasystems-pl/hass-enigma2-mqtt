@@ -22,7 +22,7 @@ from typing import Any
 
 from homeassistant.components.button import DOMAIN as BUTTON_DOMAIN, SERVICE_PRESS
 from homeassistant.const import ATTR_ENTITY_ID, STATE_UNAVAILABLE, STATE_UNKNOWN
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 import homeassistant.util.dt as dt_util
@@ -713,3 +713,93 @@ async def test_the_polish_names_become_these_entity_ids(
 
     assert registered(hass, "button", "epg_import") == "button.dekoder_salon_pobierz_epg"
     assert registered(hass, "sensor", "epg_import") == "sensor.dekoder_salon_import_epg"
+
+
+# ------------------------------------------------------------- what is an answer
+
+
+async def test_a_retained_replay_of_an_old_failure_is_not_the_answer(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """🔴 A reconnect during the wait replays the previous run's retained `failed`.
+
+    Home Assistant forgets which retained topics it has delivered when it reconnects
+    to the broker, resubscribes, and the broker replays what it holds — here the
+    `failed` of the last run. That is not the receiver answering this press; the live
+    `running` arriving a moment later is. Simulated by clearing the client's record of
+    delivered retained topics, which is what a reconnect does before it resubscribes.
+    """
+    from homeassistant.components import mqtt  # noqa: PLC0415
+    from homeassistant.components.mqtt.models import DATA_MQTT  # noqa: PLC0415
+
+    box_on_the_broker[INFO_TOPIC] = with_import(epg_import_allowed=True)
+    box_on_the_broker[EPG_IMPORT_TOPIC] = json.dumps(FAILED)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    client = hass.data[DATA_MQTT].client
+
+    @callback
+    def _reconnect_then_answer(_msg) -> None:
+        client._retained_topics.clear()
+        async_fire_mqtt_message(hass, EPG_IMPORT_TOPIC, json.dumps(FAILED), retain=True)
+        hass.loop.call_later(
+            0.05,
+            lambda: async_fire_mqtt_message(hass, EPG_IMPORT_TOPIC, json.dumps(RUNNING)),
+        )
+
+    await mqtt.async_subscribe(hass, command_topic("epg_import"), _reconnect_then_answer)
+
+    await hass.services.async_call(
+        BUTTON_DOMAIN, SERVICE_PRESS, {ATTR_ENTITY_ID: BUTTON}, blocking=True
+    )
+    assert hass.states.get(SENSOR).state == "running"
+
+
+async def test_the_first_answer_stands(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A `failed` and a `running` inside one tick still raise the failure.
+
+    The waiter resumes only after the loop turns, and a check that kept taking the
+    latest payload would read the second one and call the failed start a success.
+    """
+    from homeassistant.components import mqtt  # noqa: PLC0415
+
+    box_on_the_broker[INFO_TOPIC] = with_import(epg_import_allowed=True)
+    box_on_the_broker[EPG_IMPORT_TOPIC] = json.dumps(IDLE)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    thrown = {**FAILED, "error": "EPG-Importer could not be started: boom"}
+
+    @callback
+    def _both(_msg) -> None:
+        async_fire_mqtt_message(hass, EPG_IMPORT_TOPIC, json.dumps(thrown))
+        async_fire_mqtt_message(hass, EPG_IMPORT_TOPIC, json.dumps(RUNNING))
+
+    await mqtt.async_subscribe(hass, command_topic("epg_import"), _both)
+
+    with pytest.raises(HomeAssistantError, match="could not be started: boom"):
+        await hass.services.async_call(
+            BUTTON_DOMAIN, SERVICE_PRESS, {ATTR_ENTITY_ID: BUTTON}, blocking=True
+        )
+
+
+@pytest.mark.parametrize("reported", ["yes", 1, "true", None])
+async def test_a_permission_that_is_not_a_boolean_is_not_said(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    reported: Any,
+) -> None:
+    """Only `true` opens the gate; anything else is a box that has not answered."""
+    box_on_the_broker[INFO_TOPIC] = with_import(epg_import_allowed=reported)
+
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    assert config_entry.runtime_data.epg_import_permission is None
+    assert registered(hass, "button", "epg_import") is None
