@@ -349,7 +349,9 @@ while the box is unreachable, because that is precisely when somebody wants to w
   in standby and refuses one sent then. The entity exists only once the receiver names the
   `toast` capability, which the plugin claims after the screen has actually been built — a
   receiver with the plugin's `osd_toast` setting off, or an image where the screen could not
-  be built, gets popups only.
+  be built, gets popups only. The entity stays if the receiver later stops offering toasts, and
+  a send to it then raises an error, which stops an automation at that step; put
+  `continue_on_error: true` on the step to let the automation carry on without the toast.
 - **Pilot – klawisz** — fires for every key the box reports, with the key name as the event
   type and `press` (`short` or `long`) as an attribute. An event entity may only fire types it
   declared, so a key outside the declared list is logged at debug and dropped here — the bus
