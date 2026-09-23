@@ -36,7 +36,9 @@ from .box import Enigma2Box, Enigma2CommandError, normalise_key, same_service
 from .const import (
     DOMAIN,
     HA_MODES,
-    MESSAGE_DEFAULT_TIMEOUT,
+    MESSAGE_STYLE_POPUP,
+    MESSAGE_STYLE_TOAST,
+    MESSAGE_STYLES,
     MESSAGE_TYPES,
     RECORD_ACTIONS,
     TOPIC_BOUQUET,
@@ -44,7 +46,7 @@ from .const import (
     TOPIC_SCREEN,
     TOPIC_TIMERS,
 )
-from .notify import message_payload
+from .notify import check_toast, message_payload
 
 SERVICE_ZAP = "zap"
 SERVICE_SELECT_BOUQUET = "select_bouquet"
@@ -63,6 +65,7 @@ ATTR_KEY = "key"
 ATTR_LONG = "long"
 ATTR_TEXT = "text"
 ATTR_TYPE = "type"
+ATTR_STYLE = "style"
 ATTR_TIMEOUT = "timeout"
 ATTR_EVENT_ID = "event_id"
 ATTR_BEGIN = "begin"
@@ -85,10 +88,14 @@ SEND_KEY_SCHEMA = {
     vol.Required(ATTR_KEY): cv.string,
     vol.Optional(ATTR_LONG, default=False): cv.boolean,
 }
+# 🔴 `timeout` has no default here. The default belongs to the style — ten seconds for a
+# popup, five for a toast — and a schema default of ten would reach the handler as if the
+# caller had asked for it, giving every toast without a timeout a popup's ten seconds.
 MESSAGE_SCHEMA = {
     vol.Required(ATTR_TEXT): cv.string,
     vol.Optional(ATTR_TYPE, default=MESSAGE_TYPES[0]): vol.In(MESSAGE_TYPES),
-    vol.Optional(ATTR_TIMEOUT, default=MESSAGE_DEFAULT_TIMEOUT): cv.positive_int,
+    vol.Optional(ATTR_STYLE, default=MESSAGE_STYLE_POPUP): vol.In(MESSAGE_STYLES),
+    vol.Optional(ATTR_TIMEOUT): cv.positive_int,
 }
 ADD_TIMER_SCHEMA = {
     vol.Required(ATTR_SREF): cv.string,
@@ -193,10 +200,22 @@ class Enigma2Actions:
         text: str,
         # Named after the action's field, which is what Home Assistant passes.
         type: str = MESSAGE_TYPES[0],  # noqa: A002
-        timeout: int = MESSAGE_DEFAULT_TIMEOUT,
+        style: str = MESSAGE_STYLE_POPUP,
+        timeout: int | None = None,
     ) -> None:
-        """Put a popup on the television."""
-        await self.box.async_command("message", message_payload(text, type, timeout))
+        """Put a popup or a toast on the television.
+
+        The `style` field exists on every receiver, because an action's fields are the
+        same for the whole domain and cannot appear per box. A toast aimed at a receiver
+        that has not named the `toast` capability is therefore refused here, before
+        anything is published, the way `select_bouquet` refuses a box without
+        `bouquet_context`.
+        """
+        if style == MESSAGE_STYLE_TOAST:
+            check_toast(self.box, timeout)
+        await self.box.async_command(
+            "message", message_payload(text, type, timeout, style)
+        )
 
     async def async_add_timer(
         self,

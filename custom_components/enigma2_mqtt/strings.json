@@ -246,6 +246,9 @@
     "notify": {
       "osd": {
         "name": "OSD"
+      },
+      "osd_toast": {
+        "name": "OSD toast"
       }
     },
     "number": {
@@ -415,11 +418,15 @@
     },
     "message": {
       "name": "Show message",
-      "description": "Puts a popup on the television. The receiver cuts the text at 500 characters.",
+      "description": "Puts a message on the television: a popup, or a discreet toast in a corner that hides itself. The receiver cuts a popup at 500 characters and a toast at 200.",
       "fields": {
         "text": {
           "name": "Text",
-          "description": "What the popup says."
+          "description": "What the popup or toast says."
+        },
+        "style": {
+          "name": "Style",
+          "description": "A popup takes focus and waits in the receiver's queue; a toast takes no key press, hides itself and is replaced by the next one. A toast needs a receiver that offers it."
         },
         "type": {
           "name": "Type",
@@ -427,7 +434,7 @@
         },
         "timeout": {
           "name": "Timeout",
-          "description": "How long the popup stays on screen, in seconds."
+          "description": "How long the message stays on screen, in seconds. Without one a popup stays 10 seconds and a toast 5; a toast takes 1 to 30."
         }
       }
     },
@@ -511,6 +518,12 @@
     }
   },
   "selector": {
+    "message_style": {
+      "options": {
+        "popup": "Popup",
+        "toast": "Discreet toast"
+      }
+    },
     "message_type": {
       "options": {
         "info": "Information",
@@ -562,6 +575,12 @@
     },
     "bouquet_not_published": {
       "message": "The receiver does not offer the bouquet {bouquet}."
+    },
+    "toast_unsupported": {
+      "message": "This receiver does not offer the discreet toast. Switch it on in the plugin's settings on the receiver, or update the plugin, or send a popup instead."
+    },
+    "toast_timeout_out_of_range": {
+      "message": "A toast hides itself, so its timeout must be {min} to {max} seconds, not {timeout}."
     },
     "bouquet_context_unsupported": {
       "message": "This receiver plugin cannot activate a bouquet context. Update the plugin to use this action."

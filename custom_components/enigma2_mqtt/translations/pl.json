@@ -220,6 +220,9 @@
     "notify": {
       "osd": {
         "name": "Ekran OSD"
+      },
+      "osd_toast": {
+        "name": "Ekran – dyskretnie"
       }
     },
     "number": {
@@ -389,11 +392,15 @@
     },
     "message": {
       "name": "Pokaż komunikat",
-      "description": "Wyświetla na telewizorze okienko z komunikatem. Dekoder ucina tekst po 500 znakach.",
+      "description": "Wyświetla komunikat na telewizorze: okienko albo dyskretny dymek w rogu ekranu, który sam znika. Dekoder ucina okienko po 500 znakach, a dymek po 200.",
       "fields": {
         "text": {
           "name": "Tekst",
           "description": "Treść komunikatu."
+        },
+        "style": {
+          "name": "Styl",
+          "description": "Okienko przejmuje pilota i czeka w kolejce dekodera; dymek nie reaguje na pilota, sam znika i zastępuje go następny. Dymek wymaga dekodera, który go oferuje."
         },
         "type": {
           "name": "Rodzaj",
@@ -401,7 +408,7 @@
         },
         "timeout": {
           "name": "Czas wyświetlania",
-          "description": "Jak długo okienko zostaje na ekranie, w sekundach."
+          "description": "Jak długo komunikat zostaje na ekranie, w sekundach. Bez podania okienko zostaje 10 sekund, a dymek 5; dymek przyjmuje od 1 do 30."
         }
       }
     },
@@ -485,6 +492,12 @@
     }
   },
   "selector": {
+    "message_style": {
+      "options": {
+        "popup": "Okienko",
+        "toast": "Dyskretnie"
+      }
+    },
     "message_type": {
       "options": {
         "info": "Informacja",
@@ -536,6 +549,12 @@
     },
     "bouquet_not_published": {
       "message": "Dekoder nie udostępnia bukietu {bouquet}."
+    },
+    "toast_unsupported": {
+      "message": "Ten dekoder nie oferuje dyskretnego dymka. Włącz go w ustawieniach wtyczki na dekoderze albo zaktualizuj wtyczkę, albo wyślij okienko."
+    },
+    "toast_timeout_out_of_range": {
+      "message": "Dymek znika sam, więc czas wyświetlania musi wynosić od {min} do {max} sekund, a nie {timeout}."
     },
     "bouquet_context_unsupported": {
       "message": "Ta wersja wtyczki dekodera nie potrafi ustawić aktywnego bukietu. Zaktualizuj wtyczkę, aby użyć tej akcji."

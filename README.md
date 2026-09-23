@@ -33,7 +33,7 @@ One receiver becomes **one device** with these entities (display names are Polis
 |---|---|---|
 | `media_player` | *Dekoder salon* (the device name) | off or playing, the channel list of the bouquets you choose (or just the one the receiver is on — an option), `select_source`, `play_media` by service reference, channel name or active bouquet, `browse_media` through playable bouquets, volume and mute, channel ±, the screen grab as artwork |
 | `remote` | *Pilot* | `send_command` with `KEY_*` names; `hold_secs` makes it a long press. Hidden on the device page of a new installation — Home Assistant puts a power toggle on every remote, and *Zasilanie* is the labelled one |
-| `notify` | *Ekran OSD* | a message on the television screen |
+| `notify` | *Ekran OSD*, *Ekran – dyskretnie* | a message on the television screen: a popup, or — where the receiver offers it — a discreet toast in a corner that takes no key press and hides itself |
 | `event` | *Pilot – klawisz* | every remote key as an event, with `press` = short or long |
 | `image` | *Ekran* | the last screen grab from the box |
 | `sensor` | *Kanał*, *Program*, *Następny program*, *Aktywne nagrania*, *Następny timer*, *SNR*, *AGC*, *BER*, *Czas pracy*, *Ostatni błąd*, *Softcam*, *EPG – aktywny bukiet* | what is on, what is next, recordings and timers, tuner quality, uptime (tuner and uptime sensors off by default), the receiver's last refusal in its own words, kept across a restart; where the receiver can restart it, which card-sharing client the image started and how many copies of it are running; and what is on now and next across the bouquet the receiver is walking (its channel list is kept out of the recorder) |

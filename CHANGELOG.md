@@ -59,8 +59,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bouquet's worth of programmes rewritten every time one of them ends does not belong in the
   database. Created while the receiver announces both the `epg_grid` and `bouquet_context`
   capabilities, and never removed when they go quiet.
+- **„Ekran – dyskretnie", a discreet toast on the television** (English „OSD toast"), beside
+  „Ekran OSD". The popup takes focus and waits in the receiver's queue behind an open channel
+  list; the toast is a small overlay in a corner that takes no key press, hides itself after
+  five seconds and is replaced by the next one. A title is folded into the text as it is for
+  the popup, and the text is cut at 200 characters, where the receiver cuts a toast. Created
+  when the receiver announces the `toast` capability — which the plugin claims only once the
+  screen has actually been built — and never removed when it goes quiet; sending to it while
+  the receiver does not name the capability is refused with the reason instead of published.
+- **The `message` action gains a `style` field**, `popup` (the default) or `toast`. A toast
+  without a `timeout` stays five seconds, and one outside 1–30 seconds is refused before
+  anything is sent, since nothing on a toast can dismiss it. A toast aimed at a receiver
+  that does not offer one is refused the same way.
 
 ### Changed
+
+- **A `message` action without `style` is byte-for-byte the popup it was**, but its `timeout`
+  default of ten seconds now comes from the handler rather than the action schema, so that a
+  toast without a `timeout` gets its own five seconds rather than the popup's ten.
 
 - **A guided install whose name field was left empty now titles the entry with the name the
   receiver already has**, rather than with the node ID. Nothing is written to the receiver for an

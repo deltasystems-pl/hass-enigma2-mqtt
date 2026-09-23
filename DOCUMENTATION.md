@@ -236,7 +236,7 @@ everything.
 
 ## 4. Entities
 
-**Twenty-five entities on every receiver**, and twenty-nine more that exist only while
+**Twenty-five entities on every receiver**, and thirty more that exist only while
 something says they should — plus one set of three per OSCam source, which has no fixed
 number because it follows however many readers and servers that receiver has. The
 conditional ones are, in full:
@@ -247,6 +247,7 @@ conditional ones are, in full:
 | 1 | „Odśwież EPG" | the receiver reports the `epg_grid` capability |
 | 1 | „EPG – aktywny bukiet" | the receiver reports the `epg_grid` **and** `bouquet_context` capabilities |
 | 1 | „Softcam" | the receiver reports the `softcam` capability |
+| 1 | „Ekran – dyskretnie" | the receiver reports the `toast` capability |
 | 5 | the enigma2 process diagnostics | the receiver reports the `process` capability |
 | 2 | „Głębokie uśpienie", „Restart" | the Home Assistant option asks for them **and** the receiver permits deep standby |
 | 1 | „Restart softcam" | the receiver reports the `softcam` capability **and** permits a softcam restart |
@@ -263,7 +264,10 @@ a receiver that builds no grids. „Softcam", „EPG – aktywny bukiet" and the
 diagnostics are neither: they are sensors with a history, and a capability that stops being named is an older
 plugin after a downgrade, a hook that failed to attach on one boot, or a receiver that has
 not answered yet. None of those is a decision, so they stay and say nothing until the
-topic returns.
+topic returns. „Ekran – dyskretnie" stays for the same reason: automations notify it by name,
+and a receiver that stops naming `toast` — a downgrade, a skin reload whose rebuild of the
+toast screen failed — has decided nothing. Sending to it then is refused in Home Assistant
+with the reason, rather than published into a refusal on `last_error`.
 
 Unique ids follow one scheme: `<node_id>_<key>`, where the
 key is the English translation key of the entity. Entity ids derive from the same key, so
@@ -318,6 +322,7 @@ while the box is unreachable, because that is precisely when somebody wants to w
 |---|---|---|---|
 | `remote` | *Pilot* | `<node_id>_remote` | `power` / `cmd/key` |
 | `osd` | *Ekran OSD* | `<node_id>_osd` | `cmd/message` |
+| `osd_toast` | *Ekran – dyskretnie* | `<node_id>_osd_toast` | `cmd/message` with `style: toast` · only while the receiver names the `toast` capability |
 | `key` | *Pilot – klawisz* | `<node_id>_key` | `key` |
 | `screen` | *Ekran* | `<node_id>_screen` | `screen` |
 
@@ -336,6 +341,17 @@ while the box is unreachable, because that is precisely when somebody wants to w
 - **Ekran OSD** — `notify.send_message` puts a popup on the television. The popup has one text
   field, so a title becomes the first thing in it rather than being dropped; the text is cut
   at 500 characters, where the plugin cuts it.
+- **Ekran – dyskretnie** — the same message as a **toast**: a small overlay in a corner of the
+  screen, headed „MQTT Bridge", that takes no key press, hides itself after five seconds and is
+  replaced by the next one. Nothing waits in the receiver's queue behind the channel list, and
+  nothing interrupts whoever is holding the remote. The title is folded in the same way, and
+  the text is cut at 200 characters, where the plugin cuts a toast. The receiver shows no toast
+  in standby and refuses one sent then. The entity exists only once the receiver names the
+  `toast` capability, which the plugin claims after the screen has actually been built — a
+  receiver with the plugin's `osd_toast` setting off, or an image where the screen could not
+  be built, gets popups only. The entity stays if the receiver later stops offering toasts, and
+  a send to it then raises an error, which stops an automation at that step; put
+  `continue_on_error: true` on the step to let the automation carry on without the toast.
 - **Pilot – klawisz** — fires for every key the box reports, with the key name as the event
   type and `press` (`short` or `long`) as an attribute. An event entity may only fire types it
   declared, so a key outside the declared list is logged at debug and dropped here — the bus
@@ -613,7 +629,7 @@ the platform an action was registered on, and one box has exactly one media play
 |---|---|
 | `enigma2_mqtt.zap` | `sref` **or** `name` — exactly one |
 | `enigma2_mqtt.send_key` | `key` (`KEY_RED` or `red`), `long` |
-| `enigma2_mqtt.message` | `text` (cut at 500 characters), `type` (`info`\|`warning`\|`error`), `timeout` |
+| `enigma2_mqtt.message` | `text` (cut at 500 characters, 200 for a toast), `style` (`popup`\|`toast`, default `popup`), `type` (`info`\|`warning`\|`error`), `timeout` |
 | `enigma2_mqtt.add_timer` | `sref` + `event_id`, **or** `sref` + `begin` + `end` + `name` |
 | `enigma2_mqtt.delete_timer` | `sref`, `begin`, `end` |
 | `enigma2_mqtt.record` | `action`: `start` or `stop` |
@@ -623,6 +639,15 @@ the platform an action was registered on, and one box has exactly one media play
 
 `begin` and `end` take a date and time or the epoch seconds the topics use; both end up as
 epoch seconds on the wire.
+
+`message` without a `style` is the popup it has always been, byte for byte: without a
+`timeout` it stays ten seconds, and `0` keeps it up until dismissed. `style: toast` sends the
+discreet toast described under [„Ekran – dyskretnie"](#42-remote-notify-event-image): without
+a `timeout` it stays five seconds, and a `timeout` outside 1–30 is refused before anything is
+sent, because a toast cannot be dismissed. The field exists on every receiver — an action's
+fields are the same for the whole integration — so a toast aimed at a receiver that does not
+name the `toast` capability is refused with the reason, and nothing is published. `type` is
+passed on for a toast too; the receiver validates it and shows every toast the same way.
 
 ### How an action knows it worked
 

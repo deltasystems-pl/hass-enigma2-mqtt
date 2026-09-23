@@ -60,6 +60,14 @@ message:
       selector:
         text:
           multiline: true
+    style:
+      default: popup
+      selector:
+        select:
+          translation_key: message_style
+          options:
+            - popup
+            - toast
     type:
       default: info
       selector:
@@ -70,7 +78,6 @@ message:
             - warning
             - error
     timeout:
-      default: 10
       selector:
         number:
           min: 1
