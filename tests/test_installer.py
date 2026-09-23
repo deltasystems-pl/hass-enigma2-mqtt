@@ -14,6 +14,7 @@ from unittest.mock import patch
 from homeassistant.core import HomeAssistant
 import pytest
 
+from custom_components.enigma2_mqtt import installer_helper
 from custom_components.enigma2_mqtt.bundle import BundledPlugin
 from custom_components.enigma2_mqtt.installer import (
     CommandResult,
@@ -39,6 +40,9 @@ class FakeReceiver:
     """A command-aware fake SSH receiver with persistent transaction state."""
 
     fail_on: str | None = None
+    # A helper step refused because opkg's lock stayed held: the helper's own exit
+    # status for it, and nothing done.
+    busy_on: str | None = None
     installed_version: str | None = "0.0.9"
     recording: bool = False
     timers: list[dict[str, Any]] = field(default_factory=list)
@@ -106,6 +110,10 @@ class FakeSession:
             receiver.inputs.append(input)
         if receiver.fail_on and receiver.fail_on in command:
             return CommandResult(1, "", "deliberately failed")
+        if receiver.busy_on and receiver.busy_on in command:
+            return CommandResult(
+                installer_helper.EXIT_OPKG_BUSY, "", "opkg is busy: /run/opkg.lock is held"
+            )
         if "cat /etc/image-version" in command:
             return CommandResult(0, "OpenViX 6.6\n")
         if "sys.version_info" in command:
@@ -1155,3 +1163,104 @@ async def test_same_host_install_is_serialized(
         await first
 
     assert raised.value.code is InstallerErrorCode.BUSY
+
+
+async def _install_with_the_bundle(
+    hass: HomeAssistant, install_request: InstallRequest, tmp_path: Path, receiver: FakeReceiver
+) -> None:
+    artifact = tmp_path / "plugin.ipk"
+    artifact.write_bytes(b"ipk bytes")
+    digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    bundle = BundledPlugin(artifact, "0.1.0", digest, "1" * 40)
+    original_run = FakeSession.run
+
+    async def hash_aware_run(self: FakeSession, command: str, **kwargs: Any):
+        if "sha256sum" in command:
+            self.receiver.commands.append(command)
+            return CommandResult(0, digest + "\n")
+        return await original_run(self, command, **kwargs)
+
+    with (
+        patch("custom_components.enigma2_mqtt.installer.load_bundled_plugin", return_value=bundle),
+        patch(
+            "custom_components.enigma2_mqtt.installer._installed_hash_manifest",
+            return_value=b"hash  /file\n",
+        ),
+        patch.object(FakeSession, "run", hash_aware_run),
+    ):
+        await async_install(hass, install_request, _connector=receiver.connect)
+
+
+async def test_a_snapshot_refused_for_a_busy_opkg_says_so(
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+) -> None:
+    """„Try again in a minute" is the whole remedy, and a generic failure hid it.
+
+    The helper's refusal went out on stderr, which the installer discards, so a box
+    whose owner was installing something from the receiver's menu reported the same
+    „could not be installed" as a broken one.
+    """
+    receiver = FakeReceiver(busy_on=" snapshot ")
+
+    with pytest.raises(InstallerError) as raised:
+        await _install_with_the_bundle(hass, install_request, tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.OPKG_BUSY
+    assert receiver.installed is False
+    assert receiver.rolled_back is False
+    # Nothing was taken, so there is nothing to restore — only the transaction lock to
+    # give back.
+    assert any(" release " in command for command in receiver.commands)
+
+
+async def test_a_restore_refused_for_a_busy_opkg_says_so(
+    credentials: SshCredentials,
+) -> None:
+    """The receiver is still on the new plugin, which is not what a half-done restore is."""
+    receiver = FakeReceiver(busy_on=" restore ")
+
+    with pytest.raises(InstallerError) as raised:
+        await _rollback(credentials, receiver.connect)
+
+    assert raised.value.code is InstallerErrorCode.ROLLBACK_OPKG_BUSY
+    assert receiver.rolled_back is False
+    # The interface is started again and the transaction lock released regardless.
+    assert "init 3" in receiver.commands
+    assert any(" release " in command for command in receiver.commands)
+
+
+async def test_only_the_helpers_busy_status_is_read_as_busy(
+    credentials: SshCredentials,
+) -> None:
+    """Any other failure of the restore is still the failure it always was."""
+    receiver = FakeReceiver(fail_on=" restore ")
+
+    with pytest.raises(InstallerError) as raised:
+        await _rollback(credentials, receiver.connect)
+
+    assert raised.value.code is InstallerErrorCode.ROLLBACK_FAILED
+
+
+def test_the_helpers_waits_end_inside_the_commands_that_run_them() -> None:
+    """A helper still waiting when the installer gives up takes the lock from under nobody.
+
+    The margin is for the work each step does after it has the lock, which on a
+    receiver's flash is seconds, not the wait.
+    """
+    from custom_components.enigma2_mqtt import installer  # noqa: PLC0415
+
+    margin = 5
+    assert (
+        installer_helper.OPKG_LOCK_WAIT_SNAPSHOT_SECONDS + margin <= installer.SNAPSHOT_TIMEOUT
+    )
+    assert installer_helper.OPKG_LOCK_WAIT_RESTORE_SECONDS + margin <= installer.RESTORE_TIMEOUT
+    # The second look at a granted lock waits out opkg's unlock-close-delete, which is
+    # three system calls; it must be a real pause, and far shorter than a poll.
+    assert 0 < installer_helper.OPKG_LOCK_SETTLE_SECONDS < installer_helper.OPKG_LOCK_POLL_SECONDS
+    # And a rollback, the worse thing to give up on, waits longer than an install.
+    assert (
+        installer_helper.OPKG_LOCK_WAIT_RESTORE_SECONDS
+        > installer_helper.OPKG_LOCK_WAIT_SNAPSHOT_SECONDS
+    )

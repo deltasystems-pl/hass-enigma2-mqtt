@@ -125,14 +125,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   traceback, and the repeats in that run go to the debug log; the rest update as usual.
 - **The guided installer now holds opkg's own lock while it snapshots and restores the
   receiver's package database.** It used to lock `/var/lock/opkg.lock`, a file opkg 0.6.3 on
-  OpenViX never opens — that opkg locks `/run/opkg.lock` — so the image's daily update check or
-  the receiver's plugin browser could rewrite the database in the middle of an install or a
-  rollback. The lock is now the file named by `option lock_file` in the receiver's opkg
-  configuration, or, where the configuration names none, both built-in defaults (`/run` for
-  current opkg, `/var/lock` for older releases), taken with `lockf` as opkg takes it and removed
-  afterwards as opkg removes it. An opkg run that starts meanwhile is refused by opkg itself, as it
-  would be during any other opkg run; an opkg run already in progress is waited for up to 20 seconds, after
-  which the step fails with „opkg is busy" instead of hanging until the installer's timeout.
+  OpenViX never opens — that opkg locks `/run/opkg.lock` — so the lock kept no opkg run out. The
+  lock is now the file named by `option lock_file` in the receiver's opkg configuration, or, where
+  the configuration names none, both built-in defaults (`/run` for current opkg, `/var/lock` for
+  older releases), taken with `lockf` as opkg takes it and removed afterwards as opkg removes it.
+  What that buys is narrower than „opkg is kept out": opkg reads its status file *before* it
+  locks, so the helper excludes an opkg run only where their locks would overlap — one already
+  holding the lock is waited for, and one asking while the helper holds it fails its own lock
+  and changes nothing. The image's daily package-list update is the least relevant case; the
+  real one is somebody installing or removing a package from the receiver's own menu during a
+  guided install or its rollback.
+- **„opkg is busy" is now said, not swallowed.** A snapshot that cannot get opkg's lock within
+  20 seconds, or a rollback's restore within 40 — each inside the 30- and 60-second command it
+  runs under, and one bound for the whole wait however many lock files there are — ends the
+  install with its own sentence: the package manager is busy, try again in a minute; or, for the
+  rollback, that nothing was restored and the receiver needs looking at. Both used to end on the
+  generic failure, because the helper's explanation went out on output the installer discards.
+  A snapshot refused this way no longer leaves an empty snapshot directory behind for the
+  pruning to count, and a lock lost while the helper was inside fails the step rather than
+  passing off work an opkg run may have overlapped.
 
 ## [0.2.0] - 2026-09-22
 

@@ -74,6 +74,8 @@
       "rollback_restart_failed": "Der Receiver wurde zurückgesetzt, aber seine Oberfläche ist nicht wieder gestartet.",
       "rollback_lock_failed": "Der Receiver wurde zurückgesetzt, aber die Sperre des Installers konnte nicht freigegeben werden.",
       "busy": "Eine andere Installation läuft bereits.",
+      "rollback_opkg_busy": "Die Installation ist fehlgeschlagen, und der Receiver konnte nicht zurückgesetzt werden, weil seine Paketverwaltung belegt war; prüfe den Receiver von Hand.",
+      "opkg_busy": "Die Paketverwaltung des Receivers ist mit einem anderen Vorgang beschäftigt. Versuche es in einer Minute erneut.",
       "identity_mismatch": "Der Receiver hat eine andere MQTT-Identität angekündigt.",
       "host_key_changed": "Der SSH-Hostschlüssel des Receivers hat sich geändert.",
       "no_ack": "Der Receiver hat den Moduswechsel nicht bestätigt. Prüfe, ob das Plugin läuft und ob sein Broker-Zugang in die Themen dieses Knotens schreiben darf.",
@@ -111,6 +113,8 @@
       "rollback_restart_failed": "Die Installation ist fehlgeschlagen. Der Receiver wurde zurückgesetzt, aber seine Oberfläche ist nicht wieder gestartet — starte den Receiver von Hand neu; sonst ist nichts rückgängig zu machen.",
       "rollback_lock_failed": "Der Receiver wurde zurückgesetzt, aber die Sperre des Installers konnte nicht freigegeben werden — lösche /home/root/mqttbridge-backups/.ha-installer.lock von Hand oder warte 30 Minuten, bevor du erneut installierst.",
       "busy": "Auf diesem Receiver läuft bereits eine andere Installation.",
+      "rollback_opkg_busy": "Die Installation ist fehlgeschlagen, und der Receiver konnte nicht zurückgesetzt werden, weil seine Paketverwaltung (opkg) mit einem anderen Vorgang beschäftigt war — höchstwahrscheinlich einer Installation oder Entfernung aus dem Menü des Receivers. Es wurde nichts wiederhergestellt. Prüfe den Receiver von Hand: Die Sicherung von vor der Änderung liegt in /home/root/mqttbridge-backups.",
+      "opkg_busy": "Die Paketverwaltung des Receivers (opkg) ist mit einem anderen Vorgang beschäftigt — einer Installation oder Entfernung aus dem Menü des Receivers oder ihrer Aktualisierungsprüfung —, daher wurde nichts installiert. Versuche es in einer Minute erneut.",
       "identity_mismatch": "Der Receiver ist für die Knoten-ID {box_node_id} und das Basisthema {box_base_topic} konfiguriert, das Formular nennt {node_id} und {base_topic}. Ein Wert in Klammern ist auf dem Receiver nicht gespeichert; gezeigt wird die Voreinstellung des Plugins, sofern es eine gibt. Es wurde nichts geändert.",
       "unknown": "Installation ist unerwartet fehlgeschlagen; es wurde kein Eintrag erstellt."
     }
