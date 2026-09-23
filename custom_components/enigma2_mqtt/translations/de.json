@@ -138,7 +138,7 @@
           "source_list_scope": "Sender in der Quellenliste des Media Players"
         },
         "data_description": {
-          "dangerous_buttons": "Der Tiefschlaf nimmt den Receiver vom Netz, bis ihn ein Magic Packet weckt, und der Neustart unterbricht, was er gerade tut. Die Schaltflächen erscheinen erst, wenn beide Bedingungen erfüllt sind: diese Option ist eingeschaltet, und der Receiver selbst erlaubt den Tiefschlaf — diese Erlaubnis wird am Gerät unter Menü → Plugins → MQTT Bridge gesetzt und ist von hier aus nicht änderbar. Ein älteres Plugin, das diese Erlaubnis nicht meldet, überlässt die Entscheidung dieser Option. Die Schaltflächen sind voreingestellt ausgeblendet, damit sie auf einem gemeinsamen Dashboard nicht einen Fehlgriff neben der Lautstärke liegen, und das Plugin verweigert beide während einer Aufnahme, unabhängig von dieser Einstellung.",
+          "dangerous_buttons": "Der Tiefschlaf nimmt den Receiver vom Netz, bis ihn ein Magic Packet weckt, sofern der Receiver das unterstützt, und der Neustart unterbricht, was er gerade tut. Die Schaltflächen erscheinen erst, wenn beide Bedingungen erfüllt sind: diese Option ist eingeschaltet, und der Receiver selbst erlaubt den Tiefschlaf — diese Erlaubnis wird am Gerät unter Menü → Plugins → MQTT Bridge gesetzt und ist von hier aus nicht änderbar. Ein älteres Plugin, das diese Erlaubnis nicht meldet, überlässt die Entscheidung dieser Option. Die Schaltflächen sind voreingestellt ausgeblendet, damit sie auf einem gemeinsamen Dashboard nicht einen Fehlgriff neben der Lautstärke liegen, und das Plugin verweigert beide während einer Aufnahme, unabhängig von dieser Einstellung.",
           "wol_mac": "Leer lassen, um die vom Receiver gemeldete Adresse zu verwenden. Setze sie, wenn der Receiver eine andere Schnittstelle meldet als die angeschlossene — eine Box im WLAN antwortet nicht auf ein Magic Packet an ihren Kabelanschluss.",
           "bouquets": "Welche Bouquets die Senderliste und der Medienbrowser anbieten. Leer lassen für alle Bouquets, die der Receiver veröffentlicht.",
           "publish_keys": "Tastenereignisse können Automationen auslösen, zeigen aber auch, was gedrückt wird. Deaktiviere sie, wenn keine Automation sie benötigt.",
@@ -183,7 +183,15 @@
     },
     "button": {
       "deep_standby": {
-        "name": "Tiefschlaf"
+        "name": "Tiefschlaf",
+        "state_attributes": {
+          "wake_on_lan": {
+            "name": "Wake-on-LAN",
+            "state": {
+              "not_supported": "Nicht unterstützt: Dieser Receiver lässt sich aus dem Tiefschlaf nicht über das Netzwerk wecken, nur mit der Fernbedienung, der Taste an der Front oder einem Timer"
+            }
+          }
+        }
       },
       "restart_gui": {
         "name": "GUI neu starten"
@@ -192,7 +200,15 @@
         "name": "Neustart"
       },
       "wake": {
-        "name": "Wecken (WoL)"
+        "name": "Wecken (WoL)",
+        "state_attributes": {
+          "wake_on_lan": {
+            "name": "Wake-on-LAN",
+            "state": {
+              "not_supported": "Nicht unterstützt: Das Magic Packet wird gesendet, aber dieser Receiver wacht dadurch nicht aus dem Tiefschlaf auf, nur mit der Fernbedienung, der Taste an der Front oder einem Timer"
+            }
+          }
+        }
       },
       "screenshot": {
         "name": "Bildschirmfoto"

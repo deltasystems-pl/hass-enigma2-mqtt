@@ -187,7 +187,7 @@ effect without a restart.
 | Option | Default | What it does |
 |---|---|---|
 | **Show the deep standby and reboot buttons** | off | The Home Assistant half of the gate on „Głębokie uśpienie" and „Restart"; the receiver's own `deep_standby_allowed` is the other half, and [§4.5](#45-buttons-and-update) says how the two combine. Turning this off removes the buttons from the entity registry rather than leaving them behind unavailable. It is about what appears on a dashboard, **not** a safety mechanism: the plugin refuses both commands while a recording is running whatever is set here. |
-| **Wake-on-LAN MAC address** | the address the box reports on `info` | The target of the magic packet the „Obudź (WoL)" button and `media_player.turn_on` send. Set it when the receiver reports a different interface from the one that is plugged in — a box on Wi-Fi does not answer a packet sent to its cable port. Written as `00:00:5e:00:53:01`, `00-00-5e-00-53-01`, `0000.5e00.5301` or `00005e005301`, in any case; it is stored lower-case and colon-separated whichever you type, and anything that is not an address fails the form rather than failing later from inside `wake_on_lan`. Whichever address a packet would go to — the override, or the one the box reports — is registered on the device as its MAC connection, so the rest of Home Assistant knows it too. On current Home Assistant that connection does not merge devices across integrations, so a router or DHCP integration may still show a second card for the same receiver; it is there so that what *is* keyed on a MAC can find this one. A value stored by an earlier release that is not an address is dropped once at startup, with a line in the log. |
+| **Wake-on-LAN MAC address** | the address the box reports on `info` | The target of the magic packet the „Obudź (WoL)" button, `media_player.turn_on` and `remote.turn_on` send. Set it when the receiver reports a different interface from the one that is plugged in — a box on Wi-Fi does not answer a packet sent to its cable port. Written as `00:00:5e:00:53:01`, `00-00-5e-00-53-01`, `0000.5e00.5301` or `00005e005301`, in any case; it is stored lower-case and colon-separated whichever you type, and anything that is not an address fails the form rather than failing later from inside `wake_on_lan`. Whichever address a packet would go to — the override, or the one the box reports — is registered on the device as its MAC connection, so the rest of Home Assistant knows it too. On current Home Assistant that connection does not merge devices across integrations, so a router or DHCP integration may still show a second card for the same receiver; it is there so that what *is* keyed on a MAC can find this one. A value stored by an earlier release that is not an address is dropped once at startup, with a line in the log. |
 | **Bouquets to offer** | every bouquet the box publishes | Which bouquets feed the media player's channel list and the media browser. The choices are the bouquets on the `channels` topic, and a name can be typed for one the box has not published yet. This narrows the plugin's own `bouquets_for_select`; it cannot widen it. |
 | **Channels in the media player's source list** | every bouquet on offer | What `media_player.source_list` holds, and nothing else. **Every bouquet on offer** is what this integration has always done and stays the default, so an existing installation does not change under an automation that names a channel; on a receiver with about a thousand channels it is a dropdown of about a thousand rows. **The active bouquet** is the short list the receiver's own channel ± is walking, which is also what the „Kanał" select shows. `select_source` follows this setting; the `zap` action takes a service reference and does not. Three cases keep the long list whatever is chosen, because there is nothing to shorten it to and an empty source list would leave no way to change channel: a receiver that publishes no channel-list context (an older plugin without `bouquet_context`), a context naming a bouquet the **Bouquets to offer** option excludes, and a context naming a bouquet with no playable channel in it. The last two are logged as a warning, once per bouquet. 🔴 This setting is **not** about the recorder: Home Assistant declares `source_list` an unrecorded attribute and the recorder removes it before it measures a state against its size limit, so the long list never reached the database in the first place. |
 | **Check for published plugin releases** | off | The only thing this integration can do that is not talking to your own broker, which is why it is off. Turned on, the version entity asks the plugin repository which release is published — **at most once every 24 hours** — and reports the tag in its summary, in a `published_version` attribute and in the release link. The time of the last request and its answer are written to `.storage/enigma2_mqtt.release_check`, keyed by config entry, so reloading the receiver, saving the options or restarting Home Assistant shows what is already known instead of spending another request; the record is deleted when the receiver is removed. At most 64 KiB of the answer is read, and a tag is only believed if it is at most 64 characters and parses as a version. The release link is only followed if it points into this plugin's own releases. It downloads nothing and it never raises `latest_version`: `install` can only ever put the bundle shipped here on a receiver, and offering a version the installer would refuse would be a button that lies. Failures — a rate limit, a timeout, an answer that is not a release — are a debug line and nothing else. |
@@ -313,7 +313,9 @@ while the box is unreachable, because that is precisely when somebody wants to w
   takes a name. The browser sends the first.
 - **Volume** — set, step and mute, on the box's own 0–100 scale underneath.
 - **Turning on** — `cmd/power on` when the box is listening, a Wake-on-LAN magic packet when
-  it is not. Turning off is always `cmd/power standby`; nothing here sends deep standby.
+  it is not; the packet wakes nothing from deep standby on a receiver that reports it cannot be
+  woken over the network ([§4.5](#45-buttons-and-update)). `remote.turn_on` does the same.
+  Turning off is always `cmd/power standby`; nothing here sends deep standby.
 - **Picture** — the retained `screen` JPEG is both the media image and the entity picture, and
   its hash changes with every frame so the browser fetches the new one.
 - **Position** — from `epg.now`, so the progress bar is the programme, not a stream.
@@ -510,10 +512,10 @@ it is the opposite: the answer is coming, and the dashboard should not sit still
 
 | Key | Polish name | unique_id | Command | What proves it |
 |---|---|---|---|---|
-| `deep_standby` | *Głębokie uśpienie* | `<node_id>_deep_standby` | `cmd/deep_standby` · **both gates below** | silence |
+| `deep_standby` | *Głębokie uśpienie* | `<node_id>_deep_standby` | `cmd/deep_standby` · **both gates below**; attribute `wake_on_lan` where the receiver cannot be woken over the network | silence |
 | `restart_gui` | *Restart GUI* | `<node_id>_restart_gui` | `cmd/restart_gui` | silence |
 | `reboot` | *Restart* | `<node_id>_reboot` | `cmd/reboot` · **both gates below** | silence |
-| `wake` | *Obudź (WoL)* | `<node_id>_wake` | `wake_on_lan.send_magic_packet` — no MQTT, and available while the box is not | — |
+| `wake` | *Obudź (WoL)* | `<node_id>_wake` | `wake_on_lan.send_magic_packet` — no MQTT, and available while the box is not; attribute `wake_on_lan` where the receiver cannot be woken over the network | — |
 | `screenshot` | *Zrzut ekranu* | `<node_id>_screenshot` | `cmd/screenshot` | `screen` is republished |
 | `refresh_discovery` | *Odśwież discovery* | `<node_id>_refresh_discovery` | `cmd/discovery` | the announcement is republished |
 | `refresh_epg` | *Odśwież EPG* | `<node_id>_refresh_epg` | `cmd/epg_grid` · only while the box names the `epg_grid` capability | silence |
@@ -535,6 +537,22 @@ publishes on its own interval, or a retained picture or announcement replayed by
 after a reconnect, can end a press's wait. The press then reports success for something it did
 not cause. It is benign — the command was sent, and the receiver carries it out or complains on
 its own — and the alternative is a correlation id the contract does not have.
+
+**A receiver that cannot be woken over the network says so on „Głębokie uśpienie" and „Obudź
+(WoL)".** From plugin 0.3.0 the receiver reports `info.wol`, whose `supported` is the image's own
+answer — whether it found a switch to arm Wake-on-LAN for deep standby — and not the network
+card's `Supports Wake-on`, which describes a suspend path these images do not take. Where it is
+`false`, both buttons carry the attribute `wake_on_lan` with the value `not_supported`, for
+automations and dashboards to read. Its translation, „Wake-on-LAN" followed by a sentence in the
+household's language, says that from deep standby that receiver is woken only by its remote, its
+front button or a timer, and on „Obudź (WoL)" that the magic packet is still sent but will not
+wake it. Home Assistant shows it only to administrators, under ⋮ → Details in the button's
+dialog: a button has no control of its own there, and that menu is drawn for administrators
+alone. The same applies to `media_player.turn_on` and `remote.turn_on` while the box is in deep
+standby, which send the same packet. A button has no description of its own in Home Assistant,
+and an attribute leaves the name — and so the entity id — alone. Where the receiver
+reports `supported: true`, or an older plugin reports no `wol` at all, or `supported` is not a
+boolean, neither button has the attribute and nothing else changes.
 
 **„Odśwież EPG"** exists only while the receiver names the `epg_grid` capability. With the
 plugin's `epg_grid_events` setting at zero there are no grids to rebuild, the capability is
