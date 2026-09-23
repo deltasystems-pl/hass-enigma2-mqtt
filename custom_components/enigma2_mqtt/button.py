@@ -37,10 +37,11 @@ receivers neither is true: the image has no way to arm the network port for deep
 and the box stays dark whatever arrives. A receiver that says so (`info.wol.supported`
 is `false`) gets the `wake_on_lan` attribute on those two buttons, and its one value is
 translated per button into what the household can do instead: the remote, the front
-button or a timer. A button has no description of its own in Home Assistant; an
-attribute is what its more-info dialog shows beside the press, it can be read by an
-automation, and it changes neither the name nor the entity id, which on a Polish
-installation is derived from the Polish name. A receiver that says Wake-on-LAN works, or
+button or a timer. A button has no description of its own in Home Assistant, and no
+control of its own in the more-info dialog either: the attribute is for automations and
+dashboards to read, and the frontend shows it only to administrators, under ⋮ → Details.
+It changes neither the name nor the entity id, which on a Polish installation is derived
+from the Polish name. A receiver that says Wake-on-LAN works, or
 a plugin that says nothing, gets no attribute: nothing changes where nobody has said it
 does not work.
 """
