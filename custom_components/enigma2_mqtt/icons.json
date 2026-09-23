@@ -89,6 +89,9 @@
     "notify": {
       "osd": {
         "default": "mdi:message-text"
+      },
+      "osd_toast": {
+        "default": "mdi:message-badge-outline"
       }
     },
     "number": {

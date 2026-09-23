@@ -369,6 +369,25 @@ MESSAGE_TYPES: Final = ("info", "warning", "error")
 MESSAGE_MAX_LENGTH: Final = 500
 MESSAGE_DEFAULT_TIMEOUT: Final = 10
 
+# The two ways `cmd/message` can show a text. The popup is what the command has always
+# done: a dialog that takes focus and waits in the image's notification queue. The toast
+# is a small overlay in a corner that takes no key and hides itself, and the plugin only
+# offers it where the screen for it was actually built — which it says by naming the
+# `toast` capability. The popup is the default because a payload without `style` has to
+# mean exactly what it meant before the field existed.
+MESSAGE_STYLE_POPUP: Final = "popup"
+MESSAGE_STYLE_TOAST: Final = "toast"
+MESSAGE_STYLES: Final = (MESSAGE_STYLE_POPUP, MESSAGE_STYLE_TOAST)
+CAPABILITY_TOAST: Final = "toast"
+
+# A toast is a glance, not a letter: the plugin cuts its text at 200 characters, hides it
+# after five seconds unless told otherwise, and will not keep one up for longer than
+# thirty — nor show one "until dismissed", since nothing on it can be dismissed.
+TOAST_MAX_LENGTH: Final = 200
+TOAST_DEFAULT_TIMEOUT: Final = 5
+TOAST_MIN_TIMEOUT: Final = 1
+TOAST_MAX_TIMEOUT: Final = 30
+
 # What `cmd/record` accepts.
 RECORD_ACTIONS: Final = ("start", "stop")
 
