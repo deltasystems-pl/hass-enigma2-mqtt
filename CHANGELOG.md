@@ -74,8 +74,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **One entity that fails on a message no longer stops the others from updating.** Every entity
   of a receiver is told about a message in turn, and an exception in one of them used to skip
   every entity after it for that message and put a traceback in the log on each message for as
-  long as the fault lasted. The failing entity is now logged once, with its traceback, and its
-  repeats go to the debug log; the rest update as usual.
+  long as the fault lasted. The failing entity is now logged once per run of failures, with its
+  traceback, and the repeats in that run go to the debug log; the rest update as usual.
 
 ## [0.2.0] - 2026-09-22
 

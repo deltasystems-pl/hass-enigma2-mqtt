@@ -578,7 +578,7 @@ class _Listener:
 
     callback: Callable[[], None]
     topics: frozenset[str] | None = None
-    # Whether this callback has raised before, so its traceback is logged once.
+    # Whether this callback's last call raised, so a run of failures is logged once.
     failed: bool = False
 
     def wants(self, suffix: str) -> bool:
@@ -1690,7 +1690,9 @@ class Enigma2Box:
         MQTT client, which logs a traceback on each message for as long as the entity
         keeps raising. The first failure of a listener is logged with its traceback, at
         error level, because it is a bug; the repeats go to debug, because the tenth copy
-        of the same traceback on every grid refresh only buries the log around it.
+        of the same traceback on every grid refresh only buries the log around it. A
+        successful call ends the run, so the next failure — which may be a different bug
+        entirely — is logged at error level again rather than hidden until a reload.
         """
         for listener in list(self._listeners):
             if not listener.wants(suffix):
@@ -1709,10 +1711,13 @@ class Enigma2Box:
                     listener.failed = True
                     _LOGGER.exception(
                         "A listener of receiver %s failed on %s; the others still ran, "
-                        "and later failures of this one are logged at debug level",
+                        "and its further failures are logged at debug level until it "
+                        "next succeeds",
                         self.node_id,
                         suffix,
                     )
+            else:
+                listener.failed = False
 
 
 async def async_send_magic_packet(box: Enigma2Box) -> None:
