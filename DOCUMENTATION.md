@@ -236,7 +236,7 @@ everything.
 
 ## 4. Entities
 
-**Twenty-five entities on every receiver**, and thirty more that exist only while
+**Twenty-five entities on every receiver**, and thirty-two more that exist only while
 something says they should — plus one set of three per OSCam source, which has no fixed
 number because it follows however many readers and servers that receiver has. The
 conditional ones are, in full:
@@ -247,10 +247,12 @@ conditional ones are, in full:
 | 1 | „Odśwież EPG" | the receiver reports the `epg_grid` capability |
 | 1 | „EPG – aktywny bukiet" | the receiver reports the `epg_grid` **and** `bouquet_context` capabilities |
 | 1 | „Softcam" | the receiver reports the `softcam` capability |
+| 1 | „Import EPG" | the receiver reports the `epg_import` capability |
 | 1 | „Ekran – dyskretnie" | the receiver reports the `toast` capability |
 | 5 | the enigma2 process diagnostics | the receiver reports the `process` capability |
 | 2 | „Głębokie uśpienie", „Restart" | the Home Assistant option asks for them **and** the receiver permits deep standby |
 | 1 | „Restart softcam" | the receiver reports the `softcam` capability **and** permits a softcam restart |
+| 1 | „Pobierz EPG" | the receiver reports the `epg_import` capability **and** permits an EPG import |
 | 4 | the conditional-access diagnostics | the `cam_telemetry` option is on |
 | 12 | the OSCam aggregates | the `oscam_telemetry` option is on |
 | 3 per OSCam source | status, ready cards, shared cards | the `oscam_telemetry` option is on, for each reader or server that receiver reports |
@@ -260,7 +262,7 @@ splits on it. A row that follows an **option or a permission** is removed on a s
 „no": somebody decided, at the television or on the options form, and an entity that can
 never say anything again is worse than none. A row that follows a **capability** is
 removed only where the control behind it would be permanently refused — „Odśwież EPG" on
-a receiver that builds no grids. „Softcam", „EPG – aktywny bukiet" and the five process
+a receiver that builds no grids. „Softcam", „Import EPG", „EPG – aktywny bukiet" and the five process
 diagnostics are neither: they are sensors with a history, and a capability that stops being named is an older
 plugin after a downgrade, a hook that failed to attach on one boot, or a receiver that has
 not answered yet. None of those is a decision, so they stay and say nothing until the
@@ -374,6 +376,7 @@ while the box is unreachable, because that is precisely when somebody wants to w
 | `uptime` | *Czas pracy* | `<node_id>_uptime` | `info` | seconds · diagnostic · **disabled by default** |
 | `epg_active_bouquet` | *EPG – aktywny bukiet* | `<node_id>_epg_active_bouquet` | `bouquet`, `epg_grid/<bouquet_slug>` | how many channels of the active bouquet have a programme now or next · no unit · attribute `channels` (**not recorded**) · only while the receiver names the `epg_grid` and `bouquet_context` capabilities |
 | `softcam` | *Softcam* | `<node_id>_softcam` | `softcam` | the selected cam binary · diagnostic · only while the receiver names the `softcam` capability |
+| `epg_import` | *Import EPG* | `<node_id>_epg_import` | `epg_import` | `idle`, `running`, `done` or `failed` · diagnostic · attributes `started`, `finished`, `events`, `error` · only while the receiver names the `epg_import` capability |
 | `last_error` | *Ostatni błąd* | `<node_id>_last_error` | `last_error` | the refused command's name · diagnostic · attributes `error` and `time` |
 | `process_memory` | *Pamięć Enigma2* | `<node_id>_process_memory` | `process` | MiB · `data_size` · diagnostic · **on by default** |
 | `process_memory_peak` | *Pamięć Enigma2 (szczyt)* | `<node_id>_process_memory_peak` | `process` | MiB · the high-water mark since the process started · diagnostic · **disabled by default** |
@@ -428,6 +431,26 @@ thread will otherwise spend an afternoon confusing.
 | `restarts_today` | restarts since local midnight. It lives in the receiver's memory and the topic is retained, so after a receiver reboot this shows the last published number until the plugin publishes again: it is a counter, not a durable total |
 | `manager_check_on_start` | whether the image's own softcam liveness check will add a copy at every interface restart on this box. This is the difference between a receiver that needs the restart button and one that merely has it |
 | `manager_timer_minutes` | the image's periodic check interval when it is switched on, `unknown` when it is not. A receiver with both this and `manager_check_on_start` gains an instance every interval, for ever — which is the runaway worth seeing on a dashboard before it becomes a household symptom |
+
+**Import EPG** is what the receiver's own EPG-Importer is doing, **whoever started it** —
+„Pobierz EPG", the image's daily schedule or the importer's own screen. The plugin looks at the
+importer every minute while it is idle and every two seconds while it runs, so an import the
+image started shows as `running` too, and a press refused as „already running" is never
+unexplained.
+
+| Attribute | What |
+|---|---|
+| `started` | when the run began, ISO 8601 — for a run the plugin did not start, when it first saw it |
+| `finished` | when the importer says it finished, ISO 8601. After a restart of the receiver it is the importer's own record of the last run |
+| `events` | how many events the importer **processed** in that run — not how many were new to the guide. A run one day after the last adds days at the far end of the guide, not events in the next few hours |
+| `error` | why it failed, for a person, cut at 255 characters |
+
+`failed` has only three causes the plugin can see: the import did not start, it finished with
+**no events** (the importer reports every run as finished, even one whose every download
+failed, and names no source), or it did not finish within **30 minutes**. The plugin cannot
+cancel an import, so after the watchdog it keeps refusing a new one for as long as the old one
+still runs. Every value that is not what the contract says — a state outside
+the four, a time of zero, `true` as a count — is `unknown` rather than guessed at.
 
 **EPG – aktywny bukiet** is what is on across the bouquet the receiver's channel ± is
 walking — the same list its own EPG would show for it. It reads the retained grid whose
@@ -495,6 +518,7 @@ it is the opposite: the answer is coming, and the dashboard should not sit still
 | `refresh_discovery` | *Odśwież discovery* | `<node_id>_refresh_discovery` | `cmd/discovery` | the announcement is republished |
 | `refresh_epg` | *Odśwież EPG* | `<node_id>_refresh_epg` | `cmd/epg_grid` · only while the box names the `epg_grid` capability | silence |
 | `softcam_restart` | *Restart softcam* | `<node_id>_softcam_restart` | `cmd/softcam_restart` · **both gates below** | silence |
+| `epg_import` | *Pobierz EPG* | `<node_id>_epg_import` | `cmd/epg_import` · **both gates below** | a new `epg_import` payload in `running` |
 | `plugin` | *Wtyczka MQTT Bridge* | `<node_id>_plugin` | an `update` entity: installed = `info.plugin`, latest = the plugin release this version was written against | — |
 
 **Every button waits for the receiver**, on the same path as the actions below. A refusal
@@ -552,6 +576,35 @@ can take about ten seconds before it republishes `softcam` — it waits for the 
 go, kills what survives, starts one and lets it settle — and waiting for that topic would
 report „the receiver did not carry this out" for a restart that worked on exactly the
 slowest boxes. Every refusal arrives immediately, which is what the wait is for.
+
+**„Pobierz EPG"** runs the receiver's own EPG-Importer now, with the sources selected on the
+receiver, instead of waiting for its schedule. The import is the image's, not the plugin's:
+
+- **At its end the image saves the guide on the thread that draws the picture**, so menus freeze
+  for two to three seconds. The plugin adds nothing blocking of its own and cannot move that.
+- If the importer's **„clear old EPG"** setting is on, the image empties the whole guide before it
+  imports, and the grids stay empty until it finishes.
+- **The importer's own deep-standby settings apply** to an import started here exactly as to a
+  scheduled one: a receiver in standby that the importer is set to shut down afterwards will shut
+  down. That is the image's behaviour, not a fault of the button.
+
+It has the same two gates as „Restart softcam", both the receiver's: the permission
+`epg_import_allowed`, set under *Menu → Plugins → MQTT Bridge* and not writable over MQTT, and
+the **`epg_import` capability**, which the plugin claims only where it found the importer the
+image already loaded and the guide can be imported in place — on an image where the importer
+would finish by restarting the interface, there is no capability and no button. Only a stated
+„no" to the permission removes the button.
+
+The receiver refuses the press, in its own words on „Ostatni błąd", without the permission;
+while an import is running, whoever started it; while recording or with a recording due within
+ten minutes, because the final save holds up the thread that starts recordings; within ten
+minutes of the importer's own scheduled run; and when no sources are selected. The press waits
+for a **new** `epg_import` payload saying `running` — the one already held does not count, since
+an import the schedule started is already `running` and the receiver refuses a second one. If
+the new payload says `failed` instead, the press raises its `error`; the first answer stands.
+A retained copy the broker replays after a reconnect is never the answer, because it may
+describe the previous run. While an import runs the
+receiver also refuses its own deep standby, reboot and interface restart, which would lose it.
 
 **„Głębokie uśpienie" and „Restart" need two gates open**: the Home Assistant option
 [below](#options), and the receiver's own `deep_standby_allowed`, which is set on the box under

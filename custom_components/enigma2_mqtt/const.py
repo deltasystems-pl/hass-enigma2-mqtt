@@ -54,6 +54,8 @@ CONF_SOFTCAM_AUTOHEAL_SECONDS: Final = "softcam_autoheal_seconds"
 # settings and the options flow sends them like any other.
 CONF_DEEP_STANDBY_ALLOWED: Final = "deep_standby_allowed"
 CONF_SOFTCAM_RESTART_ALLOWED: Final = "softcam_restart_allowed"
+# The third, for the on-demand EPG import (item i), under the same rule.
+CONF_EPG_IMPORT_ALLOWED: Final = "epg_import_allowed"
 
 SCREENSHOT_OFF: Final = "off"
 SCREENSHOT_ON_ZAP: Final = "on_zap"
@@ -255,6 +257,20 @@ CAPABILITY_SOFTCAM: Final = "softcam"
 # reads, and the channel-list context that says which of them is the one in use.
 CAPABILITY_EPG_GRID: Final = "epg_grid"
 CAPABILITY_BOUQUET_CONTEXT: Final = "bouquet_context"
+
+# The on-demand EPG import. The plugin claims the capability only where it found the
+# image's own EPG-Importer already loaded and the EPG cache can import in place; the
+# topic says what the importer is doing, whoever started it.
+TOPIC_EPG_IMPORT: Final = "epg_import"
+CAPABILITY_EPG_IMPORT: Final = "epg_import"
+# The four states the topic may report. Anything else is not part of the contract and
+# is read as "it did not say".
+EPG_IMPORT_STATES: Final = ("idle", "running", "done", "failed")
+# The most events one import is believed to report. A real run here is about 120 000;
+# the ceiling only keeps a nonsense payload off a graph.
+MAX_EPG_IMPORT_EVENTS: Final = 100_000_000
+# The furthest ahead a `started` or `finished` is read as a clock: 2100-01-01T00:00:00Z.
+MAX_EPG_IMPORT_EPOCH: Final = 4_102_444_800
 
 # How much of a programme title the active-bouquet sensor carries. A few titles run to a
 # whole sentence of episode blurb, and the sensor holds one per channel twice over; eighty

@@ -72,6 +72,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   anything is sent, since nothing on a toast can dismiss it. A toast aimed at a receiver
   that does not offer one is refused the same way.
 
+- **„Pobierz EPG", a button that runs the receiver's own EPG-Importer now** (English „Import
+  EPG"), and **„Import EPG", a diagnostic** (English „EPG import") that says whether an import is
+  `idle`, `running`, `done` or `failed`, with when it started and finished, how many events the
+  importer processed, and why it failed. The sensor follows every import, including the ones the
+  image's own schedule starts, so a press refused as „already running" is never unexplained. The
+  press waits until the receiver reports the import running; every refusal — no permission, an
+  import already running, a recording running or due within ten minutes, the image's own run due
+  within ten minutes, no sources selected — raises the receiver's own sentence, and so does a
+  start that failed. The import is the image's: at its end menus freeze for two to three
+  seconds while the image saves the guide, and the importer's own deep-standby and „clear old
+  EPG" settings apply as they do to a scheduled run.
+- 🔴 The button has **two gates, both the receiver's**, as „Restart softcam" does: the
+  permission `epg_import_allowed`, set on the receiver and refused over MQTT, and the
+  `epg_import` capability, claimed only where the plugin found the importer loaded and able to
+  import in place. Only a stated „no" to the permission removes the button; the sensor, which
+  follows the capability alone, is never removed.
+
 ### Changed
 
 - **A `message` action without `style` is byte-for-byte the popup it was**, but its `timeout`

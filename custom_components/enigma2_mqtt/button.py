@@ -47,8 +47,20 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .box import Enigma2Box, Enigma2MqttConfigEntry, async_send_magic_packet
-from .const import CAPABILITY_SOFTCAM, CONF_DANGEROUS_BUTTONS, TOPIC_SCREEN
+from .box import (
+    Enigma2Box,
+    Enigma2CommandError,
+    Enigma2MqttConfigEntry,
+    async_send_magic_packet,
+)
+from .const import (
+    CAPABILITY_EPG_IMPORT,
+    CAPABILITY_SOFTCAM,
+    CONF_DANGEROUS_BUTTONS,
+    DOMAIN,
+    TOPIC_EPG_IMPORT,
+    TOPIC_SCREEN,
+)
 from .entity import Enigma2Entity, OptionalEntities
 
 PARALLEL_UPDATES = 0
@@ -95,6 +107,55 @@ def _async_command(name: str) -> Callable[[Enigma2Box], Coroutine[Any, Any, None
         await box.async_command(name, PRESS)
 
     return _press
+
+
+async def _async_epg_import(box: Enigma2Box) -> None:
+    """Ask the receiver to import EPG, and wait for the import to be seen running.
+
+    The proof is the `epg_import` topic saying `running` — and it has to be a *new*
+    payload that says so, not the state already held. An import the image's own
+    schedule started is already `running`; the box refuses a second one with „already
+    running" on `last_error`, and reading the old state as the answer would report that
+    refusal as a success.
+
+    Every guard refuses on `last_error`, and `async_command` raises that sentence. The
+    one other answer is a new payload in `failed`: the plugin publishes it when starting
+    the importer threw, with the reason in `error`. That ends the wait too and raises the
+    receiver's own words, rather than sitting out the timeout and blaming the receiver
+    for not answering when it did.
+    """
+    before = box.updates.get(TOPIC_EPG_IMPORT, 0)
+    answer: dict[str, Any] = {}
+
+    def answered() -> bool:
+        # The first answer stands. The waiter resumes a tick after the future is set,
+        # and every payload in between re-runs this check: a `failed` followed at once
+        # by a `running` must still read as the failure it was.
+        if answer:
+            return True
+        if box.updates.get(TOPIC_EPG_IMPORT, 0) <= before:
+            return False
+        # A retained delivery is what the broker already held — after a reconnect
+        # Home Assistant resubscribes and the broker replays it — so it may be the
+        # previous run's `failed`. It updates the sensor and answers nothing.
+        if box.state.epg_import_retained:
+            return False
+        payload = box.state.epg_import or {}
+        if payload.get("state") in ("running", "failed"):
+            answer.update(payload)
+            return True
+        return False
+
+    await box.async_command("epg_import", PRESS, effect=answered)
+    if answer.get("state") == "failed":
+        raise Enigma2CommandError(
+            translation_domain=DOMAIN,
+            translation_key="command_refused",
+            translation_placeholders={
+                "command": "epg_import",
+                "reason": answer.get("error") or "the import failed",
+            },
+        )
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -174,6 +235,15 @@ SOFTCAM_BUTTON = Enigma2ButtonDescription(
     press_fn=_async_command("softcam_restart"),
 )
 
+# „Pobierz EPG": the receiver's own EPG-Importer, run now rather than at its scheduled
+# time. Two gates, both the box's, exactly as for „Restart softcam": the permission
+# `epg_import_allowed`, set on the receiver and refused over MQTT, and the `epg_import`
+# capability, claimed only where the importer was found loaded and safe to call.
+EPG_IMPORT_BUTTON = Enigma2ButtonDescription(
+    key="epg_import",
+    press_fn=_async_epg_import,
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -213,6 +283,7 @@ async def async_setup_entry(
             *DANGEROUS_BUTTONS,
             *(pair[1] for pair in CAPABILITY_BUTTONS),
             SOFTCAM_BUTTON,
+            EPG_IMPORT_BUTTON,
         )
     }
 
@@ -286,6 +357,26 @@ async def async_setup_entry(
             # or a receiver that has not answered yet, and none of those is a decision
             # anybody made.
             lambda: has_answered() and box.softcam_restart_permission is False,
+            async_add_entities,
+        ).start()
+    )
+
+    entry.async_on_unload(
+        OptionalEntities(
+            hass,
+            box,
+            "button",
+            [EPG_IMPORT_BUTTON.key],
+            factory,
+            # The softcam button's gates, for the softcam button's reasons: a stated
+            # „yes" to the permission on a box that names the capability creates it,
+            # and only a stated „no" to the permission removes it.
+            lambda: (
+                CAPABILITY_EPG_IMPORT in box.capabilities
+                and has_answered()
+                and box.epg_import_permission is True
+            ),
+            lambda: has_answered() and box.epg_import_permission is False,
             async_add_entities,
         ).start()
     )

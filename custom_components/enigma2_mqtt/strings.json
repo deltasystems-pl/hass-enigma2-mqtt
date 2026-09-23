@@ -231,6 +231,9 @@
       },
       "softcam_restart": {
         "name": "Restart softcam"
+      },
+      "epg_import": {
+        "name": "Import EPG"
       }
     },
     "event": {
@@ -341,6 +344,10 @@
       "oscam_source_shared_cards": {"name": "OSCam source {id} reported shared cards"},
       "epg_active_bouquet": {"name": "EPG, active bouquet"},
       "softcam": {"name": "Softcam"},
+      "epg_import": {
+        "name": "EPG import",
+        "state": {"idle": "Idle", "running": "Running", "done": "Done", "failed": "Failed"}
+      },
       "last_error": {"name": "Last error"}
     },
     "switch": {

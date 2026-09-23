@@ -72,6 +72,9 @@
       "softcam_restart": {
         "default": "mdi:shield-refresh"
       },
+      "epg_import": {
+        "default": "mdi:television-guide"
+      },
       "wake": {
         "default": "mdi:sleep-off"
       }
@@ -195,6 +198,9 @@
       },
       "softcam": {
         "default": "mdi:shield-lock-outline"
+      },
+      "epg_import": {
+        "default": "mdi:database-import-outline"
       },
       "uptime": {
         "default": "mdi:clock-start"
