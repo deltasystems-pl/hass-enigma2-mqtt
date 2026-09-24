@@ -23,13 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   receiver, and never writes. The flow ends on „removed and verified", „removed, not verified" with
   the reason, „the receiver said it removed the plugin", „the receiver refused" with its own words,
   „the receiver started the removal but aborted it" with its own words — which say what state
-  the package is in — once any retraction has arrived after the command was sent (not somebody
+  the package is in — once any retraction has arrived as the command was sent (not somebody
   else's before it), even without the `offline`, „the removal did not
   complete", or „the receiver did not act". The plugin says `offline` before it runs opkg, so the
   flow keeps listening after it — through the SSH readbacks, or for the rest of the minute without
   them — and a receiver that comes back and says why ends it at once. A dropped or timed-out SSH
   connection only costs the verification, a restart that never came does not hide the other
-  readbacks, the hook check waits for OpenWebif, and a briefly held opkg lock (and only the lock)
+  readbacks, the hook check waits for OpenWebif, and a briefly held opkg lock (a lock somebody holds, never one that cannot be created)
   is asked again; a lock still held before the command refuses the removal before anything is
   published, „opkg on the receiver is busy — try again in a few minutes". A
   receiver in `ha_mode: off`, which has no announcement to retract, is recognised by its `info`

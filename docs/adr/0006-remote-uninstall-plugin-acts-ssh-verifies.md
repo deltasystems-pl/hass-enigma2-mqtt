@@ -73,10 +73,16 @@ everything back and undoes it. A fresh `last_error` for the command is a **refus
 retraction at all has arrived, and a **rollback** as soon as any one has — an emptied `info`,
 announcement or `availability` (the plugin retracts in sorted order, its own `availability`
 first) — even when the `offline` that completes the shape never reached Home Assistant because
-the connection dropped mid-retraction. Only a retraction that arrives **after** Home Assistant's
-client has had the command acknowledged counts: one before it is somebody else's — a third client
+the connection dropped mid-retraction. Only a retraction that arrives once the command is about
+to be published counts toward the rollback: one before it is somebody else's — a third client
 switching `ha_mode` off, a `cmd/reset`, an `availability` emptied by hand — and must not turn a
-refusal into a rollback. A fresh non-empty payload is a republish, never a retraction. A
+refusal into a rollback. The count starts immediately **before** the publish call, not after it
+returns: the call awaits the broker's acknowledgement, and Home Assistant's client dispatches
+incoming messages as it reads them, so after a stall of the event loop the acknowledgement and the
+receiver's first retractions arrive in one read and are handled before the call returns. The
+removal's *shape* is scoped differently, deliberately: it is what the broker holds, whoever emptied
+it — an announcement retracted by `ha_mode: off` a moment before the command is one the plugin no
+longer has to retract. A fresh non-empty payload is a republish, never a retraction. A
 `last_error` about any other command — the plugin defers `cmd/config` during a removal and says so
 under `config` — is not an answer to this one.
 
@@ -98,7 +104,10 @@ its status page (bounded), then `opkg status` empty, no opkg info file, no plugi
 `MQTTBridge` file anywhere under the Python tree, `/mqttbridge` answering 404, and the block's count
 and hash unchanged. A restart that never came is named and does not hide the other readbacks; the
 404 check, which only a restart settles, is then left out. A refusal of `opkg status` for its lock
-— and only for its lock, recognised by „lock" as a word, so „blocked" does not count — is asked again, briefly. If the lock is still held before the command,
+— and only for a lock somebody holds: opkg's `Could not lock <path>` or the image's `Command
+failed to capture privilege lock`; `Could not create lock file …`, for the file or its directory,
+is a receiver that cannot take the lock at all and is not retried — is asked again, briefly. If
+the lock is still held before the command,
 the flow refuses there, „opkg on the receiver is busy", and publishes nothing: the plugin would meet
 the same lock after retracting everything, and roll back. Every SSH failure — a dropped connection
 or a timeout included, `pidof` among the before-reads as much as any other, before the

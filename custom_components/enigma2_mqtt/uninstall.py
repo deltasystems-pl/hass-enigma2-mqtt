@@ -119,9 +119,12 @@ _HOOK_STATUS = "wget -S -O /dev/null http://127.0.0.1/mqttbridge 2>&1"
 _HTTP_STATUS = re.compile(r"HTTP/\d(?:\.\d)?\s+(\d{3})")
 # opkg takes `/run/opkg.lock` even to answer `status`, and the image's own update check or
 # its plugin browser can be holding it. A refusal for that reason is asked again, briefly.
-# opkg says „Could not lock /run/opkg.lock"; a word boundary keeps „blocked" and the like
-# from counting as a lock.
-_LOCKED = re.compile(r"\block\b", re.IGNORECASE)
+# Only the two refusals that mean somebody else holds the lock right now and will let go:
+# opkg's own `Could not lock <path>: …` and the image's `Command failed to capture privilege
+# lock`. `Could not create lock file …` — the file or its directory — is a receiver that
+# cannot take the lock at all, which asking again does not change; nor is „blocked" a lock.
+# Case-sensitive, because these are opkg's fixed strings.
+_LOCKED = re.compile(r"Could not lock |failed to capture privilege lock")
 LOCK_RETRIES = 5
 LOCK_RETRY_SECONDS = 2.0
 # How long the readbacks wait for OpenWebif after the interface restarted, and how often
@@ -247,6 +250,15 @@ async def async_uninstall(
     loop = hass.loop
     try:
         await watch.async_wait_until_established()
+        # From here an emptied topic can be the receiver's answer. A retraction before it
+        # is somebody else's — a third client switching `ha_mode` off, a `cmd/reset`, an
+        # `availability` emptied by hand — and must not turn a refusal into a rollback.
+        # Armed before the publish, not after it: the publish awaits the broker's
+        # acknowledgement, and Home Assistant's client dispatches incoming messages
+        # synchronously as it reads them, so after a stall of the event loop the
+        # acknowledgement and the receiver's first retractions arrive in one read — and
+        # are handled before the publish returns, or while it waits out its own timeout.
+        watch.arm()
         await mqtt.async_publish(
             hass,
             command_topic(box.base_topic, box.node_id, COMMAND),
@@ -254,11 +266,6 @@ async def async_uninstall(
             qos=1,
             retain=False,
         )
-        # Only from here can an emptied topic be the receiver's answer: the command has
-        # left Home Assistant's client and been acknowledged. A retraction before it is
-        # somebody else's — a third client switching `ha_mode` off, a `cmd/reset`, an
-        # `availability` emptied by hand — and must not turn a refusal into a rollback.
-        watch.arm()
         deadline = loop.time() + timeout
         await asyncio.wait(
             {watch.refused, watch.shape, watch.rolled_back},
