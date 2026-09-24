@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connection only costs the verification, a restart that never came does not hide the other
   readbacks, the hook check waits for OpenWebif, and a briefly held opkg lock (a lock somebody holds, never one that cannot be created)
   is asked again; a lock still held before the command refuses the removal before anything is
-  published, „opkg on the receiver is busy - try again in a few minutes". A
+  published, „opkg on the receiver is busy &mdash; try again in a few minutes". A
   receiver in `ha_mode: off`, which has no announcement to retract, is recognised by its `info`
   retraction and `offline`. Nothing about the entry changes, and nothing is reloaded.
 - **[ADR-0006](docs/adr/0006-remote-uninstall-plugin-acts-ssh-verifies.md)** supersedes ADR-0004's

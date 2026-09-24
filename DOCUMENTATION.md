@@ -929,7 +929,7 @@ settings block's count and hash are unchanged. A restart that never came does no
 readbacks; only the `/mqttbridge` check, which a restart is what settles, is left out. `opkg`
 takes its lock even to answer `status`, so a refusal for a lock somebody holds (`Could not lock <path>`, `Command failed to capture privilege lock`; not `Could not create lock file ...`) is
 asked again, up to five times two seconds apart, before it counts. 🔴 If the lock is still held
-before the command, the flow stops there with „opkg on the receiver is busy - try again in a few
+before the command, the flow stops there with „opkg on the receiver is busy &mdash; try again in a few
 minutes" and publishes nothing: the plugin's own removal would meet the same lock after it had
 already retracted everything, and roll back. Every command is a fixed read, and an SSH connection
 that drops or times out, before the command or after it, costs the verification and nothing else

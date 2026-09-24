@@ -5,7 +5,7 @@ text at 500 characters, and so does this - truncating here means the message a u
 is the message they can read the start of, rather than one the box silently cut
 somewhere else.
 
-„Ekran - dyskretnie" is the same message as a **toast**: a small overlay in a corner of
+The `osd_toast` entity is the same message as a **toast**: a small overlay in a corner of
 the screen that takes no key press, hides itself after a few seconds and is replaced by
 the next one. It exists only on a receiver that names the `toast` capability, which the
 plugin claims only once the screen for it has actually been built; a receiver that

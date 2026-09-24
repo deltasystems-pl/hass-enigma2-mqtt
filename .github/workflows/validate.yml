@@ -6,8 +6,8 @@ on:
   pull_request:
   schedule:
     - cron: "0 4 * * 1"
-  # Called by the release workflow, so that a tag runs these jobs once — as the gate in
-  # front of the published zip — rather than twice beside it.
+  # Called by the release workflow, so that a tag runs these jobs once - as the gate in
+  # front of the published zip - rather than twice beside it.
   workflow_call:
 
 permissions:

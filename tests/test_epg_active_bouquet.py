@@ -1,4 +1,4 @@
-"""„EPG - aktywny bukiet": what is on across the bouquet the receiver is walking.
+"""The `epg_active_bouquet` sensor: what is on across the bouquet the receiver is walking.
 
 Three things make this sensor worth its own file. It joins two topics - the channel-list
 context and one of several per-bouquet grids - and has to read the right grid and only

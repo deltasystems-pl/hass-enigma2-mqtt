@@ -267,7 +267,7 @@ TOPIC_SOFTCAM: Final = "softcam"
 # manager's poller rather than through `/etc/init.d/softcam`.
 CAPABILITY_SOFTCAM: Final = "softcam"
 
-# The two capabilities the „EPG - aktywny bukiet" sensor needs: the per-bouquet grids it
+# The two capabilities the `epg_active_bouquet` sensor needs: the per-bouquet grids it
 # reads, and the channel-list context that says which of them is the one in use.
 CAPABILITY_EPG_GRID: Final = "epg_grid"
 CAPABILITY_BOUQUET_CONTEXT: Final = "bouquet_context"

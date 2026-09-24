@@ -481,8 +481,9 @@ def _toast_name(path: Path) -> str:
 def test_the_names_are_the_ones_chosen_once() -> None:
     """🔴 The Polish name becomes the entity id on a Polish installation.
 
-    „Ekran - dyskretnie", with an en dash, exactly: after the first install it is what
-    every automation calls this entity, so it is fixed here rather than left to taste.
+    „Ekran", a spaced en dash (U+2013), „dyskretnie" - exactly as asserted below: after
+    the first install it is what every automation calls this entity, so it is fixed here
+    rather than left to taste.
     """
     assert _toast_name(COMPONENT / "translations" / "pl.json") == "Ekran \u2013 dyskretnie"
     assert _toast_name(COMPONENT / "strings.json") == "OSD toast"

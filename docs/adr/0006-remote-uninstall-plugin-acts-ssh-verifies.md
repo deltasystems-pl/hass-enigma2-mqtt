@@ -145,7 +145,7 @@ connection is attempted.
   about what happened.
 - **The hook readback assumes OpenWebif answers 404 for a path it does not serve**, and asks only
   once OpenWebif answers its own status page. The page answers 200 from the receiver itself on the
-  current plugin (measured 2026‑09‑23), not the 403 an earlier measurement from another host saw;
+  current plugin (measured 2026-09-23), not the 403 an earlier measurement from another host saw;
   any status other than 404, and a missing status line, is a readback that disagrees. OpenWebif
   that never comes back within its bound is named as such rather than read as the page being gone.
 - **Mid-readback, a rollback wins.** A receiver whose opkg failed after `offline` never restarts,

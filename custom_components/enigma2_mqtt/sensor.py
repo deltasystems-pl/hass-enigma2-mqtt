@@ -11,9 +11,9 @@ only time anybody goes looking for it is after something has already gone wrong.
 The rest depend on what the plugin announced. The `process` group - what enigma2 itself
 is using - appears when the box names that capability. The conditional-access and OSCam
 groups follow a setting instead of a capability, because they are a choice about privacy
-rather than about what the image allows. „EPG - aktywny bukiet" follows two capabilities
-at once - the grids and the channel-list context - and is the one sensor here whose state
-moves with the clock as well as with the topics.
+rather than about what the image allows. The `epg_active_bouquet` sensor follows two
+capabilities at once - the grids and the channel-list context - and is the one sensor here
+whose state moves with the clock as well as with the topics.
 
 Two conventions run through the file. Epoch seconds from the topics become ISO strings
 in attributes and `datetime` objects in states, because those are what a template and a
