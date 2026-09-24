@@ -38,7 +38,7 @@ WEBIF_SHIM = (
 WEBIF_LEGACY_BYTECODE = "MQTTBridge.pyc"
 # Where opkg keeps its database is a configuration item, not a constant. OpenViX 6.6
 # ships `/etc/opkg/opkg.conf` naming `/var/lib/opkg`, and leaves `/usr/lib/opkg`
-# containing nothing but `alternatives/` — so a hard-coded `/usr/lib/opkg/status` found
+# containing nothing but `alternatives/` - so a hard-coded `/usr/lib/opkg/status` found
 # no database at all, and the first snapshot of a guided install died on a box that was
 # perfectly healthy. Older images put it under `/usr/lib/opkg`, which is why both are
 # still searched when nothing says otherwise.
@@ -50,7 +50,7 @@ PROVISION = "etc/enigma2/mqttbridge.json"
 # file that is depends on the opkg: `option lock_file` in its configuration when there is
 # one, otherwise the default it was built with. opkg 0.6.3 on OpenViX 6.6 is built with
 # `/run/opkg.lock` and never touches `/var/lock/opkg.lock`, which is where this helper
-# used to lock — so for as long as it did, it excluded nothing. Older opkg releases were
+# used to lock - so for as long as it did, it excluded nothing. Older opkg releases were
 # built with the `/var/lock` default, and nothing on the receiver says which one this is
 # without running opkg, so when the configuration is silent both are taken.
 #
@@ -66,7 +66,7 @@ OPKG_LOCK_OPTION = "lock_file"
 OPKG_DEFAULT_LOCKS = ("run/opkg.lock", "var/lock/opkg.lock")
 # opkg does not wait for its lock: it tries once and fails "Could not lock". This helper
 # waits a little, because a snapshot refused for an operation that would have ended in
-# seconds is a worse install than one that starts late — but never past the installer's
+# seconds is a worse install than one that starts late - but never past the installer's
 # command timeout, because a helper still blocked after the installer gave up would take
 # the lock later, from under nobody. The bound is the whole wait, across every lock file
 # taken, not a wait per file. The snapshot runs under a 30 s command and the restore
@@ -74,7 +74,7 @@ OPKG_DEFAULT_LOCKS = ("run/opkg.lock", "var/lock/opkg.lock")
 OPKG_LOCK_WAIT_SNAPSHOT_SECONDS = 20.0
 OPKG_LOCK_WAIT_RESTORE_SECONDS = 40.0
 OPKG_LOCK_POLL_SECONDS = 0.25
-# opkg lets go in three steps — unlock, close, delete the file — so a lock granted
+# opkg lets go in three steps - unlock, close, delete the file - so a lock granted
 # between the first and the last is on a file that is about to lose its name. The
 # holder looks again after this pause, which is far longer than those three calls take.
 OPKG_LOCK_SETTLE_SECONDS = 0.1
@@ -177,7 +177,7 @@ def opkg_paths(root: Path) -> OpkgPaths:
     """Resolve the status file and info directory the way opkg itself does.
 
     The configuration wins where it speaks. Where it does not, the database is looked
-    for in one place and then the other — and both halves are taken from the same one,
+    for in one place and then the other - and both halves are taken from the same one,
     because a status file in `/var` and an info directory in `/usr` is not a layout any
     image has, and writing one of each would be worse than failing.
     """
@@ -287,14 +287,14 @@ def _take_opkg_lock(path: Path, deadline: float, wait: float) -> int:
 
     opkg creates the file and takes a POSIX record lock on the whole of it with
     `lockf`; `lockf` here joins that same lock domain, where `flock` would not. opkg
-    also deletes the file when it lets go — after unlocking and closing it. A process
+    also deletes the file when it lets go - after unlocking and closing it. A process
     granted the lock in that gap holds it on a file whose name is about to go, and the
     next opkg creates a fresh file and locks that one unopposed. So a lock only counts
     once the name still leads to the locked file, and still does after a pause longer
     than opkg's unlock, close and delete take; otherwise it is taken again.
 
-    Only "somebody else holds it" is waited on. Any other failure to lock — a kernel
-    or filesystem without record locks answers `ENOLCK` — is not going to clear by
+    Only "somebody else holds it" is waited on. Any other failure to lock - a kernel
+    or filesystem without record locks answers `ENOLCK` - is not going to clear by
     waiting, and is raised at once.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -322,7 +322,7 @@ def _take_opkg_lock(path: Path, deadline: float, wait: float) -> int:
 
 
 def _release_opkg_lock(path: Path, descriptor: int) -> None:
-    """Let go the way opkg does — remove the file, then close it.
+    """Let go the way opkg does - remove the file, then close it.
 
     Only while the name is still ours: removing a file somebody else has since
     created and locked would hand the next opkg an unopposed lock.
@@ -651,7 +651,7 @@ def read_identity(root: Path) -> dict[str, object]:
     for that setting, which is neither an empty value nor a difference. Enigma2 never
     writes out a setting that still equals its default, so a receiver left on the
     default base topic has no `base_topic` line at all, and this used to answer
-    `enigma2` for a box that had said nothing — the right answer, from a copy of the
+    `enigma2` for a box that had said nothing - the right answer, from a copy of the
     plugin's defaults kept on the wrong side of the link. Applying the defaults is the
     caller's job: they belong to the plugin, they are worth having in exactly one
     place, and this half of the installer runs on the receiver with no way to import
@@ -660,8 +660,8 @@ def read_identity(root: Path) -> dict[str, object]:
     `friendly_name` binds nothing and is reported for the opposite reason: it is the
     name the household reads, and an install whose name field was left empty leaves
     the receiver called this, so it is the only way for the caller to know what the box
-    it has just configured is called. Raw like the rest — an empty string is a receiver
-    that stores an empty name, and `null` a receiver that stores none — because the
+    it has just configured is called. Raw like the rest - an empty string is a receiver
+    that stores an empty name, and `null` a receiver that stores none - because the
     caller decides what to do with a blank, and cannot if this has already flattened
     the two.
     """
@@ -727,7 +727,7 @@ def _is_stale(lock_dir: Path) -> str:
         recorded = json.loads(owner.read_text(encoding="ascii"))
     except (OSError, ValueError):
         # The record is written atomically, so it is never half there: it is either a
-        # claim that has not got to it yet — a matter of milliseconds — or one that died
+        # claim that has not got to it yet - a matter of milliseconds - or one that died
         # in between. Only age tells those apart, and the directory's own mtime is the
         # only age an owner-less lock has.
         age = _age_of(lock_dir)
@@ -773,8 +773,8 @@ def claim_transaction(lock_dir: Path) -> None:
     receiver. A rename has exactly one winner.
 
     The verdict is then reached a second time, on the directory the rename actually took
-    away. The first verdict can be overtaken — between judging and renaming, another
-    claimer can have reclaimed the lock and started an install — and the second verdict
+    away. The first verdict can be overtaken - between judging and renaming, another
+    claimer can have reclaimed the lock and started an install - and the second verdict
     is the one made while nobody else can touch the directory. A lock that turns out to
     be alive is put straight back and this claimer is told the receiver is busy.
     """
@@ -833,14 +833,14 @@ def prune_snapshots(
 ) -> list[str]:
     """Delete all but the newest `keep` installer snapshots, and report what went.
 
-    A snapshot is the only way back from an install, so one is kept — the one taken by
-    the install that just succeeded — and one more behind it. Without this, every guided
+    A snapshot is the only way back from an install, so one is kept - the one taken by
+    the install that just succeeded - and one more behind it. Without this, every guided
     install left another copy of the plugin directory on the receiver's flash for ever.
 
     `keep_name` is that install's own snapshot, and it is never removed whatever its
     timestamp says. The order here is the modification time, and on these receivers a
     timestamp is not a clock: many have no battery-backed one, boot in 1970 and jump to
-    the real time when NTP answers — which can be after the snapshot was taken. Ranking
+    the real time when NTP answers - which can be after the snapshot was taken. Ranking
     the newest snapshot last and deleting it would throw away the only way back from the
     install that is committing.
 

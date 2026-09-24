@@ -201,7 +201,7 @@ def test_a_busy_snapshot_refuses_and_leaves_no_snapshot_behind(
     backups.mkdir()
     backup = backups / "ha-installer-000000000001"
     # Looked at while the helper is still waiting, which is when a prune running beside
-    # it would count the directory — cleaning it up afterwards is not enough.
+    # it would count the directory - cleaning it up afterwards is not enough.
     during_the_wait: list = []
     real_take = installer_helper._take_opkg_lock
 
@@ -222,7 +222,7 @@ def test_a_busy_snapshot_refuses_and_leaves_no_snapshot_behind(
 def test_a_busy_restore_refuses_before_it_touches_anything(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The restore waits on its own, longer bound — and here it runs out."""
+    """The restore waits on its own, longer bound - and here it runs out."""
     root = tmp_path / "root"
     _receiver(root)
     backup = tmp_path / "backup"
@@ -268,7 +268,7 @@ def test_the_bound_is_the_whole_wait_across_every_lock_file(
 
     `/run` is held for most of the bound and then let go; `/var/lock` is held
     throughout. A wait per file would spend the first stretch on `/run` and then a whole
-    bound more on `/var/lock` — past the installer's command timeout on a real
+    bound more on `/var/lock` - past the installer's command timeout on a real
     receiver. One deadline for both ends it on time.
     """
     root = tmp_path / "root"
@@ -399,7 +399,7 @@ def test_opkgs_own_order_of_letting_go_cannot_slip_past_the_check(
 ) -> None:
     """opkg unlocks, closes, and only then deletes the file.
 
-    Granted in that gap, the helper's first look finds the name still on its file —
+    Granted in that gap, the helper's first look finds the name still on its file -
     and the departing opkg deletes it a moment later. The look is repeated after a
     pause longer than that gap, and the lock taken again on a fresh file.
     """
@@ -430,8 +430,8 @@ def test_a_lock_lost_inside_the_step_fails_the_step(
 ) -> None:
     """If the name went anyway, an opkg run may have overlapped, and the step says so.
 
-    The snapshot taken under it is not kept, and the file now on the name — somebody
-    else's — is not deleted on the way out.
+    The snapshot taken under it is not kept, and the file now on the name - somebody
+    else's - is not deleted on the way out.
     """
     root = tmp_path / "root"
     _receiver(root)

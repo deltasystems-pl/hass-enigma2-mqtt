@@ -5,13 +5,13 @@ to get wrong is small and all of it has a history:
 
 - **The popup must not change by a byte.** Every receiver in the field understands the
   three-field payload, and an older plugin would read an unexpected `style` as nothing
-  at all — so a popup carries no `style`, and its default timeout stays ten seconds.
+  at all - so a popup carries no `style`, and its default timeout stays ten seconds.
 - **The default timeout belongs to the style.** The action schema used to fill in ten
   before the handler ever saw the call, which would have given every toast without a
   timeout a popup's ten seconds.
 - **The entity follows a capability and is never taken away by one.** The receiver
   names `toast` only once the screen was actually built, and it answers after the
-  platforms are set up — so the entity is created late, and a capability that goes
+  platforms are set up - so the entity is created late, and a capability that goes
   quiet is an older plugin or a failed rebuild, not a decision. The registry is watched,
   because an end state cannot tell „never removed" from „removed and created again".
 """
@@ -163,7 +163,7 @@ async def test_the_toast_entity_survives_the_capability_going_quiet(
 
     A downgraded plugin, or a skin reload whose rebuild of the screen failed, looks
     exactly like this. Removing the entity would take every automation that notifies it
-    by name with it — and on a Polish installation its id is the Polish name, so the
+    by name with it - and on a Polish installation its id is the Polish name, so the
     next payload would not even bring it back under the same id.
     """
     box_on_the_broker[INFO_TOPIC] = with_toast()
@@ -274,7 +274,7 @@ async def test_on_a_polish_installation_the_id_follows_the_polish_name(
     """🔴 The Polish name is load-bearing: it is the entity id a Polish household gets.
 
     Home Assistant builds an object id from the displayed name in the installation's
-    language. The sibling is `…_ekran_osd` there, and this is `…_ekran_dyskretnie`; a
+    language. The sibling is `..._ekran_osd` there, and this is `..._ekran_dyskretnie`; a
     change to either Polish name renames the entity out from under every automation.
     """
     hass.config.language = "pl"
@@ -298,7 +298,7 @@ async def test_a_popup_without_a_timeout_is_byte_for_byte_what_it_was(
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """Three fields, no `style`, ten seconds — whether or not the box can toast."""
+    """Three fields, no `style`, ten seconds - whether or not the box can toast."""
     box_on_the_broker[INFO_TOPIC] = with_toast()
     await async_setup_box(hass, config_entry)
     await async_arm_box_ack(hass, "message")
@@ -481,10 +481,11 @@ def _toast_name(path: Path) -> str:
 def test_the_names_are_the_ones_chosen_once() -> None:
     """🔴 The Polish name becomes the entity id on a Polish installation.
 
-    „Ekran – dyskretnie", with an en dash, exactly: after the first install it is what
-    every automation calls this entity, so it is fixed here rather than left to taste.
+    „Ekran", a spaced en dash (U+2013), „dyskretnie" - exactly as asserted below: after
+    the first install it is what every automation calls this entity, so it is fixed here
+    rather than left to taste.
     """
-    assert _toast_name(COMPONENT / "translations" / "pl.json") == "Ekran – dyskretnie"
+    assert _toast_name(COMPONENT / "translations" / "pl.json") == "Ekran \u2013 dyskretnie"
     assert _toast_name(COMPONENT / "strings.json") == "OSD toast"
     assert (COMPONENT / "translations" / "en.json").read_bytes() == (
         COMPONENT / "strings.json"

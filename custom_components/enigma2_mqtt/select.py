@@ -1,7 +1,7 @@
 """The two lists a household picks from: which bouquet, and which channel in it.
 
 In *discovery* mode the plugin publishes a channel `select` of its own. In *integration*
-mode it retracts every discovery payload and this integration builds the entities — and
+mode it retracts every discovery payload and this integration builds the entities - and
 it had no `select` platform, so a box run the way this integration wants it run listed
 neither bouquets nor channels anywhere. The topics (`channels`, `bouquet`) and the
 commands (`cmd/bouquet`, `cmd/zap`) were already there; only the two controls in front
@@ -17,7 +17,7 @@ name and is right to; handing it one when the reference is in hand would be inve
 the problem. The name is what a person reads, the reference is what gets sent.
 
 **Both wait for the receiver.** Selecting publishes and then waits for the topic that
-proves it happened — `bouquet` for one, `service` for the other — so a refusal arrives
+proves it happened - `bouquet` for one, `service` for the other - so a refusal arrives
 as an error in the interface rather than as a control that quietly springs back.
 """
 
@@ -53,16 +53,16 @@ def _unique_options(entries: Iterable[tuple[str, str]]) -> list[tuple[str, str]]
     """Return (label, sref) pairs whose labels are unique, numbering the repeats.
 
     A select cannot offer the same option twice, and dropping the second „TVN HD" would
-    make that channel unreachable from Home Assistant. So a repeat is numbered —
-    „TVN HD", „TVN HD (2)" — while the list itself stays in the receiver's order.
+    make that channel unreachable from Home Assistant. So a repeat is numbered -
+    „TVN HD", „TVN HD (2)" - while the list itself stays in the receiver's order.
 
     🔴 **The number follows the service reference, not the position.** Numbering in
     bouquet order would mean that moving one „TVN HD" above the other in the receiver's
     own bouquet editor silently swaps which channel „TVN HD (2)" tunes, and an
     automation that names it would keep working and do something else. Sorting the
     repeats of one name by their identity makes the label stable under a reorder. It
-    cannot be stable under a duplicate being added or removed — the numbers there are
-    positions in a set that changed — which is why an automation belongs on the `zap`
+    cannot be stable under a duplicate being added or removed - the numbers there are
+    positions in a set that changed - which is why an automation belongs on the `zap`
     action with a reference rather than on a label.
 
     Counting up until the label is free, rather than straight to the occurrence number,
@@ -177,7 +177,7 @@ class Enigma2Select(Enigma2Entity, SelectEntity):
         """Return the reference behind an option, or say it is no longer offered.
 
         Home Assistant checks an option against the list before this is reached, so the
-        only way here is a list that changed between the two — the receiver republished
+        only way here is a list that changed between the two - the receiver republished
         its channels while somebody was choosing. Sending the stale label as a name
         anyway is how the wrong channel gets tuned.
         """
@@ -232,7 +232,7 @@ class Enigma2ChannelSelect(Enigma2Select):
     def _async_read_state(self) -> None:
         """Reshape to the active bouquet, and mark what is playing inside it.
 
-        Nothing is marked when the playing service is not one of these channels — the
+        Nothing is marked when the playing service is not one of these channels - the
         receiver is on the radio list, or on a bouquet nobody chose to publish. An
         invented option would be worse than an empty one: it would claim the select can
         go back to it.
@@ -246,7 +246,7 @@ class Enigma2ChannelSelect(Enigma2Select):
     async def async_select_option(self, option: str) -> None:
         """Tune this channel, by its service reference.
 
-        What proves it worked is the `service` topic naming the same service — by
+        What proves it worked is the `service` topic naming the same service - by
         identity, not by string. The receiver answers with its own spelling of the
         reference, and a raw comparison would report a zap that plainly happened as a
         timeout.

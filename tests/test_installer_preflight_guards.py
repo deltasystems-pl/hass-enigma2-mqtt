@@ -90,7 +90,7 @@ def test_openwebif_booleans_are_read_exactly_and_nothing_else_is_guessed() -> No
     """OpenWebif answers `true`, `1` or `True` depending on the image and the endpoint.
 
     All three are the same answer and are read as one. Anything else is not a fourth
-    spelling of "yes" — it is an endpoint this code has not seen, and the guard fails
+    spelling of "yes" - it is an endpoint this code has not seen, and the guard fails
     closed rather than deciding the box is idle.
     """
     for spelling in ("true", "True", "1", 1, True):

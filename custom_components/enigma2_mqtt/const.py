@@ -93,7 +93,7 @@ MAX_SCREENSHOT_DELAY: Final = 30
 MIN_SOFTCAM_AUTOHEAL_SECONDS: Final = 30
 MAX_SOFTCAM_AUTOHEAL_SECONDS: Final = 600
 # Shown on the form only when the box reports a window that is not a number in that
-# range — which is a plugin that is misbehaving, not a value to be preserved. A box that
+# range - which is a plugin that is misbehaving, not a value to be preserved. A box that
 # reports a usable window is its own default, so this is never the suggested value on a
 # receiver that is working. 🔴 It is deliberately *not* in `PLUGIN_SETTING_DEFAULTS`:
 # that table is checked against the bundled plugin's own source, and the bundle here is
@@ -114,7 +114,7 @@ MAX_SOFTCAM_RESTARTS_TODAY: Final = 10_000
 # The image's own periodic check interval, in minutes. A day is already absurd for it.
 MAX_SOFTCAM_MANAGER_MINUTES: Final = 1440
 # The furthest into the future `last_restart` is read as a clock rather than as a
-# payload: 2100-01-01T00:00:00Z. Zero is rejected too — it is a field nobody filled in.
+# payload: 2100-01-01T00:00:00Z. Zero is rejected too - it is a field nobody filled in.
 MAX_SOFTCAM_EPOCH: Final = 4_102_444_800
 # The longest binary name that can be a sensor state at all: Home Assistant drops a state
 # over 255 characters rather than cutting it, so a longer one is not a name to show.
@@ -140,7 +140,7 @@ SOURCE_LIST_SCOPES: Final = (SOURCE_LIST_SCOPE_ACTIVE_BOUQUET, SOURCE_LIST_SCOPE
 DEFAULT_SOURCE_LIST_SCOPE: Final = SOURCE_LIST_SCOPE_ALL
 
 # How many colon-separated fields identify a service. Two spellings of one channel
-# differ in what follows them — a trailing colon, a stream URL, a name — so a comparison
+# differ in what follows them - a trailing colon, a stream URL, a name - so a comparison
 # that is not made over exactly these fields will call the same channel two channels.
 # 🔴 This mirrors `SERVICE_FIELDS` in the receiver plugin's `enigma2.identity()`. The two
 # halves have to agree about what "the same service" means; a cleverer rule here than
@@ -154,11 +154,11 @@ HA_MODE_OFF: Final = "off"
 HA_MODES: Final = (HA_MODE_DISCOVERY, HA_MODE_INTEGRATION, HA_MODE_OFF)
 
 # What the receiver plugin declares as each setting's default, mirroring the
-# `ConfigText`/`ConfigSelection`/… declarations in its own `src/MQTTBridge/config.py`.
+# `ConfigText`/`ConfigSelection`/... declarations in its own `src/MQTTBridge/config.py`.
 #
 # 🔴 Enigma2 does not write out a setting whose value still equals its default, so a
 # receiver that has never been moved off the default base topic has no `base_topic`
-# line in `/etc/enigma2/settings` at all — and nor has one on the default `port`, or
+# line in `/etc/enigma2/settings` at all - and nor has one on the default `port`, or
 # `enabled`, or any other untouched setting. A box measured after a working install had
 # exactly ten of these lines out of twenty-six settings. Anything here that reads a
 # stored plugin setting must therefore read an absent key as the value in this table;
@@ -166,7 +166,7 @@ HA_MODES: Final = (HA_MODE_DISCOVERY, HA_MODE_INTEGRATION, HA_MODE_OFF)
 # working perfectly. The receiver-side helper used to apply these itself, which put a
 # copy of them on the far side of the link where nothing compared it with the plugin,
 # and made "the settings file says nothing" indistinguishable from "it says `enigma2`"
-# for everything downstream — including the message a refusal puts on the screen.
+# for everything downstream - including the message a refusal puts on the screen.
 #
 # One table, because the alternative is a default written down beside each comparison
 # and one of them drifting. `tests/test_plugin_setting_defaults.py` reads the bundled
@@ -262,12 +262,12 @@ CAPABILITY_PROCESS: Final = "process"
 TOPIC_SOFTCAM: Final = "softcam"
 
 # The capability behind the softcam topic and its diagnostic sensor. The plugin claims it
-# only where restarting the selected cam is actually possible — the binary resolves under
+# only where restarting the selected cam is actually possible - the binary resolves under
 # `/usr/softcams/`, its family has a start line, and the image starts it through the
 # manager's poller rather than through `/etc/init.d/softcam`.
 CAPABILITY_SOFTCAM: Final = "softcam"
 
-# The two capabilities the „EPG – aktywny bukiet" sensor needs: the per-bouquet grids it
+# The two capabilities the `epg_active_bouquet` sensor needs: the per-bouquet grids it
 # reads, and the channel-list context that says which of them is the one in use.
 CAPABILITY_EPG_GRID: Final = "epg_grid"
 CAPABILITY_BOUQUET_CONTEXT: Final = "bouquet_context"
@@ -278,8 +278,8 @@ CAPABILITY_BOUQUET_CONTEXT: Final = "bouquet_context"
 TOPIC_EPG_IMPORT: Final = "epg_import"
 CAPABILITY_EPG_IMPORT: Final = "epg_import"
 # Removing the plugin from the receiver. The plugin claims the capability only where the
-# package manager installed it — an executable opkg, the package's own control file, and a
-# file list naming the `plugin.py` that is running — so a plugin unpacked by hand or baked
+# package manager installed it - an executable opkg, the package's own control file, and a
+# file list naming the `plugin.py` that is running - so a plugin unpacked by hand or baked
 # into an image is never offered a removal it cannot perform.
 CAPABILITY_UNINSTALL: Final = "uninstall"
 # Seconds the options flow waits, after `cmd/uninstall`, for the receiver to retract its
@@ -413,7 +413,7 @@ MESSAGE_DEFAULT_TIMEOUT: Final = 10
 # The two ways `cmd/message` can show a text. The popup is what the command has always
 # done: a dialog that takes focus and waits in the image's notification queue. The toast
 # is a small overlay in a corner that takes no key and hides itself, and the plugin only
-# offers it where the screen for it was actually built — which it says by naming the
+# offers it where the screen for it was actually built - which it says by naming the
 # `toast` capability. The popup is the default because a payload without `style` has to
 # mean exactly what it meant before the field existed.
 MESSAGE_STYLE_POPUP: Final = "popup"
@@ -423,7 +423,7 @@ CAPABILITY_TOAST: Final = "toast"
 
 # A toast is a glance, not a letter: the plugin cuts its text at 200 characters, hides it
 # after five seconds unless told otherwise, and will not keep one up for longer than
-# thirty — nor show one "until dismissed", since nothing on it can be dismissed.
+# thirty - nor show one "until dismissed", since nothing on it can be dismissed.
 TOAST_MAX_LENGTH: Final = 200
 TOAST_DEFAULT_TIMEOUT: Final = 5
 TOAST_MIN_TIMEOUT: Final = 1
@@ -452,7 +452,7 @@ PLUGIN_LATEST_RELEASE_URL: Final = (
 #
 # "A day" is measured against a stamp in Home Assistant's own storage, not against the
 # life of an entity. A reload, an options save and a restart each build a new entity,
-# and a limit that any of those resets is not a limit — six reloads were six requests.
+# and a limit that any of those resets is not a limit - six reloads were six requests.
 # Between checks the entity shows the stored answer, so the tag survives a restart
 # without anybody being asked for it again.
 RELEASE_CHECK_INTERVAL: Final = timedelta(hours=24)

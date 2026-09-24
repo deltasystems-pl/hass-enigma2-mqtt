@@ -1,7 +1,7 @@
-"""„EPG – aktywny bukiet": what is on across the bouquet the receiver is walking.
+"""The `epg_active_bouquet` sensor: what is on across the bouquet the receiver is walking.
 
-Three things make this sensor worth its own file. It joins two topics — the channel-list
-context and one of several per-bouquet grids — and has to read the right grid and only
+Three things make this sensor worth its own file. It joins two topics - the channel-list
+context and one of several per-bouquet grids - and has to read the right grid and only
 that one. It moves with the clock as well as with the topics, because the plugin
 republishes a grid only when its content changes and a programme can end in between.
 And its one big attribute must stay out of the recorder, which this integration has to
@@ -72,7 +72,7 @@ NO_CONTEXT = {"name": None, "sref": None}
 
 WITH_CONTEXT = {**INFO, "capabilities": [*CAPABILITIES, CAPABILITY_BOUQUET_CONTEXT]}
 
-# The fixture's „Wiadomości" runs 1789459200–1789460700 and „Pogoda" follows it until
+# The fixture's „Wiadomości" runs 1789459200-1789460700 and „Pogoda" follows it until
 # 1789461000. Ten minutes into the news is the moment every test below starts from.
 NEWS_BEGIN = 1789459200
 NEWS_END = 1789460700
@@ -498,8 +498,8 @@ async def test_the_sensor_is_unavailable_until_the_context_arrives(
 def armed_clocks(monkeypatch: pytest.MonkeyPatch) -> list[list[bool]]:
     """Record every programme-change timer the sensor arms, and whether it is still live.
 
-    An end state cannot show a timer outliving its entity — the entity is gone, and the
-    timer fires later into nothing anybody asserts on — so the arming itself is watched.
+    An end state cannot show a timer outliving its entity - the entity is gone, and the
+    timer fires later into nothing anybody asserts on - so the arming itself is watched.
     """
     timers: list[list[bool]] = []
     real = sensor_module.async_track_point_in_utc_time

@@ -2,12 +2,12 @@
 
 **Status:** accepted 2026-09-22
 **Date:** 2026-09-22
-**Supersedes:** [ADR-0003](0003-control-feedback-and-household-features.md) §3, in part — it
+**Supersedes:** [ADR-0003](0003-control-feedback-and-household-features.md) §3, in part - it
 described this feature before it had been measured, and the parts corrected here turned out to be
 wrong. Everything else in ADR-0003 stands.
 
-The receiver's half of this decision — how instances are counted, how the cam is resolved and
-restarted, the guards, the decode signal and the privacy boundary around the ECM file — is
+The receiver's half of this decision - how instances are counted, how the cam is resolved and
+restarted, the guards, the decode signal and the privacy boundary around the ECM file - is
 ADR-0005 in
 [the plugin repository](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0005-softcam-restart.md).
 The two are read together; this one records only what Home Assistant decides.
@@ -22,12 +22,12 @@ previously answered only by example.
 different places, and a receiver can give opposite answers to them. `softcam_restart_allowed` is a
 checkbox on the receiver's own setup screen: it exists on every installation and says whether the
 command is *wanted*. The `softcam` capability says whether the receiver could carry the command
-out at all — the plugin claims it only where the cam binary resolves under the softcam directory,
+out at all - the plugin claims it only where the cam binary resolves under the softcam directory,
 its family has a known start line, and the image starts it through its manager's poller rather
 than through an init script. A receiver with the permission on and nothing to restart publishes
 the permission, claims no capability, and refuses the command. An integration that read the
-permission alone would offer a button that is always refused, and — because the plugin's own MQTT
-discovery mode creates no button for that receiver — would make one box behave two ways depending
+permission alone would offer a button that is always refused, and - because the plugin's own MQTT
+discovery mode creates no button for that receiver - would make one box behave two ways depending
 on which mode it was in.
 
 **Removing an entity and creating one are not the same question either**, and this repository had
@@ -41,7 +41,7 @@ genuinely gone for good.
 
 For a **control** it is. „Odśwież EPG" on a receiver that builds no grids would be refused every
 time it was pressed, for as long as that setting stayed at zero, and a permanently-refused button
-is worse than no button — that is the argument ADR-0003 already made for the power-off buttons.
+is worse than no button - that is the argument ADR-0003 already made for the power-off buttons.
 For a **diagnostic with history** it is not. A capability that stops being named is an older
 plugin after a downgrade, a hook that failed to attach on one boot, or a receiver that has not
 answered yet. None of those is a decision anybody made, and none of them means the sensor will
@@ -55,7 +55,7 @@ Both, and the permission must be a stated `true`. Silence about the permission c
 unlike the power-off buttons, no release has ever shipped this one, so there is no installation
 whose button has to survive a receiver that has not spoken, and an older plugin would refuse the
 command anyway. The gate listens to `info` rather than reading it once, because a receiver answers
-after Home Assistant has finished setting the integration up — a capability or a permission read
+after Home Assistant has finished setting the integration up - a capability or a permission read
 during platform setup is read as "not said" on every single start.
 
 ### 2. Only a stated `false` on the **permission** removes the button
@@ -83,7 +83,7 @@ appears on the options form, and the form's own text says where it lives and why
 ### 5. A press is proved by silence, not by the state topic moving
 
 The receiver's sequence waits for the instances to stop, kills what survives, starts one and lets
-it settle before it republishes — about ten seconds on a cam that ignores a polite signal, which
+it settle before it republishes - about ten seconds on a cam that ignores a polite signal, which
 is exactly the command timeout. Watching the topic would report "the receiver did not carry this
 out" for a restart that worked, on precisely the slowest receivers. Every refusal arrives on
 `last_error` immediately, and the error-grace window is what catches it, as it does for the other
@@ -97,7 +97,7 @@ is an integer in Python and would be stored as a count of one, and a count that 
 answers "unknown" and never zero, because no instances at all is a real and interesting reading.
 Rebuilding rather than filtering is also what keeps the privacy boundary: the receiver's own
 detector reads a file carrying a card-sharing account, a sharing server's address and live control
-words, and a field that is not in the contract has nowhere to go — not to an entity attribute, not
+words, and a field that is not in the contract has nowhere to go - not to an entity attribute, not
 into the diagnostics download, not into a log record of ours.
 
 ## Consequences
@@ -110,7 +110,7 @@ into the diagnostics download, not into a log record of ours.
   that follows a capability has to state which of the two rules it takes and why. The entity table
   in `DOCUMENTATION.md` §4 carries the distinction so that the next person meets it before they
   meet the code.
-- **A stale „Softcam" can sit on a device page indefinitely** — a receiver downgraded to a plugin
+- **A stale „Softcam" can sit on a device page indefinitely** - a receiver downgraded to a plugin
   without the capability keeps the entity, unavailable, for ever. That is the accepted cost of not
   deleting somebody's history, and removing the receiver is the way to remove the entity.
 - **`running_instances` is `unknown` where a naive implementation would say `0`.** Any automation
@@ -121,7 +121,7 @@ into the diagnostics download, not into a log record of ours.
   the plugin publishes again.
 - **The press reports success it cannot always see.** Silence is the proof, so a command the
   receiver never received looks the same as one it carried out. That is the same trade the other
-  restarts already make, and the alternative — a correlation id — is not in the contract.
+  restarts already make, and the alternative - a correlation id - is not in the contract.
 
 ## Not yet done
 

@@ -6,12 +6,12 @@ compromises.
 **It is never unavailable.** Every other entity of a box goes unavailable when the box
 does, because saying nothing is better than saying something stale. This one stays, for
 one reason: a box in deep standby is off the network, and the only way to wake it is a
-magic packet — which a user cannot send from an entity the dashboard has greyed out.
+magic packet - which a user cannot send from an entity the dashboard has greyed out.
 
 **Standby is reported as `off`.** `MediaPlayerState.STANDBY` was deprecated in Home
 Assistant 2026.8 in favour of `off` or `idle`, and the difference between a box in
 standby and a box in deep standby is not worth a state that is being removed. What the
-household sees is the same either way — a dark television — and the „Zasilanie" switch
+household sees is the same either way - a dark television - and the „Zasilanie" switch
 and the device's availability still tell the two apart for anyone who needs it.
 
 **The picture is the screenshot.** `screen` is a retained JPEG of what is on the
@@ -82,7 +82,7 @@ async def async_setup_entry(
 
 
 class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
-    """One Enigma2 receiver, as something to watch — and every action's target."""
+    """One Enigma2 receiver, as something to watch - and every action's target."""
 
     _attr_device_class = MediaPlayerDeviceClass.RECEIVER
     _attr_media_content_type = MediaType.CHANNEL
@@ -114,7 +114,7 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
                 TOPIC_SCREEN,
                 TOPIC_CHANNELS,
                 # The source list is scoped to the receiver's channel-list context by
-                # default, so a bouquet switched on the remote reshapes it — and a
+                # default, so a bouquet switched on the remote reshapes it - and a
                 # list that only reshapes on the next reload is a list that is wrong.
                 TOPIC_BOUQUET,
             ),
@@ -181,7 +181,7 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
         The default is every bouquet on offer, which is what this integration has
         always done; scoping it to the bouquet the receiver is on turns a dropdown of a
         thousand rows into a short one. It is a preference about the length of a list
-        and nothing more — Home Assistant declares this attribute unrecorded, so none
+        and nothing more - Home Assistant declares this attribute unrecorded, so none
         of it ever reaches the recorder however long it is.
         """
         return self.box.channel_names or None
@@ -342,7 +342,7 @@ async def async_zap_to_name(
     different transponders and guessing between them is worse than refusing. But a
     household picking a name out of a list has already made the choice the plugin is
     refusing to make, so a name that is ambiguous here is sent as the reference of the
-    first match instead — the one that was on the list they picked from.
+    first match instead - the one that was on the list they picked from.
 
     Whether the name is ambiguous is judged over every bouquet on offer, because that
     is the set the plugin itself would resolve it against. `prefer` only says which

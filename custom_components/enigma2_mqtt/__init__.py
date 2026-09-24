@@ -6,7 +6,7 @@ enigma2 on the receiver, and turns them into a Home Assistant device.
 The integration takes a box over: on setup it switches the plugin into `integration`
 mode, which makes the plugin retract the MQTT discovery payloads it would otherwise
 publish. From then on the entities below are the only ones the box has, which is why
-this list is long — there is no core MQTT integration filling in the gaps.
+this list is long - there is no core MQTT integration filling in the gaps.
 """
 
 from __future__ import annotations
@@ -139,7 +139,7 @@ async def async_remove_entry(
 
     The release check's stored stamp goes with it. It is keyed by entry id, and Home
     Assistant does not reuse one, so a record left behind is a row nothing will ever
-    read again — and, if the same receiver is added back, a stamp from its previous life
+    read again - and, if the same receiver is added back, a stamp from its previous life
     deciding whether its new one may ask a question.
     """
     await async_release_check_store(hass).async_remove(entry.entry_id)

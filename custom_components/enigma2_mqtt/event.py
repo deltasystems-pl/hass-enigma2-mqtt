@@ -1,7 +1,7 @@
 """Remote key presses, as an event entity.
 
 The plugin watches the receiver's key handler and never consumes a press, so this
-entity fires for every button a person pushes on the sofa — which is what makes „press
+entity fires for every button a person pushes on the sofa - which is what makes „press
 the yellow key to arm the alarm" possible without teaching enigma2 anything.
 
 An event entity has to declare its event types up front, and the list of key names an

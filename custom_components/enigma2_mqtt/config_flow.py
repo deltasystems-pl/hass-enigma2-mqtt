@@ -1,13 +1,13 @@
 """Config flow for the Enigma2 MQTT integration.
 
 A box reaches Home Assistant in one of two ways. Either the plugin announces itself on
-`enigma2mqtt/discovery/#` and Home Assistant offers it — that is `async_step_mqtt` — or
+`enigma2mqtt/discovery/#` and Home Assistant offers it - that is `async_step_mqtt` - or
 the user types the base topic and the node id, which is what a box behind an MQTT bridge
 with a rewritten prefix needs. Both paths end the same way: the box is switched into
 `integration` mode and the entry is only created once the box has acknowledged it.
 
 Two more ways in exist once there are entities to configure. **Reconfigure** follows a
-box whose node id or base topic was changed on its own setup screen — and a changed node
+box whose node id or base topic was changed on its own setup screen - and a changed node
 id is a changed identity, so it takes the old device with it rather than leaving a ghost
 beside the new one. **Options** are the three preferences that are about this end of the
 link rather than about the box: whether the two buttons that can end the evening appear,
@@ -120,7 +120,7 @@ from .uninstall import (
 _LOGGER = logging.getLogger(__name__)
 
 # Shown in place of a field the box did not report.
-UNKNOWN_PLACEHOLDER = "—"
+UNKNOWN_PLACEHOLDER = "\u2014"
 
 # The backend's install phases, in the order it reports them. They move the progress
 # bar and nothing else: see `_async_install_progress` for why the phase is not also a
@@ -380,7 +380,7 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
             # announcement is retained, so Home Assistant offers a `confirm` card again
             # at every start and at every reconnect to the broker. Raising on that
             # aborted the guided install with `already_in_progress` at this exact
-            # point — after the operator had typed the SSH password and the broker
+            # point - after the operator had typed the SSH password and the broker
             # password. The offer gives way; another install does not.
             await self.async_set_unique_id(self._node_id, raise_on_progress=False)
             self._abort_if_unique_id_configured()
@@ -439,7 +439,7 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
             self._install_error = "install_cancelled"
             # A retried install reuses this flow object, so an outcome that fills no
             # holes has to empty the ones the last one filled. Left behind, they would
-            # be handed to a sentence that does not take them — which Home Assistant
+            # be handed to a sentence that does not take them - which Home Assistant
             # ignores, until the day that sentence gains a placeholder of its own and
             # starts rendering another failure's node id.
             self._install_placeholders = {}
@@ -459,12 +459,12 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
         """Move the bar, and record nothing that is a credential or an address.
 
         A phase moves the progress bar and nothing else. It used to also ask the
-        frontend to re-read the flow, which the frontend answers by posting to it —
+        frontend to re-read the flow, which the frontend answers by posting to it -
         and a post is what finishes a progress step. Home Assistant already posts one
         of its own when the install task resolves, so a phase reported near the end of
         the transaction put two callers on one flow: the first finished it and removed
         it, and the second was answered with „Invalid flow specified". That happened at
-        the end of a successful install, and — worse — at the end of a failed one,
+        the end of a successful install, and - worse - at the end of a failed one,
         where the abort reason is the only thing on the screen worth reading.
 
         The bar is the live part, because `async_update_progress` reaches the frontend
@@ -545,8 +545,8 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
         The node id and the base topic are settings on the receiver, and changing one
         of them there is what brings a user here. The base topic is only an address, so
         a change to it is invisible once the entry has been updated. The node id is not:
-        it is half of every unique id, so a box that has been renamed is — as far as
-        Home Assistant can tell — a different device doing the same job. The old device
+        it is half of every unique id, so a box that has been renamed is - as far as
+        Home Assistant can tell - a different device doing the same job. The old device
         is removed rather than left behind unavailable, and the reload rebuilds every
         entity under the new identity.
         """
@@ -735,7 +735,7 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
         Only the discovery offer: it cannot become an entry any more, and leaving it
         standing for the length of an install is a second card for one receiver, which
         is a second entry waiting to be made. Home Assistant retires competing flows
-        by itself when an entry claims the unique id — a moment the manual path reaches
+        by itself when an entry claims the unique id - a moment the manual path reaches
         in seconds and a guided install does not reach for minutes.
         """
         for progress in self._async_in_progress(
@@ -817,7 +817,7 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
         """Open on the options, or on a menu when the receiver permits its removal.
 
         The menu exists only while removing the plugin is on offer, so for nearly every
-        receiver — the permission is off as shipped — Configure opens straight on the
+        receiver - the permission is off as shipped - Configure opens straight on the
         form, as it always has. It is a menu entry rather than a button because Home
         Assistant has no confirmation for a button or an action: a flow step is the only
         place the one-way door can be stated before it is opened (ADR-0004).
@@ -1117,8 +1117,8 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
         try:
             return await async_uninstall(self.hass, box, credentials)
         except InstallerError as err:
-            # Only the three guards reach here — the receiver is recording or about to, or
-            # opkg's lock stayed held — and all are refusals made before anything was
+            # Only the three guards reach here - the receiver is recording or about to, or
+            # opkg's lock stayed held - and all are refusals made before anything was
             # published.
             self._uninstall_error = err.code.value
         except HomeAssistantError:
@@ -1266,14 +1266,14 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
     def _box(self) -> Enigma2Box | None:
         """Return the running box, when the entry is loaded.
 
-        The options can be opened on an entry that failed to set up — no broker, no box
-        — and that is exactly when somebody wants to change the address a magic packet
+        The options can be opened on an entry that failed to set up - no broker, no box
+        - and that is exactly when somebody wants to change the address a magic packet
         goes to. So this answers None rather than raising, and the form degrades to
         typed values.
 
         An entry that is not loaded has no running box even when a stale `runtime_data`
-        is still attached: its subscriptions are gone, so what it last heard — available,
-        permitted — is not what the receiver is saying now, and nothing may be offered or
+        is still attached: its subscriptions are gone, so what it last heard - available,
+        permitted - is not what the receiver is saying now, and nothing may be offered or
         sent on its word.
         """
         if self.config_entry.state is not ConfigEntryState.LOADED:
@@ -1296,7 +1296,7 @@ def _autoheal_seconds(reported: Any) -> int:
     """Return the auto-heal window to show, given what the box reported.
 
     The box's own value, whenever it is a whole number inside the range the plugin
-    declares. Anything else — a string, a boolean, a number outside the range — is a
+    declares. Anything else - a string, a boolean, a number outside the range - is a
     plugin that is misbehaving rather than a value worth preserving, and a schema default
     the form cannot render would be a page that does not open at all. The fallback is the
     window the plugin declares as its default, which is also what the box would use.

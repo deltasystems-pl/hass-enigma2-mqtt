@@ -2,7 +2,7 @@
 
 The media player has a volume control too, on the 0-1 scale Home Assistant uses for
 media players. This one is the box's own 0-100 scale, which is what a person reads off
-the television and what every other tool that talks to enigma2 reports — including
+the television and what every other tool that talks to enigma2 reports - including
 OpenWebif. Having both means an automation can be written in whichever of the two the
 person writing it is thinking in.
 """

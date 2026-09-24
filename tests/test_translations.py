@@ -7,7 +7,7 @@ en.json, so the screen that asks for a password said less than the source claime
 did. Byte equality is the cheapest rule that cannot drift.
 
 The other languages may say it differently, but they have to say all of it, and they
-have to leave the same holes for Home Assistant to fill — a placeholder that exists in
+have to leave the same holes for Home Assistant to fill - a placeholder that exists in
 one language and not another is a message that renders `{bouquet}` at somebody.
 """
 
@@ -56,7 +56,7 @@ def test_every_installer_failure_has_an_abort_string() -> None:
 
     `config.error` and `config.abort` are different sections, and the installer's codes
     only lived in the first one. A flow that aborted with `no_space` therefore put the
-    word `no_space` on the screen — a token, in English, where a sentence belonged, and
+    word `no_space` on the screen - a token, in English, where a sentence belonged, and
     in every language at once.
     """
     for language in LANGUAGES:

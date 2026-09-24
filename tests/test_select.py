@@ -1,7 +1,7 @@
 """„Bukiet" and „Kanał": what they list, and what selecting one sends.
 
 Both selects exist because the box runs in *integration* mode, where the plugin retracts
-the discovery entities it would otherwise publish — including the channel select. The
+the discovery entities it would otherwise publish - including the channel select. The
 topics were always there; nothing in Home Assistant listed them.
 """
 
@@ -67,7 +67,7 @@ def _with_bouquet_context(store: dict[str, str | bytes]) -> None:
     """Make the example box one that can activate a channel-list context.
 
     Both topics, because the plugin publishes the same capability list on both and a
-    fixture where they disagree would be testing a receiver that does not exist — and
+    fixture where they disagree would be testing a receiver that does not exist - and
     would hide, or invent, churn in the gate that reads them.
     """
     capabilities = [*INFO["capabilities"], "bouquet_context"]
@@ -148,7 +148,7 @@ async def test_a_capable_box_creates_them_once_in_the_order_a_broker_delivers(
 
     A gate that judged the capability from whichever payload happened to arrive first
     would create both selects and delete them again a moment later: registry churn, a
-    transient entity in the recorder, and — on a restart — the loss of whatever name,
+    transient entity in the recorder, and - on a restart - the loss of whatever name,
     area or dashboard place the household had given them. The end state cannot tell
     "created once" from "created, deleted and created again", so the registry is
     watched.
@@ -198,7 +198,7 @@ async def test_a_start_up_the_box_slept_through_keeps_the_selects(
     The dangerous case is a restart, not a first run: the registry already holds these
     two, with whatever name, area and dashboard place the household gave them. A gate
     that reads silence as "the capability is gone" deletes all of that before the
-    receiver has had a chance to answer — and a first-run test cannot catch it, because
+    receiver has had a chance to answer - and a first-run test cannot catch it, because
     there is nothing registered for a wrong answer to destroy.
     """
     retained[AVAILABILITY_TOPIC] = "online"
@@ -245,7 +245,7 @@ async def test_a_payload_that_states_no_capabilities_keeps_them_too(
 
     It is not the same answer as a list that does not contain `bouquet_context`, and
     treating "a payload arrived" as "the box has answered" reads the first as the
-    second — which deletes two entities on any receiver whose plugin is old enough, or
+    second - which deletes two entities on any receiver whose plugin is old enough, or
     whose first `info` was published before it had read its own configuration.
     """
     retained[AVAILABILITY_TOPIC] = "online"
@@ -397,7 +397,7 @@ async def test_a_bouquet_option_that_vanished_says_the_list_moved(
 ) -> None:
     """The list can be republished while somebody is choosing from it.
 
-    The message has to be the one about the list having moved — "the receiver does not
+    The message has to be the one about the list having moved - "the receiver does not
     offer that bouquet" is what the action says about a bouquet that was never there,
     and it sends the reader looking at the receiver's configuration instead of at the
     list in front of them.
@@ -604,13 +604,13 @@ async def test_a_numbered_duplicate_keeps_its_channel_when_the_bouquet_is_reorde
     async_fire_mqtt_message(hass, CHANNELS_TOPIC, json.dumps(reordered))
     await hass.async_block_till_done()
 
-    # The list follows the receiver's new order …
+    # The list follows the receiver's new order ...
     assert hass.states.get(CHANNEL_SELECT).attributes[ATTR_OPTIONS] == [
         "TVP 1 HD (2)",
         "TVP 1 HD",
         "TVN HD",
     ]
-    # … and every label still tunes exactly the channel it tuned before.
+    # ... and every label still tunes exactly the channel it tuned before.
     assert _labels_by_sref(hass) == before
 
 
@@ -692,7 +692,7 @@ async def test_the_playing_channel_is_matched_by_identity(
     """The `service` topic need not spell a reference the way `channels` does.
 
     A receiver that answers with a name after the tenth colon, or in another case, is
-    tuned to exactly the channel on this list — and a raw comparison would leave the
+    tuned to exactly the channel on this list - and a raw comparison would leave the
     select showing nothing for as long as it stayed there.
     """
     _with_bouquet_context(box_on_the_broker)

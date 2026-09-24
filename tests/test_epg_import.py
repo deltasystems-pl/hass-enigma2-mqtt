@@ -2,7 +2,7 @@
 
 The import is the image's. The plugin only finds the importer the image already loaded,
 starts it the way the importer's own „Manual" button does, and reports on a retained
-`epg_import` topic what it is doing — whoever started it. What this integration adds is
+`epg_import` topic what it is doing - whoever started it. What this integration adds is
 a button behind two gates that both belong to the receiver, and a diagnostic that says
 `idle`, `running`, `done` or `failed`.
 
@@ -227,7 +227,7 @@ async def test_a_press_sends_the_command_and_waits_for_the_import_to_run(
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """QoS 1, never retained, `PRESS` — and the press stays open until `running`."""
+    """QoS 1, never retained, `PRESS` - and the press stays open until `running`."""
     box_on_the_broker[INFO_TOPIC] = with_import(epg_import_allowed=True)
     box_on_the_broker[EPG_IMPORT_TOPIC] = json.dumps(IDLE)
     await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
@@ -727,7 +727,7 @@ async def test_a_retained_replay_of_an_old_failure_is_not_the_answer(
     """🔴 A reconnect during the wait replays the previous run's retained `failed`.
 
     Home Assistant forgets which retained topics it has delivered when it reconnects
-    to the broker, resubscribes, and the broker replays what it holds — here the
+    to the broker, resubscribes, and the broker replays what it holds - here the
     `failed` of the last run. That is not the receiver answering this press; the live
     `running` arriving a moment later is. Simulated by clearing the client's record of
     delivered retained topics, which is what a reconnect does before it resubscribes.

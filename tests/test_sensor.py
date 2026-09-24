@@ -404,7 +404,7 @@ async def test_clearing_the_topic_does_not_clear_the_sensor(
     """This is the entire point of the sensor.
 
     The plugin clears `last_error` on the next command that succeeds, and the person
-    asking why „Restart" did nothing looks afterwards — usually after the next volume
+    asking why „Restart" did nothing looks afterwards - usually after the next volume
     step has already wiped it.
     """
     await async_setup_box(hass, config_entry)
@@ -515,8 +515,8 @@ async def test_a_newer_identical_complaint_moves_the_time(
     """Two refusals of the same thing differ only in when they happened.
 
     A permission error says the same sentence every time, so a second „deep standby
-    is not allowed" — pressed while Home Assistant was down, and waiting on the topic
-    when it came back — is byte-identical to the first except for `ts`. Comparing the
+    is not allowed" - pressed while Home Assistant was down, and waiting on the topic
+    when it came back - is byte-identical to the first except for `ts`. Comparing the
     text would show the right error at the wrong time, which is the one thing this
     sensor exists to get right.
     """
@@ -554,7 +554,7 @@ async def test_replaying_the_very_same_complaint_changes_nothing(
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """Not merely the same values — the same state, with no event behind it.
+    """Not merely the same values - the same state, with no event behind it.
 
     Every reconnect replays this payload, and an entity that rewrote itself each time
     would be a row in the recorder for something that did not happen.
@@ -658,7 +658,7 @@ async def test_a_retained_complaint_is_shown_when_there_is_nothing_to_restore(
 ) -> None:
     """A fresh install, or a refusal that happened while Home Assistant was down.
 
-    The complaint is still the truth about the receiver, so it is shown — with the
+    The complaint is still the truth about the receiver, so it is shown - with the
     receiver's own timestamp, not the moment the broker handed it over.
     """
     box_on_the_broker[LAST_ERROR_TOPIC] = json.dumps(

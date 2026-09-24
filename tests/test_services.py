@@ -2,7 +2,7 @@
 
 Every one of them is an entity action on the media player, so a test that targets the
 device rather than the entity is testing that Home Assistant resolves the device to the
-box — which is the whole reason the actions were registered there.
+box - which is the whole reason the actions were registered there.
 """
 
 from __future__ import annotations
@@ -87,7 +87,7 @@ async def test_the_zap_action_accepts_the_receivers_own_spelling(
 
     A reference can stop at the tenth colon or carry one, and its hexadecimal fields
     are not written in an agreed case, so comparing the two as strings reports a zap
-    that plainly happened as a timeout — ten seconds after it happened.
+    that plainly happened as a timeout - ten seconds after it happened.
     """
     await async_setup_box(hass, config_entry)
     other = "1:0:19:1234:3F3:1:C00000:0:0:0:"

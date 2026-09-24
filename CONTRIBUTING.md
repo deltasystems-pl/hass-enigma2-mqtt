@@ -7,7 +7,7 @@ down as an ADR.
 ## What helps most right now
 
 - **Testers on other images.** OpenViX 6.6 on a Vu+ Uno 4K SE is the only box the maintainer
-  can run. OpenATV, OpenPLi and OpenBH need someone with the hardware — say so in an issue and
+  can run. OpenATV, OpenPLi and OpenBH need someone with the hardware - say so in an issue and
   you get a call-for-testers checklist.
 - **Translations.** English is the source language, Polish is reviewed by the maintainer,
   **German is drafted and needs a native speaker**. Other languages are welcome.
@@ -34,7 +34,7 @@ Tests live in `tests/`, mirroring the module they cover. `tests/conftest.py` ena
 integrations for every test; the MQTT side is exercised with the `mqtt_mock` fixture, never
 against a real broker, and the SSH installer (M4) is tested against a fake SSH server.
 
-**hassfest** and the **HACS action** are not run locally — they are GitHub Actions, and CI
+**hassfest** and the **HACS action** are not run locally - they are GitHub Actions, and CI
 runs them on every push and pull request. Open a draft pull request if you want their verdict
 before the work is finished.
 
@@ -45,7 +45,7 @@ script and the by-effect checklist.
 ## Pull requests
 
 - One topic per pull request, branched off `main`.
-- **CI must be green** — hassfest, the HACS action, ruff and pytest. This applies to the
+- **CI must be green** - hassfest, the HACS action, ruff and pytest. This applies to the
   maintainer too; nothing is pushed straight to `main`.
 - Update `CHANGELOG.md` under `## [Unreleased]` when the change is visible to a user.
 - Update the documentation in the same pull request as the behaviour.
@@ -55,15 +55,15 @@ script and the by-effect checklist.
 
 - Plain, conventional messages: an imperative subject line of about 70 characters, a body that
   explains *why* when the change is not obvious.
-- **No trailers, no attribution footers, no generated-by lines** — in commit messages, pull
+- **No trailers, no attribution footers, no generated-by lines** - in commit messages, pull
   request bodies, issues, release notes or code comments. Authorship is the person opening the
   pull request.
 - Comments explain intent, not syntax.
 
 ## Architecture decisions
 
-Anything that constrains later work — a topic contract, a dependency, a mode, a naming
-scheme — is recorded in [`docs/adr/`](docs/adr/). Superseded decisions are marked as
+Anything that constrains later work - a topic contract, a dependency, a mode, a naming
+scheme - is recorded in [`docs/adr/`](docs/adr/). Superseded decisions are marked as
 superseded, never deleted. [ADR-0000](docs/adr/0000-prd.md) is the approved product
 requirements document; [ADR-0001](docs/adr/0001-m0-decisions.md) closed its open questions.
 
@@ -72,11 +72,11 @@ requirements document; [ADR-0001](docs/adr/0001-m0-decisions.md) closed its open
 - `custom_components/enigma2_mqtt/translations/en.json` is the **source**; every key starts
   there.
 - `pl.json` is reviewed by the maintainer. `de.json` is a draft and **needs community
-  review** — corrections are welcome as pull requests.
+  review** - corrections are welcome as pull requests.
 - Translation **keys are English** and entity ids derive from them, so a key is never renamed
   for cosmetic reasons; only display names change. 🔴 An entity's **English name** is what
   Home Assistant slugifies into its entity id, so every English name has to slugify back to
-  its own key — „Wake" gives `…_wake`, „Wake (WoL)" would give `…_wake_wol`. Rename the
+  its own key - „Wake" gives `..._wake`, „Wake (WoL)" would give `..._wake_wol`. Rename the
   English name of an existing entity and you rename every automation that refers to it.
 - Every file covers the same ground: the config and options flows, the name of each of the
   twenty-six entities, the eight device triggers, and the name, description and every field

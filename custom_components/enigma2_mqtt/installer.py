@@ -64,7 +64,7 @@ ENIGMA_SETTINGS = "/etc/enigma2/settings"
 BACKUP_ROOT = "/home/root/mqttbridge-backups"
 MIN_PYTHON = (3, 9)
 # The command timeouts of the two helper steps that take opkg's lock. The helper's own
-# wait for that lock has to end inside them — `installer_helper.OPKG_LOCK_WAIT_*` — or the
+# wait for that lock has to end inside them - `installer_helper.OPKG_LOCK_WAIT_*` - or the
 # installer gives up on a helper that is still waiting and takes the lock later.
 SNAPSHOT_TIMEOUT = 30
 RESTORE_TIMEOUT = 60
@@ -73,8 +73,8 @@ TIMER_GUARD_SECONDS = 10 * 60
 ANNOUNCEMENT_TIMEOUT = 120.0
 # How long a rollback waits for the interface it stopped to come back, and how often it
 # looks. The success path judges its restart by the plugin's fresh MQTT announcement and
-# allows ANNOUNCEMENT_TIMEOUT for it; a rollback has no announcement coming — it has just
-# put the old plugin back, or no plugin at all — so it watches the process instead, and
+# allows ANNOUNCEMENT_TIMEOUT for it; a rollback has no announcement coming - it has just
+# put the old plugin back, or no plugin at all - so it watches the process instead, and
 # it is given the same time. `init 3` returns immediately and the interface takes eleven
 # to fourteen seconds to answer on the receivers measured, so a single look straight
 # afterwards reads a box that is coming back perfectly well as one that is not.
@@ -136,13 +136,13 @@ def _log_install_refusal(error: InstallerError) -> None:
     An install stopped before the receiver was touched used to leave nothing at all: no
     line at INFO, none at WARNING, and the one sentence explaining it on a config-flow
     screen that is gone the moment it is read. Asked afterwards why an install had been
-    refused, the log had no answer — measured on a receiver on 2026-09-22.
+    refused, the log had no answer - measured on a receiver on 2026-09-22.
 
     Every guard carries the facts it judged in `detail`; this is the only thing that
     writes them, and only on the install path. The same guards are what the options
     screen's no-write credential probe and reauthentication run, and there a receiver
     that happens to be recording is a message on a form to be retried, not a refused
-    install — a line claiming otherwise, once per retry, would be a false one. One
+    install - a line claiming otherwise, once per retry, would be a false one. One
     boundary, one line, and nothing to keep in step about which of two places has
     already logged.
 
@@ -162,8 +162,8 @@ class _RollbackError(InstallerError):
     """A rollback step that failed, named by the outcome it leaves the receiver in.
 
     The steps of a rollback fail for different reasons and leave the receiver in
-    different states — files restored or not, interface up or not, lock released or
-    not — and telling a person to inspect a box that only needs restarting is as
+    different states - files restored or not, interface up or not, lock released or
+    not - and telling a person to inspect a box that only needs restarting is as
     unhelpful as the reverse. A marker class rather than a bare `InstallerError` so
     that the caller can tell the rollback's own verdict from anything else.
     """
@@ -296,7 +296,7 @@ class InstallResult:
     restarted: bool
     # What the receiver is called now the transaction is over: the name the form gave,
     # or the one the receiver already held when the form gave none. Empty when nothing
-    # was provisioned — an update writes no settings — and the caller then keeps
+    # was provisioned - an update writes no settings - and the caller then keeps
     # whatever name it already had for the box.
     friendly_name: str = ""
 
@@ -403,10 +403,10 @@ async def _async_connect(credentials: SshCredentials) -> InstallerSession:
         )
     except (asyncssh.HostKeyNotVerifiable, asyncssh.KeyImportError) as err:
         # `KeyImportError` is the stored key itself being unreadable, and it subclasses
-        # `ValueError` rather than `asyncssh.Error` — so it used to sail past both
+        # `ValueError` rather than `asyncssh.Error` - so it used to sail past both
         # handlers below and reach the user as a traceback and the word "Unknown". It
-        # belongs here: whatever the cause — a truncated write, a hand-edited entry, a
-        # restored backup from another receiver — the pinned identity is no longer
+        # belongs here: whatever the cause - a truncated write, a hand-edited entry, a
+        # restored backup from another receiver - the pinned identity is no longer
         # usable, and the recovery is the same one a changed host key gets, which is to
         # be shown the fingerprint again and asked to accept it.
         raise InstallerError(InstallerErrorCode.HOST_KEY_CHANGED) from err
@@ -436,7 +436,7 @@ async def _run_checked(
 
     `busy` is the code for a helper step that could not get opkg's lock in time. That
     one failure gets its own sentence because it is the one a person can fix by waiting
-    — somebody is installing something from the receiver's menu — and the helper's own
+    - somebody is installing something from the receiver's menu - and the helper's own
     words for it would otherwise be discarded with the rest of its output.
     """
     try:
@@ -701,7 +701,7 @@ async def _async_enigma_pids(session: InstallerSession) -> set[int]:
     working perfectly.
 
     `pidof` exits 1 and says nothing when there is no match, which is a receiver with
-    its interface down — a box still booting, or one stopped on purpose — rather than a
+    its interface down - a box still booting, or one stopped on purpose - rather than a
     receiver that failed to answer. The empty set is the answer, not an error.
     """
     try:
@@ -722,7 +722,7 @@ async def _async_wait_for_enigma(session: InstallerSession, old_pids: set[int]) 
     `init 3` returns as soon as the runlevel change is accepted, not when the interface
     is up, so asking `pidof` once straight afterwards asks a question the receiver
     cannot yet answer. A box that was coming back normally was read as one that had not
-    come back at all, which turned a rollback that had worked into a reported failure —
+    come back at all, which turned a rollback that had worked into a reported failure -
     and, because that verdict came before the lock was released, it wedged every later
     install on that receiver.
 
@@ -748,7 +748,7 @@ def _stored_setting(identity: dict[str, Any], name: str) -> Any:
     """Return a stored plugin setting, reading an absent one as the plugin's default.
 
     `None` from the receiver-side helper means the settings file has no line for this
-    setting, and enigma2 writes no line for a setting that still equals its default —
+    setting, and enigma2 writes no line for a setting that still equals its default -
     so absence is the default, never a difference. The defaults come from
     `PLUGIN_SETTING_DEFAULTS`, which is the only copy of them on this side.
     """
@@ -767,7 +767,7 @@ def _stored_for_display(identity: dict[str, Any], name: str) -> str:
 
     A setting stored as an empty string is stored, so it gets no brackets: it is shown
     as `""`, because it is the one value that would otherwise appear as nothing at all
-    in the middle of a sentence — and because it is a real difference from the default,
+    in the middle of a sentence - and because it is a real difference from the default,
     which is how `_stored_setting` compares it. Collapsing the two would put the same
     two-identical-looking-values problem back, one layer down.
 
@@ -789,13 +789,13 @@ async def _async_validate_receiver_identity(
     """Refuse to update or overwrite a differently configured receiver.
 
     Returns the name the receiver stores, stripped, or an empty string for a receiver
-    that stores none. It is not part of any comparison — a box may be called anything
-    — but this is the one point in the transaction that has already read the settings
+    that stores none. It is not part of any comparison - a box may be called anything
+    - but this is the one point in the transaction that has already read the settings
     file, and it is the only way to know what a box whose name the form did not give
     is going to be called.
 
     What the helper reports is what the settings file holds, and a setting that is not
-    in it is `null` rather than a value — enigma2 writes no line for a value that still
+    in it is `null` rather than a value - enigma2 writes no line for a value that still
     equals its default, so a receiver on the default base topic stores no base topic.
     Every comparison here is therefore made after the plugin's own defaults have been
     applied, from `PLUGIN_SETTING_DEFAULTS`, which is the only copy of them on this
@@ -804,7 +804,7 @@ async def _async_validate_receiver_identity(
     plugin and where absence and the default value arrived here as the same answer.
 
     An absent node id is the one that is not defaulted, because the plugin has no
-    default worth comparing against — it derives `<boxtype>_<mac6>` on its first run
+    default worth comparing against - it derives `<boxtype>_<mac6>` on its first run
     and writes it, so a box with no node id is a box whose plugin has never started.
     There is nothing there to take over, so provisioning proceeds and writes the one
     the form gave. Deriving the expected id instead would mean guessing the MAC at a
@@ -1147,10 +1147,10 @@ async def _async_rollback(
         result = await session.run("set -eu; " + "; ".join(commands), timeout=RESTORE_TIMEOUT)
         if install_started and result.exit_status == installer_helper.EXIT_OPKG_BUSY:
             # Nothing was restored: the helper takes opkg's lock before it touches a
-            # file. Which plugin the receiver is on depends on how far the install got —
+            # file. Which plugin the receiver is on depends on how far the install got -
             # the likeliest way here is an opkg run from the receiver's menu that also
             # made the install's own `opkg install` fail on the lock, and then nothing
-            # had changed — so this says „not restored", not „on the new plugin", and
+            # had changed - so this says „not restored", not „on the new plugin", and
             # apart from a restore that broke half-way.
             raise InstallerError(InstallerErrorCode.ROLLBACK_OPKG_BUSY)
         if install_started and result.exit_status == installer_helper.EXIT_OPKG_LOCK_LOST:
@@ -1212,7 +1212,7 @@ async def _async_rollback(
         if cancelled is None and isinstance(release_err, asyncio.CancelledError):
             cancelled = release_err
         if progress.lock_released:
-            # The lock went; something after it did not — closing the session, most
+            # The lock went; something after it did not - closing the session, most
             # likely. Saying the receiver is locked here would send somebody to delete a
             # directory that is not there.
             _LOGGER.warning(
@@ -1308,7 +1308,7 @@ async def _async_install_locked(
     try:
         # Everything up to the transaction lock is a guard, and a guard that refuses
         # leaves the receiver as it found it. Each of those refusals is written to the
-        # log here — the one place that knows an install was being attempted — because
+        # log here - the one place that knows an install was being attempted - because
         # the sentence a user is shown lives on a config-flow screen that is gone as
         # soon as it is read, and afterwards there was nothing at all to say one had
         # even happened. The guards themselves log nothing: the same code runs for the
@@ -1402,7 +1402,7 @@ async def _async_install_locked(
             # What the receiver ends up called, which an empty name field leaves to the
             # receiver: the document omits the key, the plugin keeps the name it holds,
             # and this is only the answer to what that name is. Reported rather than
-            # written back — a value the box already holds is not this transaction's to
+            # written back - a value the box already holds is not this transaction's to
             # rewrite, and writing it would make an install that changed nothing
             # indistinguishable from one that renamed the box to the same thing.
             provisioned_name = request.provisioning.display_name() or stored_name
@@ -1427,7 +1427,7 @@ async def _async_install_locked(
         await _async_measure_preflight(session, bundle_size=len(bundle_bytes))
         # Read before the restart, so that afterwards a process that was not running
         # then is proof the interface really went down and came back. An empty set is a
-        # perfectly ordinary answer — a box still booting has no Enigma yet — and any
+        # perfectly ordinary answer - a box still booting has no Enigma yet - and any
         # pid at all afterwards is then the proof.
         old_enigma_pids = await _async_enigma_pids(session)
         base_topic, node_id = request.target()

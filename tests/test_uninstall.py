@@ -2,7 +2,7 @@
 
 The receiver in these tests is the documentation's example box. Its MQTT side is the fake
 broker every other test uses, answering `cmd/uninstall` the way the plugin's teardown does
-— `info` and the announcement retracted, then `offline` — or refusing it on `last_error`.
+- `info` and the announcement retracted, then `offline` - or refusing it on `last_error`.
 Its SSH side is a fake that knows only the handful of fixed reads the verification makes,
 and records every one of them, so an ordering can be asserted and a write would show up.
 """
@@ -169,7 +169,7 @@ class FakeReceiver:
     opkg_broken_after: bool = False
     # What `pidof enigma2` answers before the removal, when not the pid.
     pidof_before: CommandResult | None = None
-    # An opkg failure that mentions „blocked" — not the lock — before the removal.
+    # An opkg failure that mentions „blocked" - not the lock - before the removal.
     opkg_blocked_before: bool = False
     # A transport failure on the first command containing this text.
     drop_on: str | None = None
@@ -317,7 +317,7 @@ async def _arm_box(
             # Deep standby, or a power cut: the last will, and `info` left retained.
             async_fire_mqtt_message(hass, AVAILABILITY_TOPIC, "offline")
         elif answer == "fail_then_restore":
-            # Retractions under way, then everything back and why — a failure the plugin
+            # Retractions under way, then everything back and why - a failure the plugin
             # reports before it ever says `offline` (a connection that dropped mid-way).
             async_fire_mqtt_message(hass, INFO_TOPIC, "")
             async_fire_mqtt_message(hass, ANNOUNCEMENT_TOPIC, "")
@@ -473,7 +473,7 @@ async def test_an_empty_info_withdraws_the_permission_and_keeps_the_rest(
     The plugin retracts `info` on its way out. Ignoring that kept the permission it had
     stated in memory until Home Assistant restarted, so the menu went on offering to
     remove a plugin that was already gone. What the rest of the integration reads from
-    the last payload — the image, the version, the address — stays.
+    the last payload - the image, the version, the address - stays.
     """
     entry = _entry()
     await async_setup_box(hass, entry)
@@ -645,9 +645,9 @@ async def test_with_credentials_every_readback_passing_is_verified(
     assert result["reason"] == "uninstall_verified"
     command_at = events.index("mqtt:cmd/uninstall")
     before, after = events[:command_at], events[command_at + 1 :]
-    # The guards, the pids, the package and the settings block before the command…
+    # The guards, the pids, the package and the settings block before the command...
     assert before == ["ssh:wget", "ssh:wget", "ssh:pidof", "ssh:opkg", "ssh:grep"]
-    # …and after it the restart first, OpenWebif up, then every absence and the block.
+    # ...and after it the restart first, OpenWebif up, then every absence and the block.
     assert after == [
         "ssh:pidof",
         "ssh:wget",
@@ -728,7 +728,7 @@ async def test_a_readback_that_disagrees_is_named(
     receiver: FakeReceiver,
     detail: str,
 ) -> None:
-    """„Removed, not verified", naming exactly what SSH found instead — nothing more."""
+    """„Removed, not verified", naming exactly what SSH found instead - nothing more."""
     entry = _entry(credentials=True)
     await async_setup_box(hass, entry)
     await _arm_box(hass, "uninstall", receiver=receiver)
@@ -746,7 +746,7 @@ async def test_a_briefly_held_opkg_lock_is_asked_again(
     mqtt_mock,
     permitted: dict[str, str | bytes],
 ) -> None:
-    """opkg's lock held for a moment — the image's update check — is not a failed readback."""
+    """opkg's lock held for a moment - the image's update check - is not a failed readback."""
     receiver = FakeReceiver(opkg_locked_after=2)
     entry = _entry(credentials=True)
     await async_setup_box(hass, entry)
@@ -858,14 +858,14 @@ async def test_a_refusal_is_raised_with_the_receivers_own_words(
 
 # What the plugin publishes when the removal fails after its `offline`: opkg refused, or
 # the broker's acknowledgements never came. The shape of a removal first, then the plugin
-# back on the broker, everything republished, and — when it can — the reason.
+# back on the broker, everything republished, and - when it can - the reason.
 _SHAPE = [(INFO_TOPIC, ""), (ANNOUNCEMENT_TOPIC, ""), (AVAILABILITY_TOPIC, "offline")]
 _BACK = [(AVAILABILITY_TOPIC, "online"), (INFO_TOPIC, json.dumps(PERMITTED_INFO))]
 _OPKG_FAILED = json.dumps({"cmd": "uninstall", "error": "opkg remove exited 255"})
 
 
 # The plugin's own sentences for a removal that failed after `offline` (enigma2-mqtt-bridge
-# `uninstall.py`, main 8ad4c72): opkg refused — its lock held, say — and opkg reporting
+# `uninstall.py`, main 8ad4c72): opkg refused - its lock held, say - and opkg reporting
 # success with the package still on the disk.
 _OPKG_REFUSED = (
     "the uninstall stopped at the package removal: opkg exited with status 255; "
@@ -882,8 +882,8 @@ _ANNOUNCEMENT = json.dumps({"node_id": NODE_ID, "name": BOX_NAME, "base_topic": 
 def _teardown_then_failure(sentence: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
     """The plugin's real publishes, in its order, split where the failure happens.
 
-    Steps 2 and 3: every retained topic it owns retracted in sorted order — its own
-    `availability` among them — then `offline`. Then, when opkg or the acknowledgements
+    Steps 2 and 3: every retained topic it owns retracted in sorted order - its own
+    `availability` among them - then `offline`. Then, when opkg or the acknowledgements
     fail, `restart_after_failed_uninstall`: a fresh session's `on_connect` publishes
     `online`, the snapshot, the announcement, and only then the `last_error`.
     """
@@ -923,7 +923,7 @@ async def test_a_removal_that_fails_after_offline_is_a_rollback(
     """`offline` is not the end of the answer, with or without SSH.
 
     The plugin says `offline` before it runs opkg; a removal that fails afterwards comes
-    back online and says why on `last_error`. That sentence is the result — not „the
+    back online and says why on `last_error`. That sentence is the result - not „the
     receiver said it removed the plugin", and not a readback that waits for a restart
     that is never coming and then blames the restart. The failure arrives a moment after
     the teardown, as it does on a receiver, so with SSH it lands while the readbacks run.
@@ -1127,7 +1127,7 @@ async def test_a_failure_after_retractions_but_before_offline_is_a_rollback(
     """Retractions, then everything back and why, with no `offline` in between.
 
     The connection dropped mid-retraction, so the `offline` that completes the shape never
-    reached Home Assistant — but the teardown had begun, so this is a rollback, not a
+    reached Home Assistant - but the teardown had begun, so this is a rollback, not a
     refusal.
     """
     entry = _entry()
@@ -1298,7 +1298,7 @@ _REFUSED = json.dumps({"cmd": "uninstall", "error": REFUSAL})
         # The broker holds empty `info` and announcement when the watch subscribes, and
         # the box then goes off: a fresh last will after stale retractions.
         ({INFO_TOPIC: "", ANNOUNCEMENT_TOPIC: ""}, [(AVAILABILITY_TOPIC, "offline")]),
-        # The whole shape, but all of it retained — a replay of some earlier removal.
+        # The whole shape, but all of it retained - a replay of some earlier removal.
         ({INFO_TOPIC: "", ANNOUNCEMENT_TOPIC: "", AVAILABILITY_TOPIC: "offline"}, []),
         # A refusal from some earlier session.
         ({LAST_ERROR_TOPIC: _REFUSED}, []),
@@ -1315,8 +1315,8 @@ async def test_retained_replays_are_never_the_answer(
     """What the broker held before the command cannot be the receiver's reply to it.
 
     The stale payloads go into the broker's retained store after the box is set up, so
-    they reach the watch the way a broker delivers them — once, flagged retained, as its
-    subscriptions land — and never reach the box, which is still offering the removal.
+    they reach the watch the way a broker delivers them - once, flagged retained, as its
+    subscriptions land - and never reach the box, which is still offering the removal.
     """
     entry = _entry()
     await async_setup_box(hass, entry)
@@ -1501,7 +1501,7 @@ def _before_the_command(
     """Let a third client's messages land once the watch is listening, before the command.
 
     They arrive after the watch's subscriptions are confirmed and before the watch is armed
-    and the command published — exactly the window in which somebody else's retraction used
+    and the command published - exactly the window in which somebody else's retraction used
     to be taken for the receiver's own teardown.
     """
     real = _UninstallWatch.async_wait_until_established
@@ -1664,7 +1664,7 @@ async def _answer_inside_the_publish(
     """A receiver whose answer arrives before the publish call has returned.
 
     After a stall of the event loop the broker's acknowledgement and the receiver's first
-    messages come in one read, and Home Assistant's client dispatches them as it reads —
+    messages come in one read, and Home Assistant's client dispatches them as it reads -
     so the answer is handled inside the publish. The MQTT test harness delivers exactly
     that way when an answer is sent from the command's own callback.
     """
@@ -1722,7 +1722,7 @@ async def test_a_drop_mid_retraction_delivered_inside_the_publish_is_aborted(
     mqtt_mock,
     permitted: dict[str, str | bytes],
 ) -> None:
-    """Retractions, no `offline`, then everything back and why — all inside the publish.
+    """Retractions, no `offline`, then everything back and why - all inside the publish.
 
     Counting retractions only once the publish had returned read these as somebody
     else's, and reported a teardown that had begun as a refusal.

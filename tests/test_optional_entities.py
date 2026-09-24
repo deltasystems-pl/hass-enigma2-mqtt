@@ -1,7 +1,7 @@
 """Diagnostics that exist only while the receiver is actually reporting them.
 
 A box can advertise that it *can* report conditional-access or OSCam health and still
-have that reporting switched off — which is the default, because both are opt-in. The
+have that reporting switched off - which is the default, because both are opt-in. The
 entities used to be created from the capability alone, so a device page filled up with
 diagnostics that read `unknown` for ever and could not be made to say anything. On a
 page whose whole job is "is anything wrong", a permanent unknown is indistinguishable
@@ -154,8 +154,8 @@ async def test_an_info_payload_that_says_nothing_about_the_option_removes_nothin
 
     A plugin that has not read its own configuration yet, or an older one that has no
     such option, publishes `info` without the setting in it. Reading that as "turned
-    off" deleted the entities from the registry — with the names, the areas, the icons
-    and the history the household had given them — and the next `info` a second later
+    off" deleted the entities from the registry - with the names, the areas, the icons
+    and the history the household had given them - and the next `info` a second later
     brought them back as strangers.
     """
     retained[AVAILABILITY_TOPIC] = "online"

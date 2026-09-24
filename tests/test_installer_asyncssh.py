@@ -4,9 +4,9 @@ Everything else about the installer is tested against a fake session, which is t
 place to test a state machine. It is the wrong place to test the transport: the fake
 answers because it was written to, and the mapping from what a real SSH library raises
 onto the error codes the config flow shows is exactly what a fake cannot check. So this
-file runs the real adapter against a real server in this process — one that refuses the
+file runs the real adapter against a real server in this process - one that refuses the
 password, one that is not there at all, one that never answers, and one that fails a
-command — and asserts the code a user would end up reading.
+command - and asserts the code a user would end up reading.
 """
 
 from __future__ import annotations
@@ -115,7 +115,7 @@ async def test_probe_closes_a_connection_it_managed_to_open(socket_enabled: None
     """A server that wants no authentication lets the probe all the way in.
 
     The probe asks for no authentication method at all, which most receivers answer by
-    refusing — and that refusal is the path the other test takes. A box that does not
+    refusing - and that refusal is the path the other test takes. A box that does not
     refuse leaves this holding an open connection it never wanted, and it has to be given
     back rather than left to the garbage collector.
     """
@@ -307,7 +307,7 @@ async def test_a_stored_host_key_that_is_not_a_key_routes_to_re_pinning(
     """A pinned identity can be unreadable as well as wrong.
 
     AsyncSSH raises KeyImportError for a host key it cannot parse, and that subclasses
-    ValueError rather than asyncssh.Error — so a truncated write, a hand-edited entry or
+    ValueError rather than asyncssh.Error - so a truncated write, a hand-edited entry or
     a backup restored from another receiver left the installer as a raw traceback, shown
     to the user as "Unknown error", with no reauthentication offered. Offering it is the
     one thing that fixes this: the fingerprint is shown again and accepted again.

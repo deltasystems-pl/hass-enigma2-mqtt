@@ -16,8 +16,8 @@ Two things about a receiver-side removal are not obvious from here, and both sha
 
 **Retained topics outlive the plugin.** Removing the package without first retracting them leaves
 the broker serving a snapshot of a receiver that is gone, for ever, and a consumer showing
-entities nothing will ever update. The correct order — retract while the plugin is still
-connected, then remove — is documented and is easy to forget, and forgetting it is invisible until
+entities nothing will ever update. The correct order - retract while the plugin is still
+connected, then remove - is documented and is easy to forget, and forgetting it is invisible until
 much later.
 
 **Deleting a configuration entry is not a statement about the receiver.** It is a local decision
@@ -41,8 +41,8 @@ something inferred it. Removal has to be asked for, in as many words, by somebod
   top: the people most likely to get that ordering wrong are the people who will not be running a
   reset by hand first.
 
-The receiver's half of this decision — the permission, the command, the order of operations and
-why removing one's own files while running is safe — is ADR-0004 in
+The receiver's half of this decision - the permission, the command, the order of operations and
+why removing one's own files while running is safe - is ADR-0004 in
 [the plugin repository](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0004-remote-uninstall.md).
 The two are read together.
 
@@ -63,11 +63,11 @@ granted on the receiver and never over MQTT, on the terms
 [ADR-0003](0003-control-feedback-and-household-features.md) set for the power-off permission.
 
 🔴 **The polarity here is the opposite of the one decision 2 of ADR-0003 uses, deliberately.**
-There, only a *stated* `false` removes anything, so a receiver running an older plugin — or one
-whose payload cannot be read — keeps behaving as it always did. Here the action exists only on a
+There, only a *stated* `false` removes anything, so a receiver running an older plugin - or one
+whose payload cannot be read - keeps behaving as it always did. Here the action exists only on a
 stated `true`. Silence means „this receiver has not said it permits this", and for an operation
 that cannot be undone the safe reading of silence is no. The three states ADR-0003 already
-identified — not yet stated, stated true, stated false — are the same three; only which of them
+identified - not yet stated, stated true, stated false - are the same three; only which of them
 opens the door changes.
 
 ### 3. SSH is preferred where the entry has it; the command is the fallback
@@ -77,7 +77,7 @@ opens the door changes.
   nothing loadable was left behind. It is the path that can tell success from a receiver that
   merely stopped answering.
 - **Without them**, the integration publishes the plugin's `cmd/uninstall`, whose payload is the
-  node id — a confirmation that this receiver was meant, not a secret. The receiver retracts its
+  node id - a confirmation that this receiver was meant, not a secret. The receiver retracts its
   retained topics, says `offline`, removes its package and restarts, in that order.
 
 ### 4. Deleting the configuration entry still never removes anything from a receiver
@@ -90,19 +90,19 @@ plugin is the action above, and only the action above.
 
 When the plugin is gone there is nothing left to listen: no message from Home Assistant can bring
 it back, and the receiver returns only through SSH or its own package manager. The confirmation
-says that, in one sentence, in the household's language, before the action runs — and it says that
+says that, in one sentence, in the household's language, before the action runs - and it says that
 the receiver keeps its settings, so a later reinstall finds its configuration where it left it.
 
 ## Consequences
 
 - **Over MQTT, success cannot be proved.** The last thing the broker hears is `offline`, and a
   receiver that has removed the plugin looks exactly like one that was switched off mid-command.
-  The action reports what it asked for and what it observed, and says which of the two it is —
+  The action reports what it asked for and what it observed, and says which of the two it is -
   rather than reporting a success it cannot see. The SSH path does not have this problem and is
   preferred for that reason, not for speed.
 - **The entry and its entities survive the removal.** Nothing will update them again, and the
-  device goes unavailable and stays there. That is correct — the configuration is the user's, and
-  this integration does not delete it out from under them — but it means the visible outcome of a
+  device goes unavailable and stays there. That is correct - the configuration is the user's, and
+  this integration does not delete it out from under them - but it means the visible outcome of a
   successful uninstall is indistinguishable at a glance from a receiver that is off. The
   confirmation says what to expect, and deleting the entry afterwards is the user's next step if
   they want one.
@@ -119,7 +119,7 @@ the receiver keeps its settings, so a later reinstall finds its configuration wh
 ## Not yet done
 
 - **None of this is implemented.** This record is the decision; the release is 0.3.0, and the
-  plugin's half has to land first — there is nothing to offer until a receiver can echo the
+  plugin's half has to land first - there is nothing to offer until a receiver can echo the
   permission.
 - **The composed sequence has never been run on hardware.** Each step is proven separately; a
   plugin removing itself while connected is not.

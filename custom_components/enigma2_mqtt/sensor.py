@@ -1,19 +1,19 @@
 """What the receiver is doing, as sensors.
 
 Ten always, and more when the box says it can measure them. The first five are what a
-household looks at — the channel, what is on now and next, whether anything is being
+household looks at - the channel, what is on now and next, whether anything is being
 recorded and when the next recording starts. The next four are diagnostics: signal
 quality and uptime matter when something is wrong and are noise on a dashboard, so they
 are in the diagnostic category and disabled until somebody turns them on. The tenth is
 „Ostatni błąd", which is the opposite case: a diagnostic that is enabled, because the
 only time anybody goes looking for it is after something has already gone wrong.
 
-The rest depend on what the plugin announced. The `process` group — what enigma2 itself
-is using — appears when the box names that capability. The conditional-access and OSCam
+The rest depend on what the plugin announced. The `process` group - what enigma2 itself
+is using - appears when the box names that capability. The conditional-access and OSCam
 groups follow a setting instead of a capability, because they are a choice about privacy
-rather than about what the image allows. „EPG – aktywny bukiet" follows two capabilities
-at once — the grids and the channel-list context — and is the one sensor here whose state
-moves with the clock as well as with the topics.
+rather than about what the image allows. The `epg_active_bouquet` sensor follows two
+capabilities at once - the grids and the channel-list context - and is the one sensor here
+whose state moves with the clock as well as with the topics.
 
 Two conventions run through the file. Epoch seconds from the topics become ISO strings
 in attributes and `datetime` objects in states, because those are what a template and a
@@ -189,7 +189,7 @@ def _softcam_attributes(state: Enigma2State) -> dict[str, Any]:
     that is what a template can read.
 
     🔴 `running_instances` is `None` rather than `0` when the count could not be taken.
-    Zero instances is a real reading — it is a channel that has stopped decoding — and a
+    Zero instances is a real reading - it is a channel that has stopped decoding - and a
     number that means "we do not know" would be the one thing an automation must never be
     given here.
     """
@@ -200,7 +200,7 @@ def _softcam_attributes(state: Enigma2State) -> dict[str, Any]:
         "last_restart_reason": softcam.get("last_restart_reason"),
         "restarts_today": softcam.get("restarts_today"),
         # Whether the image's own liveness check adds a copy of the cam at every GUI
-        # start on this box — the difference between a receiver that needs the restart
+        # start on this box - the difference between a receiver that needs the restart
         # button and one that merely has it.
         "manager_check_on_start": softcam.get("manager_check_on_start"),
         # The image's periodic check interval when it is switched on, and `None` when it
@@ -245,8 +245,8 @@ def _grid_events(channel: dict[str, Any]) -> list[dict[str, Any]]:
     The grid arrives from a box and is not trusted to be what the contract says: an event
     without a title or with an end that is not after its begin is left out, rather than
     drawn as a programme that lasts no time at all. The title is capped here, once, so
-    everything downstream — the attribute and the comparison that decides whether the
-    state moved — sees the same string.
+    everything downstream - the attribute and the comparison that decides whether the
+    state moved - sees the same string.
     """
     events = channel.get("events")
     if not isinstance(events, list):
@@ -553,7 +553,7 @@ async def async_setup_entry(
             lambda: CAPABILITY_PROCESS in box.capabilities,
             # Never. The CAM and OSCam entities follow a setting a household can turn
             # off, and turning it off is a reason to take them away. This follows a
-            # capability, and a capability that stops being named is not a decision —
+            # capability, and a capability that stops being named is not a decision -
             # it is a downgraded plugin, an image that lost a hook, or a box that has
             # not answered yet. None of those is a reason to delete somebody's history.
             lambda: False,
@@ -595,7 +595,7 @@ async def async_setup_entry(
             # answered" side is a flat no. The two above follow a *setting*: somebody
             # turned the telemetry off, meant it, and an entity that can never say
             # anything again is worse than none. This follows a *capability*, and a
-            # capability going quiet is not a decision anybody made — it is an older
+            # capability going quiet is not a decision anybody made - it is an older
             # plugin, a hook that failed to attach on this boot, or a receiver that is
             # simply not there. Deleting on that takes the rename, the area, the
             # dashboard card and the whole history of a diagnostic with it, and the next
@@ -643,7 +643,7 @@ async def async_setup_entry(
 
     # The manager is started whatever the box has said so far, because at this point it
     # has usually said nothing: `async_setup_entry` subscribes and returns, and the
-    # retained burst that carries `info` — and with it the capability list — arrives
+    # retained burst that carries `info` - and with it the capability list - arrives
     # after the platforms have been set up. Reading the capability here meant that on
     # every real receiver the per-source entities were never created at all, and that
     # the branch taken instead deleted every `oscam_` registration the box had. The
@@ -680,14 +680,14 @@ class Enigma2EpgActiveBouquetSensor(Enigma2Entity, SensorEntity):
 
     The plugin publishes one retained grid per configured bouquet and, separately, which
     bouquet the receiver's channel ± is in. This joins the two: it reads the grid whose
-    `bouquet` names the active context, so switching bouquets — on the remote or through
-    „Bukiet" — switches what it shows, and a grid for any other bouquet leaves it alone.
+    `bouquet` names the active context, so switching bouquets - on the remote or through
+    „Bukiet" - switches what it shows, and a grid for any other bouquet leaves it alone.
     The grid's `bouquet` field is matched rather than its topic's slug, because the
     contract says the slug is only an address and the payload carries the name.
 
     **The state is how many channels have something to show**, and it keeps three
-    situations apart that a single number would merge. No active bouquet at all — the
-    radio list, the movie list — is `0` with an empty list: the receiver is not in a
+    situations apart that a single number would merge. No active bouquet at all - the
+    radio list, the movie list - is `0` with an empty list: the receiver is not in a
     bouquet, so there is nothing to count. An active bouquet whose grid has not arrived,
     was retracted, or was never configured on the box is `unknown` with an empty list:
     that is „no grid", and reporting it as „a grid with nothing in it" would tell an
@@ -775,8 +775,8 @@ class Enigma2EpgActiveBouquetSensor(Enigma2Entity, SensorEntity):
             current, following = _now_and_next(_grid_events(channel), now)
             if current is not None or following is not None:
                 with_data += 1
-            # The moment this channel's answer changes: its programme ends, or — on a
-            # channel between programmes — the next one starts.
+            # The moment this channel's answer changes: its programme ends, or - on a
+            # channel between programmes - the next one starts.
             change = (
                 current["end"]
                 if current is not None
@@ -816,7 +816,7 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
 
     The integration owns this memory rather than the topic. The plugin clears
     `last_error` on the next command that succeeds, and the person who wants to know why
-    „Restart" did nothing is looking afterwards — usually after the next volume step has
+    „Restart" did nothing is looking afterwards - usually after the next volume step has
     already wiped the evidence. So a cleared topic leaves this sensor alone.
 
     Two things follow from that, and both of them are about the receiver being gone.
@@ -824,7 +824,7 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
     **The time is the receiver's own `ts`** whenever the payload carries one, not the
     moment this integration read it. The retained complaint is replayed on every
     reconnect and again at every start-up, and a time taken from the clock moves each
-    time — so the one number that says when the receiver refused would drift forward
+    time - so the one number that says when the receiver refused would drift forward
     for as long as nobody pressed anything else. With a `ts` in hand a replay writes
     exactly what is already there and Home Assistant drops it, and two refusals that
     differ only in when they happened are still two refusals: the sentence a permission
@@ -896,7 +896,7 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
         ):
             # A replay of what is already shown, by a payload that gives no time of its
             # own: taking it would move the time to now, and a reconnect would do it
-            # again. The text alone only settles this when there is no `ts` — a
+            # again. The text alone only settles this when there is no `ts` - a
             # permission refusal says the same sentence every time, so the second one,
             # made while Home Assistant was down, is byte-identical to the first except
             # for the moment it happened.

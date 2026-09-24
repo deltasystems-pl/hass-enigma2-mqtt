@@ -1,7 +1,7 @@
 """Standby and mute, as switches.
 
 Both are optimistic: the switch moves the moment it is pressed and the state topic
-confirms it a moment later. That is not `assumed_state` — the box does report back, and
+confirms it a moment later. That is not `assumed_state` - the box does report back, and
 a switch that never heard the answer would keep showing the wrong thing, which
 `assumed_state` is for. It is the opposite: the answer is coming, and the dashboard
 should not sit still until it does.

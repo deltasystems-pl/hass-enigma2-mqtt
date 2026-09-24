@@ -119,8 +119,8 @@ def test_oversized_metadata_is_rejected_before_parsing(monkeypatch, tmp_path):
 # The tests above break the committed bundle's *metadata*, which is enough to prove the
 # integration refuses it. They cannot reach the checks that read the source archive,
 # because the committed archive is valid and there is no way to make it otherwise. So
-# this half builds a whole bundle from scratch — a package, a source tarball and the
-# metadata that binds them — and then breaks one thing at a time.
+# this half builds a whole bundle from scratch - a package, a source tarball and the
+# metadata that binds them - and then breaks one thing at a time.
 
 
 def _source_archive(path: Path, staging: Path, *, license_file: bool = True, extras=()) -> None:

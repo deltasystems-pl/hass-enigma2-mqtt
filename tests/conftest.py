@@ -5,7 +5,7 @@ The box in every fixture is the documentation's example receiver: node id
 `192.0.2.12` (RFC 5737 TEST-NET-1). No real receiver appears in this repository.
 
 Two fixtures do the heavy lifting. `retained` gives the fake broker the retained store
-the MQTT test harness does not have, including for wildcard subscriptions — which the
+the MQTT test harness does not have, including for wildcard subscriptions - which the
 integration relies on, since one subscription covers every topic of a box.
 `box_on_the_broker` fills that store with a receiver that is switched on and watching
 television, so a test can assert what an entity says without publishing anything first.
@@ -188,7 +188,7 @@ TIMERS: list[dict[str, Any]] = [
 VOLUME: dict[str, Any] = {"level": 35, "muted": False}
 HDD: dict[str, Any] = {"mounted": True, "path": "/media/hdd", "free_mb": 412330}
 
-# Not a real picture — nothing in the integration decodes it, and a test fixture that
+# Not a real picture - nothing in the integration decodes it, and a test fixture that
 # is a real JPEG only makes the diff harder to read.
 SCREEN = b"\xff\xd8\xff\xdb--not-really-a-jpeg--\xff\xd9"
 
@@ -283,7 +283,7 @@ def retained(hass: HomeAssistant) -> Generator[dict[str, str | bytes]]:
     that payload the moment it subscribes. The MQTT test harness has no retained store,
     so without this a test would have to guess when the subscription landed and fire the
     message at it. Put a payload in the returned mapping and any subscription that
-    matches that topic receives it, exactly as a broker would deliver it — including the
+    matches that topic receives it, exactly as a broker would deliver it - including the
     `<base>/<node>/#` subscription the integration actually uses.
     """
     store: dict[str, str | bytes] = {}
@@ -361,7 +361,7 @@ async def async_setup_box_then_retained(
     This is the order a real broker produces and `async_setup_box` does not.
     `box.async_start` registers the subscription and returns, Home Assistant holds the
     SUBSCRIBE packet behind a tenth of a second of debouncing, and the platforms are set
-    up in the meantime — so `info`, `last_error` and the rest land on entities that
+    up in the meantime - so `info`, `last_error` and the rest land on entities that
     already exist. The `retained` fixture delivers them inside `mqtt.async_subscribe`
     instead, which is the opposite order, and it hides every bug that depends on what a
     thing knew before the box had said anything.
@@ -464,7 +464,7 @@ async def async_arm_box_ack(hass: HomeAssistant, command: str) -> None:
     """Make the fake box clear `last_error` when it carries a command out.
 
     The contract has no acknowledgement topic, so a command with no state topic of its
-    own — `send_key`, `message` — is only ever answered by silence or by a complaint.
+    own - `send_key`, `message` - is only ever answered by silence or by a complaint.
     Clearing `last_error` is the one positive signal the plugin does publish, and the
     integration takes it as one; a box that does not send it simply costs the caller
     the grace period.

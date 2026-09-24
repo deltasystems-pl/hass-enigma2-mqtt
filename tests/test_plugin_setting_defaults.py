@@ -4,14 +4,14 @@
 receiver's `/etc/enigma2/settings` is a list of what somebody changed and nothing else.
 Everything that compares a stored plugin setting therefore has to supply the default
 itself, and a default that is believed here but not declared there is a silent wrong
-answer — a box on the default base topic read as a box configured for another one, and
+answer - a box on the default base topic read as a box configured for another one, and
 a reinstall over a plugin that is working refused for a difference it was never given.
 The defaults used to be applied on the receiver, inside the installer helper, which is
 where nothing could compare them with the plugin at all (2026-09-22).
 
 `PLUGIN_SETTING_DEFAULTS` is the one copy of them. This checks it against the bundled
-plugin's own `config.py` — the source the metadata pins by digest and commit, which is
-also the source of the package the installer puts on the receiver — so the table is a
+plugin's own `config.py` - the source the metadata pins by digest and commit, which is
+also the source of the package the installer puts on the receiver - so the table is a
 mirror that is verified rather than a comment claiming to be one.
 """
 
@@ -43,7 +43,7 @@ def _plugin_config_source() -> str:
 
 
 def _declared_defaults() -> dict[str, object]:
-    """Return every `section.<name> = Config…(default=…)` the plugin declares.
+    """Return every `section.<name> = Config...(default=...)` the plugin declares.
 
     Parsed rather than imported: the plugin's `config.py` imports enigma2's own
     `Components.config`, which exists only on a receiver. The module's own constants
