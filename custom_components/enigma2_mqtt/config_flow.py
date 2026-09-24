@@ -1117,8 +1117,9 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
         try:
             return await async_uninstall(self.hass, box, credentials)
         except InstallerError as err:
-            # Only the two guards reach here — the receiver is recording or about to —
-            # and both are refusals made before anything was published.
+            # Only the three guards reach here — the receiver is recording or about to, or
+            # opkg's lock stayed held — and all are refusals made before anything was
+            # published.
             self._uninstall_error = err.code.value
         except HomeAssistantError:
             self._uninstall_error = "mqtt_unavailable"

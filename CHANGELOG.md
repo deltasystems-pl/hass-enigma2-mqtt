@@ -22,12 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reads before and after, including a hash of the receiver's plugin settings computed on the
   receiver, and never writes. The flow ends on „removed and verified", „removed, not verified" with
   the reason, „the receiver said it removed the plugin", „the receiver refused" with its own words,
-  „the receiver started the removal and rolled it back" with its own words, „the removal did not
+  „the receiver started the removal and rolled it back" with its own words — which say what state
+  the package is in — once any retraction has arrived, even without the `offline`, „the removal did not
   complete", or „the receiver did not act". The plugin says `offline` before it runs opkg, so the
   flow keeps listening after it — through the SSH readbacks, or for the rest of the minute without
   them — and a receiver that comes back and says why ends it at once. A dropped or timed-out SSH
   connection only costs the verification, a restart that never came does not hide the other
-  readbacks, the hook check waits for OpenWebif, and a briefly held opkg lock is asked again. A
+  readbacks, the hook check waits for OpenWebif, and a briefly held opkg lock (and only the lock)
+  is asked again; a lock still held before the command refuses the removal before anything is
+  published, „opkg on the receiver is busy — try again in a few minutes". A
   receiver in `ha_mode: off`, which has no announcement to retract, is recognised by its `info`
   retraction and `offline`. Nothing about the entry changes, and nothing is reloaded.
 - **[ADR-0006](docs/adr/0006-remote-uninstall-plugin-acts-ssh-verifies.md)** supersedes ADR-0004's

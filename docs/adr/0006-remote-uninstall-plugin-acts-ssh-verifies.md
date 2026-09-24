@@ -69,7 +69,12 @@ to answer. It then watches, for at most 60 seconds, for fresh — never retained
 retraction of `info` and of the announcement, then `offline`. For a receiver whose last `info`
 said `ha_mode: off` there is no announcement to retract, and `info` then `offline` is the shape. A
 fresh non-empty `info`, announcement or `online` after a retraction is the plugin putting
-everything back and undoes it; a fresh `last_error` for the command before the shape is a refusal.
+everything back and undoes it. A fresh `last_error` for the command is a **refusal** when no
+retraction at all has arrived, and a **rollback** as soon as any one has — an emptied `info`,
+announcement or `availability` (the plugin retracts in sorted order, its own `availability`
+first) — even when the `offline` that completes the shape never reached Home Assistant because
+the connection dropped mid-retraction. A `last_error` about any other command — the plugin
+defers `cmd/config` during a removal and says so under `config` — is not an answer to this one.
 
 🔴 **The shape does not end the listening.** The plugin publishes `offline` before it waits for the
 broker's acknowledgements and before it runs opkg, and its failure path — reconnect, `online`, the
@@ -89,7 +94,10 @@ its status page (bounded), then `opkg status` empty, no opkg info file, no plugi
 `MQTTBridge` file anywhere under the Python tree, `/mqttbridge` answering 404, and the block's count
 and hash unchanged. A restart that never came is named and does not hide the other readbacks; the
 404 check, which only a restart settles, is then left out. A refusal of `opkg status` for its lock
-is asked again, briefly. Every SSH failure — a dropped connection or a timeout included, before the
+— and only for its lock — is asked again, briefly. If the lock is still held before the command,
+the flow refuses there, „opkg on the receiver is busy", and publishes nothing: the plugin would meet
+the same lock after retracting everything, and roll back. Every SSH failure — a dropped connection
+or a timeout included, `pidof` among the before-reads as much as any other, before the
 command or after it — costs the verification and is named; it never ends the flow as „unknown".
 Every command is a fixed read; nothing is uploaded and the settings never leave the receiver.
 
@@ -97,8 +105,9 @@ Every command is a fixed read; nothing is uploaded and the settings never leave 
 
 „Removed and verified"; „removed, not verified" with the readback that disagreed or the SSH failure
 named; „the receiver said it removed the plugin" without readbacks, after a quiet window; „the
-receiver refused" with its own sentence, before it changed anything; „the receiver started the
-removal and rolled it back" with its own sentence, when it came back after the shape and said why;
+receiver refused" with its own sentence, before any retraction; „the receiver started the removal
+and rolled it back" with its own sentence — which states the package's condition, so the ending
+adds nothing about it — when it said why after any retraction;
 „the removal did not complete" when it came back without a reason; „the receiver did not act" after
 60 seconds of nothing in that shape.
 
