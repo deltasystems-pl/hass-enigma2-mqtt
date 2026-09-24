@@ -927,9 +927,13 @@ then for OpenWebif to answer, and reads that `opkg status` is empty, that no opk
 directory, bytecode or OpenWebif hook file is left, that `/mqttbridge` answers 404, and that the
 settings block's count and hash are unchanged. A restart that never came does not stop the other
 readbacks; only the `/mqttbridge` check, which a restart is what settles, is left out. `opkg`
-takes its lock even to answer `status`, so a refusal for the lock is asked again, briefly, before
-it counts. Every command is a fixed read, and an SSH connection that drops or times out, before
-the command or after it, costs the verification and nothing else — the sentence says so.
+takes its lock even to answer `status`, so a refusal for the lock — and only for the lock — is
+asked again, up to five times two seconds apart, before it counts. 🔴 If the lock is still held
+before the command, the flow stops there with „opkg on the receiver is busy — try again in a few
+minutes" and publishes nothing: the plugin's own removal would meet the same lock after it had
+already retracted everything, and roll back. Every command is a fixed read, and an SSH connection
+that drops or times out, before the command or after it, costs the verification and nothing else
+— the sentence says so (`ssh (timed out)`, `ssh (connection lost)`).
 
 The flow ends on one of these, and never on a success nobody saw:
 
@@ -938,8 +942,8 @@ The flow ends on one of these, and never on a success nobody saw:
 | **Removed and verified** | the shape arrived, and every SSH readback agreed |
 | **Removed, not verified** | the shape arrived, but SSH could not be used or a readback disagreed — the sentence names which, for example `restart not seen`, `opkg status`, `OpenWebif not answering`, `ssh (connection lost)`. 🟡 The image's own restart asks on screen, with no timeout, while something is streaming or a background job runs; a restart that never came is reported here, with the plugin already disconnected and off the disk |
 | **The receiver said it removed the plugin** | the shape arrived, there are no SSH readbacks, and the receiver stayed away for the rest of the 60-second window |
-| **The receiver refused** | the receiver answered on `last_error`, with its own sentence, before it changed anything — the permission is off, a recording is running or due, an EPG import is running, an uninstall is already running |
-| **The receiver started the removal and rolled it back** | the shape arrived, then the receiver came back and said on `last_error` which step failed — opkg refused, opkg reported success with the package still there, the broker's acknowledgements never came. The plugin is still installed |
+| **The receiver refused** | the receiver answered on `last_error`, with its own sentence, before a single retraction arrived — the permission is off, a recording is running or due, an EPG import is running, an uninstall is already running |
+| **The receiver started the removal and rolled it back** | at least one retraction (`info`, the announcement or `availability` emptied) arrived, and then the receiver said on `last_error` which step failed — opkg refused, opkg reported success with the package still there, the broker's acknowledgements never came, the connection dropped mid-retraction. The `offline` need not have arrived. The receiver's own sentence says what state the package is in; after an opkg that reported success with the package still there, some of its files may already be gone, and the sentence gives the command that puts it back whole |
 | **The removal did not complete** | the shape arrived, then the receiver came back — `online`, or `info` published again — without a `last_error` about the removal |
 | **The receiver did not act** | nothing of that shape arrived within 60 seconds |
 

@@ -78,7 +78,6 @@ from .installer import (
     InstallerSession,
     SshCredentials,
     _async_connect,
-    _async_enigma_pids,
     _async_wait_for_enigma,
     _timer_guard,
 )
@@ -148,8 +147,9 @@ class UninstallOutcome(StrEnum):
     REPORTED = "uninstall_reported"
     # The receiver answered the command on `last_error` before it changed anything.
     REFUSED = "uninstall_refused"
-    # The receiver retracted and said offline, then came back and said on `last_error`
-    # which step failed: the removal was started and put back.
+    # The receiver had begun retracting, then came back and said on `last_error` which
+    # step failed: the removal was started and put back. Its own sentence says what state
+    # the package is in.
     ROLLED_BACK = "uninstall_rolled_back"
     # The receiver retracted and said offline, then came back without saying why.
     INCOMPLETE = "uninstall_incomplete"
@@ -221,7 +221,11 @@ async def async_uninstall(
         try:
             before = await _async_read_before(credentials, connector)
         except InstallerError as err:
-            if err.code in (InstallerErrorCode.RECORDING, InstallerErrorCode.TIMER_DUE):
+            if err.code in (
+                InstallerErrorCode.RECORDING,
+                InstallerErrorCode.TIMER_DUE,
+                InstallerErrorCode.BUSY,
+            ):
                 raise
             unverified = _check_name(err)
             _LOGGER.warning(
@@ -250,8 +254,14 @@ async def async_uninstall(
         )
         deadline = loop.time() + timeout
         await asyncio.wait(
-            {watch.refused, watch.shape}, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
+            {watch.refused, watch.shape, watch.rolled_back},
+            timeout=timeout,
+            return_when=asyncio.FIRST_COMPLETED,
         )
+        # A failure after the retractions had begun is a rollback even when the `offline`
+        # never reached us — the connection dropped mid-retraction, say.
+        if (result := _rolled_back(watch, box)) is not None:
+            return result
         if watch.refused.done():
             refusal = watch.refused.result()
             _LOGGER.warning("Receiver %s refused to uninstall: %s", box.node_id, refusal)
@@ -405,7 +415,13 @@ async def _async_read_before(
                 f"{TIMER_GUARD_SECONDS // 60} minutes",
             )
         pids = await _async_pids(session)
-        installed = await _async_opkg_status(session)
+        installed, busy = await _async_opkg_status(session)
+        if busy:
+            # opkg's lock held through every retry: the image's own update check, or its
+            # plugin browser. The plugin's removal would meet the same lock after it had
+            # already retracted everything, and roll back. Refused here, before anything is
+            # published, and nothing on the receiver changes.
+            raise InstallerError(InstallerErrorCode.BUSY, "opkg lock held")
         if installed is None or f"Package: {PACKAGE}" not in installed.splitlines():
             # A plugin opkg does not know about claims no capability and would refuse;
             # if it did not, there would be nothing opkg could be shown to have removed.
@@ -417,26 +433,36 @@ async def _async_read_before(
 
 
 async def _async_pids(session: InstallerSession) -> set[int]:
-    """`pidof enigma2`, with a transport failure named rather than raised raw."""
-    try:
-        return await _async_enigma_pids(session)
-    except asyncssh.Error as err:
-        raise InstallerError(InstallerErrorCode.SSH_UNAVAILABLE, SSH_LOST) from err
+    """`pidof enigma2`, read through `_run` so a timeout or a drop is named like any read.
+
+    The installer's own `_async_enigma_pids` reports a timeout as `restart_failed`, a
+    code that means nothing before a command that has not been sent; the parsing is the
+    same: `pidof` exits 1 and prints nothing when there is no match, and anything that
+    is not a list of numbers is not an answer.
+    """
+    result = await _run(session, "pidof enigma2")
+    values = result.stdout.split()
+    if result.exit_status not in (0, 1) or any(not value.isdigit() for value in values):
+        raise InstallerError(InstallerErrorCode.PREFLIGHT_FAILED, "pidof enigma2")
+    return {int(value) for value in values}
 
 
-async def _async_opkg_status(session: InstallerSession) -> str | None:
-    """Return `opkg status` of the package, asking again while opkg's lock is held.
+async def _async_opkg_status(session: InstallerSession) -> tuple[str | None, bool]:
+    """Return `opkg status` of the package, and whether opkg's lock stayed held.
 
-    None is an answer that never came: opkg kept refusing, or failed for another reason.
+    Only a refusal for the lock is asked again — the image's own update check or its
+    plugin browser holds it for a while and lets go. Any other failure is an answer,
+    given at once: `(None, False)`. A lock held through every retry is `(None, True)`.
     """
     for attempt in range(LOCK_RETRIES + 1):
         result = await _run(session, f"opkg status {PACKAGE}")
         if result.exit_status in (0, 1):
-            return result.stdout
-        if not _LOCKED.search(result.stdout + result.stderr) or attempt == LOCK_RETRIES:
-            return None
-        await asyncio.sleep(LOCK_RETRY_SECONDS)
-    return None
+            return result.stdout, False
+        if not _LOCKED.search(result.stdout + result.stderr):
+            return None, False
+        if attempt < LOCK_RETRIES:
+            await asyncio.sleep(LOCK_RETRY_SECONDS)
+    return None, True
 
 
 async def _async_wait_for_webif(session: InstallerSession) -> bool:
@@ -483,7 +509,7 @@ async def _async_read_after(
         except asyncssh.Error as err:
             raise InstallerError(InstallerErrorCode.SSH_UNAVAILABLE, SSH_LOST) from err
         webif = restarted and await _async_wait_for_webif(session)
-        status = await _async_opkg_status(session)
+        status, _busy = await _async_opkg_status(session)
         if status is None or status.strip():
             failed.append("opkg status")
         if (await _run(session, _OPKG_INFO_FILES)).stdout.strip():
@@ -534,10 +560,11 @@ class _UninstallWatch:
     Three futures, each resolved at most once and never by a retained message:
 
     - `refused`, with the receiver's sentence, for a `last_error` about `uninstall`
-      before the removal's shape;
+      before any retraction arrived — nothing on the receiver had changed;
     - `shape`, when the retractions and then `offline` have arrived;
     - `rolled_back`, with the receiver's sentence, for a `last_error` about `uninstall`
-      after the shape — the plugin's failure path, which reconnects first.
+      after any retraction — the plugin's failure path, which reconnects first, and
+      which may follow a teardown whose `offline` never reached us.
 
     `came_back` records `online` or a republished `info` after the shape.
     """
@@ -583,7 +610,9 @@ async def _async_watch_uninstall(
     rolled_back: asyncio.Future[str] = loop.create_future()
     established: asyncio.Future[None] = loop.create_future()
     gone = {"info": False, "announcement": not expect_announcement}
-    seen = {"came_back": False}
+    # `retracted`: any fresh empty `info`, announcement or `availability` — the teardown
+    # has begun, whatever else did or did not arrive after it.
+    seen = {"came_back": False, "retracted": False}
     confirmed = 0
 
     def _retracted_or_back(key: str, msg: ReceiveMessage) -> None:
@@ -593,6 +622,8 @@ async def _async_watch_uninstall(
         # shape has been seen, is the receiver coming back.
         if msg.retain:
             return
+        if not msg.payload:
+            seen["retracted"] = True
         if shape.done():
             if key == "info" and msg.payload:
                 seen["came_back"] = True
@@ -613,6 +644,8 @@ async def _async_watch_uninstall(
     def _availability(msg: ReceiveMessage) -> None:
         if msg.retain:
             return
+        if not msg.payload:
+            seen["retracted"] = True
         payload = (decode_payload(msg.payload) or "").strip()
         if payload == PAYLOAD_ONLINE and shape.done():
             seen["came_back"] = True
@@ -630,7 +663,10 @@ async def _async_watch_uninstall(
         if error is None or error.get("cmd") != COMMAND:
             return
         sentence = str(error.get("error") or "").strip() or COMMAND
-        if shape.done():
+        # After any retraction the removal had begun, so its failure is a rollback —
+        # even when the `offline` that completes the shape never reached us. With none,
+        # nothing changed on the receiver, and it is a refusal.
+        if shape.done() or seen["retracted"]:
             if not rolled_back.done():
                 rolled_back.set_result(sentence)
         elif not refused.done():

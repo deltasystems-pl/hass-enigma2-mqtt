@@ -13,6 +13,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 import json
+from pathlib import Path
 from typing import Any
 from unittest.mock import call, patch
 
@@ -76,6 +77,7 @@ PERMITTED_INFO: dict[str, Any] = {
 REFUSAL = "an uninstall is already running"
 _UNINSTALL = "custom_components.enigma2_mqtt.uninstall"
 SETTINGS_HASH = "5" * 64
+_LOCK_REFUSAL = "Could not lock /run/opkg.lock: Resource temporarily unavailable."
 
 
 def _entry(*, credentials: bool = False) -> MockConfigEntry:
@@ -156,8 +158,11 @@ class FakeReceiver:
     # count before and after agree.
     settings_count: int = 3
     settings_count_after: int = 3
-    # How many `opkg status` calls after the removal find opkg's lock held.
+    # How many `opkg status` calls before and after the removal find opkg's lock held,
+    # and whether it fails after the removal for a reason that is not the lock.
+    opkg_locked_before: int = 0
     opkg_locked_after: int = 0
+    opkg_broken_after: bool = False
     # A transport failure on the first command containing this text.
     drop_on: str | None = None
     timeout_on: str | None = None
@@ -211,11 +216,14 @@ class FakeSession:
         if command == "pidof enigma2":
             return CommandResult(0, f"{receiver.pid}\n")
         if command.startswith("opkg status"):
+            if not removed and receiver.opkg_locked_before:
+                receiver.opkg_locked_before -= 1
+                return CommandResult(255, "", _LOCK_REFUSAL)
             if removed and receiver.opkg_locked_after:
                 receiver.opkg_locked_after -= 1
-                return CommandResult(
-                    255, "", "Could not lock /run/opkg.lock: Resource temporarily unavailable."
-                )
+                return CommandResult(255, "", _LOCK_REFUSAL)
+            if removed and receiver.opkg_broken_after:
+                return CommandResult(255, "", "opkg: cannot read /var/lib/opkg/status")
             if not receiver.installed:
                 return CommandResult(0, "")
             return CommandResult(
@@ -1079,20 +1087,150 @@ async def test_with_readbacks_the_shape_is_enough_to_go_and_look(
     assert result["reason"] == "uninstall_verified"
 
 
-async def test_a_failure_reported_before_offline_is_the_answer(
+async def test_a_failure_after_retractions_but_before_offline_is_a_rollback(
     hass: HomeAssistant,
     mqtt_mock,
     permitted: dict[str, str | bytes],
 ) -> None:
-    """The plugin puts everything back and says which step failed; that is the answer."""
+    """Retractions, then everything back and why, with no `offline` in between.
+
+    The connection dropped mid-retraction, so the `offline` that completes the shape never
+    reached Home Assistant — but the teardown had begun, so this is a rollback, not a
+    refusal.
+    """
     entry = _entry()
     await async_setup_box(hass, entry)
     await _arm_box(hass, "fail_then_restore")
 
+    # A window no test would sit out: the answer is the `last_error`, not the timeout.
+    with patch(f"{_UNINSTALL}.UNINSTALL_TIMEOUT", 3600):
+        async with asyncio.timeout(10):
+            result = await _confirm(hass, await _open_uninstall(hass, entry))
+
+    assert result["reason"] == "uninstall_rolled_back"
+    assert result["description_placeholders"]["detail"] == "opkg remove exited 255"
+
+
+@pytest.mark.parametrize(
+    "retraction",
+    [(AVAILABILITY_TOPIC, ""), (INFO_TOPIC, ""), (ANNOUNCEMENT_TOPIC, "")],
+    ids=["availability", "info", "announcement"],
+)
+async def test_any_one_retraction_before_the_failure_makes_it_a_rollback(
+    hass: HomeAssistant,
+    mqtt_mock,
+    permitted: dict[str, str | bytes],
+    retraction: tuple[str, str],
+) -> None:
+    """The plugin retracts in sorted order, its own `availability` first; one is enough."""
+    entry = _entry()
+    await async_setup_box(hass, entry)
+    _teardown, failure = _teardown_then_failure(_OPKG_REFUSED)
+
+    @callback
+    def _answer(_msg: ReceiveMessage) -> None:
+        async_fire_mqtt_message(hass, *retraction)
+        for topic, payload in failure:
+            async_fire_mqtt_message(hass, topic, payload)
+
+    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _answer)
     result = await _confirm(hass, await _open_uninstall(hass, entry))
 
-    assert result["reason"] == "uninstall_refused"
-    assert result["description_placeholders"]["detail"] == "opkg remove exited 255"
+    assert result["reason"] == "uninstall_rolled_back"
+    assert result["description_placeholders"]["detail"] == _OPKG_REFUSED
+
+
+async def test_opkg_busy_before_the_command_refuses_without_publishing(
+    hass: HomeAssistant,
+    mqtt_mock,
+    permitted: dict[str, str | bytes],
+) -> None:
+    """opkg's lock held through every retry: the removal would roll back, so it is not sent."""
+    receiver = FakeReceiver(opkg_locked_before=99)
+    entry = _entry(credentials=True)
+    await async_setup_box(hass, entry)
+    received = await _arm_box(hass, "uninstall", receiver=receiver)
+
+    with patch("custom_components.enigma2_mqtt.uninstall._async_connect", receiver.connect):
+        result = await _confirm(hass, await _open_uninstall(hass, entry))
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "busy"
+    assert received == []
+    assert _uninstall_publishes(mqtt_mock) == []
+    assert receiver.events.count("ssh:opkg") == 6
+
+
+async def test_opkg_briefly_busy_before_the_command_is_asked_again(
+    hass: HomeAssistant,
+    mqtt_mock,
+    permitted: dict[str, str | bytes],
+) -> None:
+    """A lock that lets go within the retries is waited for, and the removal goes ahead."""
+    receiver = FakeReceiver(opkg_locked_before=2)
+    entry = _entry(credentials=True)
+    await async_setup_box(hass, entry)
+    await _arm_box(hass, "uninstall", receiver=receiver)
+
+    with patch("custom_components.enigma2_mqtt.uninstall._async_connect", receiver.connect):
+        result = await _confirm(hass, await _open_uninstall(hass, entry))
+
+    assert result["reason"] == "uninstall_verified"
+
+
+async def test_only_a_held_lock_is_asked_again(
+    hass: HomeAssistant,
+    mqtt_mock,
+    permitted: dict[str, str | bytes],
+) -> None:
+    """opkg failing for another reason is an answer at once, not five more questions."""
+    receiver = FakeReceiver(opkg_broken_after=True)
+    entry = _entry(credentials=True)
+    await async_setup_box(hass, entry)
+    await _arm_box(hass, "uninstall", receiver=receiver)
+
+    with patch("custom_components.enigma2_mqtt.uninstall._async_connect", receiver.connect):
+        result = await _confirm(hass, await _open_uninstall(hass, entry))
+
+    assert result["reason"] == "uninstall_not_verified"
+    assert result["description_placeholders"]["detail"] == "opkg status"
+    # Once before the command, once after it.
+    assert receiver.events.count("ssh:opkg") == 2
+
+
+async def test_a_pidof_timeout_before_the_command_reads_like_any_ssh_timeout(
+    hass: HomeAssistant,
+    mqtt_mock,
+    permitted: dict[str, str | bytes],
+) -> None:
+    """„ssh (timed out)", never the installer's `restart_failed` code."""
+    receiver = FakeReceiver(timeout_on="pidof")
+    entry = _entry(credentials=True)
+    await async_setup_box(hass, entry)
+    await _arm_box(hass, "uninstall", receiver=receiver)
+
+    with patch("custom_components.enigma2_mqtt.uninstall._async_connect", receiver.connect):
+        result = await _confirm(hass, await _open_uninstall(hass, entry))
+
+    assert result["reason"] == "uninstall_not_verified"
+    assert result["description_placeholders"]["detail"] == "ssh (timed out)"
+
+
+@pytest.mark.parametrize("language", ["strings", "en", "pl", "de"])
+def test_the_rollback_sentence_leaves_the_package_state_to_the_receiver(
+    language: str,
+) -> None:
+    """The plugin's own sentence says whether the package is still there, or half gone.
+
+    A fixed „the plugin is still installed" after it would contradict the sentence for an
+    opkg that reported success with the package on the disk and some files already gone.
+    """
+    root = Path(__file__).parents[1] / "custom_components" / "enigma2_mqtt"
+    path = root / ("strings.json" if language == "strings" else f"translations/{language}.json")
+    text = json.loads(path.read_text(encoding="utf-8"))["options"]["abort"][
+        "uninstall_rolled_back"
+    ]
+    assert text.rstrip().endswith("{detail}")
 
 
 @pytest.mark.parametrize("answer", ["silence", "switch_off"])
