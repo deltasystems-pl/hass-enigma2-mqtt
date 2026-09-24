@@ -14,7 +14,10 @@ Without credentials there is still an observable that is not a guess. A receiver
 switched off leaves `info` and its announcement retained and ends on its last will; one
 that uninstalled retracts both and then publishes `offline`. The watch below waits for
 exactly that shape, and never for a retained replay, which is what the broker held before
-the command and so cannot be its answer.
+the command and so cannot be its answer. Without credentials the shape is not the end of
+it: the plugin says `offline` before it runs opkg, and a removal that fails after that
+comes back online with its reason on `last_error`, so the whole window is watched before
+the receiver's statement is reported.
 
 Nothing here writes to the receiver over SSH. Every command is a fixed read, and the
 settings are never transferred — only their count and their SHA-256, computed where they
@@ -115,6 +118,8 @@ class UninstallOutcome(StrEnum):
     REPORTED = "uninstall_reported"
     # The receiver answered the command on `last_error`.
     REFUSED = "uninstall_refused"
+    # The receiver retracted and said offline, then came back without saying why.
+    INCOMPLETE = "uninstall_incomplete"
     # Nothing in the shape of an uninstall arrived before the timeout.
     NO_ACTION = "uninstall_no_action"
 
@@ -193,7 +198,16 @@ async def async_uninstall(
                 err.detail or err.code.value,
             )
 
-    watch = await _async_watch_uninstall(hass, box.base_topic, box.node_id)
+    # 🔴 The plugin says `offline` before it waits for the broker's acknowledgements and
+    # before it runs opkg, and either can still fail; its failure path — reconnect,
+    # republish, `last_error` for `uninstall` — comes after. With readbacks to come, they
+    # decide, so the shape is enough to go and look. Without them, the shape is only the
+    # start of the answer: the whole window is watched, and a receiver that comes back is
+    # not reported as removed.
+    verify = before is not None
+    watch = await _async_watch_uninstall(
+        hass, box.base_topic, box.node_id, resolve_on_shape=verify
+    )
     try:
         await watch.async_wait_until_established()
         await mqtt.async_publish(
@@ -207,13 +221,23 @@ async def async_uninstall(
             async with asyncio.timeout(timeout):
                 refusal = await watch.done
         except TimeoutError:
-            _LOGGER.warning(
-                "Receiver %s did not uninstall its plugin within %s s: no retraction "
-                "of its info and announcement followed by offline arrived",
-                box.node_id,
-                timeout,
-            )
-            return UninstallResult(UninstallOutcome.NO_ACTION)
+            refusal = None
+            if not watch.shape_seen:
+                _LOGGER.warning(
+                    "Receiver %s did not uninstall its plugin within %s s: no retraction "
+                    "of its info and announcement followed by offline arrived",
+                    box.node_id,
+                    timeout,
+                )
+                return UninstallResult(UninstallOutcome.NO_ACTION)
+            if watch.came_back:
+                _LOGGER.warning(
+                    "Receiver %s retracted its topics and went offline after "
+                    "cmd/uninstall, then came back without saying why; the removal did "
+                    "not complete",
+                    box.node_id,
+                )
+                return UninstallResult(UninstallOutcome.INCOMPLETE)
     finally:
         watch.cancel()
 
@@ -227,8 +251,9 @@ async def async_uninstall(
     )
     if credentials is None:
         return UninstallResult(UninstallOutcome.REPORTED)
-    if before is None:
+    if not verify:
         return UninstallResult(UninstallOutcome.NOT_VERIFIED, unverified)
+    assert before is not None
     try:
         failed = await _async_read_after(credentials, connector, before)
     except InstallerError as err:
@@ -364,17 +389,40 @@ async def _async_settings_block(session: InstallerSession) -> tuple[int, str]:
 
 
 @dataclass(slots=True)
+class _Seen:
+    """What the watch has seen so far, readable after its window has closed."""
+
+    # `info` and the announcement retracted, then `offline`: the shape of a removal.
+    shape_seen: bool = False
+    # After that shape, `online` or a republished `info`: the plugin's failure path.
+    came_back: bool = False
+
+
+@dataclass(slots=True)
 class _UninstallWatch:
     """Four live subscriptions, and the answer they add up to.
 
-    `done` resolves with None when the receiver has retracted `info` and its announcement
-    and then said `offline`, and with the receiver's sentence when it answered the
-    command on `last_error`.
+    `done` resolves with the receiver's sentence when it answered the command on
+    `last_error`, whenever that comes. It resolves with None on the removal's shape only
+    when asked to (`resolve_on_shape`) — when SSH readbacks follow and will decide.
+    Otherwise the shape is recorded in `seen` and the watch goes on listening until the
+    caller's window closes, because the plugin's failure path comes after its `offline`.
     """
 
     done: asyncio.Future[str | None]
     established: asyncio.Future[None]
     cancel: CALLBACK_TYPE
+    seen: _Seen
+
+    @property
+    def shape_seen(self) -> bool:
+        """Return whether the removal's shape arrived."""
+        return self.seen.shape_seen
+
+    @property
+    def came_back(self) -> bool:
+        """Return whether the receiver came back after the removal's shape."""
+        return self.seen.came_back
 
     async def async_wait_until_established(self) -> None:
         """Wait until the broker is sending all four topics to us.
@@ -392,19 +440,29 @@ class _UninstallWatch:
 
 
 async def _async_watch_uninstall(
-    hass: HomeAssistant, base_topic: str, node_id: str
+    hass: HomeAssistant,
+    base_topic: str,
+    node_id: str,
+    *,
+    resolve_on_shape: bool = True,
 ) -> _UninstallWatch:
     """Subscribe to the four topics whose fresh messages make up an uninstall."""
     done: asyncio.Future[str | None] = hass.loop.create_future()
     established: asyncio.Future[None] = hass.loop.create_future()
     gone = {"info": False, "announcement": False}
+    seen = _Seen()
     confirmed = 0
 
     def _retracted_or_back(key: str, msg: ReceiveMessage) -> None:
         # A retained message is what the broker held before the command; it can never be
         # the receiver's answer to it. A fresh non-empty one after a retraction is the
-        # plugin's failure path putting everything back, and undoes the retraction.
+        # plugin's failure path putting everything back, and undoes the retraction —
+        # or, once the whole shape has been seen, is the receiver coming back.
         if msg.retain or done.done():
+            return
+        if seen.shape_seen:
+            if key == "info" and msg.payload:
+                seen.came_back = True
             return
         gone[key] = not msg.payload
 
@@ -421,8 +479,12 @@ async def _async_watch_uninstall(
         if msg.retain or done.done():
             return
         payload = (decode_payload(msg.payload) or "").strip()
-        if payload == PAYLOAD_OFFLINE and all(gone.values()):
-            done.set_result(None)
+        if payload == PAYLOAD_ONLINE and seen.shape_seen:
+            seen.came_back = True
+        elif payload == PAYLOAD_OFFLINE and all(gone.values()):
+            seen.shape_seen = True
+            if resolve_on_shape:
+                done.set_result(None)
         elif payload == PAYLOAD_ONLINE:
             gone.update(info=False, announcement=False)
 
@@ -468,4 +530,4 @@ async def _async_watch_uninstall(
     except BaseException:
         _cancel()
         raise
-    return _UninstallWatch(done=done, established=established, cancel=_cancel)
+    return _UninstallWatch(done=done, established=established, cancel=_cancel, seen=seen)

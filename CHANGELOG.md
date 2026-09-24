@@ -22,7 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reads before and after, including a hash of the receiver's plugin settings computed on the
   receiver, and never writes. The flow ends on „removed and verified", „removed, not verified" with
   the reason, „the receiver said it removed the plugin", „the receiver refused" with its own words,
-  or „the receiver did not act". Nothing about the entry changes, and nothing is reloaded.
+  „the removal did not complete", or „the receiver did not act". Without SSH readbacks the flow
+  watches the whole minute after the receiver goes offline, because the plugin says `offline`
+  before it runs opkg: a receiver that comes back with a reason is reported as refused, one that
+  comes back without one as not completed. Nothing about the entry changes, and nothing is reloaded.
 - **[ADR-0006](docs/adr/0006-remote-uninstall-plugin-acts-ssh-verifies.md)** supersedes ADR-0004's
   transport decision: an `opkg remove` over SSH would skip the plugin's ordered retraction and leave
   every retained topic behind, so the plugin always acts and SSH only witnesses.

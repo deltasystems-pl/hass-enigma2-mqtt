@@ -94,6 +94,18 @@ def _entry(*, credentials: bool = False) -> MockConfigEntry:
     return MockConfigEntry(domain=DOMAIN, title=BOX_NAME, unique_id=NODE_ID, data=data)
 
 
+@pytest.fixture(autouse=True)
+def short_window() -> Any:
+    """Close the watch's window in half a second rather than a minute.
+
+    Without SSH readbacks the flow watches the whole window before it reports a removal,
+    so every such test would otherwise take the full minute. The fake box answers inside
+    the publish, long before half a second is up.
+    """
+    with patch("custom_components.enigma2_mqtt.uninstall.UNINSTALL_TIMEOUT", 0.5):
+        yield
+
+
 @pytest.fixture
 def permitted(box_on_the_broker: dict[str, str | bytes]) -> dict[str, str | bytes]:
     """A receiver that states the permission and claims the capability."""
@@ -614,21 +626,123 @@ async def test_a_readback_that_disagrees_is_named(
     assert result["description_placeholders"]["detail"].startswith(detail)
 
 
+@pytest.mark.parametrize(
+    "refusal",
+    [REFUSAL, "an EPG import is running"],
+    ids=["already_running", "epg_import_running"],
+)
 async def test_a_refusal_is_raised_with_the_receivers_own_words(
     hass: HomeAssistant,
     mqtt_mock,
     permitted: dict[str, str | bytes],
+    refusal: str,
 ) -> None:
-    """„The receiver refused: `last_error`"."""
+    """„The receiver refused: `last_error`", in whatever words the receiver chose."""
     entry = _entry()
     await async_setup_box(hass, entry)
-    await _arm_box(hass, "refuse")
+
+    @callback
+    def _refuse(_msg: ReceiveMessage) -> None:
+        async_fire_mqtt_message(
+            hass, LAST_ERROR_TOPIC, json.dumps({"cmd": "uninstall", "error": refusal})
+        )
+
+    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _refuse)
 
     result = await _confirm(hass, await _open_uninstall(hass, entry))
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "uninstall_refused"
-    assert result["description_placeholders"]["detail"] == REFUSAL
+    assert result["description_placeholders"]["detail"] == refusal
+
+
+# What the plugin publishes when the removal fails after its `offline`: opkg refused, or
+# the broker's acknowledgements never came. The shape of a removal first, then the plugin
+# back on the broker, everything republished, and — when it can — the reason.
+_SHAPE = [(INFO_TOPIC, ""), (ANNOUNCEMENT_TOPIC, ""), (AVAILABILITY_TOPIC, "offline")]
+_BACK = [(AVAILABILITY_TOPIC, "online"), (INFO_TOPIC, json.dumps(PERMITTED_INFO))]
+_OPKG_FAILED = json.dumps({"cmd": "uninstall", "error": "opkg remove exited 255"})
+
+
+@pytest.mark.parametrize("credentials", [False, True], ids=["no_ssh", "ssh_unreadable"])
+async def test_a_removal_that_fails_after_offline_is_the_refusal(
+    hass: HomeAssistant,
+    mqtt_mock,
+    permitted: dict[str, str | bytes],
+    credentials: bool,
+) -> None:
+    """Without readbacks to decide, `offline` is not the end of the answer.
+
+    The plugin says `offline` before it runs opkg; a removal that fails afterwards comes
+    back online and says why on `last_error`. That sentence is the result, not „the
+    receiver said it removed the plugin". The same holds with credentials SSH could not
+    use beforehand, because there are then no readbacks either.
+    """
+    entry = _entry(credentials=credentials)
+    await async_setup_box(hass, entry)
+    receiver = FakeReceiver(connect_fails=True)
+
+    @callback
+    def _answer(_msg: ReceiveMessage) -> None:
+        for topic, payload in [*_SHAPE, *_BACK, (LAST_ERROR_TOPIC, _OPKG_FAILED)]:
+            async_fire_mqtt_message(hass, topic, payload)
+
+    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _answer)
+    with patch("custom_components.enigma2_mqtt.uninstall._async_connect", receiver.connect):
+        result = await _confirm(hass, await _open_uninstall(hass, entry))
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "uninstall_refused"
+    assert result["description_placeholders"]["detail"] == "opkg remove exited 255"
+
+
+@pytest.mark.parametrize(
+    "back",
+    [_BACK, _BACK[:1], _BACK[1:]],
+    ids=["online_and_info", "online", "info"],
+)
+async def test_a_receiver_that_comes_back_without_a_reason_did_not_complete(
+    hass: HomeAssistant,
+    mqtt_mock,
+    permitted: dict[str, str | bytes],
+    back: list[tuple[str, str]],
+) -> None:
+    """Back on the broker after the shape, and no `last_error`: „did not complete"."""
+    entry = _entry()
+    await async_setup_box(hass, entry)
+
+    @callback
+    def _answer(_msg: ReceiveMessage) -> None:
+        for topic, payload in [*_SHAPE, *back]:
+            async_fire_mqtt_message(hass, topic, payload)
+
+    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _answer)
+    result = await _confirm(hass, await _open_uninstall(hass, entry))
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "uninstall_incomplete"
+
+
+async def test_with_readbacks_the_shape_is_enough_to_go_and_look(
+    hass: HomeAssistant,
+    mqtt_mock,
+    permitted: dict[str, str | bytes],
+) -> None:
+    """With SSH readbacks to follow, the flow does not sit out the window first."""
+    receiver = FakeReceiver()
+    entry = _entry(credentials=True)
+    await async_setup_box(hass, entry)
+    await _arm_box(hass, "uninstall", receiver=receiver)
+
+    with (
+        patch("custom_components.enigma2_mqtt.uninstall._async_connect", receiver.connect),
+        # A window no test would sit out: reaching the readbacks proves it was not waited.
+        patch("custom_components.enigma2_mqtt.uninstall.UNINSTALL_TIMEOUT", 3600),
+    ):
+        async with asyncio.timeout(10):
+            result = await _confirm(hass, await _open_uninstall(hass, entry))
+
+    assert result["reason"] == "uninstall_verified"
 
 
 async def test_a_failure_reported_before_offline_is_the_answer(

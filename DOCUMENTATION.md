@@ -918,18 +918,22 @@ The flow ends on one of these, and never on a success nobody saw:
 |---|---|
 | **Removed and verified** | the receiver retracted `info` and its announcement, then said `offline`, and every SSH readback agreed |
 | **Removed, not verified** | the same, but SSH could not connect or a readback disagreed — the sentence names which. 🟡 The image's own restart asks on screen, with no timeout, while something is streaming or a background job runs; a restart that never came is reported here, with the plugin already disconnected and off the disk |
-| **The receiver said it removed the plugin** | the same, without stored SSH credentials. A switched-off receiver leaves `info` and its announcement retained and ends on its last will; only an uninstall retracts both before `offline`, so this is an observation, not a guess |
-| **The receiver refused** | the receiver answered on `last_error`, with its own sentence — the permission is off, a recording is running or due, or an uninstall is already running |
+| **The receiver said it removed the plugin** | the same, without SSH readbacks, and the receiver stayed away for the rest of the 60-second window. A switched-off receiver leaves `info` and its announcement retained and ends on its last will; only an uninstall retracts both before `offline`, so this is an observation, not a guess |
+| **The receiver refused** | the receiver answered on `last_error`, with its own sentence — the permission is off, a recording is running or due, an EPG import is running, an uninstall is already running, or a removal that failed after `offline` (opkg refused, the broker's acknowledgements never came) |
+| **The removal did not complete** | the shape arrived, and then the receiver came back — `online`, or `info` published again — without a `last_error` for the command |
 | **The receiver did not act** | nothing of that shape arrived within 60 seconds |
 
-🟡 **A removal that fails after `offline` is not seen by the flow.** The plugin says `offline`
+🔴 **Without SSH readbacks, `offline` is not the end of the answer.** The plugin says `offline`
 before it waits for the broker's acknowledgements and before it runs its package manager, and
-either of those can still fail — the image's own update check can hold opkg's lock. The plugin
-then reconnects, publishes everything again and says on `last_error` which step failed, but by
-then the flow has already ended. With SSH credentials the readbacks catch it (the package is still
-there, and the interface never restarted): „removed, not verified". Without them the flow says
-„the receiver said it removed the plugin" and the receiver comes back online a moment later, with
-the menu entry and its reason on „Ostatni błąd".
+either can still fail — the image's own update check can hold opkg's lock. The plugin then
+reconnects, publishes everything again and says on `last_error` which step failed. So when there
+is nothing to read back — no stored credentials, or SSH could not be reached before the command —
+the flow watches the whole 60-second window after it sees the shape: a `last_error` for the
+command is the refusal, a receiver that comes back without one did not complete the removal, and
+only a receiver that stays away is reported as having said it removed the plugin. That flow
+therefore always takes the full minute. With SSH readbacks the shape is enough to go and look,
+and the readbacks decide: a package still there and an interface that never restarted is
+„removed, not verified".
 
 ## 9. FAQ
 

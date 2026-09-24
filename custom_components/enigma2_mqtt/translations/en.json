@@ -202,6 +202,7 @@
       ,"uninstall_not_verified": "The receiver said it removed the plugin — it retracted its topics and went offline — but SSH could not confirm it. Disagreed or could not be read: {detail}."
       ,"uninstall_reported": "The receiver said it removed the plugin: it retracted its topics and went offline. Without stored SSH credentials that is all that can be shown from here."
       ,"uninstall_refused": "The receiver refused: {detail}"
+      ,"uninstall_incomplete": "The removal did not complete: the receiver retracted its topics and went offline, then came back without saying why. The plugin is most likely still installed; the receiver's last error may say more."
       ,"uninstall_no_action": "The receiver did not act: nothing in the shape of a removal arrived within a minute. The plugin is most likely still installed; check that the receiver is on and connected."
       ,"recording": "The receiver is recording. Nothing was sent; try again when the recording has finished."
       ,"timer_due": "A recording is about to start on the receiver. Nothing was sent; try again later."

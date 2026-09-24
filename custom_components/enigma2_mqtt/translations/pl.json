@@ -176,6 +176,7 @@
       ,"uninstall_not_verified": "Dekoder zgłosił usunięcie wtyczki — wycofał swoje tematy i przeszedł w tryb offline — ale SSH tego nie potwierdził. Nie zgadza się albo nie dało się odczytać: {detail}."
       ,"uninstall_reported": "Dekoder zgłosił usunięcie wtyczki: wycofał swoje tematy i przeszedł w tryb offline. Bez zapisanych danych SSH nic więcej nie da się stąd pokazać."
       ,"uninstall_refused": "Dekoder odmówił: {detail}"
+      ,"uninstall_incomplete": "Usuwanie nie zostało dokończone: dekoder wycofał swoje tematy i przeszedł w tryb offline, a potem wrócił, nie podając powodu. Wtyczka jest najpewniej nadal zainstalowana; więcej może powiedzieć ostatni błąd dekodera."
       ,"uninstall_no_action": "Dekoder nie zareagował: w ciągu minuty nie nadeszło nic, co wyglądałoby na usunięcie. Wtyczka jest najpewniej nadal zainstalowana; sprawdź, czy dekoder jest włączony i połączony."
       ,"recording": "Dekoder nagrywa. Nic nie zostało wysłane — spróbuj ponownie po zakończeniu nagrania."
       ,"timer_due": "Na dekoderze zaraz zacznie się nagranie. Nic nie zostało wysłane — spróbuj ponownie później."

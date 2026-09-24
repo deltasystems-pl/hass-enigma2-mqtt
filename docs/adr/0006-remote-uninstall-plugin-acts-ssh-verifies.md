@@ -70,6 +70,15 @@ retraction of `info` and of the announcement, then `offline`. A fresh non-empty 
 or `online` after a retraction is the plugin's failure path putting everything back and undoes it; a
 fresh `last_error` for the command is the answer.
 
+🔴 **Without readbacks the shape does not end the watch.** The plugin publishes `offline` before it
+waits for the broker's acknowledgements and before it runs opkg, and its failure path — reconnect,
+republish, `last_error` for `uninstall` — comes after both. So when there is nothing to read back
+(no credentials, or SSH unreachable before the command), the watch runs to the end of its 60-second
+window after the shape: a `last_error` for the command is the refusal with its text; `online` or a
+republished `info` without one is „the removal did not complete"; only a window that ends quietly is
+„the receiver said it removed the plugin". With readbacks to follow, the shape ends the watch and
+the readbacks decide.
+
 With the installer's credentials kept, SSH reads **before** the command — whether the receiver is
 recording or about to (a refusal before anything is published), the interface's process ids, `opkg
 status` of the package, and the line count and SHA-256 of the sorted `config.plugins.mqttbridge.*`
@@ -78,11 +87,13 @@ empty, no opkg info file, no plugin directory, no `MQTTBridge` file anywhere und
 `/mqttbridge` answering 404, and the block's count and hash unchanged. Every command is a fixed
 read; nothing is uploaded and the settings never leave the receiver.
 
-### 4. Five endings, each named by what was seen
+### 4. Six endings, each named by what was seen
 
 „Removed and verified"; „removed, not verified" with the readback that disagreed or the SSH failure
-named; „the receiver said it removed the plugin" without credentials; „the receiver refused" with
-its own sentence; „the receiver did not act" after 60 seconds of nothing in that shape.
+named; „the receiver said it removed the plugin" without readbacks, after a quiet window; „the
+receiver refused" with its own sentence, including a removal that failed after `offline`; „the
+removal did not complete" when the receiver came back without a reason; „the receiver did not act"
+after 60 seconds of nothing in that shape.
 
 ### 5. Deleting the entry: one publish, no SSH — now a test
 
@@ -95,12 +106,10 @@ connection is attempted.
 - **Over MQTT alone the removal is an observation, not a proof** — the receiver's own statement, in
   a shape a switched-off box does not produce. SSH turns it into a proof where credentials exist;
   it is preferred for that reason, and it never acts.
-- **A failure after `offline` arrives after the verdict.** The plugin publishes `offline` before it
-  waits for the broker's acknowledgements and before it runs opkg, and its failure path — reconnect,
-  republish, `last_error` — comes after both. With SSH the after-readbacks catch it; without SSH the
-  flow has already said „the receiver said it removed the plugin" when the receiver comes back. The
-  watch ends on the shape the specification names and does not wait out a settle period after it;
-  whether it should is an open question, not a decision.
+- **Without readbacks a removal always takes the full minute**, because a failure after `offline`
+  can only be ruled out by waiting for it. A receiver that stays away for the whole window is still
+  only the receiver's own statement; a failure that reports later than 60 seconds after the command
+  is not seen. With readbacks the flow goes to look as soon as the shape arrives.
 - **„Removed, not verified" covers a restart that never came.** The image's own interface restart
   asks on screen, with no timeout, while something is streaming or a background job runs. The
   plugin is disconnected and off the disk by then, so the verdict is about what could be shown, not
