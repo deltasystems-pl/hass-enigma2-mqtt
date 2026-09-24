@@ -176,7 +176,7 @@
       ,"uninstall_not_verified": "Der Receiver hat das Entfernen gemeldet — er hat seine Topics zurückgezogen und ist offline gegangen —, aber SSH konnte es nicht bestätigen. Nicht übereinstimmend oder nicht lesbar: {detail}."
       ,"uninstall_reported": "Der Receiver hat das Entfernen gemeldet: Er hat seine Topics zurückgezogen und ist offline gegangen. Ohne gespeicherte SSH-Zugangsdaten lässt sich von hier aus nicht mehr zeigen."
       ,"uninstall_refused": "Der Receiver hat abgelehnt: {detail}"
-      ,"uninstall_rolled_back": "Der Receiver hat das Entfernen begonnen, es aber zurückgenommen: {detail}"
+      ,"uninstall_rolled_back": "Der Receiver hat das Entfernen begonnen, aber abgebrochen: {detail}"
       ,"busy": "opkg auf dem Receiver ist beschäftigt — versuche es in ein paar Minuten erneut. Es wurde nichts gesendet."
       ,"uninstall_incomplete": "Das Entfernen wurde nicht abgeschlossen: Der Receiver hat seine Topics zurückgezogen und ist offline gegangen, dann aber ohne Begründung zurückgekommen. Das Plugin ist sehr wahrscheinlich noch installiert; der letzte Fehler des Receivers sagt vielleicht mehr."
       ,"uninstall_no_action": "Der Receiver hat nicht reagiert: Innerhalb einer Minute kam nichts, das nach einer Entfernung aussieht. Das Plugin ist sehr wahrscheinlich noch installiert; prüfe, ob der Receiver eingeschaltet und verbunden ist."
