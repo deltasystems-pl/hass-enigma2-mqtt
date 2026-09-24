@@ -123,7 +123,8 @@
   },
   "options": {
     "step": {
-      "init": {
+      "init": {"title": "Receiver-Optionen", "description": "Die Optionen für diese Seite der Verbindung ändern oder das Plugin vom Receiver entfernen. Dieser Receiver erlaubt seine Entfernung; diese Erlaubnis wird am Receiver selbst eingestellt.", "menu_options": {"settings": "Optionen", "uninstall": "Plugin vom Receiver entfernen"}},
+      "settings": {
         "title": "Receiver-Optionen",
         "description": "Der Receiver meldet die MAC-Adresse {mac}. Magic Packets gehen dorthin, sofern unten keine andere angegeben wird.",
         "data": {
@@ -161,12 +162,29 @@
       },
       "ssh_host": {"title": "Mit dem Receiver verbinden", "data": {"ssh_host": "Receiver-Adresse", "ssh_port": "SSH-Port"}},
       "ssh_confirm": {"title": "SSH-Identität bestätigen", "description": "Bestätige den Receiver-Fingerabdruck `{fingerprint}` vor dem Senden der Zugangsdaten.", "data": {"ssh_username": "SSH-Benutzer", "ssh_password": "SSH-Passwort"}}
+      ,"uninstall": {"title": "Plugin vom Receiver entfernen", "description": "Das MQTT-Bridge-Plugin wird von {name} entfernt. Das ist eine Einbahnstraße: Ist das Plugin weg, kann nichts hier es zurückholen — nur SSH oder die Paketverwaltung des Receivers (Menü → Plugins → herunterladen → Extensions). Der Receiver behält die Einstellungen des Plugins, sodass eine Neuinstallation mit demselben Broker, derselben Node-ID und demselben Modus startet und dieser Eintrag ihn mit allen Entitäten wie bisher wieder aufnimmt. Bis dahin sieht das Gerät genau wie ein ausgeschalteter Receiver aus: alle Entitäten nicht verfügbar. Am Ende startet der Receiver seine Oberfläche neu; er lehnt ab, solange er aufnimmt oder gleich eine Aufnahme beginnt.", "data": {"confirm_uninstall": "Ich weiß, dass nur SSH oder die Paketverwaltung des Receivers das Plugin zurückbringt"}}
     },
     "error": {
       "plugin_unavailable": "Der Receiver ist nicht verbunden; seine Datenschutzeinstellungen wurden nicht geändert. Versuche es erneut, wenn er online ist.",
       "plugin_config_failed": "Der Receiver hat die neuen Datenschutzeinstellungen nicht bestätigt. Die bisherigen Receiver-Einstellungen und Home-Assistant-Optionen wurden beibehalten.",
-      "invalid_mac": "Das ist keine MAC-Adresse. Schreibe sie als `00:00:5e:00:53:01`, `00-00-5e-00-53-01`, `0000.5e00.5301` oder `00005e005301`, oder lass das Feld leer, um die vom Receiver gemeldete Adresse zu verwenden."
-    }
+      "invalid_mac": "Das ist keine MAC-Adresse. Schreibe sie als `00:00:5e:00:53:01`, `00-00-5e-00-53-01`, `0000.5e00.5301` oder `00005e005301`, oder lass das Feld leer, um die vom Receiver gemeldete Adresse zu verwenden.",
+      "uninstall_not_confirmed": "Setze das Häkchen, um das Plugin zu entfernen. An den Receiver wurde nichts gesendet."
+    },
+    "abort": {
+      "uninstall_not_offered": "Der Receiver erlaubt das Entfernen des Plugins nicht mehr, oder er ist nicht verbunden. Es wurde nichts gesendet."
+      ,"uninstall_verified": "Das Plugin wurde vom Receiver entfernt und per SSH überprüft: Paket und Dateien sind weg, die Plugin-Einstellungen auf dem Receiver unverändert. Der Eintrag bleibt; lösche ihn, wenn du keine Neuinstallation planst."
+      ,"uninstall_not_verified": "Der Receiver hat das Entfernen gemeldet — er hat seine Topics zurückgezogen und ist offline gegangen —, aber SSH konnte es nicht bestätigen. Nicht übereinstimmend oder nicht lesbar: {detail}."
+      ,"uninstall_reported": "Der Receiver hat das Entfernen gemeldet: Er hat seine Topics zurückgezogen und ist offline gegangen. Ohne gespeicherte SSH-Zugangsdaten lässt sich von hier aus nicht mehr zeigen."
+      ,"uninstall_refused": "Der Receiver hat abgelehnt: {detail}"
+      ,"uninstall_rolled_back": "Der Receiver hat das Entfernen begonnen, es aber zurückgenommen: {detail}. Das Plugin ist weiterhin installiert."
+      ,"uninstall_incomplete": "Das Entfernen wurde nicht abgeschlossen: Der Receiver hat seine Topics zurückgezogen und ist offline gegangen, dann aber ohne Begründung zurückgekommen. Das Plugin ist sehr wahrscheinlich noch installiert; der letzte Fehler des Receivers sagt vielleicht mehr."
+      ,"uninstall_no_action": "Der Receiver hat nicht reagiert: Innerhalb einer Minute kam nichts, das nach einer Entfernung aussieht. Das Plugin ist sehr wahrscheinlich noch installiert; prüfe, ob der Receiver eingeschaltet und verbunden ist."
+      ,"recording": "Der Receiver nimmt auf. Es wurde nichts gesendet; versuche es nach dem Ende der Aufnahme erneut."
+      ,"timer_due": "Auf dem Receiver beginnt gleich eine Aufnahme. Es wurde nichts gesendet; versuche es später erneut."
+      ,"mqtt_unavailable": "Die MQTT-Integration ist nicht verfügbar, daher wurde nichts an den Receiver gesendet."
+      ,"unknown": "Das Entfernen des Plugins ist unerwartet fehlgeschlagen; Details stehen im Log."
+    },
+    "progress": {"uninstalling": "Der Receiver entfernt sein Plugin; es wird gewartet, bis er seine Topics zurückzieht und offline geht"}
   },
   "entity": {
     "binary_sensor": {

@@ -18,7 +18,8 @@ stable across reinstalls of the plugin and of Home Assistant.
 **The broker is the only channel.** The plugin publishes state under
 `<base_topic>/<node_id>/` (default base topic `enigma2`) and subscribes to
 `<base_topic>/<node_id>/cmd/#`. The integration never talks to OpenWebif; the only other
-connection it ever opens is SSH, and only when you ask it to install or update the plugin.
+connection it ever opens is SSH, and only when you ask it to install or update the plugin, or
+to verify a removal you asked for.
 
 **Push, not poll.** State topics are retained, so Home Assistant has the full picture the
 moment it subscribes, and every later change arrives as the enigma2 event that caused it.
@@ -203,6 +204,12 @@ box already correct: the node ID, the base topic, that the plugin is enabled, an
 *Settings → Devices & Services → Enigma2 MQTT → Configure.* Three preferences, all about this
 end of the link rather than about the box; saving them reloads the entry, so a change takes
 effect without a restart.
+
+On a receiver that permits its own removal, *Configure* opens on a menu of two entries instead:
+**Options**, which is this form, and **Remove the plugin from the receiver** („Usuń wtyczkę z
+dekodera"), described in [§8](#removing-the-plugin-from-the-receiver). Every other receiver —
+and that is every receiver as shipped, because the permission is off by default — opens straight
+on the form, as before.
 
 | Option | Default | What it does |
 |---|---|---|
@@ -847,14 +854,94 @@ rebuilds its own entities — a box that was taken over here is handed straight 
 publish is best effort: if the receiver is off or the broker is unreachable the entry is still
 removed, and the mode can be set on the plugin's setup screen afterwards.
 
-**If you are also uninstalling the plugin, send `cmd/reset` to the box first.** Retained topics
-outlive the plugin that created them: remove the package without resetting and the broker goes
-on serving a snapshot of a receiver that is gone, for as long as the broker lives. `cmd/reset`
-retracts everything the node owns and republishes it in one burst, so it is safe to run at any
-time — but only while the plugin is still running, because after `opkg remove` there is nothing
-left to ask. The plugin's
+🔴 **Deleting the entry never uninstalls anything**, whatever the entry holds and whatever the
+receiver permits: the one `cmd/ha_mode` publish above is the whole of what it sends, and it opens
+no SSH connection. Removing the plugin is the separate action below
+([ADR-0004](docs/adr/0004-remote-uninstall.md), [ADR-0006](docs/adr/0006-remote-uninstall-plugin-acts-ssh-verifies.md)).
+
+**If you are uninstalling the plugin by hand** — over SSH, or from the receiver's own plugin
+menu — **send `cmd/reset` to the box first.** Retained topics outlive the plugin that created
+them: remove the package without resetting and the broker goes on serving a snapshot of a
+receiver that is gone, for as long as the broker lives. `cmd/reset` retracts everything the node
+owns and republishes it in one burst, so it is safe to run at any time — but only while the
+plugin is still running, because after `opkg remove` there is nothing left to ask. The plugin's
 [topic contract](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TOPICS.md)
-describes it in full.
+describes it in full. The action below does not need it: the plugin's own teardown retracts
+without republishing.
+
+### Removing the plugin from the receiver
+
+*Configure → Remove the plugin from the receiver* („Usuń wtyczkę z dekodera"). The entry is
+offered only while all three of these hold, read from what the receiver is saying now:
+
+- it is **on the broker** (`availability` is `online`);
+- its current `info` states **`uninstall_allowed: true`** — a permission set on the receiver's
+  own setup screen (*Menu → Plugins → MQTT Bridge*) and refused over MQTT, like
+  `deep_standby_allowed`; off as shipped;
+- the same `info` names the **`uninstall` capability**, which the plugin claims only where the
+  package manager installed it, so a plugin unpacked by hand is never offered a removal it cannot
+  perform.
+
+Silence is no: an older plugin that does not report the permission offers nothing, and so does an
+**empty `info`** — the plugin retracts it on its way out, and the entry goes with it rather than
+standing for a receiver whose plugin has already gone.
+
+The one form says what the step costs before it is taken, and it needs a tick to proceed. It is a
+**one-way door**: once the plugin is gone nothing in Home Assistant can bring it back — only SSH or
+the receiver's own package manager can. The receiver **keeps its plugin settings**, so a reinstall
+from its package manager starts on the same broker, node ID and `integration` mode, and this entry
+picks it up again with every entity id unchanged; the guided installer cannot run while the entry
+exists, and asks for the broker password again when it does. Until a reinstall the device looks
+exactly like a switched-off receiver — every entity unavailable — and the entry, its entities and
+their history stay where they are. Delete the entry afterwards if you want it gone.
+
+**The receiver does the removal; Home Assistant only asks and watches.** After the tick the
+integration publishes `cmd/uninstall` with the node id as its payload, once, and only after the
+broker has confirmed the subscriptions that are to hear the answer. The plugin stops its
+publishers, retracts every retained topic it owns, publishes `offline` last, waits for the
+broker's acknowledgements, disconnects, removes its package and restarts the interface. An
+`opkg remove` over SSH would skip that order and leave the retained topics behind, so SSH is never
+used to remove anything here.
+
+**What a removal looks like on the broker.** Fresh messages, never retained replays: the
+retraction of `info` and of the announcement, then `offline`. A receiver in `ha_mode: off`
+publishes no announcement, so for it the retraction of `info` and then `offline` is the whole
+shape. A switched-off receiver leaves `info` and its announcement retained and ends on its last
+will, so it never produces this shape.
+
+🔴 **`offline` is not the end of the answer.** The plugin says `offline` before it waits for the
+broker's acknowledgements and before it runs its package manager, and either can still fail — the
+image's own update check can hold opkg's lock, and a killed opkg reports success. The plugin then
+reconnects and publishes `online`, its snapshot and its announcement, and then says on `last_error`
+which step failed. So the flow keeps listening after the shape — through the SSH readbacks, when
+there are any, and for the rest of the 60-second window when there are not — and a `last_error`
+about the removal ends it with the receiver's own sentence. Without SSH readbacks a removal
+therefore always takes the full minute.
+
+Where the entry kept the installer's SSH credentials, SSH is the **witness**. Before the command
+it reads whether the receiver is recording or about to (and refuses if so, having published
+nothing), the running interface's process ids, `opkg status` of the package, and the line count
+and SHA-256 of the receiver's `config.plugins.mqttbridge.*` block — computed on the receiver; the
+settings never leave it. After the receiver says `offline` it waits for the interface restart and
+then for OpenWebif to answer, and reads that `opkg status` is empty, that no opkg info file, plugin
+directory, bytecode or OpenWebif hook file is left, that `/mqttbridge` answers 404, and that the
+settings block's count and hash are unchanged. A restart that never came does not stop the other
+readbacks; only the `/mqttbridge` check, which a restart is what settles, is left out. `opkg`
+takes its lock even to answer `status`, so a refusal for the lock is asked again, briefly, before
+it counts. Every command is a fixed read, and an SSH connection that drops or times out, before
+the command or after it, costs the verification and nothing else — the sentence says so.
+
+The flow ends on one of these, and never on a success nobody saw:
+
+| Result | When |
+|---|---|
+| **Removed and verified** | the shape arrived, and every SSH readback agreed |
+| **Removed, not verified** | the shape arrived, but SSH could not be used or a readback disagreed — the sentence names which, for example `restart not seen`, `opkg status`, `OpenWebif not answering`, `ssh (connection lost)`. 🟡 The image's own restart asks on screen, with no timeout, while something is streaming or a background job runs; a restart that never came is reported here, with the plugin already disconnected and off the disk |
+| **The receiver said it removed the plugin** | the shape arrived, there are no SSH readbacks, and the receiver stayed away for the rest of the 60-second window |
+| **The receiver refused** | the receiver answered on `last_error`, with its own sentence, before it changed anything — the permission is off, a recording is running or due, an EPG import is running, an uninstall is already running |
+| **The receiver started the removal and rolled it back** | the shape arrived, then the receiver came back and said on `last_error` which step failed — opkg refused, opkg reported success with the package still there, the broker's acknowledgements never came. The plugin is still installed |
+| **The removal did not complete** | the shape arrived, then the receiver came back — `online`, or `info` published again — without a `last_error` about the removal |
+| **The receiver did not act** | nothing of that shape arrived within 60 seconds |
 
 ## 9. FAQ
 

@@ -1,6 +1,7 @@
 # ADR-0004: Remote uninstall behind a box-side permission
 
-**Status:** accepted 2026-09-22, implementation pending
+**Status:** accepted 2026-09-22; §3 and the first consequence superseded by
+[ADR-0006](0006-remote-uninstall-plugin-acts-ssh-verifies.md), which also records the implementation
 **Date:** 2026-09-22
 
 ## Context

@@ -42,6 +42,8 @@ CONF_CHECK_GITHUB_RELEASES: Final = "check_github_releases"
 CONF_SOURCE_LIST_SCOPE: Final = "source_list_scope"
 CONF_SOFTCAM_AUTOHEAL: Final = "softcam_autoheal"
 CONF_SOFTCAM_AUTOHEAL_SECONDS: Final = "softcam_autoheal_seconds"
+# The tick box on the options flow's removal step. A form field, never stored.
+CONF_CONFIRM_UNINSTALL: Final = "confirm_uninstall"
 
 # Read-only members of `info.settings`. They are settings a consumer may read, not ones
 # `cmd/config` will accept: `deep_standby_allowed` gates a command, and a setting that
@@ -56,6 +58,10 @@ CONF_DEEP_STANDBY_ALLOWED: Final = "deep_standby_allowed"
 CONF_SOFTCAM_RESTART_ALLOWED: Final = "softcam_restart_allowed"
 # The third, for the on-demand EPG import (item i), under the same rule.
 CONF_EPG_IMPORT_ALLOWED: Final = "epg_import_allowed"
+# The fourth, for removing the plugin from the receiver (ADR-0004). Same rule, with the
+# opposite reading of silence: only a stated `true` offers anything, because the one act
+# this permission opens cannot be undone from here.
+CONF_UNINSTALL_ALLOWED: Final = "uninstall_allowed"
 
 # `info.wol`: `{supported, armed, iface, mechanism}`, what the receiver's image can do
 # about Wake-on-LAN from deep standby (plugin 0.3.0 onward). Only `supported` is read
@@ -271,6 +277,17 @@ CAPABILITY_BOUQUET_CONTEXT: Final = "bouquet_context"
 # topic says what the importer is doing, whoever started it.
 TOPIC_EPG_IMPORT: Final = "epg_import"
 CAPABILITY_EPG_IMPORT: Final = "epg_import"
+# Removing the plugin from the receiver. The plugin claims the capability only where the
+# package manager installed it — an executable opkg, the package's own control file, and a
+# file list naming the `plugin.py` that is running — so a plugin unpacked by hand or baked
+# into an image is never offered a removal it cannot perform.
+CAPABILITY_UNINSTALL: Final = "uninstall"
+# Seconds the options flow waits, after `cmd/uninstall`, for the receiver to retract its
+# `info` and its announcement and then say `offline`. The plugin's own bound on the
+# broker's acknowledgements is 15 s, so a box that has not finished by this is a box
+# that has not acted.
+UNINSTALL_TIMEOUT: Final = 60
+
 # The four states the topic may report. Anything else is not part of the contract and
 # is read as "it did not say".
 EPG_IMPORT_STATES: Final = ("idle", "running", "done", "failed")

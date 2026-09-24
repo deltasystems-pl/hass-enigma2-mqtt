@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **„Remove the plugin from the receiver" („Usuń wtyczkę z dekodera")**, a menu entry in the
+  receiver's *Configure*, offered only while the receiver is on the broker, states
+  `uninstall_allowed: true` and claims the `uninstall` capability — a permission set on the
+  receiver's own setup screen and off as shipped, so almost every installation sees *Configure*
+  open on the options form exactly as before. One form states the one-way door (only SSH or the
+  receiver's package manager can bring the plugin back), that the receiver keeps its settings, and
+  that the device will then look like a switched-off one, and it needs a tick. The receiver does
+  the removal itself, in the order only it can keep; Home Assistant publishes `cmd/uninstall` once,
+  after its subscriptions are confirmed, and watches for `info` and the announcement to be
+  retracted before `offline`. Where the installer's SSH credentials were kept, SSH verifies: it
+  reads before and after, including a hash of the receiver's plugin settings computed on the
+  receiver, and never writes. The flow ends on „removed and verified", „removed, not verified" with
+  the reason, „the receiver said it removed the plugin", „the receiver refused" with its own words,
+  „the receiver started the removal and rolled it back" with its own words, „the removal did not
+  complete", or „the receiver did not act". The plugin says `offline` before it runs opkg, so the
+  flow keeps listening after it — through the SSH readbacks, or for the rest of the minute without
+  them — and a receiver that comes back and says why ends it at once. A dropped or timed-out SSH
+  connection only costs the verification, a restart that never came does not hide the other
+  readbacks, the hook check waits for OpenWebif, and a briefly held opkg lock is asked again. A
+  receiver in `ha_mode: off`, which has no announcement to retract, is recognised by its `info`
+  retraction and `offline`. Nothing about the entry changes, and nothing is reloaded.
+- **[ADR-0006](docs/adr/0006-remote-uninstall-plugin-acts-ssh-verifies.md)** supersedes ADR-0004's
+  transport decision: an `opkg remove` over SSH would skip the plugin's ordered retraction and leave
+  every retained topic behind, so the plugin always acts and SSH only witnesses.
 - **What enigma2 itself is using** — memory, its high-water mark, threads, open files and when
   the process started — when the receiver plugin can measure it. The memory is on by default,
   because "it has been getting slower for a fortnight" is a question the recorder can only
@@ -104,6 +128,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   says a magic packet wakes it if the receiver supports that, in all three languages.
 
 ### Changed
+
+- **An empty `info` now withdraws the receiver's permission to be uninstalled.** It used to be
+  ignored like any payload that does not parse, which kept the last stated permission in memory
+  until Home Assistant restarted and would have left the removal on offer for a receiver whose
+  plugin had already gone. The rest of the last `info` is kept as before.
+- **The options form is now the step `settings`**, behind the menu above where it appears. Nothing
+  on it moved.
+- 🔴 **Deleting a receiver's entry is now tested to send exactly one message** —
+  `cmd/ha_mode = discovery` — and to open no SSH connection, under every combination of kept
+  credentials, permission and availability. It never uninstalls anything, and never did.
 
 - **A `message` action without `style` is byte-for-byte the popup it was**, but its `timeout`
   default of ten seconds now comes from the handler rather than the action schema, so that a

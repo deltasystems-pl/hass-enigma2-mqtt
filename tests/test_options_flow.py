@@ -81,7 +81,7 @@ async def test_the_options_offer_the_bouquets_the_box_published(
 
     result = await hass.config_entries.options.async_init(config_entry.entry_id)
     assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "init"
+    assert result["step_id"] == "settings"
 
     selector = result["data_schema"].schema[CONF_BOUQUETS]
     options = selector.config["options"]
