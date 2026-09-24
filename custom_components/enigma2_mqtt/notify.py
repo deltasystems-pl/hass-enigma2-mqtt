@@ -1,11 +1,11 @@
 """The on-screen display, as two notification targets.
 
 `notify.send_message` on „Ekran OSD" puts a popup on the television. The plugin caps the
-text at 500 characters, and so does this — truncating here means the message a user sees
+text at 500 characters, and so does this - truncating here means the message a user sees
 is the message they can read the start of, rather than one the box silently cut
 somewhere else.
 
-„Ekran – dyskretnie" is the same message as a **toast**: a small overlay in a corner of
+„Ekran - dyskretnie" is the same message as a **toast**: a small overlay in a corner of
 the screen that takes no key press, hides itself after a few seconds and is replaced by
 the next one. It exists only on a receiver that names the `toast` capability, which the
 plugin claims only once the screen for it has actually been built; a receiver that
@@ -51,8 +51,8 @@ def message_payload(
 ) -> str:
     """Return a `cmd/message` payload with the text capped the way the plugin caps it.
 
-    🔴 A popup is written exactly as it was before toasts existed — three fields, no
-    `style` — so that every popup is byte-for-byte what an older plugin already
+    🔴 A popup is written exactly as it was before toasts existed - three fields, no
+    `style` - so that every popup is byte-for-byte what an older plugin already
     understands. Only a toast carries the field.
 
     The default timeout belongs to the style, which is why it is not a default of the
@@ -86,7 +86,7 @@ def check_toast(box: Enigma2Box, timeout: int | None = None) -> None:
 
     The timeout is checked against the toast's own range rather than left to the box's
     clamp: `0` means „until dismissed" to a popup, and a toast cannot be dismissed, so
-    the plugin refuses it — and a request for a minute silently shown for thirty seconds
+    the plugin refuses it - and a request for a minute silently shown for thirty seconds
     is a surprise nobody asked for.
     """
     if CAPABILITY_TOAST not in box.capabilities:
@@ -127,7 +127,7 @@ async def async_setup_entry(
             lambda: CAPABILITY_TOAST in box.capabilities,
             # Never removed. A capability that stops being named is an older plugin after
             # a downgrade, a skin reload whose rebuild failed, or a receiver that has not
-            # answered yet — none of them a decision anybody made. Deleting the entity
+            # answered yet - none of them a decision anybody made. Deleting the entity
             # would take the automations that notify it by name with it, and its id is the
             # Polish name on a Polish installation, so the next payload would not even
             # bring it back under the id they use.

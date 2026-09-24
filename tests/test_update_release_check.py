@@ -4,7 +4,7 @@ Two things meet on this entity and they are deliberately kept apart. The **bundl
 what `install` can put on a receiver, so it alone decides `latest_version`. The
 **published release** is what the plugin repository last tagged; it is asked for only
 when somebody turns the option on, and it may appear in the summary, in an attribute and
-in the link — never in `latest_version`, because an install button that offers a version
+in the link - never in `latest_version`, because an install button that offers a version
 the installer would refuse is a button that lies.
 """
 
@@ -144,7 +144,7 @@ async def test_the_release_check_asks_once_a_day_and_not_more(
     await _setup_with_release_check(hass, config_entry)
     assert aioclient_mock.call_count == 1
 
-    # `fire_all` is a timer that goes off early — which is the case the stamp exists
+    # `fire_all` is a timer that goes off early - which is the case the stamp exists
     # for, and the only way to make one happen on purpose.
     freezer.tick(RELEASE_CHECK_INTERVAL / 2)
     async_fire_time_changed(hass, fire_all=True)
@@ -474,7 +474,7 @@ async def test_a_phase_the_card_cannot_draw_moves_no_bar(
     [
         "https://evil.example/phish",
         "javascript:alert(1)",
-        # The right host, the wrong repository — a release page somebody else owns.
+        # The right host, the wrong repository - a release page somebody else owns.
         "https://github.com/someone-else/enigma2-mqtt-bridge/releases/tag/v9.9.9",
         # The prefix as a prefix of the *host*, which is the classic way past a naive
         # "does it contain our address" check.
@@ -593,7 +593,7 @@ async def test_a_tag_that_is_not_a_version_never_reaches_the_card(
     """Everything downstream compares this with the bundled build.
 
     A string that does not sort is not a comparison, it is a label pretending to be one
-    — and it would be shown in an attribute and in a sentence either way.
+    - and it would be shown in an attribute and in a sentence either way.
     """
     aioclient_mock.get(
         PLUGIN_LATEST_RELEASE_URL, json={"tag_name": tag, "html_url": RELEASE_URL}
@@ -627,7 +627,7 @@ async def test_six_reloads_are_still_one_request(
     """The limit used to live on the entity, and a reload builds a new entity.
 
     Every options save reloads the entry, so a household adjusting three settings in a
-    row spent three days' budget in a minute — on a rate limit shared with everything
+    row spent three days' budget in a minute - on a rate limit shared with everything
     else on that address.
     """
     aioclient_mock.get(
@@ -779,7 +779,7 @@ async def test_a_second_sentence_that_will_not_fit_is_dropped_whole(
 ) -> None:
     """Home Assistant cuts at 255 characters, wherever the 255th happens to fall.
 
-    Mid-word, usually — and in a language with long compounds, mid-sentence. The first
+    Mid-word, usually - and in a language with long compounds, mid-sentence. The first
     sentence says what to do and the second is context about a published tag, so the
     second is dropped whole rather than shown as a fragment.
     """
@@ -847,7 +847,7 @@ async def test_the_release_check_belongs_to_the_entry_that_started_it(
 ) -> None:
     """A request started on `hass` outlives the receiver it was started for.
 
-    Unloading the entry — a reload, a removal, a shutdown — then leaves a ten-second
+    Unloading the entry - a reload, a removal, a shutdown - then leaves a ten-second
     request running against an entity that has gone, with nothing holding a handle to
     cancel it. Started on the entry, it is cancelled with everything else the receiver
     owns.

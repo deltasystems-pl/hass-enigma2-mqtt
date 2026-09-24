@@ -125,7 +125,7 @@ async def test_install_creates_entry_and_discards_credentials_by_default(
 async def test_the_entry_is_titled_with_the_name_the_receiver_already_has(
     hass: HomeAssistant, mqtt_mock
 ) -> None:
-    """The name field was left empty, so the receiver keeps its name — and so does the entry.
+    """The name field was left empty, so the receiver keeps its name - and so does the entry.
 
     Only the transaction can ask the receiver what it is called; the form is drawn
     before anything has logged in to it. The title used to fall back to the node id,
@@ -211,7 +211,7 @@ async def test_a_waiting_announcement_does_not_block_the_guided_install(
 async def test_the_install_takes_the_offer_down_while_it_is_still_running(
     hass: HomeAssistant, mqtt_mock
 ) -> None:
-    """Not at the end — at the start, which is where the difference is.
+    """Not at the end - at the start, which is where the difference is.
 
     Home Assistant retires a competing flow by itself when an entry claims the unique
     id. A guided install does not reach that point for minutes, and a discovery card
@@ -257,7 +257,7 @@ async def test_a_second_guided_install_waits_rather_than_cancelling_the_first(
 ) -> None:
     """Taking the unique id from a running install would unwind a live receiver.
 
-    The first flow's task is what holds the transaction — the snapshot, the package,
+    The first flow's task is what holds the transaction - the snapshot, the package,
     the receiver's own lock. Aborting that flow cancels the task, and the first
     install would then be rolling a box back while the second one writes to it.
     """
@@ -344,7 +344,7 @@ async def test_the_manual_path_still_adds_a_box_that_is_being_offered(
     """Unchanged: it never raised on the offer, and it still does not.
 
     Nothing here withdraws the offer either. Home Assistant retires it by itself once
-    an entry claims the unique id, which is the moment the manual path reaches — and
+    an entry claims the unique id, which is the moment the manual path reaches - and
     is exactly the moment the guided install does not reach for several minutes,
     which is why that path has to take the offer out of the way on its own.
     """
@@ -373,8 +373,8 @@ async def _install_watching_the_frontend(
 ) -> tuple[list[Any], list[float]]:
     """Run one guided install with a frontend that behaves the way the real one does.
 
-    It answers every „this flow changed" notification by posting to the flow — a post
-    is what finishes a progress step — and its post cannot arrive in the same loop
+    It answers every „this flow changed" notification by posting to the flow - a post
+    is what finishes a progress step - and its post cannot arrive in the same loop
     iteration as the notification that caused it, because it is on the other end of a
     socket. It also records the progress-bar updates, which reach it without it having
     to ask the flow for anything.
@@ -443,7 +443,7 @@ async def test_a_successful_install_ends_on_the_created_entry(
     Home Assistant advances a progress step itself when the task it was handed
     resolves, and notifies the frontend; the frontend answers by posting, and that
     post is what creates the entry. A phase that asked for the same notification put a
-    second caller on the flow — and the one that lost the race was answered with
+    second caller on the flow - and the one that lost the race was answered with
     „Invalid flow specified" at the end of an install that had succeeded.
     """
     answers, _ = await _install_watching_the_frontend(hass, _reporting_install)
@@ -535,7 +535,7 @@ async def test_an_identity_mismatch_names_both_sides_on_the_screen(
     """„Configured for a different node ID or base topic" is not something to act on.
 
     Which of the two disagreed, and what the receiver actually holds, is the whole
-    diagnosis — and the abort screen is the only place it can be read, because the
+    diagnosis - and the abort screen is the only place it can be read, because the
     flow is gone afterwards. The sentence has holes for both sides and the flow has to
     fill them; an abort that carried no placeholders would put the braces themselves
     in front of somebody.
@@ -560,7 +560,7 @@ async def test_a_retried_install_does_not_inherit_the_last_one_s_placeholders(
     """One flow object outlives an install, and an outcome that fills no holes empties them.
 
     Home Assistant discards placeholders a sentence has no holes for, so today this is
-    invisible — until the day one of the other abort sentences gains a hole and starts
+    invisible - until the day one of the other abort sentences gains a hole and starts
     rendering the node id of a failure two attempts ago.
     """
     flow = Enigma2MqttConfigFlow()

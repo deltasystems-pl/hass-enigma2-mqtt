@@ -220,7 +220,7 @@ async def test_a_transport_failure_becomes_the_step_s_own_error_code() -> None:
         # The restart proof is arithmetic on these numbers; a word in there is not one.
         CommandResult(0, "not-a-pid\n"),
         # `pidof` says "no match" with 1 and nothing else with anything above it, so an
-        # exit status of its own is a question that was not answered — not a receiver
+        # exit status of its own is a question that was not answered - not a receiver
         # with its interface down, which is what the empty set means.
         CommandResult(2, ""),
         CommandResult(127, "", "pidof: not found"),
@@ -236,8 +236,8 @@ async def test_an_answer_that_is_not_a_pid_list_is_refused(result: CommandResult
 @pytest.mark.parametrize(
     ("result", "expected"),
     [
-        # What `pidof` does when nothing matches. It is an interface that is down — a
-        # box still booting, or one stopped on purpose — not a receiver that failed to
+        # What `pidof` does when nothing matches. It is an interface that is down - a
+        # box still booting, or one stopped on purpose - not a receiver that failed to
         # answer, and it used to be refused as an ambiguous lifecycle.
         (CommandResult(1, ""), set()),
         (CommandResult(0, "100\n"), {100}),
@@ -353,7 +353,7 @@ async def test_a_setting_the_receiver_never_stored_is_its_default_not_a_differen
 
     Enigma2 writes no line for a setting whose value still equals its default, so a
     receiver left on the default base topic has no `base_topic` in
-    `/etc/enigma2/settings` — a box measured after a normal install had ten of the
+    `/etc/enigma2/settings` - a box measured after a normal install had ten of the
     plugin's twenty-six settings stored and that was not one of them. That rule held
     before this only because the receiver-side helper substituted the plugin's defaults
     itself, where nothing checked them against the plugin and where absence and the
@@ -389,7 +389,7 @@ async def test_a_receiver_on_another_base_topic_is_still_refused(
     """A stored value that differs is the mismatch this guard is for.
 
     The abort sentence carries both sides, because on the screen where it is shown
-    there is no other way to find out which half disagreed — and a value the receiver
+    there is no other way to find out which half disagreed - and a value the receiver
     never stored is shown in brackets, so „the box says enigma2" and „the box says
     nothing, and enigma2 is what that means" do not look identical.
     """
@@ -426,7 +426,7 @@ async def test_a_base_topic_stored_as_empty_is_shown_as_stored_and_empty(
     """The one value that would otherwise be invisible in the middle of the sentence.
 
     An empty string is a value the receiver holds, and it is a real difference from
-    `enigma2` — which is how it compares. Rendering it as the bracketed default would
+    `enigma2` - which is how it compares. Rendering it as the bracketed default would
     have put "the box says `(enigma2)`, the form says `enigma2`, refused" back on the
     screen, which is the problem this message exists to solve, one layer down.
     """
@@ -466,7 +466,7 @@ async def test_an_update_still_needs_the_settings_it_is_updating_against(
     """An update writes nothing, so a box that stores no node id is not its box.
 
     Its `enabled` and `ha_mode` are read with the plugin's defaults applied like every
-    other setting — a receiver in `integration` mode has both stored — but the node id
+    other setting - a receiver in `integration` mode has both stored - but the node id
     has no default worth comparing against, and absence there means the plugin has
     never run.
     """

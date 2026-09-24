@@ -378,8 +378,8 @@ async def test_a_retained_info_is_not_an_acknowledgement(
 ) -> None:
     """A box that is switched off cannot confirm anything.
 
-    Its retained `info` may already say `integration` — from the last time it was set
-    up — and the broker replays that on every new subscription. Accepting it would add
+    Its retained `info` may already say `integration` - from the last time it was set
+    up - and the broker replays that on every new subscription. Accepting it would add
     a device for a receiver nobody asked and nobody answered.
     """
     retained[INFO_TOPIC] = json.dumps({**INFO, "ha_mode": "integration"})

@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Report privately through **GitHub security advisories**:
-[*Security → Report a vulnerability*](https://github.com/deltasystems-pl/hass-enigma2-mqtt/security/advisories/new)
+[*Security -> Report a vulnerability*](https://github.com/deltasystems-pl/hass-enigma2-mqtt/security/advisories/new)
 on this repository. Please do not open a public issue for a vulnerability, and please do not
 send exploit details to a public discussion.
 
@@ -25,13 +25,13 @@ Supported: the latest release. There are no long-term support branches.
 ## What this integration handles
 
 **Broker credentials.** Give each receiver its own broker login, restricted by ACL to its own
-topics — the README has the snippet. The credential lives on the box, and most Enigma2 images
+topics - the README has the snippet. The credential lives on the box, and most Enigma2 images
 ship with a default root password and an open telnet or SSH service, so treat the receiver as
 the least trusted device on the network and change that password.
 
 **SSH password.** The guided installer asks for the receiver's SSH password. It is
 **discarded after a successful install** unless you explicitly ask to keep it for later plugin
-updates. If you do keep it, it is stored in the config entry — and Home Assistant's `.storage`
+updates. If you do keep it, it is stored in the config entry - and Home Assistant's `.storage`
 is **not encrypted at rest**, so anyone with the configuration directory or a backup of it can
 read it. The password is never written to the log, and diagnostics redact both it and the
 broker credential.

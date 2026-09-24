@@ -1,7 +1,7 @@
 """The helper as the receiver actually runs it: one file, one argv, one exit code.
 
 Every other test in this repository calls the helper's functions. The receiver does not:
-the installer uploads this module and runs `python3 <helper> <operation> …` over SSH, so
+the installer uploads this module and runs `python3 <helper> <operation> ...` over SSH, so
 the command line is the real interface and an argument the installer spells one way and
 the parser reads another is a rollback that does nothing on a box nobody is watching.
 """

@@ -4,7 +4,7 @@ The receiver does the removal itself, in an order only it can keep: it stops eve
 publisher, retracts every retained topic it owns, says `offline` last, waits for the
 broker to acknowledge all of it, disconnects, and only then asks its package manager to
 remove it (ADR-0004 in both repositories). An `opkg remove` typed over SSH would skip all
-of that and leave the broker serving a snapshot of a receiver that is gone, for ever — so
+of that and leave the broker serving a snapshot of a receiver that is gone, for ever - so
 SSH is never an uninstall path here. Where the entry kept the installer's credentials it is
 the *witness*: it reads the guards and the facts before the command, and the absence of
 every file after it, and it compares the receiver's own settings block by a hash computed
@@ -17,7 +17,7 @@ exactly that shape, and never for a retained replay, which is what the broker he
 the command and so cannot be its answer.
 
 🔴 **`offline` is not the end of the answer.** The plugin says it before it waits for the
-broker's acknowledgements and before it runs opkg, and both can still fail — opkg's lock is
+broker's acknowledgements and before it runs opkg, and both can still fail - opkg's lock is
 shared with the image's own update check, and a killed opkg reports success. A removal that
 fails there comes back: `online`, the snapshot, the announcement, and `last_error` for
 `uninstall` with the step that failed. So the watch stays subscribed for the whole window,
@@ -25,7 +25,7 @@ through the SSH readbacks as well, and a `last_error` for the command after the 
 the flow as a removal that was started and rolled back, in the receiver's words.
 
 Nothing here writes to the receiver over SSH. Every command is a fixed read, and the
-settings are never transferred — only their count and their SHA-256, computed where they
+settings are never transferred - only their count and their SHA-256, computed where they
 live.
 """
 
@@ -90,8 +90,8 @@ COMMAND = "uninstall"
 # The receiver's settings block, the part of `/etc/enigma2/settings` that is the plugin's.
 # Sorted under the C locale so the hash does not depend on the order enigma2 happened to
 # write the lines in, and only the hash leaves the receiver: the block holds the broker
-# password. The whole file is not comparable across the restart — enigma2 rewrites its own
-# `config.misc.*` lines on every shutdown — so the block is what „settings kept" means.
+# password. The whole file is not comparable across the restart - enigma2 rewrites its own
+# `config.misc.*` lines on every shutdown - so the block is what „settings kept" means.
 _SETTINGS_BLOCK = (
     "grep '^config\\.plugins\\.mqttbridge\\.' /etc/enigma2/settings | LC_ALL=C sort "
     "| sha256sum; grep -c '^config\\.plugins\\.mqttbridge\\.' /etc/enigma2/settings "
@@ -107,21 +107,21 @@ _LEFTOVERS = (
     "find /usr/lib/enigma2/python \\( -name 'MQTTBridge*' -o -path '*/MQTTBridge/*' \\)"
 )
 # OpenWebif is up when its own status page answers. It comes up some seconds after the
-# interface's new process exists, and until it does every request is refused — which is
+# interface's new process exists, and until it does every request is refused - which is
 # not the same answer as „that page is not here".
 _WEBIF_UP = "wget -q -O /dev/null http://127.0.0.1/api/statusinfo"
 # OpenWebif serves the hook for as long as its module is loaded, which a removal of the
 # files alone does not end: only the restart does. A 404 is the one answer that says the
 # page is gone; every other status is a page still being served. (Measured 2026-09-23 on
-# a current build: the page answers 200 from the receiver itself, not 403 — the hook now
+# a current build: the page answers 200 from the receiver itself, not 403 - the hook now
 # follows OpenWebif's own authentication.)
 _HOOK_STATUS = "wget -S -O /dev/null http://127.0.0.1/mqttbridge 2>&1"
 _HTTP_STATUS = re.compile(r"HTTP/\d(?:\.\d)?\s+(\d{3})")
 # opkg takes `/run/opkg.lock` even to answer `status`, and the image's own update check or
 # its plugin browser can be holding it. A refusal for that reason is asked again, briefly.
 # Only the two refusals that mean somebody else holds the lock right now and will let go:
-# opkg's own `Could not lock <path>: …` and the image's `Command failed to capture privilege
-# lock`. `Could not create lock file …` — the file or its directory — is a receiver that
+# opkg's own `Could not lock <path>: ...` and the image's `Command failed to capture privilege
+# lock`. `Could not create lock file ...` - the file or its directory - is a receiver that
 # cannot take the lock at all, which asking again does not change; nor is „blocked" a lock.
 # Case-sensitive, because these are opkg's fixed strings.
 _LOCKED = re.compile(r"Could not lock |failed to capture privilege lock")
@@ -132,7 +132,7 @@ LOCK_RETRY_SECONDS = 2.0
 # measured; OpenWebif is a plugin of it and comes up with it.
 WEBIF_READY_TIMEOUT = 60.0
 WEBIF_READY_POLL_SECONDS = 3.0
-# Named in the unverified sentence. Punctuation and paths, never words, where possible —
+# Named in the unverified sentence. Punctuation and paths, never words, where possible -
 # the sentence around them is Polish or German; these few are the exceptions.
 RESTART_NOT_SEEN = "restart not seen"
 WEBIF_DOWN = "OpenWebif not answering"
@@ -167,7 +167,7 @@ class UninstallResult:
     """The outcome, and the one fact that explains it.
 
     `detail` is the receiver's own sentence for a refusal or a rollback, and for an
-    unverified removal the readbacks that disagreed — named by the command or path they
+    unverified removal the readbacks that disagreed - named by the command or path they
     read, so it drops into the Polish and German sentences largely unchanged.
     """
 
@@ -212,7 +212,7 @@ async def async_uninstall(
     """Ask the receiver to remove its plugin, and report what can be shown of it.
 
     Raises `InstallerError` with `RECORDING` or `TIMER_DUE` when SSH shows the receiver is
-    recording or about to — before anything is published, because the plugin would refuse
+    recording or about to - before anything is published, because the plugin would refuse
     for the same reason and the restart at the end of a removal would cost the recording.
     Any other failure to read the receiver beforehand, a dropped connection included, only
     costs the verification: the command still goes, and the result says it was not
@@ -251,12 +251,12 @@ async def async_uninstall(
     try:
         await watch.async_wait_until_established()
         # From here an emptied topic can be the receiver's answer. A retraction before it
-        # is somebody else's — a third client switching `ha_mode` off, a `cmd/reset`, an
-        # `availability` emptied by hand — and must not turn a refusal into a rollback.
+        # is somebody else's - a third client switching `ha_mode` off, a `cmd/reset`, an
+        # `availability` emptied by hand - and must not turn a refusal into a rollback.
         # Armed before the publish, not after it: the publish awaits the broker's
         # acknowledgement, and Home Assistant's client dispatches incoming messages
         # synchronously as it reads them, so after a stall of the event loop the
-        # acknowledgement and the receiver's first retractions arrive in one read — and
+        # acknowledgement and the receiver's first retractions arrive in one read - and
         # are handled before the publish returns, or while it waits out its own timeout.
         watch.arm()
         await mqtt.async_publish(
@@ -273,7 +273,7 @@ async def async_uninstall(
             return_when=asyncio.FIRST_COMPLETED,
         )
         # A failure after the retractions had begun is a rollback even when the `offline`
-        # never reached us — the connection dropped mid-retraction, say.
+        # never reached us - the connection dropped mid-retraction, say.
         if (result := _rolled_back(watch, box)) is not None:
             return result
         if watch.refused.done():
@@ -464,7 +464,7 @@ async def _async_pids(session: InstallerSession) -> set[int]:
 async def _async_opkg_status(session: InstallerSession) -> tuple[str | None, bool]:
     """Return `opkg status` of the package, and whether opkg's lock stayed held.
 
-    Only a refusal for the lock is asked again — the image's own update check or its
+    Only a refusal for the lock is asked again - the image's own update check or its
     plugin browser holds it for a while and lets go. Any other failure is an answer,
     given at once: `(None, False)`. A lock held through every retry is `(None, True)`.
     """
@@ -500,7 +500,7 @@ async def _async_read_after(
     served until it happens. The plugin asks for it last and cannot promise it: the
     image's own restart asks on screen, with no timeout, whenever something is streaming
     or a background job runs. A restart that never came is a readback that failed, and it
-    does not hide the others — the package, the files and the settings are read either
+    does not hide the others - the package, the files and the settings are read either
     way, and only the hook, which a restart is what unloads, is left out.
 
     Any SSH failure on the way is a readback that could not be made: it is named and
@@ -574,10 +574,10 @@ class _UninstallWatch:
     Three futures, each resolved at most once and never by a retained message:
 
     - `refused`, with the receiver's sentence, for a `last_error` about `uninstall`
-      before any retraction arrived — nothing on the receiver had changed;
+      before any retraction arrived - nothing on the receiver had changed;
     - `shape`, when the retractions and then `offline` have arrived;
     - `rolled_back`, with the receiver's sentence, for a `last_error` about `uninstall`
-      after any retraction — the plugin's failure path, which reconnects first, and
+      after any retraction - the plugin's failure path, which reconnects first, and
       which may follow a teardown whose `offline` never reached us.
 
     `came_back` records `online` or a republished `info` after the shape.
@@ -628,7 +628,7 @@ async def _async_watch_uninstall(
     rolled_back: asyncio.Future[str] = loop.create_future()
     established: asyncio.Future[None] = loop.create_future()
     gone = {"info": False, "announcement": not expect_announcement}
-    # `retracted`: any fresh empty `info`, announcement or `availability` — the teardown
+    # `retracted`: any fresh empty `info`, announcement or `availability` - the teardown
     # has begun, whatever else did or did not arrive after it.
     seen = {"came_back": False, "retracted": False, "armed": False}
     confirmed = 0
@@ -636,7 +636,7 @@ async def _async_watch_uninstall(
     def _retracted_or_back(key: str, msg: ReceiveMessage) -> None:
         # A retained message is what the broker held before the command; it can never be
         # the receiver's answer to it. A fresh non-empty one after a retraction is the
-        # plugin putting everything back, and undoes the retraction — or, once the whole
+        # plugin putting everything back, and undoes the retraction - or, once the whole
         # shape has been seen, is the receiver coming back.
         if msg.retain:
             return
@@ -681,7 +681,7 @@ async def _async_watch_uninstall(
         if error is None or error.get("cmd") != COMMAND:
             return
         sentence = str(error.get("error") or "").strip() or COMMAND
-        # After any retraction the removal had begun, so its failure is a rollback —
+        # After any retraction the removal had begun, so its failure is a rollback -
         # even when the `offline` that completes the shape never reached us. With none,
         # nothing changed on the receiver, and it is a refusal.
         if shape.done() or seen["retracted"]:

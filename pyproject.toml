@@ -4,7 +4,7 @@ line-length = 100
 extend-exclude = ["custom_components/enigma2_mqtt/brand"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "B", "UP"]
+select = ["E", "F", "W", "I", "B", "UP", "RUF002", "RUF003"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["custom_components", "tests"]

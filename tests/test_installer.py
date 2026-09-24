@@ -62,13 +62,13 @@ class FakeReceiver:
     enigma_wrapper_pid: int | None = None
     enigma_running: bool = True
     # A restart that takes the interface down and does not bring it back. On a wrapper
-    # image that still leaves a pid answering `pidof enigma2` — the wrapper's.
+    # image that still leaves a pid answering `pidof enigma2` - the wrapper's.
     enigma_dies_at_restart: bool = False
     # What `read_identity` answers, and `None` is the answer for a setting enigma2 has
     # no line for. It has no line for any setting still at its default, so a receiver
-    # whose plugin has never been configured says nothing about all four of these — and
+    # whose plugin has never been configured says nothing about all four of these - and
     # one that has been configured normally still says nothing about its base topic.
-    # These defaults are therefore a real box, not an empty one — including a box with
+    # These defaults are therefore a real box, not an empty one - including a box with
     # no name of its own, which is what a plugin that has never run leaves behind.
     node_id: str | None = None
     base_topic: str | None = None
@@ -422,7 +422,7 @@ async def test_a_committed_install_prunes_superseded_snapshots(
 ) -> None:
     """Otherwise every guided install leaves another plugin directory on the flash.
 
-    It has to happen after the lock is released — the receiver is free at that point —
+    It has to happen after the lock is released - the receiver is free at that point -
     and before the helper that does it is deleted.
     """
     receiver = FakeReceiver()
@@ -496,7 +496,7 @@ async def test_an_empty_name_leaves_the_receiver_s_own_name_alone_and_reports_it
 ) -> None:
     """A name the receiver already holds is not this transaction's to rewrite.
 
-    The document says nothing about the name, so the plugin keeps it — and the caller
+    The document says nothing about the name, so the plugin keeps it - and the caller
     still has to be told what that name is, because it is what the box is called when
     the install is over and the only thing the entry can sensibly be titled with.
     """
@@ -577,7 +577,7 @@ async def test_an_image_that_runs_a_wrapper_beside_enigma_can_be_installed_on(
     """Two Enigma processes is a lifecycle some images have, not a fault.
 
     The install's restart proof read `pidof enigma2` and refused anything but exactly
-    one pid — before the restart as well as after it — so on an image that runs a
+    one pid - before the restart as well as after it - so on an image that runs a
     wrapper beside the interface it starts, the guided install stopped with
     `restart_failed` at the step in front of the only disruptive command, on a receiver
     with nothing wrong with it. The wrapper survives the restart and the interface does
@@ -602,7 +602,7 @@ async def test_an_interface_that_died_behind_its_wrapper_is_not_a_restart(
     On a wrapper image the wrapper answers `pidof enigma2` whether or not the interface
     it started is there, so „the pids changed" is satisfied by the interface simply
     dying: 42 and 100 before, 42 alone after. Only „a pid that was not running before"
-    tells those apart, and this is the last guard in front of the commit — after it the
+    tells those apart, and this is the last guard in front of the commit - after it the
     lock is released and the install is declared good.
     """
     receiver = FakeReceiver(enigma_pid=100, enigma_wrapper_pid=42, enigma_dies_at_restart=True)
@@ -710,8 +710,8 @@ async def test_rollback_restores_a_receiver_whose_openwebif_died_at_the_restart(
 ) -> None:
     """The failure the rollback exists for is the one that used to disable it.
 
-    The receiver's interface does not come back, so OpenWebif — which is an Enigma
-    plugin — stops answering and the announcement never arrives. The rollback re-measured
+    The receiver's interface does not come back, so OpenWebif - which is an Enigma
+    plugin - stops answering and the announcement never arrives. The rollback re-measured
     the install guards over that same dead OpenWebif, the measurement failed, and the
     restore was abandoned before a single command was sent: the box was left running the
     new plugin with the old one nowhere. The guards may inform the rollback; they may
@@ -812,7 +812,7 @@ async def test_a_rollback_waits_for_the_interface_it_restarted(
 
     The rollback asked `pidof enigma2` once, immediately afterwards, and a receiver that
     was coming back perfectly normally answered nothing for another eleven seconds. That
-    verdict — "the restart failed" — replaced the real reason the install had failed, and
+    verdict - "the restart failed" - replaced the real reason the install had failed, and
     it came before the transaction lock was released, so the next install was refused as
     busy on a box that was in order. Measured on an OpenViX 6.6 receiver, 2026-09-22.
     """
@@ -864,7 +864,7 @@ async def test_a_rollback_whose_interface_never_returns_says_so_and_still_unlock
 
     The files were restored; only the interface did not come back, and the one thing
     that fixes that is a person restarting the box. Holding the transaction lock as well
-    would make the next attempt — after that restart — refuse itself as busy.
+    would make the next attempt - after that restart - refuse itself as busy.
     """
     artifact = tmp_path / "plugin.ipk"
     artifact.write_bytes(b"ipk bytes")
@@ -1005,7 +1005,7 @@ async def test_a_rollback_that_cannot_unlock_says_so_rather_than_the_original_re
 
     Reporting the install's original failure and nothing else is true and useless: the
     box has been restored, the person fixes what was wrong and presses install again,
-    and that attempt is refused as busy by a lock nobody holds — for the half hour
+    and that attempt is refused as busy by a lock nobody holds - for the half hour
     before it is judged stale. The abort names the lock and where it is instead.
     """
     receiver = FakeReceiver(fail_on=" release ")
@@ -1049,7 +1049,7 @@ async def test_a_rollback_cancelled_at_the_restart_stays_cancelled(
 
     Converting it into `rollback_failed` told Home Assistant that a shutdown had broken
     a receiver, and left the task believing it had not been cancelled. The release is
-    still attempted on the way out — it is one short command and the lock outlives the
+    still attempted on the way out - it is one short command and the lock outlives the
     process that holds it.
     """
     receiver = FakeReceiver()
@@ -1219,7 +1219,7 @@ async def test_a_snapshot_refused_for_a_busy_opkg_says_so(
     assert raised.value.code is InstallerErrorCode.OPKG_BUSY
     assert receiver.installed is False
     assert receiver.rolled_back is False
-    # Nothing was taken, so there is nothing to restore — only the transaction lock to
+    # Nothing was taken, so there is nothing to restore - only the transaction lock to
     # give back.
     assert any(" release " in command for command in receiver.commands)
 

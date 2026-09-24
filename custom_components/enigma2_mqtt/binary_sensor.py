@@ -3,7 +3,7 @@
 „Nagrywanie" is what the deep-standby and reboot guards on the box read, so it is also
 what an automation should read before it does anything that would interrupt a
 recording. „Dysk nagrań" exists because a recording disk that silently unmounts is a
-receiver that records nothing and says nothing — which is the whole reason the plugin
+receiver that records nothing and says nothing - which is the whole reason the plugin
 publishes `hdd` at all.
 """
 

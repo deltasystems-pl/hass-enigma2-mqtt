@@ -401,7 +401,7 @@ async def test_an_info_with_no_capability_list_keeps_the_epg_button(
 ) -> None:
     """A payload that arrived is not the same as a question that was answered.
 
-    An `info` without a `capabilities` key has said nothing about capabilities — an
+    An `info` without a `capabilities` key has said nothing about capabilities - an
     older plugin, or one that published before it had read its own configuration. Read
     as "the box has spoken", it becomes a stated „no" and the button is deleted from the
     registry with whatever the household had done to it. The next `info` brings the
@@ -791,7 +791,7 @@ async def test_a_stored_override_that_is_not_an_address_is_dropped_once(
 
     `wake_on_lan` strips the separators and unpacks the rest with `bytes.fromhex`, so
     a stray character after the address surfaced as a complaint about a non-hexadecimal
-    number at position 12 — a message that says nothing about what was typed, from a
+    number at position 12 - a message that says nothing about what was typed, from a
     component the user never went near.
     """
     stored = "00:00:5e:00:53:01x"

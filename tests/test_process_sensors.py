@@ -1,8 +1,8 @@
 """What the enigma2 process itself is doing, once the box says it can measure it.
 
 The topic is five integers and the contract says every one of them may be null. That
-makes the interesting tests the ones where the payload is not what it should be — a
-float, a string, `true`, a negative, a number from a different unit — because each of
+makes the interesting tests the ones where the payload is not what it should be - a
+float, a string, `true`, a negative, a number from a different unit - because each of
 those, taken at face value, is a point on a graph that reads as a real measurement.
 
 The other half is *when* the entities appear. A receiver answers after Home Assistant
@@ -122,7 +122,7 @@ async def test_a_capability_that_arrives_after_setup_still_builds_them(
 
     `async_setup_entry` subscribes and returns; the retained burst that carries `info`,
     and with it the capability list, arrives afterwards. Reading the capability once
-    during setup therefore built nothing at all on a real box — which is exactly what
+    during setup therefore built nothing at all on a real box - which is exactly what
     happened to the OSCam entities before PR #6.
     """
     await async_setup_box(hass, config_entry)
@@ -145,7 +145,7 @@ async def test_a_restart_finds_a_box_that_already_said_it_can_measure(
     """Home Assistant restarts; the receiver has been publishing all along.
 
     The capability and the reading are both already retained, and both arrive in the
-    burst the broker sends after the subscription lands — which is after the platforms
+    burst the broker sends after the subscription lands - which is after the platforms
     have been set up, not before. `async_setup_box_then_retained` is the only harness
     that produces that order; the other one delivers retained payloads inside
     `async_subscribe`, which no broker does and which would let a capability read once
@@ -306,7 +306,7 @@ async def test_a_boolean_is_refused_where_the_reading_is_stored(
     """`True` is an `int` in Python, and `False` is a zero that graphs as a reading.
 
     The sensors refuse a boolean a second time on the way to the screen, so a state
-    cannot say whether the cached payload was cleaned — and everything else that reads
+    cannot say whether the cached payload was cleaned - and everything else that reads
     the cache, the diagnostics download included, would carry the boolean through. This
     therefore asserts on what was stored rather than on what is displayed.
     """
@@ -361,7 +361,7 @@ async def test_a_capability_that_stops_being_named_takes_nothing_away(
     did not mention something.
 
     Asserted on the registry's own events and not only on what is there at the end,
-    because an end state cannot tell „never removed" from „removed and created again" —
+    because an end state cannot tell „never removed" from „removed and created again" -
     and it is the second that quietly takes all of that with it while leaving a registry
     that looks untouched.
     """

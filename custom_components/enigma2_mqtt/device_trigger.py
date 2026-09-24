@@ -6,7 +6,7 @@ four colour keys are the ones an Enigma2 skin puts a labelled function on, so th
 times short and long are the eight triggers offered here.
 
 They listen to the `enigma2_mqtt_key` bus event, which the box fires for every key it
-sees — including when the „Pilot – klawisz" event entity is disabled, which is why that
+sees - including when the „Pilot - klawisz" event entity is disabled, which is why that
 event exists separately from the entity at all. Every other key is still reachable
 through the event entity or a plain event trigger; these eight are the ones worth a
 menu item.
@@ -31,7 +31,7 @@ import voluptuous as vol
 
 from .const import ATTR_KEY, ATTR_PRESS, COLOUR_KEYS, DOMAIN, EVENT_KEY, PRESSES
 
-# `<colour>_<press>`: red_short, red_long, green_short, … eight in all.
+# `<colour>_<press>`: red_short, red_long, green_short, ... eight in all.
 TRIGGER_TYPES: dict[str, tuple[str, str]] = {
     f"{colour}_{press}": (key, press)
     for colour, key in COLOUR_KEYS.items()

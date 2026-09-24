@@ -35,8 +35,8 @@ from .conftest import (
     async_setup_box,
 )
 
-# Fields whose value is a version. A version may be four dotted numbers — `6.6.0.1` is
-# an ordinary image or driver version — which is also the shape of an IPv4 address, so
+# Fields whose value is a version. A version may be four dotted numbers - `6.6.0.1` is
+# an ordinary image or driver version - which is also the shape of an IPv4 address, so
 # the address sweep below skips them by name rather than hoping none ever appears.
 VERSION_KEYS = frozenset({"enigma", "image", "plugin", "sw_version", "version"})
 
@@ -209,7 +209,7 @@ async def test_no_address_at_all_survives_the_download(
 
     Every value is visited except the ones that hold a version. `6.6.0.1` is a perfectly
     ordinary image or driver version and is also four dotted numbers, so a blind sweep
-    would start failing the day a fixture grew one — and the honest fix for that failure
+    would start failing the day a fixture grew one - and the honest fix for that failure
     would have been to weaken the sweep. Excluding those fields by name keeps the sweep
     strict everywhere it matters.
     """

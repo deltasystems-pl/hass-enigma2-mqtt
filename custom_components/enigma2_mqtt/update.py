@@ -3,7 +3,7 @@
 Three versions meet in this entity and only two of them may move its state. The
 **installed** version is what the box reports on `info`. The **bundled** version is the
 IPK that ships inside this integration, and it is the only thing `install` can ever put
-on a receiver — so it, and nothing else, is what `latest_version` offers. The
+on a receiver - so it, and nothing else, is what `latest_version` offers. The
 **published** version is what the plugin repository last released; it is asked for only
 when somebody turns the option on, at most once a day, and it is allowed to appear in
 the summary, in an attribute and in the release link and nowhere else. Letting it raise
@@ -87,7 +87,7 @@ SUMMARY_LIMIT = 255
 
 # The only place a release link may point. The JSON that carries it comes off the
 # network, and a `release_url` is a link a user is invited to click from their own
-# device page — so it is checked against where it is supposed to lead rather than
+# device page - so it is checked against where it is supposed to lead rather than
 # trusted because of the field it arrived in.
 RELEASE_URL_PREFIX = f"{PLUGIN_RELEASES_URL}/"
 
@@ -119,7 +119,7 @@ def published_release_url(url: Any) -> str | None:
     """Return a release link only when it leads to this plugin's releases.
 
     `html_url` arrives in a JSON document fetched over the network, and it ends up as
-    the "Release notes" link on a device page — somewhere a household is invited to
+    the "Release notes" link on a device page - somewhere a household is invited to
     click. A field being called `html_url` says nothing about where it points: a
     redirected DNS name, a captive portal or a compromised answer can put any address
     there, `javascript:` included. So the value is compared against where a release of
@@ -137,7 +137,7 @@ def published_release_version(tag: Any) -> str | None:
     attribute and a sentence on a device page, and there is no version that needs more
     than a handful of characters. The parse is about the tag as a *version*: everything
     downstream compares it with the bundled build, and a string that does not sort is
-    not a comparison — it is a label pretending to be one.
+    not a comparison - it is a label pretending to be one.
     """
     if not isinstance(tag, str) or len(tag) > RELEASE_TAG_MAX:
         return None
@@ -282,8 +282,8 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         """Say what the version numbers mean, and what to do about it.
 
         `latest_version` is a number on a card with an install button that may not be
-        there. Which of the two cases a household is looking at — and, when the button
-        is missing, how to get it — is not deducible from two version strings.
+        there. Which of the two cases a household is looking at - and, when the button
+        is missing, how to get it - is not deducible from two version strings.
         """
         sentences: list[str] = []
         compatibility = plugin_compatibility(self.installed_version, offered)
@@ -304,7 +304,7 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             )
 
         # Home Assistant cuts a summary at 255 characters, and where it cuts is where
-        # the 255th character happens to fall — mid-word, and in a language with long
+        # the 255th character happens to fall - mid-word, and in a language with long
         # compounds usually mid-sentence. The sentences here are in priority order: the
         # first says what the version numbers mean and what to do, the second is extra
         # context about a published tag. A second sentence that will not fit whole is
@@ -333,7 +333,7 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         Only reached on an entity built while the option was on: the timer below is not
         registered otherwise, and changing the option reloads the entry. The interval
         sets the cadence and the stored stamp enforces it, because a timer that fires
-        early — or a reload, or a restart — must not turn one day's request into two.
+        early - or a reload, or a restart - must not turn one day's request into two.
         """
         del now
         if (

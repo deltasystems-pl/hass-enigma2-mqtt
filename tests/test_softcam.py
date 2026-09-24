@@ -18,7 +18,7 @@ would graph as one running instance; `0` instances is a real reading and must ne
 confused with a count that could not be taken; and the plugin's own auto-heal detector
 reads a file carrying a card-sharing account, a server address and the live control
 words, so a test here proves that nothing outside the published contract can reach a
-sensor attribute, the diagnostics download or a log line — whatever arrives.
+sensor attribute, the diagnostics download or a log line - whatever arrives.
 """
 
 from __future__ import annotations
@@ -143,7 +143,7 @@ async def test_the_button_is_absent_until_the_box_permits_it(
 
     A gate that read the permission at platform-setup time would find „not said",
     create the button, and delete it again a moment later when `info` landed with the
-    refusal — registry churn on every start-up, and a race in which the deletion
+    refusal - registry churn on every start-up, and a race in which the deletion
     overtakes the addition and the entity is left registered for good. The end state
     cannot tell „never created" from „created and then deleted", so the registry is
     watched.
@@ -175,7 +175,7 @@ async def test_an_older_plugin_gets_no_button_at_all(
     """Silence is not permission.
 
     Deep standby had its buttons before it had a permission, so silence there has to
-    keep them. Nothing has ever shipped this one, so silence here creates nothing — and
+    keep them. Nothing has ever shipped this one, so silence here creates nothing - and
     an older plugin would only refuse the command anyway.
     """
     box_on_the_broker[INFO_TOPIC] = with_softcam()
@@ -196,7 +196,7 @@ async def test_the_permission_alone_is_not_enough_without_the_capability(
 
     `softcam_restart_allowed` is a plain checkbox on every installation and says whether
     the household wants the command available. The `softcam` capability says whether the
-    receiver could carry it out — the plugin claims it only where a cam binary actually
+    receiver could carry it out - the plugin claims it only where a cam binary actually
     resolves, its family has a known start line, and the image starts it through its
     manager rather than through an init script. A receiver can perfectly well answer yes
     to the first and nothing to the second: it publishes the permission, claims no
@@ -231,7 +231,7 @@ async def test_the_capability_arriving_late_creates_the_permitted_button(
     """A cam that resolves only after a restart is still a receiver that can do this.
 
     The gate listens rather than reading once, so the second half arriving later is
-    enough — no Home Assistant restart, and no button in the meantime.
+    enough - no Home Assistant restart, and no button in the meantime.
     """
     box_on_the_broker[INFO_TOPIC] = info(softcam_restart_allowed=True)
     await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
@@ -395,8 +395,8 @@ async def test_the_button_survives_the_capability_going_quiet(
     This is ADR-0005 §2, and it is the one decision in this file that looks like an
     inconsistency and is not. The two predicates are deliberately asymmetrical: a
     capability belongs in the half that asks „can this receiver do it", and nowhere near
-    the half that asks „did somebody decide against it". Written symmetrically — which
-    is exactly what a later tidy-up or a reviewer „fixing" it would do — a receiver
+    the half that asks „did somebody decide against it". Written symmetrically - which
+    is exactly what a later tidy-up or a reviewer „fixing" it would do - a receiver
     downgraded to an older plugin, or one whose hook failed to attach on a single boot,
     loses the button *from the registry*, and with it the household's rename, its area,
     its place on a dashboard and its history. The next payload brings it back as a
@@ -423,7 +423,7 @@ async def test_the_button_survives_the_capability_going_quiet(
     )
 
     # The permission is unchanged and still granted; only the capability stops being
-    # named — a downgraded plugin, or a hook that did not attach on this boot.
+    # named - a downgraded plugin, or a hook that did not attach on this boot.
     async_fire_mqtt_message(hass, INFO_TOPIC, info(softcam_restart_allowed=True))
     await hass.async_block_till_done()
 
@@ -690,8 +690,8 @@ async def test_nothing_outside_the_contract_reaches_home_assistant(
     """🔴 The privacy boundary, tested from this side of the broker.
 
     The plugin is the side that must never publish an ECM field, and its own tests say
-    so. This is the second lock: a payload that carries one anyway — a bug, a
-    third-party fork, anything at all with publish rights on the topic — still cannot
+    so. This is the second lock: a payload that carries one anyway - a bug, a
+    third-party fork, anything at all with publish rights on the topic - still cannot
     put it on a sensor attribute, into a diagnostics download meant to be attached to a
     public issue, or into a log line of ours. The normaliser builds a fresh object out of
     the seven names the contract has, so there is nowhere for an eighth to go.
@@ -798,7 +798,7 @@ async def test_the_form_never_offers_the_permission(
     """🔴 A setting that *enables* a command is set at the television and nowhere else.
 
     The plugin refuses it on `cmd/config` by design, so a field here would be a control
-    that cannot work — and worse, one that suggests the permission is Home Assistant's
+    that cannot work - and worse, one that suggests the permission is Home Assistant's
     to give.
     """
     box_on_the_broker[INFO_TOPIC] = with_softcam(
@@ -853,7 +853,7 @@ async def test_an_older_plugin_is_offered_neither_field(
 # began, captured on `main` at 2275ade. 🔴 An entity id is the name automations,
 # dashboards, templates and the recorder's history all know an entity by, so renaming
 # one is a silent breakage in somebody else's house. This asserts the set is still a
-# subset of what is created — new entities are welcome, a missing one is not.
+# subset of what is created - new entities are welcome, a missing one is not.
 #
 # These are the ids of the **English** installation the tests run as. On the operator's
 # receiver they read differently, because Home Assistant builds an object id from the

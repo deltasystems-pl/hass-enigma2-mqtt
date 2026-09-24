@@ -3,7 +3,7 @@
 `remote.send_command` is the escape hatch: everything enigma2 can be told to do from
 the sofa can be told to it from an automation, including the things this integration
 has no entity for. The key names are the Linux input names the box publishes on `key`,
-and they are accepted in either spelling — `KEY_RED` because that is what the topic
+and they are accepted in either spelling - `KEY_RED` because that is what the topic
 says, and `red` because that is what a person writing an automation types.
 """
 

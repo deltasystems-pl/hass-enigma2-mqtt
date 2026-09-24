@@ -1,7 +1,7 @@
 """Diagnostics for the Enigma2 MQTT integration.
 
 The download is what a bug report should carry, so it holds everything the integration
-believes about a box — and nothing that would embarrass the person attaching it to a
+believes about a box - and nothing that would embarrass the person attaching it to a
 public issue. The MAC and the IP address are redacted because they identify a household,
 not because they are secret; the credential keys are listed before any credential
 exists, so that the installer (M4) cannot add one to a file that is already being shared.
@@ -15,7 +15,7 @@ than a household.
 Two topics are summarised rather than included. `screen` is a JPEG of what is on the
 television: the size and the time it was taken answer every question a bug report asks
 of it, and the picture itself answers none of them. `key` is what somebody pressed on
-the remote a moment ago — it is not state, it has no lasting value here, and a log of
+the remote a moment ago - it is not state, it has no lasting value here, and a log of
 household behaviour is not something to attach to a public issue by accident.
 """
 
@@ -50,8 +50,8 @@ TO_REDACT = {
     "username",
     # The address a magic packet goes to is a hardware address of the same household as
     # the one `mac` is redacted for, and it is redacted for the same reason. It arrives
-    # from a different direction — the user types it into the options rather than the
-    # box announcing it — which is exactly how it was missed.
+    # from a different direction - the user types it into the options rather than the
+    # box announcing it - which is exactly how it was missed.
     "wol_mac",
 }
 

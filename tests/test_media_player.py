@@ -360,7 +360,7 @@ async def test_the_source_stays_truthful_when_it_is_off_the_list(
     """What is playing is a fact; the list is a preference, and the fact wins.
 
     In the active-bouquet scope the receiver can perfectly well be tuned to something
-    outside that bouquet — somebody pressed a number on the remote. Blanking `source`
+    outside that bouquet - somebody pressed a number on the remote. Blanking `source`
     to keep it consistent with `source_list` would mean the dashboard stopped saying
     what is on.
     """
@@ -412,7 +412,7 @@ BIG_BOUQUET_CONTEXT = {"name": "Wszystkie kanaly", "sref": BIG_BOUQUET_SREF}
 def _one_bouquet_of_a_thousand() -> dict[str, object]:
     """Return a channel list the size of the receiver this was measured on.
 
-    One bouquet, so that the „Kanał" select carries all thousand options too — that is
+    One bouquet, so that the „Kanał" select carries all thousand options too - that is
     the worst case for either entity, and the point is that neither is anywhere near
     what the recorder would refuse.
     """

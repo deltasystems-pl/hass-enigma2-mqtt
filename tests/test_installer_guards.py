@@ -223,7 +223,7 @@ async def test_a_refusal_before_the_lock_leaves_exactly_one_warning(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """One install, one line — whichever of the guards refused it, however deep.
+    """One install, one line - whichever of the guards refused it, however deep.
 
     The facts travel with the refusal and the transaction writes them, so a guard that
     is reached twice, or through a helper that re-raises, cannot turn one refused
@@ -269,7 +269,7 @@ async def test_a_failed_rollback_is_reported_as_such_and_names_the_backup(
 ) -> None:
     """When the recovery itself fails there is nothing left to do but say where to look.
 
-    Two things are said, and both were missing. The **cause** — the log named a failed
+    Two things are said, and both were missing. The **cause** - the log named a failed
     rollback and nothing about which step failed or why, leaving the receiver as the only
     place to find out. And the **lock**: the restore failing is not a reason to hold the
     transaction lock, because the next attempt takes its own snapshot before it touches
@@ -376,7 +376,7 @@ async def test_provisioning_is_written_through_an_unguessable_name_that_is_not_a
     """The temporary file holds the broker password.
 
     A fixed `.ha-new` beside the real file is a name anybody with shell access can
-    pre-create as a symlink, and `cat >` follows one — so the password would land
+    pre-create as a symlink, and `cat >` follows one - so the password would land
     wherever the link pointed. The name carries the transaction's nonce, the shell
     refuses to write to it if anything is already there, and the rename is checked too.
     """
@@ -422,8 +422,8 @@ async def test_the_provisioning_temp_is_removed_even_when_enigma_will_not_stop(
     """That file is the broker password in cleartext, sitting on the receiver's flash.
 
     It used to be deleted by the rollback's first command *after* Enigma had been
-    stopped, so a receiver that would not stop — which is a receiver in trouble, exactly
-    when a rollback runs — kept it. Deleting it needs nothing stopped, so it goes first
+    stopped, so a receiver that would not stop - which is a receiver in trouble, exactly
+    when a rollback runs - kept it. Deleting it needs nothing stopped, so it goes first
     and outside every condition.
     """
     receiver = FakeReceiver()

@@ -6,8 +6,8 @@ the availability rule are written once here rather than twenty-six times.
 Two decisions live in this file.
 
 **The unique id is `<node_id>_<key>`** and the key is the entity's translation key. That
-makes the English translation the definition of the entity id — Home Assistant derives
-an object id from the entity's name in the default language, not in the user's — so the
+makes the English translation the definition of the entity id - Home Assistant derives
+an object id from the entity's name in the default language, not in the user's - so the
 Polish and German names can be anything a household would recognise without a single
 automation or template breaking.
 
@@ -90,7 +90,7 @@ class Enigma2Entity(Entity):
         """Copy what this entity shows out of the box's state.
 
         Entities that are pure properties of the box override nothing; those that cache
-        derived values — a parsed timestamp, a media image hash — do the work here, once
+        derived values - a parsed timestamp, a media image hash - do the work here, once
         per message, rather than on every read of every property.
         """
 
@@ -101,7 +101,7 @@ class OptionalEntities:
     A box can advertise that it *can* report conditional-access or OSCam health and
     still have that reporting switched off, which is the default. Creating the entities
     anyway leaves a device page full of diagnostics that read `unknown` for ever and
-    cannot be made to say anything — a fault indication where there is no fault. So
+    cannot be made to say anything - a fault indication where there is no fault. So
     they follow the option instead of the capability: created when it is turned on, and
     removed from the registry when it is turned off, which is what the dynamic OSCam
     source entities already do.
@@ -143,8 +143,8 @@ class OptionalEntities:
         """Create or retire the whole set to match the option.
 
         Removing is only done on a stated "off". An `info` payload that simply does not
-        mention the setting — an older plugin, or one that answered before it had read
-        its own configuration — is not an answer, and treating it as one would delete
+        mention the setting - an older plugin, or one that answered before it had read
+        its own configuration - is not an answer, and treating it as one would delete
         entities the household had renamed, hidden or put on a dashboard, together with
         their history. Silence leaves everything exactly as it is.
         """

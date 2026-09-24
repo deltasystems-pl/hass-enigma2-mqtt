@@ -3,7 +3,7 @@
 Two of them can end the evening. „Głębokie uśpienie" shuts the receiver down to the
 point where at best a magic packet brings it back, and „Restart" reboots it; on a
 dashboard that a household shares, both sit one mis-tap away from the volume. So they
-are not created at all unless the option asks for them — and unless the box itself says
+are not created at all unless the option asks for them - and unless the box itself says
 they are permitted, because `deep_standby_allowed` is set on the receiver's own setup
 screen and a box that has it off refuses both commands whatever Home Assistant thinks.
 Offering a button that is always refused is worse than offering none.
@@ -14,14 +14,14 @@ an unavailable entity behind that looks like a fault.
 Every button waits for the box. The plugin verifies each command by effect and complains
 on `last_error`; a button that published and returned made a refusal indistinguishable
 from a working press, which is exactly how „Restart" and „Głębokie uśpienie" failed
-silently for two days. Where there is an effect to watch — a new screen grab, a
-republished announcement — that is the proof. Where there is none, because the box is
+silently for two days. Where there is an effect to watch - a new screen grab, a
+republished announcement - that is the proof. Where there is none, because the box is
 about to disappear anyway, the wait is the error-grace window: a complaint raises,
 silence is success.
 
 „Restart softcam" has two gates and both of them are the box's. Restarting the
 card-sharing client costs a few seconds of a scrambled picture and nothing else, so there
-is no reason to hide it behind a Home Assistant option as well — but a box whose setup
+is no reason to hide it behind a Home Assistant option as well - but a box whose setup
 screen has not permitted it refuses the command, and so does a box on which no cam binary
 resolves at all. Those are two different answers from two different parts of the plugin,
 and a receiver gives them independently: the permission is a checkbox every installation
@@ -31,15 +31,15 @@ button that is always refused is one somebody presses twice and then reports.
 „Obudź (WoL)" is the one button that sends no command at all, and the one that works
 while the box is unreachable, because that is the only time it is worth pressing.
 
-Both of them promise something about Wake-on-LAN — „Głębokie uśpienie" that a magic
-packet brings the receiver back, „Obudź (WoL)" that the packet will — and on many
+Both of them promise something about Wake-on-LAN - „Głębokie uśpienie" that a magic
+packet brings the receiver back, „Obudź (WoL)" that the packet will - and on many
 receivers neither is true: the image has no way to arm the network port for deep standby,
 and the box stays dark whatever arrives. A receiver that says so (`info.wol.supported`
 is `false`) gets the `wake_on_lan` attribute on those two buttons, and its one value is
 translated per button into what the household can do instead: the remote, the front
 button or a timer. A button has no description of its own in Home Assistant, and no
 control of its own in the more-info dialog either: the attribute is for automations and
-dashboards to read, and the frontend shows it only to administrators, under ⋮ → Details.
+dashboards to read, and the frontend shows it only to administrators, under ⋮ -> Details.
 It changes neither the name nor the entity id, which on a Polish installation is derived
 from the Polish name. A receiver that says Wake-on-LAN works, or
 a plugin that says nothing, gets no attribute: nothing changes where nobody has said it
@@ -128,7 +128,7 @@ def _async_command(name: str) -> Callable[[Enigma2Box], Coroutine[Any, Any, None
 async def _async_epg_import(box: Enigma2Box) -> None:
     """Ask the receiver to import EPG, and wait for the import to be seen running.
 
-    The proof is the `epg_import` topic saying `running` — and it has to be a *new*
+    The proof is the `epg_import` topic saying `running` - and it has to be a *new*
     payload that says so, not the state already held. An import the image's own
     schedule started is already `running`; the box refuses a second one with „already
     running" on `last_error`, and reading the old state as the answer would report that
@@ -151,8 +151,8 @@ async def _async_epg_import(box: Enigma2Box) -> None:
             return True
         if box.updates.get(TOPIC_EPG_IMPORT, 0) <= before:
             return False
-        # A retained delivery is what the broker already held — after a reconnect
-        # Home Assistant resubscribes and the broker replays it — so it may be the
+        # A retained delivery is what the broker already held - after a reconnect
+        # Home Assistant resubscribes and the broker replays it - so it may be the
         # previous run's `failed`. It updates the sensor and answers nothing.
         if box.state.epg_import_retained:
             return False
@@ -237,19 +237,19 @@ CAPABILITY_BUTTONS: tuple[tuple[str, Enigma2ButtonDescription], ...] = (
 
 # Created only while the box says the command is permitted *and* names the capability
 # that says it could carry it out, and behind no Home Assistant option at all. There is
-# nothing dangerous about it — a softcam restart costs a few seconds of a scrambled
-# picture — so the only questions worth asking are whether the box will do it and whether
+# nothing dangerous about it - a softcam restart costs a few seconds of a scrambled
+# picture - so the only questions worth asking are whether the box will do it and whether
 # it can, and the box answers both itself.
 #
 # Its proof is silence, like the three restarts above, and that is a measured decision
 # rather than a shortcut. The command's own sequence stops every instance, waits up to
 # five seconds for them to go, kills whatever survived, starts one, and settles another
-# five before it republishes `softcam` — so on a cam that ignores SIGTERM the topic moves
+# five before it republishes `softcam` - so on a cam that ignores SIGTERM the topic moves
 # at about ten seconds, which is exactly the command timeout. Waiting for it would turn a
 # restart that worked into „the receiver did not carry this out" on the slowest boxes,
-# which is the one shape of bug this project has already paid for twice. Every refusal —
+# which is the one shape of bug this project has already paid for twice. Every refusal -
 # no permission, a recording, a recording due, the rate limit, the sixty seconds after a
-# start — arrives on `last_error` immediately, and that is what the grace window is for.
+# start - arrives on `last_error` immediately, and that is what the grace window is for.
 SOFTCAM_BUTTON = Enigma2ButtonDescription(
     key="softcam_restart",
     device_class=ButtonDeviceClass.RESTART,
@@ -283,7 +283,7 @@ async def async_setup_entry(
         """Return whether the box has stated its capability list yet.
 
         Either topic will do: the announcement carries the same list. What it asks is
-        whether the list was *stated*, not whether a payload arrived — an `info` with no
+        whether the list was *stated*, not whether a payload arrived - an `info` with no
         `capabilities` in it is a box that has said nothing on the subject, and reading
         that as "it has none" would delete a button the next message brings back.
         """
@@ -319,8 +319,8 @@ async def async_setup_entry(
             [description.key for description in DANGEROUS_BUTTONS],
             factory,
             # Nothing is created until `info` has arrived. It lands after the platforms
-            # are set up — the subscription is registered and returns, and Home
-            # Assistant debounces the SUBSCRIBE behind it — so a gate that read the
+            # are set up - the subscription is registered and returns, and Home
+            # Assistant debounces the SUBSCRIBE behind it - so a gate that read the
             # permission at set-up time would read "not said" on every start, create
             # both buttons, and delete them again a moment later when `info` landed
             # with a "no": registry churn on every restart, and a race where the
@@ -354,14 +354,14 @@ async def async_setup_entry(
             # can easily give opposite answers to them. `softcam_restart_allowed` is a
             # plain checkbox on every installation and says whether the household wants
             # the command available; the `softcam` capability says whether the receiver
-            # can carry it out at all — it is claimed only where a cam binary actually
+            # can carry it out at all - it is claimed only where a cam binary actually
             # resolves and its family has a start line. A box with the permission on and
             # no resolvable cam publishes the permission, claims no capability, and
             # refuses the command, which is exactly the button nobody should be offered.
             #
             # A stated „yes" to the permission and nothing weaker. Silence is an older
             # plugin, which would refuse the command anyway, and this button has never
-            # existed on one — so unlike deep standby there is no installation whose
+            # existed on one - so unlike deep standby there is no installation whose
             # button has to survive a box that has not spoken. `info` has to have arrived
             # at all, for the same reason it does there: the announcement carries no
             # `settings`, so reading the permission before `info` lands reads „not said"
@@ -371,7 +371,7 @@ async def async_setup_entry(
                 and has_answered()
                 and box.softcam_restart_permission is True
             ),
-            # 🔴 And only a stated „no" to the *permission* removes it — the capability
+            # 🔴 And only a stated „no" to the *permission* removes it - the capability
             # is deliberately not in this half. Somebody who turns the permission off at
             # the television has decided; a capability that stops being named is an
             # older plugin after a downgrade, a hook that failed to attach on one boot,
@@ -445,7 +445,7 @@ class Enigma2Button(Enigma2Entity, ButtonEntity):
 
         Read from the box on every write rather than cached, and kept while the box is
         unreachable: `info` is retained, so the last thing the receiver said about
-        itself is still the truth when it is asleep — which is exactly when somebody
+        itself is still the truth when it is asleep - which is exactly when somebody
         looks at „Obudź (WoL)".
         """
         if (

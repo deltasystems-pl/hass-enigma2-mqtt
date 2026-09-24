@@ -4,15 +4,15 @@ Everything the entities do is also available as an action, plus the things no en
 shape fits: adding a recording timer, deleting one, reading the EPG grid.
 
 They are **entity actions on the media player**, which is what lets a target be a
-device, an area or an entity without a line of code here resolving any of it — Home
+device, an area or an entity without a line of code here resolving any of it - Home
 Assistant expands a device target to the entities of the platform an action was
 registered on, and one box has exactly one media player.
 
 Every action that changes something waits for proof. The contract has no
 acknowledgement topic, so the proof is the state topic the command moves and the
 disproof is `last_error`; `Enigma2Box.async_command` waits for whichever comes first
-and raises with the box's own words. Two commands move nothing — `send_key` and
-`message` — and for those the only available answer is silence, so they wait just long
+and raises with the box's own words. Two commands move nothing - `send_key` and
+`message` - and for those the only available answer is silence, so they wait just long
 enough to hear a complaint and then report success.
 
 🔴 `get_epg_grid` is the one action that returns data, and it is deliberately not a
@@ -88,8 +88,8 @@ SEND_KEY_SCHEMA = {
     vol.Required(ATTR_KEY): cv.string,
     vol.Optional(ATTR_LONG, default=False): cv.boolean,
 }
-# 🔴 `timeout` has no default here. The default belongs to the style — ten seconds for a
-# popup, five for a toast — and a schema default of ten would reach the handler as if the
+# 🔴 `timeout` has no default here. The default belongs to the style - ten seconds for a
+# popup, five for a toast - and a schema default of ten would reach the handler as if the
 # caller had asked for it, giving every toast without a timeout a popup's ten seconds.
 MESSAGE_SCHEMA = {
     vol.Required(ATTR_TEXT): cv.string,
@@ -169,8 +169,8 @@ class Enigma2Actions:
                 "zap",
                 sref,
                 # By identity, not by string: the receiver answers on `service` with
-                # its own spelling of the reference — a trailing colon, a stream URL,
-                # a different case — and a raw comparison reports a zap that plainly
+                # its own spelling of the reference - a trailing colon, a stream URL,
+                # a different case - and a raw comparison reports a zap that plainly
                 # happened as a timeout.
                 effect=lambda: same_service((box.state.service or {}).get("sref"), sref),
             )
@@ -252,7 +252,7 @@ class Enigma2Actions:
         """Delete a recording timer.
 
         enigma2 identifies a timer by the triple service, start and end, so those three
-        are what deletion takes — there is no id to hold on to.
+        are what deletion takes - there is no id to hold on to.
         """
         await self._async_timer_command(
             {
@@ -314,7 +314,7 @@ class Enigma2Actions:
 
         The grids are published by the box and refreshed on their own; this asks for a
         rebuild only when there is nothing there at all, which is the case on a box
-        whose `epg_grid_events` setting is zero — and that one never answers, so it
+        whose `epg_grid_events` setting is zero - and that one never answers, so it
         fails with a timeout rather than an empty result that looks like "nothing is
         on".
         """

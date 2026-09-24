@@ -499,7 +499,7 @@ async def test_an_empty_stored_password_does_not_advertise_an_install(
 
     The other three fields were checked for emptiness and the password only for being a
     string, so an entry with a blank password offered an install that was certain to
-    fail authentication — and failing authentication starts a reauth flow at somebody
+    fail authentication - and failing authentication starts a reauth flow at somebody
     who never asked for one.
     """
     config_entry.add_to_hass(hass)
@@ -614,7 +614,7 @@ async def test_a_refused_second_install_does_not_stop_the_first_one_s_spinner(
 
     The second call reached the same `finally` as the first and cleared `in_progress`
     while the first was still uploading. The card then showed an idle entity through the
-    rest of a real install — and the next thing it showed was the restart.
+    rest of a real install - and the next thing it showed was the restart.
     """
     config_entry.add_to_hass(hass)
     hass.config_entries.async_update_entry(

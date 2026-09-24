@@ -6,8 +6,8 @@ every state topic, and it publishes commands. The entity platforms read it and r
 listeners; nothing below this module knows that MQTT exists.
 
 One wildcard subscription covers every state topic of a box. That is a single SUBSCRIBE
-packet instead of fourteen, one retained burst instead of fourteen, and — because the
-`screen` topic is raw JPEG and the rest is UTF-8 JSON — it has to be taken without an
+packet instead of fourteen, one retained burst instead of fourteen, and - because the
+`screen` topic is raw JPEG and the rest is UTF-8 JSON - it has to be taken without an
 encoding and decoded per topic, which is what `_message_received` does. The box's own
 `cmd/#` echoes arrive on it too and are dropped: a broker delivers what a client
 publishes back to that client's matching subscriptions, and a command is not state.
@@ -172,7 +172,7 @@ OSCAM_STATUSES = frozenset(
         "unknown",
     }
 )
-# Real OSCam builds put a patch suffix on the revision — `1.20_svn build r11718-079` is
+# Real OSCam builds put a patch suffix on the revision - `1.20_svn build r11718-079` is
 # what the receiver this was written against reports. A version that does not match is
 # dropped on its own, so the pattern being too narrow cost only the version field; it
 # still meant the one number a support question starts with was never shown.
@@ -181,13 +181,13 @@ OSCAM_VERSION = re.compile(
     r"(?: build r[0-9]{1,8}(?:-[A-Za-z0-9]{1,8})?)?$"
 )
 # The pattern has a repeating group, so what it accepts has no length limit of its own:
-# a megabyte of `1.20_a_a_a…` would match, and it is a label for a bug report. The
+# a megabyte of `1.20_a_a_a...` would match, and it is a label for a bug report. The
 # longest version anyone has seen is a quarter of this.
 OSCAM_VERSION_MAX = 64
 
 # What the `process` topic may say, and the largest value of each that is a measurement
 # rather than a bug. The topic is five integers about the enigma2 process itself, and
-# every one of them is a number somebody would put on a graph — so the job here is to
+# every one of them is a number somebody would put on a graph - so the job here is to
 # make sure nothing that is not a number ever gets there. A receiver has under a
 # gigabyte of RAM and a few dozen threads; these ceilings are orders of magnitude above
 # anything real, which is what makes a value above them evidence of a different bug.
@@ -251,7 +251,7 @@ def normalise_mac(value: Any) -> str | None:
     """Return a MAC address as lower-case colon-separated hex, or None.
 
     One spelling is stored, sent and registered, whatever was typed: the device registry
-    keys connections by the string, so `AA-BB-…` and `aa:bb:…` would otherwise be two
+    keys connections by the string, so `AA-BB-...` and `aa:bb:...` would otherwise be two
     different devices' worth of address for one box.
     """
     if not isinstance(value, str):
@@ -338,7 +338,7 @@ def normalise_key(command: str) -> str:
     `red`, `Red`, `key_red` and `KEY_RED` are the same key: the topic spells them the
     way the Linux input layer does, and a person writing an automation does not. Spaces
     are dropped rather than turned into underscores, because the Linux names run the
-    words together — `channel up` is `KEY_CHANNELUP`, never `KEY_CHANNEL_UP`. A name
+    words together - `channel up` is `KEY_CHANNELUP`, never `KEY_CHANNEL_UP`. A name
     this does not recognise is passed through untouched, because the box is the side
     that knows which keys it has and it answers on `last_error` when it does not.
     """
@@ -382,8 +382,8 @@ def same_service(one: Any, other: Any) -> bool:
 def picon_url(ip_address: str | None, sref: str | None) -> str | None:
     """Return the URL OpenWebif serves a channel's picon at, if it can be built.
 
-    Picons are not published over MQTT — a few hundred kilobytes of PNG per channel on
-    a retained topic would be an abuse of a broker — so the browser fetches them from
+    Picons are not published over MQTT - a few hundred kilobytes of PNG per channel on
+    a retained topic would be an abuse of a broker - so the browser fetches them from
     the box, which already serves them at a name derived from the service reference:
     every colon becomes an underscore and the trailing one is dropped.
 
@@ -424,7 +424,7 @@ async def async_request_ha_mode(
 
     Subscribing before publishing is therefore not enough. Home Assistant batches its
     SUBSCRIBE packets behind a short debouncer, so a subscription that exists in
-    process still reaches the broker a tenth of a second later — about when the
+    process still reaches the broker a tenth of a second later - about when the
     receiver replies. The answer is then published to a broker that is not yet sending
     this topic anywhere, and the only copy Home Assistant ever sees is the retained one
     that arrives with the subscription, which is not an acknowledgement. Waiting for
@@ -621,14 +621,14 @@ class Enigma2State:
     epg_import: dict[str, Any] | None = None
     # Whether the last `epg_import` payload arrived with the retain flag set: a replay of
     # what the broker already held, which can describe an earlier run and is therefore
-    # never the answer to a press — the same reading `last_error_retained` gives.
+    # never the answer to a press - the same reading `last_error_retained` gives.
     epg_import_retained: bool = False
     bouquet: dict[str, Any] | None = None
     channels: dict[str, Any] | None = None
     last_error: dict[str, Any] | None = None
     # Whether the last complaint arrived with the retain flag set. A retained payload
     # is what the broker had before we subscribed, so it is a replay of something that
-    # already happened rather than news — which matters to anything that stamps a time
+    # already happened rather than news - which matters to anything that stamps a time
     # on it, because a reconnect replays it again.
     last_error_retained: bool = False
     screen: bytes | None = None
@@ -651,7 +651,7 @@ class Enigma2Box:
         self.state = Enigma2State()
         self.seen: set[str] = set()
         # How many payloads each topic has delivered. A command whose effect is "this
-        # topic was published again" — adding a timer, taking a screenshot — has no
+        # topic was published again" - adding a timer, taking a screenshot - has no
         # value to compare, only the fact that something arrived.
         self.updates: dict[str, int] = {}
         self._unsubscribes: list[CALLBACK_TYPE] = []
@@ -661,7 +661,7 @@ class Enigma2Box:
         self._pending_cam: object = _NO_PENDING_CAM
         self._pending_oscam: object = _NO_PENDING_OSCAM
         self._subscribed = asyncio.Event()
-        # Whether the last `info` the broker delivered was empty — the plugin retracting
+        # Whether the last `info` the broker delivered was empty - the plugin retracting
         # it, which an uninstall does and nothing else a running plugin does for long.
         # The last good payload is kept for everything that reads it, as it always was;
         # this flag only withdraws what that payload *permitted*. See `uninstall_offered`.
@@ -719,14 +719,14 @@ class Enigma2Box:
         """Return the Wake-on-LAN target: the option if set, else what the box says.
 
         The override exists because the address that has to be woken is not always the
-        one enigma2 reports — a box with both a wired and a wireless interface reports
+        one enigma2 reports - a box with both a wired and a wireless interface reports
         the one it is using, and the magic packet has to go to the one that is plugged
         in and listening.
 
         It is normalised here as well as in the options flow, because an entry written
         before the flow validated anything, or edited by hand in `.storage`, reaches
         this property without ever having passed through a form. An override that is not
-        an address at all is no address, so the box's own one is used — which is what
+        an address at all is no address, so the box's own one is used - which is what
         the setup repair leaves behind anyway.
         """
         if override := normalise_mac(self.entry.options.get(CONF_WOL_MAC)):
@@ -740,7 +740,7 @@ class Enigma2Box:
         `deep_standby_allowed` is set on the receiver's setup screen and deliberately
         cannot be written over MQTT, so this is the only way Home Assistant can tell
         „the box will refuse" from „the box has not been asked". `None` is the second
-        one — an older plugin that does not report the key — and it must not be read as
+        one - an older plugin that does not report the key - and it must not be read as
         a refusal, because that would delete the buttons of every installation that
         works today.
         """
@@ -758,7 +758,7 @@ class Enigma2Box:
         front-processor switch through which it arms Wake-on-LAN for deep standby. It is
         not the network card's `Supports Wake-on`, which describes a suspend path these
         images never take, so a receiver can report `false` here while `ethtool` says the
-        opposite — and `false` is the answer that matches what happens. Three values,
+        opposite - and `false` is the answer that matches what happens. Three values,
         like the permissions: `None` is a plugin that does not report `wol` at all, or a
         value that is not a boolean, and must not be read as `false`, because that would
         tell a household its receiver cannot be woken when nobody has said so.
@@ -780,7 +780,7 @@ class Enigma2Box:
 
         What differs is what `None` means to the caller. Deep standby had buttons before
         it had a permission, so silence there has to keep them. Nothing has ever shipped
-        a „Restart softcam" button, so silence here creates nothing — an older plugin
+        a „Restart softcam" button, so silence here creates nothing - an older plugin
         would only refuse the command anyway.
         """
         settings = self.state.info.get("settings")
@@ -815,8 +815,8 @@ class Enigma2Box:
         box it runs on, and only `info` carries the permission beside it.
 
         🔴 The polarity is the opposite of `deep_standby_permission`'s, deliberately
-        (ADR-0004): silence — an older plugin, a payload that cannot be read, a box that has
-        not answered — offers nothing, because the act behind it cannot be undone from here.
+        (ADR-0004): silence - an older plugin, a payload that cannot be read, a box that has
+        not answered - offers nothing, because the act behind it cannot be undone from here.
         An empty `info` counts as silence even though the last good payload is still held:
         it is what the plugin publishes on its way out, and a menu entry left standing for
         a receiver whose plugin has gone would be a control that can only ever time out.
@@ -981,7 +981,7 @@ class Enigma2Box:
 
         The default is every bouquet the options offer, which is the set the plugin
         would have to resolve a zap by name against. A caller that knows which copy is
-        meant — the source list, scoped to the active bouquet — passes that instead.
+        meant - the source list, scoped to the active bouquet - passes that instead.
         """
         matches: list[dict[str, Any]] = []
         for bouquet in self.bouquets if bouquets is None else bouquets:
@@ -996,7 +996,7 @@ class Enigma2Box:
         🔴 An exact string match, deliberately, and not the identity comparison the
         service references elsewhere get. This is what validates a reference before
         `cmd/bouquet` carries it, and the plugin activates a bouquet on an exact
-        allowlist match — so accepting a spelling here that the receiver will refuse
+        allowlist match - so accepting a spelling here that the receiver will refuse
         would only move the refusal somewhere less clear. Reading the *active* context
         is the other direction and does compare by identity: there the receiver's own
         spelling is the one that has to be recognised.
@@ -1111,7 +1111,7 @@ class Enigma2Box:
         Commands are never retained: a retained command is delivered again the instant
         the plugin subscribes, so the box would obey it after every reboot.
 
-        This is the bottom of `async_command`, and what the optimistic controls use —
+        This is the bottom of `async_command`, and what the optimistic controls use -
         the switches and the volume number, which move the moment they are pressed
         because the state topic confirms them a moment later. Anything whose only
         answer is an error goes through `async_command` instead: the buttons used this
@@ -1138,7 +1138,7 @@ class Enigma2Box:
         is for whichever comes first.
 
         `effect` returns True once the command has visibly happened. A command whose
-        effect is already true — zapping to the channel that is already tuned — is
+        effect is already true - zapping to the channel that is already tuned - is
         still sent, but there is nothing left to wait for and pretending otherwise
         would mean waiting out the whole timeout for a state that will never change.
 
@@ -1194,8 +1194,8 @@ class Enigma2Box:
         if configuration_url is None:
             configuration_url = _configuration_url(self.entry.data.get(CONF_RECEIVER_HOST))
         # The address the packet is actually sent to, so that everything else in Home
-        # Assistant — a DHCP discovery, a router integration listing what is on the
-        # network — can recognise the same box. Without it the device page knew the
+        # Assistant - a DHCP discovery, a router integration listing what is on the
+        # network - can recognise the same box. Without it the device page knew the
         # receiver's MAC and nothing else did.
         mac = self.mac_address
         device = dr.async_get(self.hass).async_get_or_create(
@@ -1299,7 +1299,7 @@ class Enigma2Box:
 
         A payload that does not parse leaves the last good one alone, as it always has. An
         empty one is different in one respect only: it is a retraction, and it withdraws
-        the permission `uninstall_offered` reads — the rest of the last payload stays,
+        the permission `uninstall_offered` reads - the rest of the last payload stays,
         because every entity reading it would otherwise lose its device details to a
         receiver that is merely resetting.
         """
@@ -1543,7 +1543,7 @@ class Enigma2Box:
             # entities stay and go unknown, which is the truth.
             #
             # Tested on the raw payload rather than on the decoded text, because this
-            # topic arrives as bytes and bytes that are not UTF-8 decode to nothing —
+            # topic arrives as bytes and bytes that are not UTF-8 decode to nothing -
             # which would make a corrupt publish indistinguishable from a retraction
             # and quietly throw away the last good sample.
             self.state.process = None
@@ -1563,8 +1563,8 @@ class Enigma2Box:
         """Strip process telemetry to five bounded integers, or None for each.
 
         `True` is an `int` in Python and would otherwise become a resident set size of
-        one kilobyte on a graph. Everything else that is not a plain integer in range —
-        a float, a string, a negative, a missing key, a number from a different unit —
+        one kilobyte on a graph. Everything else that is not a plain integer in range -
+        a float, a string, a negative, a missing key, a number from a different unit -
         is None, which is the only honest answer and the one a sensor shows as unknown.
         """
 
@@ -1581,8 +1581,8 @@ class Enigma2Box:
         """Cache the softcam snapshot, normalised to the published contract.
 
         Three payloads, three different answers, and the difference is the whole of what
-        this handler does. An **empty payload is a retraction** — the plugin withdrawing
-        a retained topic — and it clears the sample, because the alternative is a reading
+        this handler does. An **empty payload is a retraction** - the plugin withdrawing
+        a retained topic - and it clears the sample, because the alternative is a reading
         that outlives the thing it describes. A payload that is **not JSON** leaves the
         last good sample exactly where it is: one malformed message is a bug at the other
         end, not news about the softcam. Anything else is normalised and kept.
@@ -1607,7 +1607,7 @@ class Enigma2Box:
         """Strip an untrusted softcam payload to the bounded public contract.
 
         Every key is always present and a value that could not be believed is `None`,
-        which is the same shape the topic promises — so a sensor reading this never has
+        which is the same shape the topic promises - so a sensor reading this never has
         to know whether a field was missing or nonsense.
 
         🔴 Two traps are the reason this exists rather than the payload being used as it
@@ -1615,7 +1615,7 @@ class Enigma2Box:
         stored as 1, graph as one healthy instance, and be indistinguishable from a
         measurement; `isinstance(value, bool)` is checked first everywhere below.
         And **`None` is not zero**: a count that could not be taken has to read `unknown`,
-        because `0` instances is a real and very interesting reading — it is a channel
+        because `0` instances is a real and very interesting reading - it is a channel
         that has stopped decoding.
 
         Building a fresh dictionary rather than filtering the one that arrived is the
@@ -1640,7 +1640,7 @@ class Enigma2Box:
         reason = payload.get("last_restart_reason")
         check_on_start = payload.get("manager_check_on_start")
         # Epoch seconds, so zero is a field that was never filled in rather than a
-        # restart in 1970 — the same reading `_refused_at` takes of a complaint's `ts`.
+        # restart in 1970 - the same reading `_refused_at` takes of a complaint's `ts`.
         last_restart = counted(payload.get("last_restart"), MAX_SOFTCAM_EPOCH) or None
         return {
             "selected": (
@@ -1674,7 +1674,7 @@ class Enigma2Box:
         rather than `unknown`. On a page whose job is "is anything wrong", a diagnostic
         stuck at `unknown` reads as a fault; a receiver that has withdrawn the topic has
         simply stopped answering, which is what unavailable says. This mirrors
-        `_invalidate_cam` deliberately — one rule in this file for a retracted topic, not
+        `_invalidate_cam` deliberately - one rule in this file for a retracted topic, not
         two.
         """
         self.state.softcam = None
@@ -1709,8 +1709,8 @@ class Enigma2Box:
         Every key is always present and a value that could not be believed is `None`.
         `True` is an `int` in Python and is refused wherever a number is expected; a
         time of zero is a field nobody filled in, not an import in 1970. `events`
-        may be zero — an import that finished with nothing is exactly the failure the
-        plugin reports — so zero is kept there. The error is the receiver's sentence,
+        may be zero - an import that finished with nothing is exactly the failure the
+        plugin reports - so zero is kept there. The error is the receiver's sentence,
         cut where a Home Assistant attribute stays readable.
         """
 
@@ -1765,7 +1765,7 @@ class Enigma2Box:
         """Republish a key press as a bus event, and hand it to the event entity.
 
         The bus event is fired here rather than from the event entity because the
-        device triggers built on it must keep working when the entity is disabled — a
+        device triggers built on it must keep working when the entity is disabled - a
         household that only wants the colour keys in the automation editor should not
         have to keep an entity it never looks at.
         """
@@ -1841,8 +1841,8 @@ class Enigma2Box:
         keeps raising. The first failure of a listener is logged with its traceback, at
         error level, because it is a bug; the repeats go to debug, because the tenth copy
         of the same traceback on every grid refresh only buries the log around it. A
-        successful call ends the run, so the next failure — which may be a different bug
-        entirely — is logged at error level again rather than hidden until a reload.
+        successful call ends the run, so the next failure - which may be a different bug
+        entirely - is logged at error level again rather than hidden until a reload.
         """
         for listener in list(self._listeners):
             if not listener.wants(suffix):
@@ -1874,7 +1874,7 @@ async def async_send_magic_packet(box: Enigma2Box) -> None:
     """Wake a box that is in deep standby.
 
     `wake_on_lan` is an `after_dependencies`, which means Home Assistant sets it up
-    before this integration when the user already has it — and does nothing at all when
+    before this integration when the user already has it - and does nothing at all when
     they do not. Setting it up here costs nothing (its `async_setup` only registers one
     action) and is the difference between a working button and an error about a service
     that does not exist.

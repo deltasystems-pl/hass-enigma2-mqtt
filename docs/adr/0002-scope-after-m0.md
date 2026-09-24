@@ -6,7 +6,7 @@
 ## Context
 
 [ADR-0000](0000-prd.md) is the product requirements document as it was approved at M0. It stays as
-it was written — a record whose value is that it was not edited afterwards — but the integration
+it was written - a record whose value is that it was not edited afterwards - but the integration
 that now runs on a Home Assistant instance does several things it does not mention. Some came from
 the one person with a test receiver asking for them; some came out of reviews, and two came out of
 things that broke.
@@ -21,7 +21,7 @@ rather than discovered.
 
 ## Decision
 
-### 1. Bouquet activation — the `select_bouquet` action, and a bouquet as playable media
+### 1. Bouquet activation - the `select_bouquet` action, and a bouquet as playable media
 
 Browsing a bouquet here was never changing the receiver's own channel list. The box has one active
 television bouquet, and it is what its channel-up and channel-down actions walk; picking another
@@ -33,8 +33,8 @@ through the previous list.
   item rather than a folder that only contains playable ones.
 - The receiver **keeps the current channel when it belongs to the chosen bouquet**, and otherwise
   tunes that bouquet's first playable channel. Channel ± then walks the chosen list.
-- The action waits for the receiver's fresh `bouquet` topic — the plugin republishes it on every
-  success, including when the bouquet was already active — so the action reports what happened
+- The action waits for the receiver's fresh `bouquet` topic - the plugin republishes it on every
+  success, including when the bouquet was already active - so the action reports what happened
   rather than that a message was sent. A refusal is raised as an error carrying the receiver's own
   sentence.
 
@@ -45,13 +45,13 @@ programme, black picture. There was no entity for it.
 
 - With **CAM telemetry** on, the integration exposes the current service's system, its encrypted
   and active flags and the ECM time. With **OSCam telemetry** on, it exposes twelve aggregate
-  entities — software and API status, API access, uptime, configured, enabled and healthy readers,
-  cards ready, servers connected, shared cards — plus a dynamic set **per source**, reader or
+  entities - software and API status, API access, uptime, configured, enabled and healthy readers,
+  cards ready, servers connected, shared cards - plus a dynamic set **per source**, reader or
   server, under the stable opaque id the receiver publishes.
 - **These entities exist only while the option is on.** Switching the option off removes them;
   nothing is created speculatively for a receiver that publishes nothing.
 - Reader labels, addresses, accounts, card identifiers, CAIDs and WebIf credentials **never enter
-  integration state or the diagnostics download** — they never leave the receiver in the first
+  integration state or the diagnostics download** - they never leave the receiver in the first
   place, and the integration does not reconstruct them.
 - An API outage keeps existing entities `unavailable` until a complete snapshot arrives, rather
   than publishing a partial one. Old health presented as current is worse than no health.
@@ -61,8 +61,8 @@ programme, black picture. There was no entity for it.
 ### 3. The options page writes to the receiver, over `cmd/config`
 
 An options page that changes only what Home Assistant displays is half an options page; the things
-a household wants to change — whether the screen is photographed, whether key presses are published
-— live on the receiver.
+a household wants to change - whether the screen is photographed, whether key presses are published
+- live on the receiver.
 
 - The receiver-side options (`publish_keys`, `screenshot`, `screenshot_interval`,
   `screenshot_delay`, `cam_telemetry`, `oscam_telemetry`) are published on `cmd/config`, and
@@ -74,15 +74,15 @@ a household wants to change — whether the screen is photographed, whether key 
 
 🔴 **The consequence is that the broker login is the privacy boundary.** This flow is the reason
 `cmd/config` is writable at all, so anything else that can publish there can switch the same
-privacy options on — and then ask for a picture of the television. Give the receiver its own broker
+privacy options on - and then ask for a picture of the television. Give the receiver its own broker
 credential and restrict it with an ACL; the recipe is in the README. It is stated here because it
 is a property of this design, not an accident of the plugin's.
 
 ### 4. Post-zap screenshot delay, as an option
 
 An on-zap capture taken the moment the receiver reports a tune is frequently a picture of the
-previous channel. The receiver now waits a configurable number of seconds — four by default, one to
-thirty — and the option is here because the right value depends on the tuner and the transponder,
+previous channel. The receiver now waits a configurable number of seconds - four by default, one to
+thirty - and the option is here because the right value depends on the tuner and the transponder,
 which is exactly the kind of thing the person with the box knows and the software does not.
 
 ### 5. Installer hardening beyond the PRD
@@ -100,13 +100,13 @@ trusted with somebody else's receiver took more than that.
   install can take down, so a recovery path that needs it is a recovery path that is absent when it
   matters.
 - **A private pre-change backup on the receiver**, verification of the uploaded bytes, and a
-  provisioning file written **0600 under a nonce** — it carries a broker password until the plugin
+  provisioning file written **0600 under a nonce** - it carries a broker password until the plugin
   imports and deletes it.
 - **Credentials are opt-in and reversible.** The SSH password is discarded when the install
   finishes unless it is explicitly kept for updates, and it can be enrolled, refreshed or forgotten
   later without unloading MQTT. It is never written to the log or to diagnostics.
 - **An optional receiver host** in manual setup and reconfigure. It is metadata for the device link
-  and a suggestion for SSH — not a requirement, so a receiver reachable only over a bridged broker
+  and a suggestion for SSH - not a requirement, so a receiver reachable only over a bridged broker
   can still be added.
 
 What this does **not** claim: a loss of receiver power or storage in the middle of the transaction
@@ -132,21 +132,21 @@ receiver's topics did not obviously provide.
 ### 8. Backups of this integration must live outside `custom_components/`
 
 Home Assistant maps a domain to a directory by reading **every** `manifest.json` under
-`custom_components/`. A copy of this integration kept beside the live one — `enigma2_mqtt.bak-…`,
-or anything else — therefore declares the same domain twice, and **which copy wins is not
+`custom_components/`. A copy of this integration kept beside the live one - `enigma2_mqtt.bak-...`,
+or anything else - therefore declares the same domain twice, and **which copy wins is not
 predictable from its name or its date**. When the backup won, its directory name was not an
 importable module and setup failed with every entity unavailable.
 
 Five such directories sat harmlessly for days before the sixth did it. The rule is therefore
 absolute rather than careful: **a backup of a custom component leaves `custom_components/`
 entirely.** This is the same shape as two repositories declaring one domain, and it has the same
-answer — one directory per domain, no exceptions for copies.
+answer - one directory per domain, no exceptions for copies.
 
 ### 9. Waiting for the broker, not for the subscribe call
 
 Home Assistant's MQTT client batches SUBSCRIBE packets behind a 0.1 s debouncer, so
 `async_subscribe()` returns before the broker has the subscription. A receiver on the same network
-answers a command in about the same time — so an action that subscribed and published immediately
+answers a command in about the same time - so an action that subscribed and published immediately
 raced the subscription that was meant to hear the answer, and the only copy it saw was the retained
 replay, which correctly does not count as an acknowledgement. A perfectly healthy receiver produced
 a permanent „no acknowledgement".
@@ -173,7 +173,7 @@ it publishes.
 Stated so that the README and the behaviour do not drift apart again:
 
 - **There is no 0.2.0 release.** Everything above is on `main` and running on the maintainer's
-  Home Assistant; HACS still serves **0.1.0**. A coordinated bump with the plugin comes first —
+  Home Assistant; HACS still serves **0.1.0**. A coordinated bump with the plugin comes first -
   until then both report `0.1.0`, and version equality cannot tell two development builds apart.
 - **The guided installer has never been run end to end**, and neither has a real rollback. The code
   is reviewed and covered by tests against a fake SSH server, including its refusals and the races
@@ -183,7 +183,7 @@ Stated so that the README and the behaviour do not drift apart again:
   form**, which is where somebody typing a broker password is actually looking. ADR-0000 §6.2 asked
   for them there.
 - **The release workflow does not re-run hassfest and the HACS action** on the tagged tree. They
-  run on every push and pull request, so a tag cut from a green `main` is fine in practice — but
+  run on every push and pull request, so a tag cut from a green `main` is fine in practice - but
   „in practice" is not a gate.
 - **There is no opt-in release check** on the `update` entity. ADR-0000 offered one, off by
   default. Not having it is the safe direction, and it means the entity compares the receiver

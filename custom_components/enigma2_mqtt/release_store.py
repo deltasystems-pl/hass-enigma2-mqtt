@@ -7,7 +7,7 @@ household that saves its options twice spent two days' budget in a minute.
 
 The stamp and the answer therefore live in Home Assistant's storage, keyed by config
 entry, and the entity reads them before it decides whether to ask anything. That also
-means the tag survives a restart — the card keeps saying what it knows instead of going
+means the tag survives a restart - the card keeps saying what it knows instead of going
 blank until the next day's request.
 
 This is deliberately its own module rather than part of `update.py`: the removal hook in

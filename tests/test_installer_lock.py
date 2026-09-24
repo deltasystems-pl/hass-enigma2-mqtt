@@ -34,7 +34,7 @@ def test_a_lock_being_claimed_right_now_is_not_an_owner_less_lock(tmp_path: Path
 
     A second claimer arriving between them finds a directory with no owner record. It
     used to read that as "the owner died mid-write" and reclaim a lock whose owner was
-    about to start an install — two transactions, two rollbacks, one receiver.
+    about to start an install - two transactions, two rollbacks, one receiver.
     """
     lock_dir = tmp_path / "lock"
     lock_dir.mkdir(mode=0o700)
@@ -66,7 +66,7 @@ def test_only_one_of_two_claimers_can_take_the_same_stale_lock(
     Deciding "this is stale" and then writing into the directory are two acts, and a
     second claimer can do both of them in between. It would then be installing while
     the first claimer, still acting on a verdict that is now out of date, writes itself
-    in on top — two transactions unwinding one receiver.
+    in on top - two transactions unwinding one receiver.
 
     This drives that interleaving directly: the second claimer runs to completion inside
     the first one's staleness check.
@@ -130,7 +130,7 @@ def test_a_clock_that_jumps_forward_does_not_reclaim_a_live_lock(
     """Receivers without a battery-backed clock boot in 1970 and jump when NTP answers.
 
     An install that started before the jump would look decades old measured against the
-    wall clock. Measured against uptime — which cannot jump — it is seconds old, and the
+    wall clock. Measured against uptime - which cannot jump - it is seconds old, and the
     boot id proves the two measurements are from the same boot.
     """
     lock_dir = tmp_path / "lock"

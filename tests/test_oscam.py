@@ -319,7 +319,7 @@ async def test_source_entities_appear_when_the_receiver_answers_after_setup(
     `async_setup_entry` subscribes and returns; the retained burst that carries `info`,
     and with it the capability list, arrives after the platforms have already been set
     up. The per-source entities were gated on that capability at setup time, so on a
-    live box they were never created — while the aggregate OSCam sensors, which follow
+    live box they were never created - while the aggregate OSCam sensors, which follow
     `info` rather than reading it once, appeared exactly as expected. The branch taken
     instead also deleted every `oscam_` registration the box had.
     """

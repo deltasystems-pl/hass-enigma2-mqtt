@@ -301,7 +301,7 @@ def test_a_rollback_puts_back_the_plugin_and_the_mode_it_was_left_in(
 
     Every earlier drill ran against a receiver with no plugin on it, where a rollback
     restores „there was nothing here". This is the other case: a plugin that had been
-    installed and configured, whose Home Assistant entry had since been deleted — so
+    installed and configured, whose Home Assistant entry had since been deleted - so
     the plugin had been told `ha_mode: off` and was sitting there working, announcing
     nothing. An install over it writes a provisioning file that asks for `integration`,
     and a rollback has to leave the receiver in the state that install found it in,
@@ -386,7 +386,7 @@ def test_restore_removes_the_bytecode_the_receiver_actually_writes(tmp_path: Pat
     """This image compiles the hook into the legacy location, beside the source.
 
     `opkg remove` deletes the files it installed, which are the `.py` files, so the
-    rollback of a first install restores "there was no hook here" — and used to leave
+    rollback of a first install restores "there was no hook here" - and used to leave
     `MQTTBridge.pyc` sitting next to where the source had been. Python imports a
     legacy-location `.pyc` as a complete module, so the hook stayed importable and
     would have gone looking for a plugin that is no longer installed.
@@ -521,7 +521,7 @@ def test_pruning_after_a_failed_install_still_leaves_exactly_two(tmp_path: Path)
     """A failed run's snapshot is an ordinary candidate, not a third thing kept.
 
     Pruning only runs once a transaction has committed, so a run that rolls back leaves
-    its snapshot behind — as it should, it is the evidence — and the directory is one
+    its snapshot behind - as it should, it is the evidence - and the directory is one
     fuller than the rule allows until the next install succeeds. Observed on a receiver
     after the rollback drill of 2026-09-22: two snapshots from earlier successes and one
     from the failed run. The next success has to bring that back to two.
@@ -702,7 +702,7 @@ def test_read_identity_reports_a_setting_that_is_not_stored_as_absent(
 
     A receiver measured after a working install held exactly these keys and no
     `base_topic`, because it had never been moved off `enigma2`. This used to answer
-    `enigma2` for that — the right value, from a copy of the plugin's defaults kept on
+    `enigma2` for that - the right value, from a copy of the plugin's defaults kept on
     the receiver's side of the link, where it was invisible to the half that compares.
     `None` is the fact; applying the default is the caller's job.
     """
@@ -761,7 +761,7 @@ def test_read_identity_reports_the_name_the_receiver_stores_verbatim(
 ) -> None:
     """The name is reported as stored, so a reinstall can carry it forward.
 
-    Nothing compares it — a receiver may be called anything — but a guided reinstall
+    Nothing compares it - a receiver may be called anything - but a guided reinstall
     whose name field was left empty has to be able to put back the name the household
     reads, and it can only do that if this reports it rather than a tidied version of
     it. Leading and trailing spaces are left on: deciding whether they mean "no name"

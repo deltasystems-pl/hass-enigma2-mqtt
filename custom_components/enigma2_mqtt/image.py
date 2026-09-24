@@ -1,7 +1,7 @@
 """The last screenshot of the television, as an image entity.
 
 `screen` is a retained JPEG, so this entity has a picture as soon as Home Assistant
-subscribes — including a picture of what was on the television the last time the plugin
+subscribes - including a picture of what was on the television the last time the plugin
 captured one, which may be long before the box went into standby. It is a snapshot, not
 a live view; the state carries the moment it was taken.
 """
@@ -37,7 +37,7 @@ class Enigma2Screen(Enigma2Entity, ImageEntity):
         """Set up the image entity.
 
         `ImageEntity` takes `hass` in its constructor because it can fetch a picture
-        over HTTP; this one never does — the bytes arrive on a topic — but the base
+        over HTTP; this one never does - the bytes arrive on a topic - but the base
         class builds its access tokens there, so both constructors have to run.
         """
         Enigma2Entity.__init__(self, box, "screen", topics=(TOPIC_SCREEN,))
