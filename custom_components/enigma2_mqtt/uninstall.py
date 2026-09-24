@@ -119,7 +119,9 @@ _HOOK_STATUS = "wget -S -O /dev/null http://127.0.0.1/mqttbridge 2>&1"
 _HTTP_STATUS = re.compile(r"HTTP/\d(?:\.\d)?\s+(\d{3})")
 # opkg takes `/run/opkg.lock` even to answer `status`, and the image's own update check or
 # its plugin browser can be holding it. A refusal for that reason is asked again, briefly.
-_LOCKED = re.compile(r"lock", re.IGNORECASE)
+# opkg says „Could not lock /run/opkg.lock"; a word boundary keeps „blocked" and the like
+# from counting as a lock.
+_LOCKED = re.compile(r"\block\b", re.IGNORECASE)
 LOCK_RETRIES = 5
 LOCK_RETRY_SECONDS = 2.0
 # How long the readbacks wait for OpenWebif after the interface restarted, and how often
@@ -252,6 +254,11 @@ async def async_uninstall(
             qos=1,
             retain=False,
         )
+        # Only from here can an emptied topic be the receiver's answer: the command has
+        # left Home Assistant's client and been acknowledged. A retraction before it is
+        # somebody else's — a third client switching `ha_mode` off, a `cmd/reset`, an
+        # `availability` emptied by hand — and must not turn a refusal into a rollback.
+        watch.arm()
         deadline = loop.time() + timeout
         await asyncio.wait(
             {watch.refused, watch.shape, watch.rolled_back},
@@ -576,6 +583,10 @@ class _UninstallWatch:
     cancel: CALLBACK_TYPE
     seen: dict[str, bool] = field(default_factory=dict)
 
+    def arm(self) -> None:
+        """Start counting retractions toward a rollback; the command has been sent."""
+        self.seen["armed"] = True
+
     @property
     def came_back(self) -> bool:
         """Return whether the receiver came back after the removal's shape."""
@@ -612,7 +623,7 @@ async def _async_watch_uninstall(
     gone = {"info": False, "announcement": not expect_announcement}
     # `retracted`: any fresh empty `info`, announcement or `availability` — the teardown
     # has begun, whatever else did or did not arrive after it.
-    seen = {"came_back": False, "retracted": False}
+    seen = {"came_back": False, "retracted": False, "armed": False}
     confirmed = 0
 
     def _retracted_or_back(key: str, msg: ReceiveMessage) -> None:
@@ -622,7 +633,7 @@ async def _async_watch_uninstall(
         # shape has been seen, is the receiver coming back.
         if msg.retain:
             return
-        if not msg.payload:
+        if not msg.payload and seen["armed"]:
             seen["retracted"] = True
         if shape.done():
             if key == "info" and msg.payload:
@@ -644,7 +655,7 @@ async def _async_watch_uninstall(
     def _availability(msg: ReceiveMessage) -> None:
         if msg.retain:
             return
-        if not msg.payload:
+        if not msg.payload and seen["armed"]:
             seen["retracted"] = True
         payload = (decode_payload(msg.payload) or "").strip()
         if payload == PAYLOAD_ONLINE and shape.done():

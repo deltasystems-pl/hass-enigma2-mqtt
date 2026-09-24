@@ -22,8 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reads before and after, including a hash of the receiver's plugin settings computed on the
   receiver, and never writes. The flow ends on „removed and verified", „removed, not verified" with
   the reason, „the receiver said it removed the plugin", „the receiver refused" with its own words,
-  „the receiver started the removal and rolled it back" with its own words — which say what state
-  the package is in — once any retraction has arrived, even without the `offline`, „the removal did not
+  „the receiver started the removal but aborted it" with its own words — which say what state
+  the package is in — once any retraction has arrived after the command was sent (not somebody
+  else's before it), even without the `offline`, „the removal did not
   complete", or „the receiver did not act". The plugin says `offline` before it runs opkg, so the
   flow keeps listening after it — through the SSH readbacks, or for the rest of the minute without
   them — and a receiver that comes back and says why ends it at once. A dropped or timed-out SSH

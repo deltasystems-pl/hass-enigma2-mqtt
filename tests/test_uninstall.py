@@ -163,6 +163,10 @@ class FakeReceiver:
     opkg_locked_before: int = 0
     opkg_locked_after: int = 0
     opkg_broken_after: bool = False
+    # What `pidof enigma2` answers before the removal, when not the pid.
+    pidof_before: CommandResult | None = None
+    # An opkg failure that mentions „blocked" — not the lock — before the removal.
+    opkg_blocked_before: bool = False
     # A transport failure on the first command containing this text.
     drop_on: str | None = None
     timeout_on: str | None = None
@@ -214,8 +218,12 @@ class FakeSession:
         if "/api/timerlist" in command:
             return CommandResult(0, json.dumps({"timers": receiver.timers}))
         if command == "pidof enigma2":
+            if not removed and receiver.pidof_before is not None:
+                return receiver.pidof_before
             return CommandResult(0, f"{receiver.pid}\n")
         if command.startswith("opkg status"):
+            if not removed and receiver.opkg_blocked_before:
+                return CommandResult(255, "", "opkg: operation blocked by policy")
             if not removed and receiver.opkg_locked_before:
                 receiver.opkg_locked_before -= 1
                 return CommandResult(255, "", _LOCK_REFUSAL)
@@ -254,6 +262,26 @@ class FakeSession:
 
     async def close(self) -> None:
         return None
+
+
+# How long after the command the fake receiver answers. The MQTT test harness hands a
+# published message to its subscribers inside the publish call itself, before Home
+# Assistant's client has had the broker's acknowledgement; a real receiver answers only
+# after a network round trip and a turn of its own main loop. Answering a moment later is
+# the order a broker produces, and the one the rollback rule depends on.
+ANSWER_DELAY = 0.02
+
+
+def _after_publish(
+    hass: HomeAssistant, answer: Callable[[ReceiveMessage], None]
+) -> Callable[[ReceiveMessage], None]:
+    """Run a fake receiver's answer once the command's publish has returned."""
+
+    @callback
+    def _deferred(msg: ReceiveMessage) -> None:
+        hass.loop.call_later(ANSWER_DELAY, answer, msg)
+
+    return _deferred
 
 
 async def _arm_box(
@@ -297,7 +325,7 @@ async def _arm_box(
                 json.dumps({"cmd": "uninstall", "error": "opkg remove exited 255"}),
             )
 
-    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _command)
+    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _after_publish(hass, _command))
     return received
 
 
@@ -815,7 +843,7 @@ async def test_a_refusal_is_raised_with_the_receivers_own_words(
             hass, LAST_ERROR_TOPIC, json.dumps({"cmd": "uninstall", "error": refusal})
         )
 
-    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _refuse)
+    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _after_publish(hass, _refuse))
 
     result = await _confirm(hass, await _open_uninstall(hass, entry))
 
@@ -913,7 +941,7 @@ async def test_a_removal_that_fails_after_offline_is_a_rollback(
             async_fire_mqtt_message(hass, topic, payload)
         hass.loop.call_later(0.05, _fail)
 
-    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _answer)
+    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _after_publish(hass, _answer))
     with (
         patch("custom_components.enigma2_mqtt.uninstall._async_connect", receiver.connect),
         # Long enough that only the rollback can end the flow in time.
@@ -945,7 +973,7 @@ async def test_a_complaint_about_another_command_after_the_shape_changes_nothing
             hass, LAST_ERROR_TOPIC, json.dumps({"cmd": "zap", "error": "no such channel"})
         )
 
-    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _answer)
+    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _after_publish(hass, _answer))
     result = await _confirm(hass, await _open_uninstall(hass, entry))
 
     assert result["reason"] == "uninstall_reported"
@@ -966,7 +994,7 @@ async def test_without_an_announcement_to_retract_info_and_offline_are_the_shape
         async_fire_mqtt_message(hass, INFO_TOPIC, "")
         async_fire_mqtt_message(hass, AVAILABILITY_TOPIC, "offline")
 
-    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _answer)
+    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _after_publish(hass, _answer))
     result = await _confirm(hass, await _open_uninstall(hass, entry))
 
     assert result["reason"] == "uninstall_reported"
@@ -986,7 +1014,7 @@ async def test_with_an_announcement_its_retraction_is_part_of_the_shape(
         async_fire_mqtt_message(hass, INFO_TOPIC, "")
         async_fire_mqtt_message(hass, AVAILABILITY_TOPIC, "offline")
 
-    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _answer)
+    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _after_publish(hass, _answer))
     result = await _confirm(hass, await _open_uninstall(hass, entry))
 
     assert result["reason"] == "uninstall_no_action"
@@ -1058,7 +1086,7 @@ async def test_a_receiver_that_comes_back_without_a_reason_did_not_complete(
         for topic, payload in [*_SHAPE, *back]:
             async_fire_mqtt_message(hass, topic, payload)
 
-    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _answer)
+    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _after_publish(hass, _answer))
     result = await _confirm(hass, await _open_uninstall(hass, entry))
 
     assert result["type"] is FlowResultType.ABORT
@@ -1133,7 +1161,7 @@ async def test_any_one_retraction_before_the_failure_makes_it_a_rollback(
         for topic, payload in failure:
             async_fire_mqtt_message(hass, topic, payload)
 
-    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _answer)
+    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _after_publish(hass, _answer))
     result = await _confirm(hass, await _open_uninstall(hass, entry))
 
     assert result["reason"] == "uninstall_rolled_back"
@@ -1295,7 +1323,7 @@ async def test_retained_replays_are_never_the_answer(
         for topic, payload in fresh:
             async_fire_mqtt_message(hass, topic, payload)
 
-    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _replay)
+    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _after_publish(hass, _replay))
     with patch("custom_components.enigma2_mqtt.uninstall.UNINSTALL_TIMEOUT", 0.2):
         result = await _confirm(hass, await _open_uninstall(hass, entry))
 
@@ -1337,7 +1365,7 @@ async def test_a_retraction_that_is_undone_does_not_count(
         for topic, payload in messages:
             async_fire_mqtt_message(hass, topic, payload)
 
-    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _answer)
+    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _after_publish(hass, _answer))
     with patch("custom_components.enigma2_mqtt.uninstall.UNINSTALL_TIMEOUT", 0.2):
         result = await _confirm(hass, await _open_uninstall(hass, entry))
 
@@ -1362,7 +1390,7 @@ async def test_a_complaint_about_another_command_is_not_the_answer(
         async_fire_mqtt_message(hass, ANNOUNCEMENT_TOPIC, "")
         async_fire_mqtt_message(hass, AVAILABILITY_TOPIC, "offline")
 
-    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _answer)
+    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _after_publish(hass, _answer))
     result = await _confirm(hass, await _open_uninstall(hass, entry))
 
     assert result["reason"] == "uninstall_reported"
@@ -1458,3 +1486,165 @@ async def test_deleting_the_entry_never_uninstalls(
         call(HA_MODE_TOPIC, "discovery", 1, False, message_expiry_interval=None)
     ]
     assert attempts == []
+
+
+# ------------------------------------------------------------------ whose retraction it is
+
+
+def _publish_after(
+    hass: HomeAssistant, messages: list[tuple[str, str]]
+) -> Callable[..., Any]:
+    """Wrap `mqtt.async_publish` so that a third client's messages land first.
+
+    They arrive after the watch's subscriptions are confirmed and before the command
+    leaves Home Assistant — exactly the window in which somebody else's retraction used to
+    be taken for the receiver's own teardown.
+    """
+    real = mqtt.async_publish
+
+    async def _publish(hass_: HomeAssistant, topic: str, payload: Any, **kwargs: Any):
+        if topic == UNINSTALL_TOPIC:
+            for other_topic, other_payload in messages:
+                async_fire_mqtt_message(hass, other_topic, other_payload)
+        await real(hass_, topic, payload, **kwargs)
+
+    return _publish
+
+
+@pytest.mark.parametrize(
+    "third_party",
+    [
+        # Another client switched the plugin's `ha_mode` off: it retracts the announcement.
+        [(ANNOUNCEMENT_TOPIC, "")],
+        # Another client sent `cmd/reset`: everything retracted, then republished.
+        [
+            (AVAILABILITY_TOPIC, ""),
+            (INFO_TOPIC, ""),
+            (ANNOUNCEMENT_TOPIC, ""),
+            (AVAILABILITY_TOPIC, "online"),
+            (INFO_TOPIC, json.dumps(PERMITTED_INFO)),
+            (ANNOUNCEMENT_TOPIC, _ANNOUNCEMENT),
+        ],
+        # Somebody emptied `availability` by hand.
+        [(AVAILABILITY_TOPIC, "")],
+    ],
+    ids=["ha_mode_off", "cmd_reset", "empty_availability"],
+)
+async def test_somebody_elses_retraction_before_the_command_is_not_a_rollback(
+    hass: HomeAssistant,
+    mqtt_mock,
+    permitted: dict[str, str | bytes],
+    third_party: list[tuple[str, str]],
+) -> None:
+    """Only a retraction after the command has been sent counts toward a rollback."""
+    entry = _entry()
+    await async_setup_box(hass, entry)
+
+    @callback
+    def _refuse(_msg: ReceiveMessage) -> None:
+        async_fire_mqtt_message(hass, LAST_ERROR_TOPIC, _REFUSED)
+
+    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _after_publish(hass, _refuse))
+    with patch(
+        f"{_UNINSTALL}.mqtt.async_publish", _publish_after(hass, third_party)
+    ):
+        result = await _confirm(hass, await _open_uninstall(hass, entry))
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "uninstall_refused"
+    assert result["description_placeholders"]["detail"] == REFUSAL
+
+
+@pytest.mark.parametrize(
+    "republish",
+    [
+        (INFO_TOPIC, json.dumps(PERMITTED_INFO)),
+        (ANNOUNCEMENT_TOPIC, _ANNOUNCEMENT),
+        (AVAILABILITY_TOPIC, "online"),
+    ],
+    ids=["info", "announcement", "availability"],
+)
+async def test_an_ordinary_republish_before_a_refusal_is_not_a_retraction(
+    hass: HomeAssistant,
+    mqtt_mock,
+    permitted: dict[str, str | bytes],
+    republish: tuple[str, str],
+) -> None:
+    """A payload that is not empty is a republish, not the teardown beginning."""
+    entry = _entry()
+    await async_setup_box(hass, entry)
+
+    @callback
+    def _answer(_msg: ReceiveMessage) -> None:
+        async_fire_mqtt_message(hass, *republish)
+        async_fire_mqtt_message(hass, LAST_ERROR_TOPIC, _REFUSED)
+
+    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _after_publish(hass, _answer))
+    result = await _confirm(hass, await _open_uninstall(hass, entry))
+
+    assert result["reason"] == "uninstall_refused"
+    assert result["description_placeholders"]["detail"] == REFUSAL
+
+
+async def test_an_opkg_failure_that_says_blocked_is_not_the_lock(
+    hass: HomeAssistant,
+    mqtt_mock,
+    permitted: dict[str, str | bytes],
+) -> None:
+    """„blocked" contains „lock"; only opkg's lock message is waited out or refused on."""
+    receiver = FakeReceiver(opkg_blocked_before=True)
+    entry = _entry(credentials=True)
+    await async_setup_box(hass, entry)
+    received = await _arm_box(hass, "uninstall", receiver=receiver)
+
+    with patch("custom_components.enigma2_mqtt.uninstall._async_connect", receiver.connect):
+        result = await _confirm(hass, await _open_uninstall(hass, entry))
+
+    # Not „busy": the command went, and only the verification was lost.
+    assert received == [NODE_ID]
+    assert result["reason"] == "uninstall_not_verified"
+    assert result["description_placeholders"]["detail"] == "opkg status"
+    assert receiver.events.count("ssh:opkg") == 1
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [CommandResult(2, "", "pidof: error"), CommandResult(0, "enigma2\n")],
+    ids=["non_zero_exit", "not_a_number"],
+)
+async def test_an_unusable_pidof_before_the_command_costs_the_verification(
+    hass: HomeAssistant,
+    mqtt_mock,
+    permitted: dict[str, str | bytes],
+    answer: CommandResult,
+) -> None:
+    """`pidof` that fails or prints something that is not a pid is not a set of pids."""
+    receiver = FakeReceiver(pidof_before=answer)
+    entry = _entry(credentials=True)
+    await async_setup_box(hass, entry)
+    received = await _arm_box(hass, "uninstall", receiver=receiver)
+
+    with patch("custom_components.enigma2_mqtt.uninstall._async_connect", receiver.connect):
+        result = await _confirm(hass, await _open_uninstall(hass, entry))
+
+    assert received == [NODE_ID]
+    assert result["reason"] == "uninstall_not_verified"
+    assert result["description_placeholders"]["detail"] == "pidof enigma2"
+
+
+@pytest.mark.parametrize(
+    ("language", "text"),
+    [
+        ("strings", "The receiver started the removal but aborted it: {detail}"),
+        ("en", "The receiver started the removal but aborted it: {detail}"),
+        ("pl", "Dekoder rozpoczął usuwanie, ale je przerwał: {detail}"),
+        ("de", "Der Receiver hat das Entfernen begonnen, aber abgebrochen: {detail}"),
+    ],
+)
+def test_the_rollback_ending_says_the_removal_was_broken_off(language: str, text: str) -> None:
+    """„przerwał", not „wycofał": the receiver stopped the removal; nothing is implied about
+    how much of it was undone, which the receiver's own sentence says."""
+    root = Path(__file__).parents[1] / "custom_components" / "enigma2_mqtt"
+    path = root / ("strings.json" if language == "strings" else f"translations/{language}.json")
+    abort = json.loads(path.read_text(encoding="utf-8"))["options"]["abort"]
+    assert abort["uninstall_rolled_back"] == text
