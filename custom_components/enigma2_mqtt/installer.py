@@ -63,6 +63,11 @@ ENIGMA_SETTINGS = "/etc/enigma2/settings"
 # The abort messages name this directory, so it is a path a person is sent to.
 BACKUP_ROOT = "/home/root/mqttbridge-backups"
 MIN_PYTHON = (3, 9)
+# The command timeouts of the two helper steps that take opkg's lock. The helper's own
+# wait for that lock has to end inside them — `installer_helper.OPKG_LOCK_WAIT_*` — or the
+# installer gives up on a helper that is still waiting and takes the lock later.
+SNAPSHOT_TIMEOUT = 30
+RESTORE_TIMEOUT = 60
 MIN_FREE_BYTES = 2 * 1024 * 1024
 TIMER_GUARD_SECONDS = 10 * 60
 ANNOUNCEMENT_TIMEOUT = 120.0
@@ -101,7 +106,10 @@ class InstallerErrorCode(StrEnum):
     ROLLBACK_FAILED = "rollback_failed"
     ROLLBACK_RESTART_FAILED = "rollback_restart_failed"
     ROLLBACK_LOCK_FAILED = "rollback_lock_failed"
+    ROLLBACK_OPKG_BUSY = "rollback_opkg_busy"
+    ROLLBACK_OPKG_OVERLAP = "rollback_opkg_overlap"
     BUSY = "busy"
+    OPKG_BUSY = "opkg_busy"
     IDENTITY_MISMATCH = "identity_mismatch"
 
 
@@ -417,6 +425,7 @@ async def _run_checked(
     input: bytes | None = None,
     timeout: float = 30,
     detail: str = "",
+    busy: InstallerErrorCode | None = None,
 ) -> CommandResult:
     """Run a fixed command and map failures without retaining its output.
 
@@ -424,11 +433,18 @@ async def _run_checked(
     fixed and uninteresting, and the caller's own words are what makes a refusal
     readable in the log. It is not logged here, because this runs in steps that are
     recovered from as well as in ones that refuse.
+
+    `busy` is the code for a helper step that could not get opkg's lock in time. That
+    one failure gets its own sentence because it is the one a person can fix by waiting
+    — somebody is installing something from the receiver's menu — and the helper's own
+    words for it would otherwise be discarded with the rest of its output.
     """
     try:
         result = await session.run(command, input=input, timeout=timeout)
     except (OSError, TimeoutError) as err:
         raise InstallerError(code, detail) from err
+    if busy is not None and result.exit_status == installer_helper.EXIT_OPKG_BUSY:
+        raise InstallerError(busy, "the receiver's opkg lock stayed held by another opkg run")
     if result.exit_status:
         raise InstallerError(code, detail)
     return result
@@ -1128,7 +1144,20 @@ async def _async_rollback(
                 + (" --settings" if restart_started else "")
             )
         _LOGGER.info("Installer rollback: restoring the receiver from %s", backup)
-        result = await session.run("set -eu; " + "; ".join(commands), timeout=60)
+        result = await session.run("set -eu; " + "; ".join(commands), timeout=RESTORE_TIMEOUT)
+        if install_started and result.exit_status == installer_helper.EXIT_OPKG_BUSY:
+            # Nothing was restored: the helper takes opkg's lock before it touches a
+            # file. Which plugin the receiver is on depends on how far the install got —
+            # the likeliest way here is an opkg run from the receiver's menu that also
+            # made the install's own `opkg install` fail on the lock, and then nothing
+            # had changed — so this says „not restored", not „on the new plugin", and
+            # apart from a restore that broke half-way.
+            raise InstallerError(InstallerErrorCode.ROLLBACK_OPKG_BUSY)
+        if install_started and result.exit_status == installer_helper.EXIT_OPKG_LOCK_LOST:
+            # The files are back; what is in doubt is opkg's database, which an opkg run
+            # may have written at the same time. „Could not be put back" would send
+            # somebody to redo a restore that happened.
+            raise InstallerError(InstallerErrorCode.ROLLBACK_OPKG_OVERLAP)
         if result.exit_status:
             raise InstallerError(InstallerErrorCode.ROLLBACK_FAILED)
     except BaseException as err:
@@ -1205,7 +1234,16 @@ async def _async_rollback(
     if restore_error is not None:
         if restart_error is not None:
             restore_error.add_note("the receiver interface did not come back either")
-        raise _RollbackError(InstallerErrorCode.ROLLBACK_FAILED) from restore_error
+        # The two opkg outcomes are verdicts of their own; everything else that went
+        # wrong in the restore is the restore failing.
+        code = (
+            restore_error.code
+            if isinstance(restore_error, InstallerError)
+            and restore_error.code
+            in (InstallerErrorCode.ROLLBACK_OPKG_BUSY, InstallerErrorCode.ROLLBACK_OPKG_OVERLAP)
+            else InstallerErrorCode.ROLLBACK_FAILED
+        )
+        raise _RollbackError(code) from restore_error
     if restart_error is not None:
         raise _RollbackError(InstallerErrorCode.ROLLBACK_RESTART_FAILED) from restart_error
     if release_error is not None and not progress.lock_released:
@@ -1317,6 +1355,8 @@ async def _async_install_locked(
             session,
             f"python3 {shlex.quote(remote_helper)} snapshot {shlex.quote(backup)}",
             InstallerErrorCode.INSTALL_FAILED,
+            timeout=SNAPSHOT_TIMEOUT,
+            busy=InstallerErrorCode.OPKG_BUSY,
         )
         backup_created = True
 

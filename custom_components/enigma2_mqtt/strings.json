@@ -99,7 +99,10 @@
       "rollback_failed": "Installation failed and rollback also failed; inspect the receiver manually.",
       "rollback_restart_failed": "The receiver was put back as it was, but its interface did not start again.",
       "rollback_lock_failed": "The receiver was put back as it was, but the installer's lock could not be released.",
+      "rollback_opkg_busy": "Installation failed, and the receiver could not be put back because its package manager stayed busy; inspect the receiver manually.",
+      "rollback_opkg_overlap": "Installation failed; the receiver was put back, but another package-manager run may have changed its package list at the same time — check the receiver manually.",
       "busy": "Another installation is already running.",
+      "opkg_busy": "The receiver's package manager is busy with another operation. Try again in a minute.",
       "identity_mismatch": "The receiver announced a different MQTT identity.",
       "host_key_changed": "The receiver's SSH host key changed.",
       "no_ack": "The receiver did not confirm the mode switch. Check that the plugin is running and that its broker login may write to this node's topics.",
@@ -136,7 +139,10 @@
       ,"rollback_failed": "The installation failed and the receiver could not be put back as it was. Check the receiver by hand: the backup taken before the change is in /home/root/mqttbridge-backups."
       ,"rollback_restart_failed": "The installation failed and the receiver was put back as it was, but its interface did not start again. Restart the receiver by hand; nothing else needs undoing."
       ,"rollback_lock_failed": "The receiver was put back as it was, but the installer's transaction lock could not be released. Delete /home/root/mqttbridge-backups/.ha-installer.lock on the receiver, or wait thirty minutes, before installing again."
+      ,"rollback_opkg_busy": "The installation failed, and the receiver could not be put back as it was because its package manager (opkg) stayed busy with another operation — an install or removal from the receiver's own menu, most likely. Nothing was restored. Check the receiver by hand: the backup taken before the change is in /home/root/mqttbridge-backups."
+      ,"rollback_opkg_overlap": "The installation failed and the receiver was put back as it was, but another run of its package manager (opkg) held the lock for part of the restore and may have changed the package database at the same time. Check the receiver by hand (`opkg status enigma2-plugin-extensions-mqttbridge`); the backup taken before the change is in /home/root/mqttbridge-backups."
       ,"busy": "Another installation is already running on this receiver."
+      ,"opkg_busy": "The receiver's package manager (opkg) is busy with another operation — an install or removal from the receiver's own menu, or its update check — so nothing was installed. Try again in a minute."
       ,"identity_mismatch": "The receiver is configured for node ID {box_node_id} and base topic {box_base_topic}, and the form gives {node_id} and {base_topic}. A value in brackets is one the receiver has not stored, and shows the plugin's default where there is one. Nothing was changed."
       ,"unknown": "Installation failed unexpectedly; no entry was created."
     }

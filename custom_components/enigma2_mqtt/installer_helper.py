@@ -8,6 +8,8 @@ same functions against a temporary root.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+import errno
 import fcntl
 import glob
 import hashlib
@@ -44,7 +46,45 @@ OPKG_CONF_DIR = "etc/opkg"
 OPKG_DATABASES = ("var/lib/opkg", "usr/lib/opkg")
 SETTINGS = "etc/enigma2/settings"
 PROVISION = "etc/enigma2/mqttbridge.json"
-LOCK = "var/lock/opkg.lock"
+# opkg's own lock, which this helper takes around every change to opkg's database. Which
+# file that is depends on the opkg: `option lock_file` in its configuration when there is
+# one, otherwise the default it was built with. opkg 0.6.3 on OpenViX 6.6 is built with
+# `/run/opkg.lock` and never touches `/var/lock/opkg.lock`, which is where this helper
+# used to lock — so for as long as it did, it excluded nothing. Older opkg releases were
+# built with the `/var/lock` default, and nothing on the receiver says which one this is
+# without running opkg, so when the configuration is silent both are taken.
+#
+# What the lock buys is narrower than it sounds. opkg reads its status file before it
+# takes the lock, so the lock does not keep an opkg run from starting on a view of the
+# database taken just before this helper's change; it only keeps the two from holding
+# the lock at once. An opkg run already holding it is waited for, and one that asks while
+# this helper holds it fails its own lock and changes nothing. The image's daily
+# package-list update barely touches the status file at all; the case that matters is
+# somebody installing or removing a package from the receiver's own menu while a guided
+# install or its rollback is under way.
+OPKG_LOCK_OPTION = "lock_file"
+OPKG_DEFAULT_LOCKS = ("run/opkg.lock", "var/lock/opkg.lock")
+# opkg does not wait for its lock: it tries once and fails "Could not lock". This helper
+# waits a little, because a snapshot refused for an operation that would have ended in
+# seconds is a worse install than one that starts late — but never past the installer's
+# command timeout, because a helper still blocked after the installer gave up would take
+# the lock later, from under nobody. The bound is the whole wait, across every lock file
+# taken, not a wait per file. The snapshot runs under a 30 s command and the restore
+# under a 60 s one; a rollback that gives up is the worse outcome, so it waits longer.
+OPKG_LOCK_WAIT_SNAPSHOT_SECONDS = 20.0
+OPKG_LOCK_WAIT_RESTORE_SECONDS = 40.0
+OPKG_LOCK_POLL_SECONDS = 0.25
+# opkg lets go in three steps — unlock, close, delete the file — so a lock granted
+# between the first and the last is on a file that is about to lose its name. The
+# holder looks again after this pause, which is far longer than those three calls take.
+OPKG_LOCK_SETTLE_SECONDS = 0.1
+# The exit status of a helper that could not get opkg's lock within its bound, so that
+# the installer can tell "opkg is busy, try again" from every other failure. EX_TEMPFAIL.
+EXIT_OPKG_BUSY = 75
+# The exit status of a step that finished its work and then found that opkg's lock file
+# had lost its name while the helper held it. For a restore that is its own outcome: the
+# files are back, but an opkg run may have written the database at the same time.
+EXIT_OPKG_LOCK_LOST = 76
 SETTINGS_PREFIX = "config.plugins.mqttbridge."
 # The snapshot directories this installer makes, and nothing else. The nonce is
 # `secrets.token_hex(6)`; anything else under the backups directory belongs to whoever
@@ -202,14 +242,124 @@ def _atomic_text(path: Path, text: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _lock(root: Path):
-    lock_path = _path(root, LOCK)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    handle = lock_path.open("a+")
-    # opkg uses a POSIX record lock on this file. `lockf`, unlike `flock`, joins
-    # that lock domain.
-    fcntl.lockf(handle.fileno(), fcntl.LOCK_EX)
-    return handle
+def opkg_lock_paths(root: Path) -> tuple:
+    """Return the lock files an opkg run on this receiver could be holding.
+
+    The configuration wins where it speaks, exactly as it does for the database: an
+    image that moved the lock says so in `option lock_file`, and then that file is the
+    only one opkg will ever take. Where it is silent, both built-in defaults are
+    returned, newest first, because the default is compiled into opkg and cannot be
+    read from here. Taking a lock no opkg uses costs nothing; missing the one it does
+    use is the defect this replaced.
+    """
+    configured = _opkg_options(root).get(OPKG_LOCK_OPTION)
+    if configured is not None:
+        return (_configured_path(root, configured),)
+    return tuple(_path(root, name) for name in OPKG_DEFAULT_LOCKS)
+
+
+class OpkgBusyError(TimeoutError):
+    """opkg's lock stayed held by somebody else for the whole of the wait."""
+
+
+class OpkgLockLostError(OSError):
+    """A lock file this helper held lost its name while the helper was inside.
+
+    Whatever was done under it may have overlapped an opkg run that took a fresh file
+    of the same name, so the work is not to be trusted.
+    """
+
+
+def _same_file(first: os.stat_result, second: os.stat_result) -> bool:
+    return (first.st_dev, first.st_ino) == (second.st_dev, second.st_ino)
+
+
+def _still_named(path: Path, descriptor: int) -> bool:
+    """Return whether `path` still leads to the file open on `descriptor`."""
+    try:
+        return _same_file(os.fstat(descriptor), os.stat(str(path)))
+    except FileNotFoundError:
+        return False
+
+
+def _take_opkg_lock(path: Path, deadline: float, wait: float) -> int:
+    """Hold `path` the way opkg holds it, or raise once `deadline` has passed.
+
+    opkg creates the file and takes a POSIX record lock on the whole of it with
+    `lockf`; `lockf` here joins that same lock domain, where `flock` would not. opkg
+    also deletes the file when it lets go — after unlocking and closing it. A process
+    granted the lock in that gap holds it on a file whose name is about to go, and the
+    next opkg creates a fresh file and locks that one unopposed. So a lock only counts
+    once the name still leads to the locked file, and still does after a pause longer
+    than opkg's unlock, close and delete take; otherwise it is taken again.
+
+    Only "somebody else holds it" is waited on. Any other failure to lock — a kernel
+    or filesystem without record locks answers `ENOLCK` — is not going to clear by
+    waiting, and is raised at once.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    while True:
+        descriptor = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o640)
+        try:
+            fcntl.lockf(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            os.close(descriptor)
+            if error.errno not in (errno.EACCES, errno.EAGAIN):
+                raise
+        else:
+            if _still_named(path, descriptor):
+                time.sleep(OPKG_LOCK_SETTLE_SECONDS)
+                if _still_named(path, descriptor):
+                    return descriptor
+            os.close(descriptor)
+        if time.monotonic() >= deadline:
+            raise OpkgBusyError(
+                f"opkg is busy: {path} is held by another opkg run (an install or "
+                f"removal from the receiver's menu, or the image's update check); "
+                f"waited {wait:.0f} s"
+            )
+        time.sleep(OPKG_LOCK_POLL_SECONDS)
+
+
+def _release_opkg_lock(path: Path, descriptor: int) -> None:
+    """Let go the way opkg does — remove the file, then close it.
+
+    Only while the name is still ours: removing a file somebody else has since
+    created and locked would hand the next opkg an unopposed lock.
+    """
+    try:
+        if _still_named(path, descriptor):
+            path.unlink()
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
+
+
+@contextmanager
+def _lock(root: Path, wait: float):
+    """Hold every lock opkg could be using on this receiver, in a fixed order.
+
+    `wait` bounds the whole acquisition, however many files there are. On the way
+    out, a lock whose file lost its name while the helper was inside is reported: the
+    work it covered may have overlapped an opkg run, and passing that off as a clean
+    step is the one outcome worse than failing it.
+    """
+    deadline = time.monotonic() + wait
+    held: list = []
+    try:
+        for path in opkg_lock_paths(root):
+            held.append((path, _take_opkg_lock(path, deadline, wait)))
+        yield
+        lost = [str(path) for path, descriptor in held if not _still_named(path, descriptor)]
+        if lost:
+            raise OpkgLockLostError(
+                "opkg's lock file was replaced while the helper held it, so an opkg run "
+                f"may have overlapped this step: {', '.join(lost)}"
+            )
+    finally:
+        for path, descriptor in reversed(held):
+            _release_opkg_lock(path, descriptor)
 
 
 def _webif_bytecode_files(root: Path) -> list[Path]:
@@ -237,75 +387,92 @@ def snapshot(root: Path, backup: Path) -> dict[str, object]:
     """Snapshot only files owned or consumed by this package."""
     if backup.exists():
         raise FileExistsError(backup)
-    backup.mkdir(mode=0o700, parents=True)
-    with _lock(root):
-        plugin = _path(root, PLUGIN_DIR)
-        opkg = opkg_paths(root)
-        status_path = opkg.status
-        if not status_path.is_file():
-            raise FileNotFoundError(_missing_status(opkg))
-        package_stanza = next(
-            (
-                s
-                for s in _stanzas(status_path.read_text(encoding="utf-8"))
-                if _package_name(s) == PACKAGE
-            ),
-            None,
-        )
-        if package_stanza is not None:
-            (backup / "package-status").write_text(package_stanza + "\n", encoding="utf-8")
-        if plugin.is_symlink():
-            raise ValueError("plugin directory may not be a symlink")
-        if plugin.is_dir():
-            shutil.copytree(plugin, backup / "plugin", symlinks=True)
-        webif_shim = _path(root, WEBIF_SHIM)
-        if webif_shim.is_symlink() or (webif_shim.exists() and not webif_shim.is_file()):
-            raise ValueError("OpenWebif shim must be a regular file")
-        if webif_shim.is_file():
-            shutil.copy2(webif_shim, backup / "webif-shim")
-        webif_cache_files = _webif_bytecode_files(root)
-        if webif_cache_files:
-            cache_backup = backup / "webif-cache"
-            cache_backup.mkdir()
-            for source in webif_cache_files:
-                shutil.copy2(source, cache_backup / source.name)
-        info_backup = backup / "opkg-info"
-        info_files = [Path(name) for name in glob.glob(str(opkg.info / f"{PACKAGE}.*"))]
-        if info_files:
-            info_backup.mkdir()
-            for source in info_files:
-                if source.is_symlink() or not source.is_file():
-                    raise ValueError("opkg metadata must be regular files")
-                shutil.copy2(source, info_backup / source.name)
-        settings_path = _path(root, SETTINGS)
-        settings_lines = []
-        if settings_path.is_file():
-            settings_lines = [
-                line
-                for line in settings_path.read_text(encoding="utf-8").splitlines()
-                if line.startswith(SETTINGS_PREFIX)
-            ]
-        (backup / "plugin-settings").write_text(
-            "".join(line + "\n" for line in settings_lines), encoding="utf-8"
-        )
-        provision = _path(root, PROVISION)
-        if provision.is_symlink():
-            raise ValueError("provisioning may not be a symlink")
-        if provision.is_file():
-            shutil.copy2(provision, backup / "provisioning")
-        metadata = {
-            "schema": 2,
-            "plugin": plugin.is_dir(),
-            "package_status": package_stanza is not None,
-            "opkg_info": bool(info_files),
-            "provisioning": provision.is_file(),
-            "settings": settings_path.is_file(),
-            "webif_shim": webif_shim.is_file(),
-            "webif_cache": bool(webif_cache_files),
-        }
-        (backup / "snapshot.json").write_text(
-            json.dumps(metadata, sort_keys=True) + "\n", encoding="utf-8"
-        )
+    # The directory is made only once opkg's lock is held, and taken away again if the
+    # snapshot does not complete. Every `ha-installer-*` directory counts as a snapshot
+    # to the pruning, so one left behind by a refusal would push a real rollback point
+    # out of the two that are kept. That includes a snapshot that completed under a lock
+    # which turned out to have been lost: it may be a view of a database mid-change.
+    created = False
+    try:
+        with _lock(root, OPKG_LOCK_WAIT_SNAPSHOT_SECONDS):
+            backup.mkdir(mode=0o700, parents=True)
+            created = True
+            return _snapshot_into(root, backup)
+    except BaseException:
+        if created:
+            shutil.rmtree(backup, ignore_errors=True)
+        raise
+
+
+def _snapshot_into(root: Path, backup: Path) -> dict[str, object]:
+    """Copy what the package owns into `backup`; opkg's lock is already held."""
+    plugin = _path(root, PLUGIN_DIR)
+    opkg = opkg_paths(root)
+    status_path = opkg.status
+    if not status_path.is_file():
+        raise FileNotFoundError(_missing_status(opkg))
+    package_stanza = next(
+        (
+            s
+            for s in _stanzas(status_path.read_text(encoding="utf-8"))
+            if _package_name(s) == PACKAGE
+        ),
+        None,
+    )
+    if package_stanza is not None:
+        (backup / "package-status").write_text(package_stanza + "\n", encoding="utf-8")
+    if plugin.is_symlink():
+        raise ValueError("plugin directory may not be a symlink")
+    if plugin.is_dir():
+        shutil.copytree(plugin, backup / "plugin", symlinks=True)
+    webif_shim = _path(root, WEBIF_SHIM)
+    if webif_shim.is_symlink() or (webif_shim.exists() and not webif_shim.is_file()):
+        raise ValueError("OpenWebif shim must be a regular file")
+    if webif_shim.is_file():
+        shutil.copy2(webif_shim, backup / "webif-shim")
+    webif_cache_files = _webif_bytecode_files(root)
+    if webif_cache_files:
+        cache_backup = backup / "webif-cache"
+        cache_backup.mkdir()
+        for source in webif_cache_files:
+            shutil.copy2(source, cache_backup / source.name)
+    info_backup = backup / "opkg-info"
+    info_files = [Path(name) for name in glob.glob(str(opkg.info / f"{PACKAGE}.*"))]
+    if info_files:
+        info_backup.mkdir()
+        for source in info_files:
+            if source.is_symlink() or not source.is_file():
+                raise ValueError("opkg metadata must be regular files")
+            shutil.copy2(source, info_backup / source.name)
+    settings_path = _path(root, SETTINGS)
+    settings_lines = []
+    if settings_path.is_file():
+        settings_lines = [
+            line
+            for line in settings_path.read_text(encoding="utf-8").splitlines()
+            if line.startswith(SETTINGS_PREFIX)
+        ]
+    (backup / "plugin-settings").write_text(
+        "".join(line + "\n" for line in settings_lines), encoding="utf-8"
+    )
+    provision = _path(root, PROVISION)
+    if provision.is_symlink():
+        raise ValueError("provisioning may not be a symlink")
+    if provision.is_file():
+        shutil.copy2(provision, backup / "provisioning")
+    metadata = {
+        "schema": 2,
+        "plugin": plugin.is_dir(),
+        "package_status": package_stanza is not None,
+        "opkg_info": bool(info_files),
+        "provisioning": provision.is_file(),
+        "settings": settings_path.is_file(),
+        "webif_shim": webif_shim.is_file(),
+        "webif_cache": bool(webif_cache_files),
+    }
+    (backup / "snapshot.json").write_text(
+        json.dumps(metadata, sort_keys=True) + "\n", encoding="utf-8"
+    )
     return metadata
 
 
@@ -398,7 +565,7 @@ def restore(
             raise ValueError("backed-up OpenWebif bytecode is unsafe")
     else:
         cache_sources = []
-    with _lock(root):
+    with _lock(root, OPKG_LOCK_WAIT_RESTORE_SECONDS):
         current = _stanzas(status_path.read_text(encoding="utf-8"))
         current = [stanza for stanza in current if _package_name(stanza) != PACKAGE]
         if metadata["package_status"]:
@@ -738,10 +905,20 @@ def main() -> int:
     elif args.operation == "prune":
         for name in prune_snapshots(args.path, keep_name=args.keep_name):
             print(f"pruned superseded installer snapshot {name}", file=sys.stderr)
-    elif args.operation == "snapshot":
-        snapshot(args.root, args.path)
-    elif args.operation == "restore":
-        restore(args.root, args.path, args.provisioning, args.settings)
+    elif args.operation in ("snapshot", "restore"):
+        try:
+            if args.operation == "snapshot":
+                snapshot(args.root, args.path)
+            else:
+                restore(args.root, args.path, args.provisioning, args.settings)
+        except OpkgBusyError as error:
+            # Its own exit status and one line, because this is the one failure the
+            # person at the other end can do something about: wait, and press again.
+            print(str(error), file=sys.stderr)
+            return EXIT_OPKG_BUSY
+        except OpkgLockLostError as error:
+            print(str(error), file=sys.stderr)
+            return EXIT_OPKG_LOCK_LOST
     else:
         verify_manifest(args.root, args.path)
     return 0

@@ -131,8 +131,28 @@ stays behind as evidence and is pruned by the next two successful installs. Two 
   `/home/root/mqttbridge-backups/.ha-installer.lock` over SSH, or wait thirty minutes for it to
   be judged stale; until then the next attempt is refused with "another installation is already
   running".
+- *„…the receiver's package manager (opkg) is busy…"* Somebody is installing or removing a
+  package from the receiver's own menu, or its update check is running. Before a snapshot this
+  means nothing was changed: wait a minute and install again. During a rollback it means nothing
+  was restored, and the receiver may be on either plugin: on the new one if the install got as
+  far as installing it, on the old one if the same opkg run had already made the install's own
+  `opkg install` fail on the lock — the likelier case. Check it by hand as for the outcome above,
+  once opkg has finished.
+- *„…the receiver was put back as it was, but another run of its package manager … may have
+  changed the package database at the same time."* The restore finished, but opkg's lock file
+  was replaced while the restore held it, so an opkg run may have overlapped it. The files are
+  back; check what opkg now records for the plugin (`opkg status
+  enigma2-plugin-extensions-mqttbridge`) before installing again.
 
-The installer releases that lock on the way out of every other failure, including one where the
+**opkg's own lock.** The snapshot and the restore take the lock opkg itself takes — the file
+`option lock_file` names in the receiver's opkg configuration, or `/run/opkg.lock` and
+`/var/lock/opkg.lock` when it names none — and wait for it up to 20 and 40 seconds respectively,
+inside the commands that run them. That keeps the two from holding it at once and no more: opkg
+reads its status file before it locks, so an opkg run started just before a restore can still
+work from the status it read. It matters for an install from the receiver's menu during a
+guided install, far less for the image's daily package-list update.
+
+The installer releases its transaction lock on the way out of every other failure, including one where the
 restore itself did not finish, so a receiver is not left refusing installs because a recovery
 went wrong. The Home Assistant log carries the reason for every step that failed, which the abort
 screen has no room for, and the rollback's own steps are logged as it takes them.

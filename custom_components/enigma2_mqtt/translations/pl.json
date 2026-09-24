@@ -74,6 +74,9 @@
       "rollback_restart_failed": "Dekoder został przywrócony, ale jego interfejs nie uruchomił się ponownie.",
       "rollback_lock_failed": "Dekoder został przywrócony, ale nie udało się zwolnić blokady instalatora.",
       "busy": "Inna instalacja jest już uruchomiona.",
+      "rollback_opkg_busy": "Instalacja się nie powiodła, a dekodera nie udało się przywrócić, bo jego menedżer pakietów był zajęty; sprawdź dekoder ręcznie.",
+      "rollback_opkg_overlap": "Instalacja się nie powiodła; dekoder przywrócono, ale inny przebieg menedżera pakietów mógł w tym samym czasie zmienić listę pakietów — sprawdź dekoder ręcznie.",
+      "opkg_busy": "Menedżer pakietów dekodera jest zajęty inną operacją. Spróbuj ponownie za minutę.",
       "identity_mismatch": "Dekoder zgłosił inną tożsamość MQTT.",
       "host_key_changed": "Klucz hosta SSH dekodera zmienił się.",
       "no_ack": "Dekoder nie odpowiedział na przełączenie trybu. Sprawdź, czy wtyczka działa i czy jej konto na brokerze ma prawo zapisu w tematach tego dekodera.",
@@ -111,6 +114,9 @@
       "rollback_restart_failed": "Instalacja nie powiodła się. Dekoder został przywrócony, ale interfejs nie uruchomił się ponownie — zrestartuj dekoder ręcznie; nic więcej nie wymaga cofnięcia.",
       "rollback_lock_failed": "Dekoder został przywrócony, ale nie udało się zwolnić blokady instalatora — usuń katalog /home/root/mqttbridge-backups/.ha-installer.lock ręcznie lub odczekaj 30 minut.",
       "busy": "Na tym dekoderze trwa już inna instalacja.",
+      "rollback_opkg_busy": "Instalacja się nie powiodła, a dekodera nie udało się przywrócić do poprzedniego stanu, bo jego menedżer pakietów (opkg) był zajęty inną operacją — najpewniej instalacją lub usuwaniem pakietu z menu dekodera. Niczego nie przywrócono. Sprawdź dekoder ręcznie: kopia sprzed zmiany jest w /home/root/mqttbridge-backups.",
+      "rollback_opkg_overlap": "Instalacja się nie powiodła, a dekoder przywrócono do poprzedniego stanu, ale inny przebieg jego menedżera pakietów (opkg) przejął blokadę w trakcie przywracania i mógł w tym samym czasie zmienić bazę pakietów. Sprawdź dekoder ręcznie (`opkg status enigma2-plugin-extensions-mqttbridge`); kopia sprzed zmiany jest w /home/root/mqttbridge-backups.",
+      "opkg_busy": "Menedżer pakietów dekodera (opkg) jest zajęty inną operacją — instalacją lub usuwaniem pakietu z menu dekodera albo sprawdzaniem aktualizacji — więc niczego nie zainstalowano. Spróbuj ponownie za minutę.",
       "identity_mismatch": "Dekoder jest skonfigurowany dla węzła {box_node_id} i tematu bazowego {box_base_topic}, a formularz podaje {node_id} i {base_topic}. Wartość w nawiasie nie jest zapisana w dekoderze — pokazana jest wartość domyślna wtyczki, o ile taka istnieje. Nic nie zostało zmienione.",
       "unknown": "Instalacja nieoczekiwanie nie powiodła się; wpisu nie utworzono."
     }
