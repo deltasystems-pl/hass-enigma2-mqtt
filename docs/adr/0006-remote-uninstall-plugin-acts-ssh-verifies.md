@@ -66,34 +66,41 @@ The integration publishes `cmd/uninstall`, payload the node id, once, at QoS 1, 
 only after the broker has confirmed the subscriptions that are to hear the answer: Home Assistant
 debounces SUBSCRIBE by a tenth of a second, about as long as a receiver on the same network takes
 to answer. It then watches, for at most 60 seconds, for fresh — never retained — messages: the
-retraction of `info` and of the announcement, then `offline`. A fresh non-empty `info`, announcement
-or `online` after a retraction is the plugin's failure path putting everything back and undoes it; a
-fresh `last_error` for the command is the answer.
+retraction of `info` and of the announcement, then `offline`. For a receiver whose last `info`
+said `ha_mode: off` there is no announcement to retract, and `info` then `offline` is the shape. A
+fresh non-empty `info`, announcement or `online` after a retraction is the plugin putting
+everything back and undoes it; a fresh `last_error` for the command before the shape is a refusal.
 
-🔴 **Without readbacks the shape does not end the watch.** The plugin publishes `offline` before it
-waits for the broker's acknowledgements and before it runs opkg, and its failure path — reconnect,
-republish, `last_error` for `uninstall` — comes after both. So when there is nothing to read back
-(no credentials, or SSH unreachable before the command), the watch runs to the end of its 60-second
-window after the shape: a `last_error` for the command is the refusal with its text; `online` or a
-republished `info` without one is „the removal did not complete"; only a window that ends quietly is
-„the receiver said it removed the plugin". With readbacks to follow, the shape ends the watch and
-the readbacks decide.
+🔴 **The shape does not end the listening.** The plugin publishes `offline` before it waits for the
+broker's acknowledgements and before it runs opkg, and its failure path — reconnect, `online`, the
+snapshot, the announcement, then `last_error` for `uninstall` — comes after both (plugin
+`uninstall.py`, `restart_after_failed_uninstall`). So the subscriptions stay up after the shape: while
+the SSH readbacks run, when there are readbacks, and for the rest of the 60-second window when there
+are not. A `last_error` for the command after the shape ends the flow at once as a removal that was
+started and rolled back, in the receiver's words, whether or not SSH is in use. Without readbacks,
+`online` or a republished `info` without one is „the removal did not complete", and only a window
+that ends quietly is „the receiver said it removed the plugin".
 
 With the installer's credentials kept, SSH reads **before** the command — whether the receiver is
 recording or about to (a refusal before anything is published), the interface's process ids, `opkg
 status` of the package, and the line count and SHA-256 of the sorted `config.plugins.mqttbridge.*`
-block, computed on the receiver — and **after** it: a new interface process, then `opkg status`
-empty, no opkg info file, no plugin directory, no `MQTTBridge` file anywhere under the Python tree,
-`/mqttbridge` answering 404, and the block's count and hash unchanged. Every command is a fixed
-read; nothing is uploaded and the settings never leave the receiver.
+block, computed on the receiver — and **after** it: a new interface process, OpenWebif answering
+its status page (bounded), then `opkg status` empty, no opkg info file, no plugin directory, no
+`MQTTBridge` file anywhere under the Python tree, `/mqttbridge` answering 404, and the block's count
+and hash unchanged. A restart that never came is named and does not hide the other readbacks; the
+404 check, which only a restart settles, is then left out. A refusal of `opkg status` for its lock
+is asked again, briefly. Every SSH failure — a dropped connection or a timeout included, before the
+command or after it — costs the verification and is named; it never ends the flow as „unknown".
+Every command is a fixed read; nothing is uploaded and the settings never leave the receiver.
 
-### 4. Six endings, each named by what was seen
+### 4. Seven endings, each named by what was seen
 
 „Removed and verified"; „removed, not verified" with the readback that disagreed or the SSH failure
 named; „the receiver said it removed the plugin" without readbacks, after a quiet window; „the
-receiver refused" with its own sentence, including a removal that failed after `offline`; „the
-removal did not complete" when the receiver came back without a reason; „the receiver did not act"
-after 60 seconds of nothing in that shape.
+receiver refused" with its own sentence, before it changed anything; „the receiver started the
+removal and rolled it back" with its own sentence, when it came back after the shape and said why;
+„the removal did not complete" when it came back without a reason; „the receiver did not act" after
+60 seconds of nothing in that shape.
 
 ### 5. Deleting the entry: one publish, no SSH — now a test
 
@@ -114,9 +121,14 @@ connection is attempted.
   asks on screen, with no timeout, while something is streaming or a background job runs. The
   plugin is disconnected and off the disk by then, so the verdict is about what could be shown, not
   about what happened.
-- **The hook readback assumes OpenWebif answers 404 for a path it does not serve.** A receiver whose
-  `wget` prints no status line leaves that one readback out; the file search above it has already
-  looked for the hook's files.
+- **The hook readback assumes OpenWebif answers 404 for a path it does not serve**, and asks only
+  once OpenWebif answers its own status page. The page answers 200 from the receiver itself on the
+  current plugin (measured 2026‑09‑23), not the 403 an earlier measurement from another host saw;
+  any status other than 404, and a missing status line, is a readback that disagrees. OpenWebif
+  that never comes back within its bound is named as such rather than read as the page being gone.
+- **Mid-readback, a rollback wins.** A receiver whose opkg failed after `offline` never restarts,
+  and the readbacks would otherwise spend two minutes waiting for that restart and then blame it;
+  its own `last_error` arrives within seconds and ends the flow first.
 - **The broker connection is not read.** Whether the receiver still holds a connection to the
   broker port is a check the on-hardware drill makes; the integration does not know the port the
   plugin was configured with and does not read the settings to find it.

@@ -16,8 +16,10 @@ import json
 from typing import Any
 from unittest.mock import call, patch
 
+import asyncssh
 from homeassistant.components import mqtt
 from homeassistant.components.mqtt import ReceiveMessage
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResultType
 import pytest
@@ -45,6 +47,7 @@ from custom_components.enigma2_mqtt.installer import (
     InstallerErrorCode,
     SshCredentials,
 )
+from custom_components.enigma2_mqtt.uninstall import credentials_from_entry
 
 from .conftest import (
     ANNOUNCEMENT_TOPIC,
@@ -71,6 +74,7 @@ PERMITTED_INFO: dict[str, Any] = {
     "settings": {"deep_standby_allowed": False, "uninstall_allowed": True},
 }
 REFUSAL = "an uninstall is already running"
+_UNINSTALL = "custom_components.enigma2_mqtt.uninstall"
 SETTINGS_HASH = "5" * 64
 
 
@@ -102,7 +106,18 @@ def short_window() -> Any:
     so every such test would otherwise take the full minute. The fake box answers inside
     the publish, long before half a second is up.
     """
-    with patch("custom_components.enigma2_mqtt.uninstall.UNINSTALL_TIMEOUT", 0.5):
+    with (
+        patch("custom_components.enigma2_mqtt.uninstall.UNINSTALL_TIMEOUT", 0.5),
+        # The SSH side's own waits, cut to what a fake needs: a restart that is coming is
+        # seen on the first look, and one that is not is given up on at once.
+        patch("custom_components.enigma2_mqtt.installer.ROLLBACK_RESTART_TIMEOUT", 0.2),
+        patch("custom_components.enigma2_mqtt.installer.ROLLBACK_RESTART_POLL_SECONDS", 0.01),
+        # `create=True` only so that this file can be run against a build that predates
+        # these waits, to show its tests failing there.
+        patch(f"{_UNINSTALL}.WEBIF_READY_TIMEOUT", 0.2, create=True),
+        patch(f"{_UNINSTALL}.WEBIF_READY_POLL_SECONDS", 0.01, create=True),
+        patch(f"{_UNINSTALL}.LOCK_RETRY_SECONDS", 0, create=True),
+    ):
         yield
 
 
@@ -128,10 +143,24 @@ class FakeReceiver:
     # What the plugin's teardown does to the box. Each can be switched off to make one
     # readback disagree.
     restarts: bool = True
-    removes_files: bool = True
+    removes_package: bool = True
+    removes_directory: bool = True
+    removes_leftovers: bool = True
     hook_after: str = "404"
+    # Whether OpenWebif answers after the removal, and whether `wget` prints a status.
+    webif_after: bool = True
+    hook_prints_status: bool = True
     settings_hash: str = SETTINGS_HASH
     settings_hash_after: str = SETTINGS_HASH
+    # An arbitrary number: nothing asserts what a real receiver holds, only that the
+    # count before and after agree.
+    settings_count: int = 3
+    settings_count_after: int = 3
+    # How many `opkg status` calls after the removal find opkg's lock held.
+    opkg_locked_after: int = 0
+    # A transport failure on the first command containing this text.
+    drop_on: str | None = None
+    timeout_on: str | None = None
     connect_fails: bool = False
     removed: bool = False
     connections: int = 0
@@ -146,11 +175,12 @@ class FakeReceiver:
     def uninstall(self) -> None:
         """What the plugin does to the box after its last `offline`."""
         self.removed = True
-        if self.removes_files:
+        if self.removes_package:
             self.installed = False
         if self.restarts:
             self.pid += 1
         self.settings_hash = self.settings_hash_after
+        self.settings_count = self.settings_count_after
 
 
 class FakeSession:
@@ -165,7 +195,15 @@ class FakeSession:
         assert input is None
         receiver = self.receiver
         receiver.events.append(f"ssh:{command.split()[0]}")
-        gone = receiver.removed and receiver.removes_files
+        if receiver.drop_on is not None and receiver.drop_on in command:
+            receiver.drop_on = None
+            raise asyncssh.ConnectionLost("simulated drop")
+        if receiver.timeout_on is not None and receiver.timeout_on in command:
+            receiver.timeout_on = None
+            raise TimeoutError
+        removed = receiver.removed
+        if command.startswith("wget -q -O /dev/null http://127.0.0.1/api/statusinfo"):
+            return CommandResult(0 if (receiver.webif_after or not removed) else 4)
         if "/api/statusinfo" in command:
             return CommandResult(0, json.dumps({"isRecording": receiver.recording}))
         if "/api/timerlist" in command:
@@ -173,29 +211,36 @@ class FakeSession:
         if command == "pidof enigma2":
             return CommandResult(0, f"{receiver.pid}\n")
         if command.startswith("opkg status"):
+            if removed and receiver.opkg_locked_after:
+                receiver.opkg_locked_after -= 1
+                return CommandResult(
+                    255, "", "Could not lock /run/opkg.lock: Resource temporarily unavailable."
+                )
             if not receiver.installed:
                 return CommandResult(0, "")
             return CommandResult(
                 0, "Package: enigma2-plugin-extensions-mqttbridge\nVersion: 0.3.0\n"
             )
         if "sha256sum" in command:
-            return CommandResult(0, f"{receiver.settings_hash}  -\n15\n")
+            return CommandResult(0, f"{receiver.settings_hash}  -\n{receiver.settings_count}\n")
         if command.startswith("ls -d "):
-            if gone:
+            if not receiver.installed:
                 return CommandResult(1, "")
             return CommandResult(
                 0, "/var/lib/opkg/info/enigma2-plugin-extensions-mqttbridge.control\n"
             )
         if command.startswith("test -e "):
-            return CommandResult(1 if gone else 0)
+            return CommandResult(1 if removed and receiver.removes_directory else 0)
         if command.startswith("find "):
-            if gone:
+            if removed and receiver.removes_leftovers:
                 return CommandResult(0, "")
             return CommandResult(
-                0, "/usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge/plugin.py\n"
+                0, "/usr/lib/enigma2/python/Components/Converter/MQTTBridge.pyc\n"
             )
         if command.startswith("wget -S "):
-            code = receiver.hook_after if receiver.removed else "200"
+            code = receiver.hook_after if removed else "200"
+            if not receiver.hook_prints_status:
+                return CommandResult(4, "wget: unable to connect\n")
             return CommandResult(8 if code == "404" else 0, f"  HTTP/1.1 {code} X\n")
         raise AssertionError(f"unexpected command on the receiver: {command}")
 
@@ -498,8 +543,14 @@ async def test_ticked_publishes_the_node_id_once_after_the_subscriptions_are_liv
         assert len(held) == 4
         assert _uninstall_publishes(mqtt_mock) == []
 
-        for done in held:
+        # Confirmed one at a time: three of four is still a broker that may not forward
+        # the answer, so nothing goes until the last one.
+        for done in held[:3]:
             done()
+            for _ in range(20):
+                await asyncio.sleep(0)
+            assert _uninstall_publishes(mqtt_mock) == []
+        held[3]()
         await hass.async_block_till_done()
         result = await hass.config_entries.options.async_configure(progress["flow_id"])
 
@@ -556,9 +607,10 @@ async def test_with_credentials_every_readback_passing_is_verified(
     before, after = events[:command_at], events[command_at + 1 :]
     # The guards, the pids, the package and the settings block before the command…
     assert before == ["ssh:wget", "ssh:wget", "ssh:pidof", "ssh:opkg", "ssh:grep"]
-    # …and after it the restart first, then every absence and the block again.
+    # …and after it the restart first, OpenWebif up, then every absence and the block.
     assert after == [
         "ssh:pidof",
+        "ssh:wget",
         "ssh:opkg",
         "ssh:ls",
         "ssh:test",
@@ -590,18 +642,44 @@ async def test_ssh_that_cannot_connect_leaves_the_removal_unverified(
     assert result["description_placeholders"]["detail"] == "ssh (ssh_unavailable)"
 
 
+_DIR = "/usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge"
+
+
 @pytest.mark.parametrize(
     ("receiver", "detail"),
     [
-        (FakeReceiver(removes_files=False), "opkg status, opkg info"),
+        (FakeReceiver(removes_package=False), "opkg status, opkg info"),
+        (FakeReceiver(removes_directory=False), _DIR),
+        (FakeReceiver(removes_leftovers=False), "find MQTTBridge"),
         (FakeReceiver(hook_after="200"), "/mqttbridge 200"),
+        (FakeReceiver(hook_prints_status=False), "/mqttbridge ?"),
+        (FakeReceiver(webif_after=False), "OpenWebif not answering"),
         (
             FakeReceiver(settings_hash_after="6" * 64),
-            "config.plugins.mqttbridge",
+            "config.plugins.mqttbridge (sha256)",
         ),
-        (FakeReceiver(restarts=False), "pidof enigma2"),
+        (FakeReceiver(settings_count_after=2), "config.plugins.mqttbridge (count)"),
+        (FakeReceiver(restarts=False), "restart not seen"),
+        # A restart that never came does not hide what else is wrong.
+        (
+            FakeReceiver(restarts=False, removes_package=False, settings_count_after=2),
+            "restart not seen, opkg status, opkg info, config.plugins.mqttbridge (count)",
+        ),
+        (FakeReceiver(opkg_locked_after=99), "opkg status"),
     ],
-    ids=["package_still_there", "hook_still_served", "settings_changed", "no_restart"],
+    ids=[
+        "package_still_there",
+        "directory_still_there",
+        "leftover_files",
+        "hook_still_served",
+        "hook_status_unreadable",
+        "webif_never_answers",
+        "settings_changed",
+        "settings_count_changed",
+        "no_restart",
+        "no_restart_and_more",
+        "opkg_locked_throughout",
+    ],
 )
 async def test_a_readback_that_disagrees_is_named(
     hass: HomeAssistant,
@@ -610,20 +688,102 @@ async def test_a_readback_that_disagrees_is_named(
     receiver: FakeReceiver,
     detail: str,
 ) -> None:
-    """„Removed, not verified", naming what SSH found instead."""
+    """„Removed, not verified", naming exactly what SSH found instead — nothing more."""
     entry = _entry(credentials=True)
     await async_setup_box(hass, entry)
     await _arm_box(hass, "uninstall", receiver=receiver)
 
-    with (
-        patch("custom_components.enigma2_mqtt.uninstall._async_connect", receiver.connect),
-        patch("custom_components.enigma2_mqtt.installer.ROLLBACK_RESTART_TIMEOUT", 0),
-    ):
+    with patch("custom_components.enigma2_mqtt.uninstall._async_connect", receiver.connect):
         result = await _confirm(hass, await _open_uninstall(hass, entry))
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "uninstall_not_verified"
-    assert result["description_placeholders"]["detail"].startswith(detail)
+    assert result["description_placeholders"]["detail"] == detail
+
+
+async def test_a_briefly_held_opkg_lock_is_asked_again(
+    hass: HomeAssistant,
+    mqtt_mock,
+    permitted: dict[str, str | bytes],
+) -> None:
+    """opkg's lock held for a moment — the image's update check — is not a failed readback."""
+    receiver = FakeReceiver(opkg_locked_after=2)
+    entry = _entry(credentials=True)
+    await async_setup_box(hass, entry)
+    await _arm_box(hass, "uninstall", receiver=receiver)
+
+    with patch("custom_components.enigma2_mqtt.uninstall._async_connect", receiver.connect):
+        result = await _confirm(hass, await _open_uninstall(hass, entry))
+
+    assert result["reason"] == "uninstall_verified"
+    assert receiver.events.count("ssh:opkg") == 1 + 3
+
+
+@pytest.mark.parametrize(
+    ("failure", "text", "detail"),
+    [
+        ("drop_on", "/api/timerlist", "ssh (connection lost)"),
+        ("timeout_on", "/api/timerlist", "ssh (timed out)"),
+        ("drop_on", "ls -d", "ssh (connection lost)"),
+        ("timeout_on", "ls -d", "ssh (timed out)"),
+    ],
+    ids=["drop_before", "timeout_before", "drop_after", "timeout_after"],
+)
+async def test_an_ssh_failure_costs_only_the_verification(
+    hass: HomeAssistant,
+    mqtt_mock,
+    permitted: dict[str, str | bytes],
+    failure: str,
+    text: str,
+    detail: str,
+) -> None:
+    """A dropped or timed-out SSH session is named, before the command and after it.
+
+    `asyncssh.ConnectionLost` is not an `OSError`, and it used to reach the flow as
+    „unknown". Before the command it costs the verification and the command still goes;
+    after it, the removal is „removed, not verified" with the reason.
+    """
+    receiver = FakeReceiver(**{failure: text})
+    entry = _entry(credentials=True)
+    await async_setup_box(hass, entry)
+    received = await _arm_box(hass, "uninstall", receiver=receiver)
+
+    with patch("custom_components.enigma2_mqtt.uninstall._async_connect", receiver.connect):
+        result = await _confirm(hass, await _open_uninstall(hass, entry))
+
+    assert received == [NODE_ID]
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "uninstall_not_verified"
+    assert result["description_placeholders"]["detail"] == detail
+
+
+async def test_a_package_opkg_does_not_know_is_not_verified(
+    hass: HomeAssistant,
+    mqtt_mock,
+    permitted: dict[str, str | bytes],
+) -> None:
+    """Nothing can be shown to have been removed that opkg did not list beforehand."""
+    receiver = FakeReceiver(installed=False)
+    entry = _entry(credentials=True)
+    await async_setup_box(hass, entry)
+    await _arm_box(hass, "uninstall", receiver=receiver)
+
+    with patch("custom_components.enigma2_mqtt.uninstall._async_connect", receiver.connect):
+        result = await _confirm(hass, await _open_uninstall(hass, entry))
+
+    assert result["reason"] == "uninstall_not_verified"
+    assert result["description_placeholders"]["detail"] == "opkg status"
+
+
+def test_a_password_without_its_pinned_host_key_is_no_credential() -> None:
+    """A password is sent only to the identity it was confirmed against."""
+    data = {
+        CONF_SSH_HOST: "192.0.2.12",
+        CONF_SSH_USERNAME: "root",
+        CONF_SSH_PASSWORD: "not-a-real-password",
+    }
+    assert credentials_from_entry(data) is None
+    assert credentials_from_entry({**data, CONF_SSH_HOST_KEY: HOST_KEY}) is not None
 
 
 @pytest.mark.parametrize(
@@ -664,36 +824,210 @@ _BACK = [(AVAILABILITY_TOPIC, "online"), (INFO_TOPIC, json.dumps(PERMITTED_INFO)
 _OPKG_FAILED = json.dumps({"cmd": "uninstall", "error": "opkg remove exited 255"})
 
 
-@pytest.mark.parametrize("credentials", [False, True], ids=["no_ssh", "ssh_unreadable"])
-async def test_a_removal_that_fails_after_offline_is_the_refusal(
+# The plugin's own sentences for a removal that failed after `offline` (enigma2-mqtt-bridge
+# `uninstall.py`, main 8ad4c72): opkg refused — its lock held, say — and opkg reporting
+# success with the package still on the disk.
+_OPKG_REFUSED = (
+    "the uninstall stopped at the package removal: opkg exited with status 255; "
+    "the plugin is still installed"
+)
+_NOT_REMOVED = (
+    "the uninstall stopped at the package removal: opkg reported success but the package "
+    "is still on the receiver, and some of its files may already be gone; to put it back "
+    "whole, run: opkg install --force-reinstall enigma2-plugin-extensions-mqttbridge"
+)
+_ANNOUNCEMENT = json.dumps({"node_id": NODE_ID, "name": BOX_NAME, "base_topic": BASE_TOPIC})
+
+
+def _teardown_then_failure(sentence: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """The plugin's real publishes, in its order, split where the failure happens.
+
+    Steps 2 and 3: every retained topic it owns retracted in sorted order — its own
+    `availability` among them — then `offline`. Then, when opkg or the acknowledgements
+    fail, `restart_after_failed_uninstall`: a fresh session's `on_connect` publishes
+    `online`, the snapshot, the announcement, and only then the `last_error`.
+    """
+    base = f"{BASE_TOPIC}/{NODE_ID}"
+    teardown = [
+        (AVAILABILITY_TOPIC, ""),
+        (INFO_TOPIC, ""),
+        (LAST_ERROR_TOPIC, ""),
+        (f"{base}/power", ""),
+        (f"{base}/service", ""),
+        (ANNOUNCEMENT_TOPIC, ""),
+        (AVAILABILITY_TOPIC, "offline"),
+    ]
+    failure = [
+        (AVAILABILITY_TOPIC, "online"),
+        (INFO_TOPIC, json.dumps(PERMITTED_INFO)),
+        (f"{base}/power", "on"),
+        (ANNOUNCEMENT_TOPIC, _ANNOUNCEMENT),
+        (LAST_ERROR_TOPIC, json.dumps({"cmd": "uninstall", "error": sentence, "ts": 1})),
+    ]
+    return teardown, failure
+
+
+@pytest.mark.parametrize(
+    "sentence", [_OPKG_REFUSED, _NOT_REMOVED], ids=["opkg_refused", "not_removed"]
+)
+@pytest.mark.parametrize(
+    "ssh", ["none", "unreachable", "kept"], ids=["no_ssh", "ssh_unreachable", "ssh_kept"]
+)
+async def test_a_removal_that_fails_after_offline_is_a_rollback(
     hass: HomeAssistant,
     mqtt_mock,
     permitted: dict[str, str | bytes],
-    credentials: bool,
+    ssh: str,
+    sentence: str,
 ) -> None:
-    """Without readbacks to decide, `offline` is not the end of the answer.
+    """`offline` is not the end of the answer, with or without SSH.
 
     The plugin says `offline` before it runs opkg; a removal that fails afterwards comes
-    back online and says why on `last_error`. That sentence is the result, not „the
-    receiver said it removed the plugin". The same holds with credentials SSH could not
-    use beforehand, because there are then no readbacks either.
+    back online and says why on `last_error`. That sentence is the result — not „the
+    receiver said it removed the plugin", and not a readback that waits for a restart
+    that is never coming and then blames the restart. The failure arrives a moment after
+    the teardown, as it does on a receiver, so with SSH it lands while the readbacks run.
     """
-    entry = _entry(credentials=credentials)
+    entry = _entry(credentials=ssh != "none")
     await async_setup_box(hass, entry)
-    receiver = FakeReceiver(connect_fails=True)
+    # The plugin never removed anything, so the interface never restarts either.
+    receiver = FakeReceiver(connect_fails=ssh == "unreachable")
+    teardown, failure = _teardown_then_failure(sentence)
+
+    @callback
+    def _fail() -> None:
+        for topic, payload in failure:
+            async_fire_mqtt_message(hass, topic, payload)
 
     @callback
     def _answer(_msg: ReceiveMessage) -> None:
-        for topic, payload in [*_SHAPE, *_BACK, (LAST_ERROR_TOPIC, _OPKG_FAILED)]:
+        for topic, payload in teardown:
             async_fire_mqtt_message(hass, topic, payload)
+        hass.loop.call_later(0.05, _fail)
 
     await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _answer)
-    with patch("custom_components.enigma2_mqtt.uninstall._async_connect", receiver.connect):
-        result = await _confirm(hass, await _open_uninstall(hass, entry))
+    with (
+        patch("custom_components.enigma2_mqtt.uninstall._async_connect", receiver.connect),
+        # Long enough that only the rollback can end the flow in time.
+        patch("custom_components.enigma2_mqtt.installer.ROLLBACK_RESTART_TIMEOUT", 30),
+        patch("custom_components.enigma2_mqtt.uninstall.UNINSTALL_TIMEOUT", 30),
+    ):
+        async with asyncio.timeout(10):
+            result = await _confirm(hass, await _open_uninstall(hass, entry))
 
     assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "uninstall_refused"
-    assert result["description_placeholders"]["detail"] == "opkg remove exited 255"
+    assert result["reason"] == "uninstall_rolled_back"
+    assert result["description_placeholders"]["detail"] == sentence
+
+
+async def test_a_complaint_about_another_command_after_the_shape_changes_nothing(
+    hass: HomeAssistant,
+    mqtt_mock,
+    permitted: dict[str, str | bytes],
+) -> None:
+    """Only a `last_error` about `uninstall` is a rollback; one about `zap` is not."""
+    entry = _entry()
+    await async_setup_box(hass, entry)
+
+    @callback
+    def _answer(_msg: ReceiveMessage) -> None:
+        for topic, payload in _SHAPE:
+            async_fire_mqtt_message(hass, topic, payload)
+        async_fire_mqtt_message(
+            hass, LAST_ERROR_TOPIC, json.dumps({"cmd": "zap", "error": "no such channel"})
+        )
+
+    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _answer)
+    result = await _confirm(hass, await _open_uninstall(hass, entry))
+
+    assert result["reason"] == "uninstall_reported"
+
+
+async def test_without_an_announcement_to_retract_info_and_offline_are_the_shape(
+    hass: HomeAssistant,
+    mqtt_mock,
+    permitted: dict[str, str | bytes],
+) -> None:
+    """In `ha_mode: off` the plugin publishes no announcement, so none is retracted."""
+    permitted[INFO_TOPIC] = json.dumps({**PERMITTED_INFO, "ha_mode": "off"})
+    entry = _entry()
+    await async_setup_box(hass, entry)
+
+    @callback
+    def _answer(_msg: ReceiveMessage) -> None:
+        async_fire_mqtt_message(hass, INFO_TOPIC, "")
+        async_fire_mqtt_message(hass, AVAILABILITY_TOPIC, "offline")
+
+    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _answer)
+    result = await _confirm(hass, await _open_uninstall(hass, entry))
+
+    assert result["reason"] == "uninstall_reported"
+
+
+async def test_with_an_announcement_its_retraction_is_part_of_the_shape(
+    hass: HomeAssistant,
+    mqtt_mock,
+    permitted: dict[str, str | bytes],
+) -> None:
+    """In `integration` mode `info` and `offline` alone are not a removal."""
+    entry = _entry()
+    await async_setup_box(hass, entry)
+
+    @callback
+    def _answer(_msg: ReceiveMessage) -> None:
+        async_fire_mqtt_message(hass, INFO_TOPIC, "")
+        async_fire_mqtt_message(hass, AVAILABILITY_TOPIC, "offline")
+
+    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _answer)
+    result = await _confirm(hass, await _open_uninstall(hass, entry))
+
+    assert result["reason"] == "uninstall_no_action"
+
+
+async def test_a_box_left_on_an_entry_that_is_not_loaded_is_not_offered(
+    hass: HomeAssistant,
+    mqtt_mock,
+    permitted: dict[str, str | bytes],
+) -> None:
+    """A stale `runtime_data` on an entry that is not loaded offers and sends nothing.
+
+    Home Assistant deletes `runtime_data` after a clean unload, but not on every path out
+    of the loaded state; what a box last heard is not what the receiver says now.
+    """
+    entry = _entry()
+    await async_setup_box(hass, entry)
+    received = await _arm_box(hass, "uninstall")
+    result = await _open_uninstall(hass, entry)
+    assert entry.runtime_data.uninstall_offered
+
+    entry.mock_state(hass, ConfigEntryState.SETUP_RETRY)
+    result = await _confirm(hass, result)
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "uninstall_not_offered"
+    assert received == []
+    menu = await hass.config_entries.options.async_init(entry.entry_id)
+    assert menu["type"] is FlowResultType.FORM
+
+
+async def test_an_entry_unloaded_while_the_form_is_open_is_not_offered(
+    hass: HomeAssistant,
+    mqtt_mock,
+    permitted: dict[str, str | bytes],
+) -> None:
+    """A stale box left on an unloaded entry is not a receiver saying anything now."""
+    entry = _entry()
+    await async_setup_box(hass, entry)
+    received = await _arm_box(hass, "uninstall")
+    result = await _open_uninstall(hass, entry)
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    result = await _confirm(hass, result)
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "uninstall_not_offered"
+    assert received == []
 
 
 @pytest.mark.parametrize(

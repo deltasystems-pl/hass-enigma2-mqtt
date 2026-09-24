@@ -33,6 +33,7 @@ from homeassistant.components.mqtt import valid_subscribe_topic
 from homeassistant.config_entries import (
     SOURCE_MQTT,
     ConfigEntry,
+    ConfigEntryState,
     ConfigFlow,
     ConfigFlowResult,
     OptionsFlowWithReload,
@@ -1268,7 +1269,14 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
         — and that is exactly when somebody wants to change the address a magic packet
         goes to. So this answers None rather than raising, and the form degrades to
         typed values.
+
+        An entry that is not loaded has no running box even when a stale `runtime_data`
+        is still attached: its subscriptions are gone, so what it last heard — available,
+        permitted — is not what the receiver is saying now, and nothing may be offered or
+        sent on its word.
         """
+        if self.config_entry.state is not ConfigEntryState.LOADED:
+            return None
         return getattr(self.config_entry, "runtime_data", None)
 
 

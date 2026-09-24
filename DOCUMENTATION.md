@@ -903,37 +903,45 @@ broker's acknowledgements, disconnects, removes its package and restarts the int
 `opkg remove` over SSH would skip that order and leave the retained topics behind, so SSH is never
 used to remove anything here.
 
+**What a removal looks like on the broker.** Fresh messages, never retained replays: the
+retraction of `info` and of the announcement, then `offline`. A receiver in `ha_mode: off`
+publishes no announcement, so for it the retraction of `info` and then `offline` is the whole
+shape. A switched-off receiver leaves `info` and its announcement retained and ends on its last
+will, so it never produces this shape.
+
+🔴 **`offline` is not the end of the answer.** The plugin says `offline` before it waits for the
+broker's acknowledgements and before it runs its package manager, and either can still fail — the
+image's own update check can hold opkg's lock, and a killed opkg reports success. The plugin then
+reconnects and publishes `online`, its snapshot and its announcement, and then says on `last_error`
+which step failed. So the flow keeps listening after the shape — through the SSH readbacks, when
+there are any, and for the rest of the 60-second window when there are not — and a `last_error`
+about the removal ends it with the receiver's own sentence. Without SSH readbacks a removal
+therefore always takes the full minute.
+
 Where the entry kept the installer's SSH credentials, SSH is the **witness**. Before the command
 it reads whether the receiver is recording or about to (and refuses if so, having published
 nothing), the running interface's process ids, `opkg status` of the package, and the line count
 and SHA-256 of the receiver's `config.plugins.mqttbridge.*` block — computed on the receiver; the
-settings never leave it. After the receiver says `offline` it waits for the interface restart,
-then reads that `opkg status` is empty, that no opkg info file, plugin directory, bytecode or
-OpenWebif hook file is left, that `/mqttbridge` answers 404, and that the settings block's count
-and hash are unchanged. Every command is a fixed read.
+settings never leave it. After the receiver says `offline` it waits for the interface restart and
+then for OpenWebif to answer, and reads that `opkg status` is empty, that no opkg info file, plugin
+directory, bytecode or OpenWebif hook file is left, that `/mqttbridge` answers 404, and that the
+settings block's count and hash are unchanged. A restart that never came does not stop the other
+readbacks; only the `/mqttbridge` check, which a restart is what settles, is left out. `opkg`
+takes its lock even to answer `status`, so a refusal for the lock is asked again, briefly, before
+it counts. Every command is a fixed read, and an SSH connection that drops or times out, before
+the command or after it, costs the verification and nothing else — the sentence says so.
 
 The flow ends on one of these, and never on a success nobody saw:
 
 | Result | When |
 |---|---|
-| **Removed and verified** | the receiver retracted `info` and its announcement, then said `offline`, and every SSH readback agreed |
-| **Removed, not verified** | the same, but SSH could not connect or a readback disagreed — the sentence names which. 🟡 The image's own restart asks on screen, with no timeout, while something is streaming or a background job runs; a restart that never came is reported here, with the plugin already disconnected and off the disk |
-| **The receiver said it removed the plugin** | the same, without SSH readbacks, and the receiver stayed away for the rest of the 60-second window. A switched-off receiver leaves `info` and its announcement retained and ends on its last will; only an uninstall retracts both before `offline`, so this is an observation, not a guess |
-| **The receiver refused** | the receiver answered on `last_error`, with its own sentence — the permission is off, a recording is running or due, an EPG import is running, an uninstall is already running, or a removal that failed after `offline` (opkg refused, the broker's acknowledgements never came) |
-| **The removal did not complete** | the shape arrived, and then the receiver came back — `online`, or `info` published again — without a `last_error` for the command |
+| **Removed and verified** | the shape arrived, and every SSH readback agreed |
+| **Removed, not verified** | the shape arrived, but SSH could not be used or a readback disagreed — the sentence names which, for example `restart not seen`, `opkg status`, `OpenWebif not answering`, `ssh (connection lost)`. 🟡 The image's own restart asks on screen, with no timeout, while something is streaming or a background job runs; a restart that never came is reported here, with the plugin already disconnected and off the disk |
+| **The receiver said it removed the plugin** | the shape arrived, there are no SSH readbacks, and the receiver stayed away for the rest of the 60-second window |
+| **The receiver refused** | the receiver answered on `last_error`, with its own sentence, before it changed anything — the permission is off, a recording is running or due, an EPG import is running, an uninstall is already running |
+| **The receiver started the removal and rolled it back** | the shape arrived, then the receiver came back and said on `last_error` which step failed — opkg refused, opkg reported success with the package still there, the broker's acknowledgements never came. The plugin is still installed |
+| **The removal did not complete** | the shape arrived, then the receiver came back — `online`, or `info` published again — without a `last_error` about the removal |
 | **The receiver did not act** | nothing of that shape arrived within 60 seconds |
-
-🔴 **Without SSH readbacks, `offline` is not the end of the answer.** The plugin says `offline`
-before it waits for the broker's acknowledgements and before it runs its package manager, and
-either can still fail — the image's own update check can hold opkg's lock. The plugin then
-reconnects, publishes everything again and says on `last_error` which step failed. So when there
-is nothing to read back — no stored credentials, or SSH could not be reached before the command —
-the flow watches the whole 60-second window after it sees the shape: a `last_error` for the
-command is the refusal, a receiver that comes back without one did not complete the removal, and
-only a receiver that stays away is reported as having said it removed the plugin. That flow
-therefore always takes the full minute. With SSH readbacks the shape is enough to go and look,
-and the readbacks decide: a package still there and an interface that never restarted is
-„removed, not verified".
 
 ## 9. FAQ
 
