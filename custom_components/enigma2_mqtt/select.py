@@ -19,11 +19,21 @@ the problem. The name is what a person reads, the reference is what gets sent.
 **Both wait for the receiver.** Selecting publishes and then waits for the topic that
 proves it happened - `bouquet` for one, `service` for the other - so a refusal arrives
 as an error in the interface rather than as a control that quietly springs back.
+
+Two more lists follow the receiver's own zap history, the one its "History Zap" screen
+shows on NEXT and PREVIOUS: "Ostatnio oglądane", which leaves out the bouquets the
+`history_hidden_bouquets` option names, and "Ostatnio oglądane (wszystkie)", which leaves
+out nothing and is disabled until somebody enables it. Their options are exactly the
+channels in that history, newest first, and their state is the channel playing now when
+it is one of them - "what is on, and a quick way back". Choosing one goes through
+`cmd/zap_history`, the path the box's own screen takes, so the zap is recorded like
+any other.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
+import json
 from typing import Any
 
 from homeassistant.components.select import SelectEntity
@@ -34,7 +44,14 @@ from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .box import Enigma2Box, Enigma2MqttConfigEntry, same_service, service_identity
-from .const import DOMAIN, TOPIC_BOUQUET, TOPIC_CHANNELS, TOPIC_SERVICE
+from .const import (
+    CAPABILITY_ZAP_HISTORY,
+    DOMAIN,
+    TOPIC_BOUQUET,
+    TOPIC_CHANNELS,
+    TOPIC_SERVICE,
+    TOPIC_ZAP_HISTORY,
+)
 from .entity import Enigma2Entity, OptionalEntities
 from .services import async_select_bouquet
 
@@ -42,6 +59,8 @@ PARALLEL_UPDATES = 0
 
 KEY_BOUQUET = "bouquet"
 KEY_CHANNEL = "channel"
+KEY_ZAP_HISTORY = "zap_history"
+KEY_ZAP_HISTORY_ALL = "zap_history_all"
 
 # What a box has to name before either select is worth creating: the channel list to
 # build the options from, and the channel-list context that says which of them is live
@@ -121,6 +140,10 @@ async def async_setup_entry(
     box = entry.runtime_data
 
     def _create(key: str) -> Entity:
+        if key == KEY_ZAP_HISTORY:
+            return Enigma2ZapHistorySelect(box, KEY_ZAP_HISTORY, filtered=True)
+        if key == KEY_ZAP_HISTORY_ALL:
+            return Enigma2ZapHistorySelect(box, KEY_ZAP_HISTORY_ALL, filtered=False)
         return (
             Enigma2BouquetSelect(box)
             if key == KEY_BOUQUET
@@ -136,6 +159,23 @@ async def async_setup_entry(
             _create,
             lambda: REQUIRED_CAPABILITIES.issubset(box.capabilities),
             lambda: box.capabilities_declared,
+            async_add_entities,
+        ).start()
+    )
+
+    entry.async_on_unload(
+        OptionalEntities(
+            hass,
+            box,
+            Platform.SELECT,
+            (KEY_ZAP_HISTORY, KEY_ZAP_HISTORY_ALL),
+            _create,
+            lambda: CAPABILITY_ZAP_HISTORY in box.capabilities,
+            # Never removed. A capability that stops being named is an older plugin, a
+            # hook that failed to attach on one boot, or a receiver that has not answered
+            # yet, and none of those is a decision anybody made; the names, areas and
+            # dashboard places the household gave these two are not the price of one.
+            lambda: False,
             async_add_entities,
         ).start()
     )
@@ -256,5 +296,61 @@ class Enigma2ChannelSelect(Enigma2Select):
         await box.async_command(
             "zap",
             sref,
+            effect=lambda: same_service((box.state.service or {}).get("sref"), sref),
+        )
+
+
+class Enigma2ZapHistorySelect(Enigma2Select):
+    """The receiver's zap history, as a list to go back to.
+
+    The options are the channels the receiver's own "History Zap" screen would show, in
+    its order, newest first - nothing the history does not hold, because choosing a
+    channel here means going back to it. The state is what is playing now, by service
+    identity, when it is one of those channels, and nothing otherwise: a channel reached
+    by a zap the receiver does not record, by something the plugin does not see, or
+    straight after an interface restart is not in the history, and an invented option
+    would claim a way back that does not exist.
+
+    The filtered one never has a hidden channel as its state, because its state can only
+    be one of its options; that is what keeps the channels of a hidden bouquet out of
+    this entity's recorded history. The unfiltered one has no such protection, which is
+    why it is disabled until somebody enables it.
+    """
+
+    def __init__(self, box: Enigma2Box, key: str, *, filtered: bool) -> None:
+        """Follow the history, what is playing, and the channel list the filter needs."""
+        super().__init__(
+            box,
+            key,
+            topics=(TOPIC_ZAP_HISTORY, TOPIC_SERVICE, TOPIC_CHANNELS),
+            requires=TOPIC_ZAP_HISTORY,
+        )
+        self._filtered = filtered
+        if not filtered:
+            self._attr_entity_registry_enabled_default = False
+
+    @callback
+    def _async_read_state(self) -> None:
+        """Rebuild the list from the history, and mark what is playing inside it."""
+        self._set_options(
+            _named_entries(self.box.zap_history_entries(filtered=self._filtered)),
+            (self.box.state.service or {}).get("sref"),
+        )
+
+    async def async_select_option(self, option: str) -> None:
+        """Go back to this channel the way the receiver's own screen does.
+
+        By reference, never by position or name: the history reorders on every zap and
+        names repeat. Choosing what is already playing sends nothing - the receiver's
+        own screen would do nothing either, and there is no change to wait for. The
+        proof is the `service` topic naming the channel, by identity.
+        """
+        box = self.box
+        sref = self._sref_for(option)
+        if same_service((box.state.service or {}).get("sref"), sref):
+            return
+        await box.async_command(
+            "zap_history",
+            json.dumps({"sref": sref}),
             effect=lambda: same_service((box.state.service or {}).get("sref"), sref),
         )

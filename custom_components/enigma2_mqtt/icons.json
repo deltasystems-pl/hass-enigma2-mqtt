@@ -75,6 +75,9 @@
       "epg_import": {
         "default": "mdi:television-guide"
       },
+      "history_clear": {
+        "default": "mdi:history-off"
+      },
       "wake": {
         "default": "mdi:sleep-off"
       }
@@ -228,6 +231,12 @@
       },
       "channel": {
         "default": "mdi:television-classic"
+      },
+      "zap_history": {
+        "default": "mdi:history"
+      },
+      "zap_history_all": {
+        "default": "mdi:history"
       }
     }
   },

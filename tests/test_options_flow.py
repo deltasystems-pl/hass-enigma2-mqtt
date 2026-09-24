@@ -20,6 +20,7 @@ from custom_components.enigma2_mqtt.const import (
     CONF_CAM_TELEMETRY,
     CONF_CHECK_GITHUB_RELEASES,
     CONF_DANGEROUS_BUTTONS,
+    CONF_HISTORY_HIDDEN_BOUQUETS,
     CONF_NAME,
     CONF_NODE_ID,
     CONF_OSCAM_TELEMETRY,
@@ -129,6 +130,9 @@ async def test_saving_the_options_reloads_the_entry(
         # Nor for this one, whose default is the long list the media player has always
         # offered - narrowing it under an existing installation would be a surprise.
         CONF_SOURCE_LIST_SCOPE: DEFAULT_SOURCE_LIST_SCOPE,
+        # Nor for this one: nothing hidden from "Ostatnio oglądane" unless somebody
+        # chose it.
+        CONF_HISTORY_HIDDEN_BOUQUETS: [],
         **PLUGIN_SETTINGS,
     }
     assert hass.states.get("button.dekoder_salon_reboot") is not None

@@ -59,6 +59,7 @@ from .const import (
     CONF_CHECK_GITHUB_RELEASES,
     CONF_CONFIRM_UNINSTALL,
     CONF_DANGEROUS_BUTTONS,
+    CONF_HISTORY_HIDDEN_BOUQUETS,
     CONF_KEEP_SSH_CREDENTIALS,
     CONF_NAME,
     CONF_NODE_ID,
@@ -878,6 +879,9 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                 CONF_BOUQUETS: user_input.get(CONF_BOUQUETS) or [],
                 CONF_CHECK_GITHUB_RELEASES: user_input[CONF_CHECK_GITHUB_RELEASES],
                 CONF_SOURCE_LIST_SCOPE: user_input[CONF_SOURCE_LIST_SCOPE],
+                CONF_HISTORY_HIDDEN_BOUQUETS: (
+                    user_input.get(CONF_HISTORY_HIDDEN_BOUQUETS) or []
+                ),
             }
             if requested is not None:
                 local_data.update(requested)
@@ -939,6 +943,19 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                 vol.Required(CONF_DANGEROUS_BUTTONS, default=False): bool,
                 vol.Optional(CONF_WOL_MAC, default=""): str,
                 vol.Optional(CONF_BOUQUETS, default=[]): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=bouquets,
+                        multiple=True,
+                        custom_value=True,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                        sort=False,
+                    )
+                ),
+                # The same list as the bouquets above, options ignored for the same
+                # reason, and read by one entity only: "Ostatnio oglądane".
+                vol.Optional(
+                    CONF_HISTORY_HIDDEN_BOUQUETS, default=[]
+                ): selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=bouquets,
                         multiple=True,

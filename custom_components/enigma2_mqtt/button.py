@@ -70,11 +70,14 @@ from .box import (
 from .const import (
     ATTR_WAKE_ON_LAN,
     CAPABILITY_EPG_IMPORT,
+    CAPABILITY_HISTORY_CLEAR,
     CAPABILITY_SOFTCAM,
     CONF_DANGEROUS_BUTTONS,
     DOMAIN,
+    HISTORY_CLEAR_REASONS,
     TOPIC_EPG_IMPORT,
     TOPIC_SCREEN,
+    TOPIC_ZAP_HISTORY,
     WAKE_ON_LAN_NOT_SUPPORTED,
 )
 from .entity import Enigma2Entity, OptionalEntities
@@ -174,6 +177,33 @@ async def _async_epg_import(box: Enigma2Box) -> None:
         )
 
 
+async def _async_history_clear(box: Enigma2Box) -> None:
+    """Clear the receiver's zap history the way its 0 key does, and wait to see it.
+
+    The proof is a `zap_history` payload that arrived **after** the press and holds at
+    most one entry - not "the list holds at most one entry", which is already true
+    before a press the receiver will refuse for exactly that reason. A retained copy the
+    broker replays after a reconnect is never the answer either.
+
+    Every refusal carries a reason code, and each code has its own translation, so the
+    household reads why in its own language: standby, the panic-button setting off, a
+    history too short to clear, timeshift, and the rest in `HISTORY_CLEAR_REASONS`.
+    """
+    before = box.updates.get(TOPIC_ZAP_HISTORY, 0)
+
+    def cleared() -> bool:
+        if box.updates.get(TOPIC_ZAP_HISTORY, 0) <= before:
+            return False
+        if box.state.zap_history_retained:
+            return False
+        history = box.state.zap_history
+        return history is not None and len(history["entries"]) <= 1
+
+    await box.async_command(
+        "history_clear", PRESS, effect=cleared, reasons=HISTORY_CLEAR_REASONS
+    )
+
+
 @dataclass(frozen=True, kw_only=True)
 class Enigma2ButtonDescription(ButtonEntityDescription):
     """A button, and what pressing it does."""
@@ -184,6 +214,9 @@ class Enigma2ButtonDescription(ButtonEntityDescription):
     # Whether what this button promises depends on the receiver waking to a magic
     # packet, so that a receiver which says it cannot has to be named on it.
     wake_on_lan_note: bool = False
+    # Whether the button is unavailable while the receiver says its panic-button setting
+    # is off, the one state in which its command can never succeed.
+    needs_panic_button: bool = False
 
 
 BUTTONS: tuple[Enigma2ButtonDescription, ...] = (
@@ -265,6 +298,18 @@ EPG_IMPORT_BUTTON = Enigma2ButtonDescription(
     press_fn=_async_epg_import,
 )
 
+# "Wyczyść ostatnio oglądane": what the remote's 0 key does with the receiver's panic
+# button on - the zap history emptied and the receiver on channel 1, the first channel of
+# its first bouquet. No permission: `cmd/zap` needs none, and `cmd/key KEY_0` already does
+# the same with none. It is unavailable while the receiver says the panic button is off,
+# because 0 then goes back one channel and clears nothing; every other case in which 0
+# would not clear is a refusal the receiver explains, translated.
+HISTORY_CLEAR_BUTTON = Enigma2ButtonDescription(
+    key="history_clear",
+    press_fn=_async_history_clear,
+    needs_panic_button=True,
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -305,6 +350,7 @@ async def async_setup_entry(
             *(pair[1] for pair in CAPABILITY_BUTTONS),
             SOFTCAM_BUTTON,
             EPG_IMPORT_BUTTON,
+            HISTORY_CLEAR_BUTTON,
         )
     }
 
@@ -402,6 +448,21 @@ async def async_setup_entry(
         ).start()
     )
 
+    entry.async_on_unload(
+        OptionalEntities(
+            hass,
+            box,
+            "button",
+            [HISTORY_CLEAR_BUTTON.key],
+            factory,
+            lambda: CAPABILITY_HISTORY_CLEAR in box.capabilities,
+            # Never removed, for the reason the history selects give: a capability that
+            # goes quiet is not a decision, and a dashboard's button is not its price.
+            lambda: False,
+            async_add_entities,
+        ).start()
+    )
+
     for capability, description in CAPABILITY_BUTTONS:
         entry.async_on_unload(
             OptionalEntities(
@@ -437,6 +498,11 @@ class Enigma2Button(Enigma2Entity, ButtonEntity):
         """Return whether the button can do anything right now."""
         if self.entity_description.offline:
             return True
+        if (
+            self.entity_description.needs_panic_button
+            and self.box.zap_history_panic_button is False
+        ):
+            return False
         return super().available
 
     @property

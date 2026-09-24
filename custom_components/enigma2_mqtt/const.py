@@ -42,6 +42,11 @@ CONF_CHECK_GITHUB_RELEASES: Final = "check_github_releases"
 CONF_SOURCE_LIST_SCOPE: Final = "source_list_scope"
 CONF_SOFTCAM_AUTOHEAL: Final = "softcam_autoheal"
 CONF_SOFTCAM_AUTOHEAL_SECONDS: Final = "softcam_autoheal_seconds"
+# Bouquets whose channels "Ostatnio oglądane" leaves out, stored as names like
+# `bouquets`. It filters that one select and nothing else: "Ostatnio oglądane
+# (wszystkie)", "Kanał", "Bukiet" and the media player are untouched by it, and the
+# receiver still publishes every entry on the broker.
+CONF_HISTORY_HIDDEN_BOUQUETS: Final = "history_hidden_bouquets"
 # The tick box on the options flow's removal step. A form field, never stored.
 CONF_CONFIRM_UNINSTALL: Final = "confirm_uninstall"
 
@@ -287,6 +292,28 @@ CAPABILITY_UNINSTALL: Final = "uninstall"
 # broker's acknowledgements is 15 s, so a box that has not finished by this is a box
 # that has not acted.
 UNINSTALL_TIMEOUT: Final = 60
+
+# The receiver's own zap history - the list its "History Zap" screen shows on NEXT and
+# PREVIOUS - newest first. Two capabilities, because an image can offer one without the
+# other: `zap_history` is the topic and `cmd/zap_history`, `history_clear` is
+# `cmd/history_clear`, which runs what the remote's 0 key runs.
+TOPIC_ZAP_HISTORY: Final = "zap_history"
+CAPABILITY_ZAP_HISTORY: Final = "zap_history"
+CAPABILITY_HISTORY_CLEAR: Final = "history_clear"
+# The reasons the receiver gives, in `last_error.reason`, for refusing to clear its
+# history - every case in which the 0 key would not clear it either. Each one has its own
+# translation, `history_clear_<reason>`, so the refusal is read in the household's
+# language; a reason not listed here falls back to the receiver's English sentence.
+HISTORY_CLEAR_REASONS: Final = (
+    "standby",
+    "panic_off",
+    "too_short",
+    "timeshift",
+    "zap_blocked",
+    "pip",
+    "playback",
+    "not_cleared",
+)
 
 # The four states the topic may report. Anything else is not part of the contract and
 # is read as "it did not say".
