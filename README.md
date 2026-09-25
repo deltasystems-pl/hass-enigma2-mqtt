@@ -24,8 +24,10 @@ plugin. You do not have to install it by hand: this integration can put it on th
   The four colour keys are device triggers, short or long press.
 - Messages on the TV: a popup, or a small toast in the corner on receivers that support it.
 - The receiver's own zap history as a dropdown, so you can jump back to a recent channel.
-- Buttons for a screenshot, Wake-on-LAN, a GUI restart and an EPG refresh. Deep standby, reboot,
-  softcam restart and EPG import show up only after you allow them on the receiver. Waking a
+- Buttons for a screenshot, Wake-on-LAN and a GUI restart, and an EPG refresh where the receiver
+  publishes EPG grids. Softcam restart and EPG import show up only after you allow them on the
+  receiver. Deep standby and reboot need two things: permission on the receiver and the
+  integration's "Show the deep standby and reboot buttons" option. Waking a
   receiver from deep standby over the network has not been tested on hardware yet, so treat deep
   standby as possibly one-way.
 - A guided installer, and an update entity that updates the receiver plugin from a copy shipped
@@ -96,8 +98,8 @@ into `config/custom_components/enigma2_mqtt/` and restart. Do not keep a backup 
   [setup](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/SETUP.md),
   [troubleshooting](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TROUBLESHOOTING.md)
   and the [MQTT topics](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TOPICS.md).
-- [ROADMAP.md](ROADMAP.md), [CHANGELOG.md](CHANGELOG.md) and the design decisions in
-  [docs/adr](docs/adr/).
+- [ROADMAP.md](ROADMAP.md), [CHANGELOG.md](CHANGELOG.md), the design decisions in
+  [docs/adr](docs/adr/) and the quality bar the project holds itself to in [docs/QUALITY.md](docs/QUALITY.md).
 - [CONTRIBUTING.md](CONTRIBUTING.md). Testers on OpenATV, OpenPLi or OpenBH and translators are
   especially welcome.
 
