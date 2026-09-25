@@ -20,8 +20,8 @@ now and next across the bouquet the receiver is walking; what the enigma2 proces
 the receiver's own zap history, as two selects and a clear button; a note on the deep standby and
 Wake-on-LAN buttons when the receiver cannot be woken over the network; and a remote uninstall.
 The softcam restart, the EPG import and the uninstall each need a permission that is off as
-shipped and can only be set on the receiver's own setup screen, so an installation that changes
-nothing there is offered no new control the receiver would refuse (see [ADR-0005](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0005-softcam-restart.md)).
+shipped and is set only on the receiver, never over MQTT, so an installation that changes nothing
+there is offered no new control the receiver would refuse (see [ADR-0005](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0005-softcam-restart.md)).
 
 **Removing the plugin is an explicit, confirmed action and a one-way door.** It is offered in
 *Configure* only while the receiver permits it; the receiver removes itself, and SSH, where the
@@ -63,8 +63,8 @@ plugin's own v0.3.0 release.
   Diagnostics summarise the history as a count, with no channel names or references.
 - **"Remove the plugin from the receiver" ("Usuń wtyczkę z dekodera")**, a menu entry in the
   receiver's *Configure*, offered only while the receiver is on the broker, states
-  `uninstall_allowed: true` and claims the `uninstall` capability - a permission set on the
-  receiver's own setup screen and off as shipped, so almost every installation sees *Configure*
+  `uninstall_allowed: true` and claims the `uninstall` capability - a permission set only on the
+  receiver, never over MQTT, and off as shipped, so almost every installation sees *Configure*
   open on the options form exactly as before. One form states the one-way door (only SSH or the
   receiver's package manager can bring the plugin back), that the receiver keeps its settings, and
   that the device will then look like a switched-off one, and it needs a tick. The receiver does
@@ -114,8 +114,8 @@ plugin's own v0.3.0 release.
   the same guard a manual press goes through, because a restart landing on the opening
   seconds of a recording is worse than a scrambled one.
 - The button needs **two gates** and both are the receiver's. The **permission**
-  `softcam_restart_allowed` is set on the receiver's own setup screen and refused over
-  MQTT, as `deep_standby_allowed` already is: a setting that enables a command stays
+  `softcam_restart_allowed` is set only on the receiver and refused over MQTT, as
+  `deep_standby_allowed` already is: a setting that enables a command stays
   outside what anything with publish rights on the broker can reach. It is therefore not
   on the options form, and the form says where it lives. The **`softcam` capability** is
   the other, and it is claimed only where a cam binary actually resolves - a receiver with
