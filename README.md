@@ -9,7 +9,7 @@ polling.
 [![Validate](https://github.com/deltasystems-pl/hass-enigma2-mqtt/actions/workflows/validate.yml/badge.svg)](https://github.com/deltasystems-pl/hass-enigma2-mqtt/actions/workflows/validate.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-![The receiver's device page in Home Assistant: controls, sensors and the last screen grab](docs/images/device-page.png)
+<img src="docs/images/device-page.png" alt="The receiver's device page in Home Assistant: controls, sensors and the last screen grab" width="420">
 
 The receiver side is the [enigma2-mqtt-bridge](https://github.com/deltasystems-pl/enigma2-mqtt-bridge)
 plugin. You do not have to install it by hand: this integration can put it on the receiver over SSH.
@@ -50,6 +50,8 @@ plugin. You do not have to install it by hand: this integration can put it on th
    plugin and adds the device. A receiver that already runs the plugin usually shows up by itself
    under *Settings -> Devices & services*.
 
+   <img src="docs/images/installer-menu.png" alt="The first screen after adding the integration: use an existing MQTT Bridge plugin, or install MQTT Bridge over SSH" width="400">
+
 Manual install: download `enigma2_mqtt.zip` from the
 [latest release](https://github.com/deltasystems-pl/hass-enigma2-mqtt/releases/latest), extract it
 into `config/custom_components/enigma2_mqtt/` and restart. Do not keep a backup copy inside
@@ -66,12 +68,24 @@ into `config/custom_components/enigma2_mqtt/` and restart. Do not keep a backup 
 
 ## Screenshots
 
-| | |
-|---|---|
-| ![The media player card showing the current channel and programme](docs/images/media-player.png) | ![The recently watched dropdown listing the last channels](docs/images/zap-history.png) |
-| Media player | Zap history |
-| ![The installer form asking for the receiver's SSH password and broker details](docs/images/installer.png) | ![The integration options form](docs/images/options.png) |
-| Installer | Options |
+<table>
+  <tr>
+    <td><img src="docs/images/media-player.png" alt="The media player dialog showing the current programme and channel, the screen grab, volume and power" width="300"></td>
+    <td><img src="docs/images/zap-history.png" alt="The Recently watched dropdown listing the last channels, newest first" width="300"></td>
+  </tr>
+  <tr>
+    <td>Media player</td>
+    <td>Zap history</td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/installer.png" alt="The installer's first step, asking for the receiver's host and SSH port" width="300"></td>
+    <td><img src="docs/images/options.png" alt="The integration options form" width="300"></td>
+  </tr>
+  <tr>
+    <td>Installer</td>
+    <td>Options</td>
+  </tr>
+</table>
 
 ## Documentation
 
