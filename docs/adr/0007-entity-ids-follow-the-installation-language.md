@@ -13,23 +13,29 @@ Polish and German names in `translations/*.json` would be free to change: a word
 improved without touching anything a household had built on the entity.
 
 That is not how Home Assistant names an entity that has a translated name. When the entity is
-first registered, Home Assistant builds its object id from the name as it is displayed in the
-installation's configured language. The channel sensor is `sensor.dekoder_salon_kanal` on a
+first registered, Home Assistant builds its object id from the entity's name in the
+installation's configured language - **if** that language is one Home Assistant lists as making
+native entity ids (`NATIVE_ENTITY_IDS` in `homeassistant/generated/languages.py`, read in
+`helpers/entity_platform.py` at the Home Assistant version this repository's tests pin,
+2026.9.2). Polish, German and English are all in that set. For a language that is not, Home
+Assistant uses the English name instead (`DEFAULT_LANGUAGE`), so on such an installation the id
+does follow the English name. The channel sensor is `sensor.dekoder_salon_kanal` on a
 Polish installation and `sensor.dekoder_salon_channel` on an English one; the translation key,
 `channel`, is the same on both. A receiver running on a Polish installation shows the same
 pattern for every entity it has: the "last error", "next timer" and "refresh discovery" entities
 have Polish ids, not English ones.
 
-The test suite did not show this, because it runs Home Assistant in English, where the displayed
-name and the English key give the same id. A test that renames an English name and sees the id
+The test suite did not show this, because it runs Home Assistant in English, where the English
+name gives the id either way. A test that renames an English name and sees the id
 change is consistent with both readings.
 
 ## Decision
 
 **The unique id is `<node_id>_<key>`**, where the key is the translation key; it is the same in
 every language and it is what the registry keys the entity by. **The entity id is not language
-independent**: it is made once, from the displayed name in the installation's language, and the
-registry keeps it from then on - also when the language changes later.
+independent**: it is made once, from the name in the installation's language when that language
+makes native entity ids and from the English name otherwise, and the registry keeps it from then
+on - also when the language changes later.
 
 **Every translation's name is therefore load-bearing, in every language.** A name that has
 shipped is not renamed in `strings.json`, `en.json`, `pl.json` or `de.json`. A new entity's name
@@ -45,9 +51,13 @@ reader to the device page for the ids of their own installation.
   installation, and any entity that is registered again - after the entry is removed and added
   back - a different id from the one existing automations, dashboards and shared examples use,
   and it changes the name the household sees.
-- Two installations in different languages have different entity ids for the same receiver.
-  Automations and dashboards shared between them need editing; the unique id is the only stable
-  handle.
+- Two installations in different languages have different entity ids for the same receiver
+  when both languages make native entity ids and the translated names differ - Polish and
+  English do. An installation in a language outside that set gets the English ids. Automations
+  and dashboards shared between installations may need editing; the unique id is the only
+  stable handle.
+- Home Assistant decides which languages make native entity ids, and the set can change between
+  its releases; a language added to it changes the ids of entities registered after that.
 - A translation that is wrong or clumsy is corrected only when the correction is worth a new id
   on new installations, and the change is called out in the changelog.
 - If Home Assistant ever builds object ids from the translation key instead, this record is
