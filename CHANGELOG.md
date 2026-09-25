@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- [ADR-0007](docs/adr/0007-entity-ids-follow-the-installation-language.md) supersedes the
+  paragraph of the PRD (ADR-0000 §6.3) that said entity ids derive from the English translation
+  keys. They do not: Home Assistant makes an entity id from the entity's name in the
+  installation's language when it is first registered, so every translated name is load-bearing
+  and a shipped name is not renamed in any language. DOCUMENTATION.md, CONTRIBUTING.md and
+  `entity.py` already said so; the ADR records the decision and its costs, and the two documents
+  link to it.
+
 ## [0.3.0] - 2026-09-25
 
 The release that follows the receiver plugin's own 0.3.0: the list of wants two days of household

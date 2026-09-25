@@ -78,7 +78,8 @@ requirements document; [ADR-0001](docs/adr/0001-m0-decisions.md) closed its open
   Assistant slugifies the `pl.json` name on a Polish installation and the `en.json` name on an
   English one. So the name of an existing entity is never renamed **in any language** - new
   installations would get different entity ids from existing ones, and the documented
-  examples and shared automations would stop matching.
+  examples and shared automations would stop matching. See
+  [ADR-0007](docs/adr/0007-entity-ids-follow-the-installation-language.md).
 - Every file covers the same ground: the config and options flows, the name of each of the
   twenty-six entities, the eight device triggers, and the name, description and every field
   of each of the nine actions. A file that is missing a key falls back to English, which

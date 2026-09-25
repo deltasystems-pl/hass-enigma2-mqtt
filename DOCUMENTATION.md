@@ -339,7 +339,8 @@ makes an entity id from the entity's name in the installation's language when th
 first registered: the channel sensor is `sensor.dekoder_salon_kanal` on a Polish installation
 and `sensor.dekoder_salon_channel` on an English one. An entity id that exists keeps its
 name when the language changes later. Look the ids up on the device page before you copy an
-example from this document.
+example from this document. The decision and what it costs are
+[ADR-0007](docs/adr/0007-entity-ids-follow-the-installation-language.md).
 
 Two rules run through the table. **An entity is unavailable when the box is offline, and also
 when the topic it reads has never arrived** - an image that gave the plugin no tuner hook
