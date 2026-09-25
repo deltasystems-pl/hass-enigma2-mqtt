@@ -21,6 +21,13 @@ stable across reinstalls of the plugin and of Home Assistant.
 connection it ever opens is SSH, and only when you ask it to install or update the plugin, or
 to verify a removal you asked for.
 
+```
+Enigma2 box                         MQTT broker                    Home Assistant
+  MQTTBridge plugin  --publishes-->  enigma2/<node_id>/... ------->  enigma2_mqtt
+  (hooks inside enigma2)            enigma2mqtt/discovery/...       (this repository)
+                     <--commands--  enigma2/<node_id>/cmd/#
+```
+
 **Push, not poll.** State topics are retained, so Home Assistant has the full picture the
 moment it subscribes, and every later change arrives as the enigma2 event that caused it.
 Availability is the MQTT last will: within about 45 seconds of a box disappearing its
@@ -34,9 +41,35 @@ created twice.
 
 ## 2. Installation
 
-See the [README](README.md#installation) for HACS and manual installation, and
-[§3 Configuration](#3-configuration) for what the flow asks. The plugin must be on the box, and
-the integration can put it there over SSH.
+**Requirements.** Home Assistant 2026.3 or newer; the MQTT integration configured and
+connected (the Mosquitto add-on is fine); and the
+[enigma2-mqtt-bridge](https://github.com/deltasystems-pl/enigma2-mqtt-bridge) plugin on the
+receiver - which the integration can put there over SSH.
+
+**HACS.** HACS -> the three-dot menu -> *Custom repositories* -> add `deltasystems-pl/hass-enigma2-mqtt`,
+category **Integration**; install **Enigma2 MQTT** and restart Home Assistant.
+
+**Manual.** Download `enigma2_mqtt.zip` from the
+[latest release](https://github.com/deltasystems-pl/hass-enigma2-mqtt/releases/latest), extract
+it into `config/custom_components/enigma2_mqtt/` and restart. A checkout of this repository
+works too: copy `custom_components/enigma2_mqtt` into your `config/custom_components/`.
+
+[§3 Configuration](#3-configuration) covers what the flow asks.
+
+**Versions.**
+
+| Integration | Plugin | Status |
+|---|---|---|
+| 0.3.0 | 0.3.0 | current release |
+| 0.2.0 | 0.2.0 | superseded |
+| 0.1.0 | 0.1.0 | superseded |
+
+The integration ships the plugin it was built against, so the two move together. The bundle in
+this release is byte for byte the package on the plugin's own
+[releases page](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/tag/v0.3.0), and
+`custom_components/enigma2_mqtt/bundled/metadata.json` carries the SHA-256 to check it with.
+The integration refuses nothing when the versions differ, but the `update` entity tells you
+when the box runs a plugin older than the one this release was written against.
 
 🔴 **Never keep a backup copy of this component inside `custom_components/`.** Home Assistant
 reads the `manifest.json` of every directory it finds there, and a copy declares the same
@@ -84,9 +117,10 @@ holding nothing but spaces counts as empty.
 🔴 **Give the receiver a broker login of its own.** The broker password ends up in a file on the
 receiver's own flash, and most Enigma2 images answer SSH with the image's default root password
 - so a login shared with Home Assistant is the whole broker, one box away. On a standalone
-Mosquitto these four lines confine it to one receiver:
+Mosquitto these lines confine it to one receiver:
 
 ```
+user enigma2-<node_id>
 topic readwrite enigma2/<node_id>/#
 topic write enigma2mqtt/discovery/<node_id>/#
 topic write homeassistant/device/<node_id>/#
@@ -299,10 +333,13 @@ and a receiver that stops naming `toast` - a downgrade, a skin reload whose rebu
 toast screen failed - has decided nothing. Sending to it then is refused in Home Assistant
 with the reason, rather than published into a refusal on `last_error`.
 
-Unique ids follow one scheme: `<node_id>_<key>`, where the
-key is the English translation key of the entity. Entity ids derive from the same key, so
-`sensor.dekoder_salon_channel` is `sensor.dekoder_salon_channel` in every language and only
-the display name changes.
+Unique ids follow one scheme: `<node_id>_<key>`, where the key is the English translation key
+of the entity, and they are the same in every language. **Entity ids are not.** Home Assistant
+makes an entity id from the entity's name in the installation's language when the entity is
+first registered: the channel sensor is `sensor.dekoder_salon_kanal` on a Polish installation
+and `sensor.dekoder_salon_channel` on an English one. An entity id that exists keeps its
+name when the language changes later. Look the ids up on the device page before you copy an
+example from this document.
 
 Two rules run through the table. **An entity is unavailable when the box is offline, and also
 when the topic it reads has never arrived** - an image that gave the plugin no tuner hook
@@ -1049,3 +1086,34 @@ and OpenBH 6 are best effort pending testers. VTi (Python 2) is out of scope.
 
 **Is any of this in the HACS default store?** Not yet - add the repository as a custom
 repository. The default-store request follows `v1.0.0`.
+
+## 10. Privacy
+
+The `key` and `epg` topics say what is being watched and which buttons are pressed, and the
+„Ekran" image entity is a picture of the screen. Nothing leaves your network - there is no
+telemetry and no cloud - but the recorder keeps a history unless you tell it not to. Exclude
+the image and the remote key event; take the key event's id from the device page, because it
+follows your language (see [§4](#4-entities)):
+
+```yaml
+recorder:
+  exclude:
+    domains:
+      - image
+    entities:
+      - event.dekoder_salon_pilot_klawisz   # English installation: event.<device>_key
+```
+
+The zap history is the same kind of record. The receiver publishes it whole, retained, on the
+broker, and the option that hides bouquets from „Ostatnio oglądane" filters that one entity in
+Home Assistant - it hides nothing on the network. „Ostatnio oglądane (wszystkie)" is recorded
+once enabled; [§4.6](#46-selects) shows how to exclude it.
+
+The [options](#options) can switch key publishing off, select `off`, `on_zap` or `interval`
+screenshots, set the interval and choose how long an on-zap capture waits for the new picture.
+The plugin validates and persists the settings as one transaction; disabling screenshots also
+retracts the retained image. Optional conditional-access telemetry publishes only the current
+service's system, encrypted/active result and ECM time. It never publishes server, account or
+card details, and creates no entities until explicitly enabled. OSCam health is optional and off
+by default; its per-source entities use stable opaque ids, and private reader labels, server
+addresses, accounts and card identifiers are neither published nor retained by the integration.
