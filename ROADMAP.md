@@ -31,8 +31,8 @@ Where the integration stands and what comes next. What each release changed is i
 
 ## Where the releases fit
 
-HACS serves **0.3.0** and the receiver plugin's feed serves its own **0.3.0**, so the two halves
-are in step and the version on a receiver or in HACS says which release you are running.
+HACS serves **0.3.1**, which bundles the receiver plugin's own **0.3.0** - the version its feed
+serves - so the version on a receiver or in HACS says which release you are running.
 
 0.2.0 (fixes) and 0.3.0 (features) came out of two days of household use, which produced a list
 of problems and a list of wants; the plan is
