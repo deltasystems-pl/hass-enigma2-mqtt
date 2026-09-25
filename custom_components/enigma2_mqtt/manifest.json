@@ -12,5 +12,5 @@
   "loggers": ["custom_components.enigma2_mqtt"],
   "mqtt": ["enigma2mqtt/discovery/#"],
   "requirements": ["asyncssh==2.24.0"],
-  "version": "0.2.0"
+  "version": "0.3.0"
 }

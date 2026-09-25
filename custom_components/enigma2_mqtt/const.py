@@ -100,9 +100,9 @@ MAX_SOFTCAM_AUTOHEAL_SECONDS: Final = 600
 # Shown on the form only when the box reports a window that is not a number in that
 # range - which is a plugin that is misbehaving, not a value to be preserved. A box that
 # reports a usable window is its own default, so this is never the suggested value on a
-# receiver that is working. 🔴 It is deliberately *not* in `PLUGIN_SETTING_DEFAULTS`:
-# that table is checked against the bundled plugin's own source, and the bundle here is
-# 0.2.0, which has no such setting.
+# receiver that is working. It is also the plugin's own default, and so the value
+# `PLUGIN_SETTING_DEFAULTS` holds for the setting, which CI checks against the bundled
+# plugin's source.
 DEFAULT_SOFTCAM_AUTOHEAL_SECONDS: Final = 90
 
 # The bounds the retained `softcam` payload is believed inside. Nothing here is a limit
@@ -194,6 +194,7 @@ PLUGIN_SETTING_DEFAULTS: Final[dict[str, object]] = {
     "screenshot": DEFAULT_SCREENSHOT,
     "screenshot_interval": DEFAULT_SCREENSHOT_INTERVAL,
     "screenshot_delay": DEFAULT_SCREENSHOT_DELAY,
+    "osd_toast": True,
     "cam_telemetry": DEFAULT_CAM_TELEMETRY,
     "oscam_telemetry": DEFAULT_OSCAM_TELEMETRY,
     "oscam_port": 8888,
@@ -202,6 +203,13 @@ PLUGIN_SETTING_DEFAULTS: Final[dict[str, object]] = {
     "oscam_identity_salt": "",
     "bouquets_for_select": "",
     "deep_standby_allowed": False,
+    "wol_arm": False,
+    "cec_standby_workaround": False,
+    "softcam_restart_allowed": False,
+    "softcam_autoheal": False,
+    "softcam_autoheal_seconds": DEFAULT_SOFTCAM_AUTOHEAL_SECONDS,
+    "epg_import_allowed": False,
+    "uninstall_allowed": False,
     "log_level": "info",
     "epg_grid_events": 4,
 }
@@ -467,7 +475,7 @@ RECORD_ACTIONS: Final = ("start", "stop")
 # The plugin release this version of the integration is written against. The update
 # entity compares it with `info.plugin`. M4 replaces the constant with the version of
 # the IPK the integration bundles, and grows an install step to go with it.
-SUPPORTED_PLUGIN_VERSION: Final = "0.2.0"
+SUPPORTED_PLUGIN_VERSION: Final = "0.3.0"
 PLUGIN_RELEASES_URL: Final = (
     "https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases"
 )
