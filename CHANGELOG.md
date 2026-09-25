@@ -28,6 +28,12 @@ No entity is renamed, and the bundled receiver plugin is still its own v0.3.0 re
 
 ### Documentation
 
+- **The README is now a short landing page**, with screenshots and one-click buttons to add the
+  repository to HACS and to add the integration. The roadmap moved to ROADMAP.md, and the
+  installation and privacy details moved into DOCUMENTATION.md. A few wrong statements were
+  corrected on the way, among them the entity id in the recorder example and the advice to
+  restrict each receiver's login with an ACL file in the Mosquitto add-on, which does not
+  enforce one.
 - [ADR-0007](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0007-entity-ids-follow-the-installation-language.md) supersedes the
   paragraph of the PRD (ADR-0000 §6.3) that said entity ids derive from the English translation
   keys. They do not: Home Assistant makes an entity id from the entity's name in the
