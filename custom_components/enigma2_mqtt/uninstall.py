@@ -26,7 +26,9 @@ the flow as a removal that was started and rolled back, in the receiver's words.
 
 Nothing here writes to the receiver over SSH. Every command is a fixed read, and the
 settings are never transferred - only their count and their SHA-256, computed where they
-live.
+live. The one exception is the opkg lock probe, which takes opkg's lock and lets it go
+exactly as opkg does - creating the lock file if it is not there and removing it after -
+and copies nothing onto the receiver: the helper runs from standard input.
 """
 
 from __future__ import annotations
@@ -37,6 +39,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import StrEnum
 import logging
+from pathlib import Path
 import re
 from typing import Any
 
@@ -45,6 +48,7 @@ from homeassistant.components import mqtt
 from homeassistant.components.mqtt import ReceiveMessage
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 
+from . import installer_helper
 from .box import (
     Enigma2Box,
     announcement_topic,
@@ -81,6 +85,7 @@ from .installer import (
     _async_wait_for_enigma,
     _timer_guard,
 )
+from .installer_helper import EXIT_OPKG_BUSY
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -117,8 +122,15 @@ _WEBIF_UP = "wget -q -O /dev/null http://127.0.0.1/api/statusinfo"
 # follows OpenWebif's own authentication.)
 _HOOK_STATUS = "wget -S -O /dev/null http://127.0.0.1/mqttbridge 2>&1"
 _HTTP_STATUS = re.compile(r"HTTP/\d(?:\.\d)?\s+(\d{3})")
-# opkg takes `/run/opkg.lock` even to answer `status`, and the image's own update check or
-# its plugin browser can be holding it. A refusal for that reason is asked again, briefly.
+# Whether opkg's lock is free is asked of the lock itself: `opkg status` does not take it
+# (measured on opkg 0.6.3, OpenViX 6.6 - exit 0 and normal output while another process
+# holds `/run/opkg.lock`), so it can never say "busy". The installer's helper takes every
+# lock opkg could be using, non-blocking, and lets go at once; it is sent on standard input
+# and run with `python3 -`, so nothing is copied onto the receiver. Exit 0 is free, the
+# helper's EXIT_OPKG_BUSY is held, anything else is a probe that could not run.
+_LOCK_PROBE = "python3 - --root / lock-probe"
+# opkg's own messages still decide one thing: an `opkg status` that does fail with them -
+# an image whose opkg does lock for `status` - is asked again, briefly, in the readbacks.
 # Only the two refusals that mean somebody else holds the lock right now and will let go:
 # opkg's own `Could not lock <path>: ...` and the image's `Command failed to capture privilege
 # lock`. `Could not create lock file ...` - the file or its directory - is a receiver that
@@ -224,7 +236,11 @@ async def async_uninstall(
     unverified = ""
     if credentials is not None:
         try:
-            before = await _async_read_before(credentials, connector)
+            # Read in an executor, as the installer reads it: a file read is blocking I/O.
+            helper_source = await hass.async_add_executor_job(
+                Path(installer_helper.__file__).read_bytes
+            )
+            before = await _async_read_before(credentials, connector, helper_source)
         except InstallerError as err:
             if err.code in (
                 InstallerErrorCode.RECORDING,
@@ -362,7 +378,11 @@ def _check_name(err: InstallerError) -> str:
 
 
 async def _run(
-    session: InstallerSession, command: str, *, timeout: float = 30
+    session: InstallerSession,
+    command: str,
+    *,
+    timeout: float = 30,
+    input: bytes | None = None,
 ) -> CommandResult:
     """Run one fixed read, turning every transport failure into an `InstallerError`.
 
@@ -371,7 +391,9 @@ async def _run(
     connection or a timeout is always named, before the command and after it.
     """
     try:
-        return await session.run(command, timeout=timeout)
+        if input is None:
+            return await session.run(command, timeout=timeout)
+        return await session.run(command, input=input, timeout=timeout)
     except TimeoutError as err:
         raise InstallerError(InstallerErrorCode.SSH_UNAVAILABLE, SSH_TIMED_OUT) from err
     except (OSError, asyncssh.Error) as err:
@@ -404,8 +426,30 @@ async def _async_close(session: InstallerSession) -> None:
         await session.close()
 
 
+async def _async_opkg_busy(session: InstallerSession, helper_source: bytes) -> bool:
+    """Return whether opkg's lock stays held through every retry.
+
+    Asked of the lock itself, not of opkg: `opkg status` does not take the lock, so it
+    answers normally while another opkg run holds it and can never say "busy" (measured on
+    opkg 0.6.3). The installer's helper takes every lock opkg could be using, non-blocking,
+    and lets go at once, exactly as it does around a snapshot. It travels on the SSH
+    session's standard input and runs from there - `python3 -` - so nothing is copied
+    onto the receiver. A probe that cannot run at all (no Python, a helper that fails)
+    raises, and costs the verification and nothing else: the command still goes.
+    """
+    for attempt in range(LOCK_RETRIES + 1):
+        result = await _run(session, _LOCK_PROBE, input=helper_source)
+        if result.exit_status == 0:
+            return False
+        if result.exit_status != EXIT_OPKG_BUSY:
+            raise InstallerError(InstallerErrorCode.PREFLIGHT_FAILED, "opkg lock probe")
+        if attempt < LOCK_RETRIES:
+            await asyncio.sleep(LOCK_RETRY_SECONDS)
+    return True
+
+
 async def _async_read_before(
-    credentials: SshCredentials, connector: Connector
+    credentials: SshCredentials, connector: Connector, helper_source: bytes
 ) -> _Before:
     """Read the guards and the facts the after-readbacks compare against."""
     session = await _async_session(credentials, connector)
@@ -429,17 +473,17 @@ async def _async_read_before(
                 f"{TIMER_GUARD_SECONDS // 60} minutes",
             )
         pids = await _async_pids(session)
-        installed, busy = await _async_opkg_status(session)
-        if busy:
+        installed, _locked = await _async_opkg_status(session)
+        if installed is None or f"Package: {PACKAGE}" not in installed.splitlines():
+            # A plugin opkg does not know about claims no capability and would refuse;
+            # if it did not, there would be nothing opkg could be shown to have removed.
+            raise InstallerError(InstallerErrorCode.PREFLIGHT_FAILED, "opkg status")
+        if await _async_opkg_busy(session, helper_source):
             # opkg's lock held through every retry: the image's own update check, or its
             # plugin browser. The plugin's removal would meet the same lock after it had
             # already retracted everything, and roll back. Refused here, before anything is
             # published, and nothing on the receiver changes.
             raise InstallerError(InstallerErrorCode.BUSY, "opkg lock held")
-        if installed is None or f"Package: {PACKAGE}" not in installed.splitlines():
-            # A plugin opkg does not know about claims no capability and would refuse;
-            # if it did not, there would be nothing opkg could be shown to have removed.
-            raise InstallerError(InstallerErrorCode.PREFLIGHT_FAILED, "opkg status")
         count, digest = await _async_settings_block(session)
         return _Before(pids, count, digest)
     finally:

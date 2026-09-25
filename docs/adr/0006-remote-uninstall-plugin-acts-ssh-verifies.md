@@ -103,16 +103,32 @@ block, computed on the receiver - and **after** it: a new interface process, Ope
 its status page (bounded), then `opkg status` empty, no opkg info file, no plugin directory, no
 `MQTTBridge` file anywhere under the Python tree, `/mqttbridge` answering 404, and the block's count
 and hash unchanged. A restart that never came is named and does not hide the other readbacks; the
-404 check, which only a restart settles, is then left out. A refusal of `opkg status` for its lock
-- and only for a lock somebody holds: opkg's `Could not lock <path>` or the image's `Command
-failed to capture privilege lock`; `Could not create lock file ...`, for the file or its directory,
-is a receiver that cannot take the lock at all and is not retried - is asked again, briefly. If
-the lock is still held before the command,
-the flow refuses there, „opkg on the receiver is busy", and publishes nothing: the plugin would meet
-the same lock after retracting everything, and roll back. Every SSH failure - a dropped connection
-or a timeout included, `pidof` among the before-reads as much as any other, before the
-command or after it - costs the verification and is named; it never ends the flow as „unknown".
-Every command is a fixed read; nothing is uploaded and the settings never leave the receiver.
+404 check, which only a restart settles, is then left out.
+
+🔴 **Whether opkg is busy is asked of its lock, not of opkg.** `opkg status`, `opkg info` and `opkg
+list-installed` do not take opkg's lock: measured on opkg 0.6.3 (OpenViX 6.6) with another process
+holding `/run/opkg.lock`, each exits 0 with its normal output. Only a command that changes the
+database takes it - `opkg remove` then fails with `Could not lock /run/opkg.lock` and `Command
+failed to capture privilege lock`. So among the before-reads the installer's own helper probes the
+lock directly: every lock file opkg could be using (`option lock_file`, else `/run/opkg.lock` and
+the older `/var/lock/opkg.lock`), a non-blocking `lockf` each, let go at once the way opkg lets
+go. The helper is fed on the SSH session's standard input to `python3 -`, so nothing is copied onto
+the receiver. A lock still held after five tries two seconds apart refuses the removal there, „opkg
+on the receiver is busy", and publishes nothing: the plugin would meet the same lock after
+retracting everything, and roll back. A probe that cannot run - no Python, a helper that fails -
+costs the verification and nothing else: the command still goes.
+
+opkg's own lock messages still decide one thing: an `opkg status` among the readbacks that fails
+with one of them - on an image whose opkg does lock for `status` - is asked again, briefly, and
+only for a lock somebody holds: opkg's `Could not lock <path>` or `Command failed to capture
+privilege lock`; `Could not create lock file ...`, for the file or its directory, is a receiver that
+cannot take the lock at all and is not retried.
+
+Every SSH failure - a dropped connection or a timeout included, `pidof` and the lock probe among
+the before-reads as much as any other, before the command or after it - costs the verification and
+is named; it never ends the flow as „unknown". Every command is a fixed read except the lock probe,
+which creates and removes opkg's lock file exactly as opkg does; nothing is uploaded and the
+settings never leave the receiver.
 
 ### 4. Seven endings, each named by what was seen
 
