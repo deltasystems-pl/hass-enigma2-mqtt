@@ -926,14 +926,24 @@ settings never leave it. After the receiver says `offline` it waits for the inte
 then for OpenWebif to answer, and reads that `opkg status` is empty, that no opkg info file, plugin
 directory, bytecode or OpenWebif hook file is left, that `/mqttbridge` answers 404, and that the
 settings block's count and hash are unchanged. A restart that never came does not stop the other
-readbacks; only the `/mqttbridge` check, which a restart is what settles, is left out. `opkg`
-takes its lock even to answer `status`, so a refusal for a lock somebody holds (`Could not lock <path>`, `Command failed to capture privilege lock`; not `Could not create lock file ...`) is
-asked again, up to five times two seconds apart, before it counts. 🔴 If the lock is still held
-before the command, the flow stops there with „opkg on the receiver is busy &mdash; try again in a few
-minutes" and publishes nothing: the plugin's own removal would meet the same lock after it had
-already retracted everything, and roll back. Every command is a fixed read, and an SSH connection
-that drops or times out, before the command or after it, costs the verification and nothing else
-- the sentence says so (`ssh (timed out)`, `ssh (connection lost)`).
+readbacks; only the `/mqttbridge` check, which a restart is what settles, is left out.
+
+🔴 **Whether opkg is busy is asked of its lock.** `opkg status` does not take opkg's lock - on opkg
+0.6.3 it answers normally while another opkg run holds it - so before the command the integration
+probes the lock itself: the installer's helper, fed to `python3 -` over the SSH session's standard
+input so nothing is copied onto the receiver, takes every lock file opkg could be using without
+waiting and lets go at once, as opkg does. If the lock is still held after five tries two seconds
+apart, the flow stops with „opkg on the receiver is busy &mdash; try again in a few minutes" and publishes
+nothing: the plugin's own removal would meet the same lock after it had already retracted
+everything, and roll back. A probe that cannot run (no Python on the image, say) costs the
+verification and nothing else - the command still goes. Among the readbacks, an `opkg status` that
+does fail for a lock somebody holds (`Could not lock <path>`, `Command failed to capture privilege
+lock`; not `Could not create lock file ...`) is asked again the same way before it counts.
+
+Every command is a fixed read - the lock probe creates and removes opkg's lock file exactly as
+opkg does, and nothing else - and an SSH connection that drops or times out, before the command or
+after it, costs the verification and nothing else; the sentence says so (`ssh (timed out)`, `ssh
+(connection lost)`).
 
 The flow ends on one of these, and never on a success nobody saw:
 

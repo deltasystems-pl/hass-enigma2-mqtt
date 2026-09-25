@@ -29,6 +29,7 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_mqtt_message,
 )
 
+from custom_components.enigma2_mqtt import installer_helper
 from custom_components.enigma2_mqtt.const import (
     CONF_BASE_TOPIC,
     CONF_CONFIRM_UNINSTALL,
@@ -81,6 +82,9 @@ REFUSAL = "an uninstall is already running"
 _UNINSTALL = "custom_components.enigma2_mqtt.uninstall"
 SETTINGS_HASH = "5" * 64
 _LOCK_REFUSAL = "Could not lock /run/opkg.lock: Resource temporarily unavailable."
+# The lock probe, exactly as the receiver is asked, and the helper it is fed on stdin.
+_LOCK_PROBE = "python3 - --root / lock-probe"
+_HELPER_SOURCE = Path(installer_helper.__file__).read_bytes()
 
 
 def _entry(*, credentials: bool = False) -> MockConfigEntry:
@@ -163,8 +167,13 @@ class FakeReceiver:
     settings_count_after: int = 3
     # How many `opkg status` calls before and after the removal find opkg's lock held,
     # and whether it fails after the removal for a reason that is not the lock.
+    # How many lock probes before the removal find opkg's lock held. As measured on
+    # opkg 0.6.3, `opkg status` never says: it answers normally while the lock is held.
     opkg_locked_before: int = 0
-    opkg_refusal_before: str = _LOCK_REFUSAL
+    # What the probe answers when it cannot run at all, and what it was fed.
+    probe_result: CommandResult | None = None
+    probe_inputs: list[bytes] = field(default_factory=list)
+    opkg_refusal_after: str = _LOCK_REFUSAL
     opkg_locked_after: int = 0
     opkg_broken_after: bool = False
     # What `pidof enigma2` answers before the removal, when not the pid.
@@ -204,8 +213,13 @@ class FakeSession:
         self, command: str, *, input: bytes | None = None, timeout: float = 30
     ) -> CommandResult:
         del timeout
-        # Every command here is a read: a verification that sends stdin is writing.
-        assert input is None
+        # Every command here is a read. The one that carries stdin is the lock probe,
+        # and what it carries is the installer's helper, run from there, never a file.
+        if command == _LOCK_PROBE:
+            assert input == _HELPER_SOURCE
+            self.receiver.probe_inputs.append(input)
+        else:
+            assert input is None
         receiver = self.receiver
         receiver.events.append(f"ssh:{command.split()[0]}")
         if receiver.drop_on is not None and receiver.drop_on in command:
@@ -225,15 +239,19 @@ class FakeSession:
             if not removed and receiver.pidof_before is not None:
                 return receiver.pidof_before
             return CommandResult(0, f"{receiver.pid}\n")
+        if command == _LOCK_PROBE:
+            if receiver.probe_result is not None:
+                return receiver.probe_result
+            if not removed and receiver.opkg_locked_before:
+                receiver.opkg_locked_before -= 1
+                return CommandResult(installer_helper.EXIT_OPKG_BUSY)
+            return CommandResult(0)
         if command.startswith("opkg status"):
             if not removed and receiver.opkg_blocked_before:
                 return CommandResult(255, "", "opkg: operation blocked by policy")
-            if not removed and receiver.opkg_locked_before:
-                receiver.opkg_locked_before -= 1
-                return CommandResult(255, "", receiver.opkg_refusal_before)
             if removed and receiver.opkg_locked_after:
                 receiver.opkg_locked_after -= 1
-                return CommandResult(255, "", _LOCK_REFUSAL)
+                return CommandResult(255, "", receiver.opkg_refusal_after)
             if removed and receiver.opkg_broken_after:
                 return CommandResult(255, "", "opkg: cannot read /var/lib/opkg/status")
             if not receiver.installed:
@@ -646,7 +664,14 @@ async def test_with_credentials_every_readback_passing_is_verified(
     command_at = events.index("mqtt:cmd/uninstall")
     before, after = events[:command_at], events[command_at + 1 :]
     # The guards, the pids, the package and the settings block before the command...
-    assert before == ["ssh:wget", "ssh:wget", "ssh:pidof", "ssh:opkg", "ssh:grep"]
+    assert before == [
+        "ssh:wget",
+        "ssh:wget",
+        "ssh:pidof",
+        "ssh:opkg",
+        "ssh:python3",
+        "ssh:grep",
+    ]
     # ...and after it the restart first, OpenWebif up, then every absence and the block.
     assert after == [
         "ssh:pidof",
@@ -1190,7 +1215,9 @@ async def test_opkg_busy_before_the_command_refuses_without_publishing(
     assert result["reason"] == "busy"
     assert received == []
     assert _uninstall_publishes(mqtt_mock) == []
-    assert receiver.events.count("ssh:opkg") == 6
+    # opkg itself answered once and normally; the lock was asked six times.
+    assert receiver.events.count("ssh:opkg") == 1
+    assert receiver.events.count("ssh:python3") == 6
 
 
 async def test_opkg_briefly_busy_before_the_command_is_asked_again(
@@ -1769,7 +1796,7 @@ async def test_an_announcement_retracted_just_before_the_command_completes_the_s
 
 
 @pytest.mark.parametrize(
-    ("refusal", "busy"),
+    ("refusal", "retried"),
     [
         ("Could not lock /run/opkg.lock: Resource temporarily unavailable.", True),
         ("Command failed to capture privilege lock", True),
@@ -1778,15 +1805,69 @@ async def test_an_announcement_retracted_just_before_the_command_completes_the_s
     ],
     ids=["held_lock", "privilege_lock", "no_lock_file", "no_lock_directory"],
 )
-async def test_only_a_held_lock_is_busy(
+async def test_only_a_held_lock_is_asked_again_in_the_readbacks(
     hass: HomeAssistant,
     mqtt_mock,
     permitted: dict[str, str | bytes],
     refusal: str,
-    busy: bool,
+    retried: bool,
 ) -> None:
-    """A lock somebody holds is waited for; a lock that cannot be created is not."""
-    receiver = FakeReceiver(opkg_locked_before=99, opkg_refusal_before=refusal)
+    """opkg's own lock messages, where an opkg that locks for `status` gives them.
+
+    A lock somebody holds is asked again; a lock that cannot be created is not, because
+    asking again does not create it.
+    """
+    receiver = FakeReceiver(opkg_locked_after=99, opkg_refusal_after=refusal)
+    entry = _entry(credentials=True)
+    await async_setup_box(hass, entry)
+    await _arm_box(hass, "uninstall", receiver=receiver)
+
+    with patch("custom_components.enigma2_mqtt.uninstall._async_connect", receiver.connect):
+        result = await _confirm(hass, await _open_uninstall(hass, entry))
+
+    assert result["reason"] == "uninstall_not_verified"
+    assert result["description_placeholders"]["detail"] == "opkg status"
+    # Once before the command, then once or six times after it.
+    assert receiver.events.count("ssh:opkg") == 1 + (6 if retried else 1)
+
+
+# ------------------------------------------------------------------ the lock probe
+
+
+async def test_the_lock_is_asked_of_the_lock_not_of_opkg_status(
+    hass: HomeAssistant,
+    mqtt_mock,
+    permitted: dict[str, str | bytes],
+) -> None:
+    """The probe is the installer's own helper, fed on stdin; nothing lands on the box."""
+    receiver = FakeReceiver()
+    entry = _entry(credentials=True)
+    await async_setup_box(hass, entry)
+    await _arm_box(hass, "uninstall", receiver=receiver)
+
+    with patch("custom_components.enigma2_mqtt.uninstall._async_connect", receiver.connect):
+        result = await _confirm(hass, await _open_uninstall(hass, entry))
+
+    assert result["reason"] == "uninstall_verified"
+    assert receiver.probe_inputs == [_HELPER_SOURCE]
+
+
+@pytest.mark.parametrize(
+    "probe",
+    [
+        CommandResult(127, "", "sh: python3: not found"),
+        CommandResult(1, "", "Traceback (most recent call last): OSError: [Errno 37] No locks"),
+    ],
+    ids=["no_python", "helper_fails"],
+)
+async def test_a_probe_that_cannot_run_costs_only_the_verification(
+    hass: HomeAssistant,
+    mqtt_mock,
+    permitted: dict[str, str | bytes],
+    probe: CommandResult,
+) -> None:
+    """Not knowing whether opkg is busy is not a reason to refuse; the command goes."""
+    receiver = FakeReceiver(probe_result=probe)
     entry = _entry(credentials=True)
     await async_setup_box(hass, entry)
     received = await _arm_box(hass, "uninstall", receiver=receiver)
@@ -1794,13 +1875,32 @@ async def test_only_a_held_lock_is_busy(
     with patch("custom_components.enigma2_mqtt.uninstall._async_connect", receiver.connect):
         result = await _confirm(hass, await _open_uninstall(hass, entry))
 
-    if busy:
-        assert result["reason"] == "busy"
-        assert received == []
-        assert receiver.events.count("ssh:opkg") == 6
-    else:
-        # Asked once, not retried, and only the verification is lost.
-        assert received == [NODE_ID]
-        assert result["reason"] == "uninstall_not_verified"
-        assert result["description_placeholders"]["detail"] == "opkg status"
-        assert receiver.events.count("ssh:opkg") == 1
+    assert received == [NODE_ID]
+    assert result["reason"] == "uninstall_not_verified"
+    assert result["description_placeholders"]["detail"] == "opkg lock probe"
+
+
+@pytest.mark.parametrize(
+    ("failure", "detail"),
+    [("drop_on", "ssh (connection lost)"), ("timeout_on", "ssh (timed out)")],
+    ids=["drop", "timeout"],
+)
+async def test_an_ssh_failure_during_the_probe_costs_only_the_verification(
+    hass: HomeAssistant,
+    mqtt_mock,
+    permitted: dict[str, str | bytes],
+    failure: str,
+    detail: str,
+) -> None:
+    """The probe is one more SSH read, and fails like one."""
+    receiver = FakeReceiver(**{failure: "lock-probe"})
+    entry = _entry(credentials=True)
+    await async_setup_box(hass, entry)
+    received = await _arm_box(hass, "uninstall", receiver=receiver)
+
+    with patch("custom_components.enigma2_mqtt.uninstall._async_connect", receiver.connect):
+        result = await _confirm(hass, await _open_uninstall(hass, entry))
+
+    assert received == [NODE_ID]
+    assert result["reason"] == "uninstall_not_verified"
+    assert result["description_placeholders"]["detail"] == detail

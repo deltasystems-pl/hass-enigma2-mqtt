@@ -362,6 +362,23 @@ def _lock(root: Path, wait: float):
             _release_opkg_lock(path, descriptor)
 
 
+def probe_opkg_lock(root: Path) -> bool:
+    """Return whether opkg's lock is free right now, taking and releasing it at once.
+
+    One attempt, no wait: every lock opkg could be using is taken with a non-blocking
+    `lockf` and let go the way opkg lets go, so a probe on a free receiver leaves it as
+    it found it. Asking opkg instead tells nothing: `opkg status`, `opkg info` and `opkg
+    list-installed` do not take the lock at all (measured on opkg 0.6.3, OpenViX 6.6).
+    A lock file that lost its name while it was held means an opkg run was letting go or
+    starting in that instant, which is busy too.
+    """
+    try:
+        with _lock(root, 0.0):
+            return True
+    except (OpkgBusyError, OpkgLockLostError):
+        return False
+
+
 def _webif_bytecode_files(root: Path) -> list[Path]:
     """Return every compiled copy of the OpenWebif hook, in both locations.
 
@@ -884,7 +901,16 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "operation",
-        choices=("snapshot", "restore", "verify", "claim", "release", "prune", "identity"),
+        choices=(
+            "snapshot",
+            "restore",
+            "verify",
+            "claim",
+            "release",
+            "prune",
+            "identity",
+            "lock-probe",
+        ),
     )
     parser.add_argument("path", type=Path, nargs="?")
     parser.add_argument("--root", type=Path, default=Path("/"))
@@ -896,6 +922,9 @@ def main() -> int:
     args = parser.parse_args()
     if args.operation == "identity":
         print(json.dumps(read_identity(args.root), sort_keys=True))
+    elif args.operation == "lock-probe":
+        # The same status a busy snapshot or restore exits with: "opkg is busy".
+        return 0 if probe_opkg_lock(args.root) else EXIT_OPKG_BUSY
     elif args.path is None:
         parser.error("path is required for this operation")
     elif args.operation == "claim":
