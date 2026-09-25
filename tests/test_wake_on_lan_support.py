@@ -162,6 +162,32 @@ async def test_every_language_says_what_wakes_the_receiver_instead(
     )
 
 
+HDMI_CEC_HEDGE = {
+    "en": "on some receivers also by switching on a TV connected over HDMI",
+    "pl": "a na niektórych dekoderach także włączeniem telewizora podłączonego przez HDMI",
+    "de": "bei manchen Receivern auch durch Einschalten eines über HDMI angeschlossenen Fernsehers",
+}
+
+
+@pytest.mark.parametrize("language", ["en", "pl", "de"])
+async def test_every_language_names_hdmi_cec_as_a_way_to_wake(
+    hass: HomeAssistant, language: str
+) -> None:
+    """Some receivers that ignore the magic packet still wake when the TV is switched on.
+
+    With HDMI-CEC on, switching on a TV connected over HDMI brought one receiver out of
+    deep standby. Whether it works depends on the receiver, so the text on both buttons
+    names it as something some receivers do, beside the remote, the front button and a
+    timer.
+    """
+    translations = await async_get_translations(hass, language, "entity", [DOMAIN])
+    prefix = f"component.{DOMAIN}.entity.button"
+    for key in ("deep_standby", "wake"):
+        text = translations[f"{prefix}.{key}.state_attributes.wake_on_lan.state.not_supported"]
+        assert HDMI_CEC_HEDGE[language] in text
+        assert "HDMI-CEC" in text
+
+
 def test_neither_button_is_renamed_in_any_language() -> None:
     """On a Polish installation the entity id comes from the Polish name.
 

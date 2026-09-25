@@ -215,7 +215,7 @@
           "wake_on_lan": {
             "name": "Wake-on-LAN",
             "state": {
-              "not_supported": "Nicht unterstützt: Dieser Receiver lässt sich aus dem Tiefschlaf nicht über das Netzwerk wecken, nur mit der Fernbedienung, der Taste an der Front oder einem Timer"
+              "not_supported": "Nicht unterstützt: Dieser Receiver lässt sich aus dem Tiefschlaf nicht über das Netzwerk wecken, nur mit der Fernbedienung, der Taste an der Front oder einem Timer, und bei manchen Receivern auch durch Einschalten eines über HDMI angeschlossenen Fernsehers, wenn HDMI-CEC aktiv ist"
             }
           }
         }
@@ -232,7 +232,7 @@
           "wake_on_lan": {
             "name": "Wake-on-LAN",
             "state": {
-              "not_supported": "Nicht unterstützt: Das Magic Packet wird gesendet, aber dieser Receiver wacht dadurch nicht aus dem Tiefschlaf auf, nur mit der Fernbedienung, der Taste an der Front oder einem Timer"
+              "not_supported": "Nicht unterstützt: Das Magic Packet wird gesendet, aber dieser Receiver wacht dadurch nicht aus dem Tiefschlaf auf, nur mit der Fernbedienung, der Taste an der Front oder einem Timer, und bei manchen Receivern auch durch Einschalten eines über HDMI angeschlossenen Fernsehers, wenn HDMI-CEC aktiv ist"
             }
           }
         }

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **"Głębokie uśpienie" and "Obudź (WoL)" name one more way to wake the receiver.** Where the
+  receiver reports that it cannot be woken over the network, the `wake_on_lan` attribute's text
+  now adds that some receivers also wake when a TV connected over HDMI is switched on, if
+  HDMI-CEC is on, beside the remote, the front button and a timer. Whether it works depends on
+  the receiver's front processor and its CEC settings; it was seen on one receiver. In English,
+  Polish and German; no entity is renamed.
+
 ### Documentation
 
 - [ADR-0007](docs/adr/0007-entity-ids-follow-the-installation-language.md) supersedes the

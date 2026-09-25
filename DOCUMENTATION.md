@@ -613,9 +613,10 @@ answer - whether it found a switch to arm Wake-on-LAN for deep standby - and not
 card's `Supports Wake-on`, which describes a suspend path these images do not take. Where it is
 `false`, both buttons carry the attribute `wake_on_lan` with the value `not_supported`, for
 automations and dashboards to read. Its translation, „Wake-on-LAN" followed by a sentence in the
-household's language, says that from deep standby that receiver is woken only by its remote, its
-front button or a timer, and on „Obudź (WoL)" that the magic packet is still sent but will not
-wake it. Home Assistant shows it only to administrators, under ⋮ -> Details in the button's
+household's language, says that from deep standby that receiver is woken only by its remote,
+its front button or a timer, and on some receivers also by switching on a TV connected over
+HDMI, if HDMI-CEC is on. On „Obudź (WoL)" it adds that the magic packet is still sent but will
+not wake it. Home Assistant shows it only to administrators, under ⋮ -> Details in the button's
 dialog: a button has no control of its own there, and that menu is drawn for administrators
 alone. The same applies to `media_player.turn_on` and `remote.turn_on` while the box is in deep
 standby, which send the same packet. A button has no description of its own in Home Assistant,
