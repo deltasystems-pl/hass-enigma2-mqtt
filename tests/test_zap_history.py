@@ -60,6 +60,7 @@ from .conftest import (
     BASE_TOPIC,
     BOUQUET_TOPIC,
     CHANNELS,
+    CHANNELS_TOPIC,
     INFO,
     INFO_TOPIC,
     LAST_ERROR_TOPIC,
@@ -483,13 +484,17 @@ async def test_a_payload_that_is_not_json_keeps_the_last_list(
     assert options(hass, HISTORY_SELECT) == ["TVP 1 HD", "TVN HD"]
 
 
-async def test_entries_that_cannot_be_read_are_dropped_not_raised(
+async def test_entries_that_cannot_be_tuned_are_dropped_not_raised(
     hass: HomeAssistant,
     mqtt_mock,
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """The payload is the receiver's; an entry without a name or a reference is no row."""
+    """The payload is the receiver's; an entry without a reference is no row.
+
+    An entry without a name is still a channel in the history, so it stays - here under
+    the name the channel list gives the same service.
+    """
     capable(box_on_the_broker)
     box_on_the_broker[ZAP_HISTORY_TOPIC] = json.dumps(
         {
@@ -501,7 +506,7 @@ async def test_entries_that_cannot_be_read_are_dropped_not_raised(
     )
     await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
 
-    assert options(hass, HISTORY_SELECT) == ["TVP 1 HD"]
+    assert options(hass, HISTORY_SELECT) == ["TVP 1 HD", "TVN HD"]
     box: Enigma2Box = config_entry.runtime_data
     assert box.state.zap_history["current"] is None
     assert box.state.zap_history["limit"] is None
@@ -932,11 +937,15 @@ async def test_a_reason_on_another_command_changes_nothing(
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """Only a command that asked for its codes gets them; a zap stays in the box's words."""
+    """A code the command does not define stays in the box's words.
+
+    `too_short` is the clear button's; on a history zap it is not a code this command
+    translates, so the receiver's sentence is what the household reads.
+    """
     capable(box_on_the_broker)
     box_on_the_broker[ZAP_HISTORY_TOPIC] = history(TVP, TVN)
     await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
-    await _arm_refusal(hass, "zap_history", "the receiver is playing a recording", "playback")
+    await _arm_refusal(hass, "zap_history", "the receiver said something else", "too_short")
 
     with pytest.raises(HomeAssistantError) as raised:
         await _select(hass, HISTORY_SELECT, "TVN HD")
@@ -1045,3 +1054,195 @@ def test_the_polish_names_give_the_ids_the_operator_expects() -> None:
         slugify(entity["button"]["history_clear"]["name"])
         == "wyczysc_ostatnio_ogladane"
     )
+
+
+# ------------------------------------------------------------------- follow-ups
+
+
+async def test_before_the_channel_list_arrives_the_filtered_select_is_empty(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Nothing can be checked yet, so nothing shows; and nothing is called missing.
+
+    Then the channel list arrives and the same history is filtered against it.
+    """
+    capable(box_on_the_broker)
+    del box_on_the_broker[CHANNELS_TOPIC]
+    box_on_the_broker[ZAP_HISTORY_TOPIC] = history(TVP, EURO)
+    box_on_the_broker[SERVICE_TOPIC] = playing(SREF, "TVP 1 HD")
+    entry = hiding(config_entry, SPORT["name"])
+    enable_the_unfiltered_select(hass, entry)
+    caplog.set_level(logging.WARNING)
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+
+    state = hass.states.get(HISTORY_SELECT)
+    assert state.attributes[ATTR_OPTIONS] == []
+    assert state.state == STATE_UNKNOWN
+    assert options(hass, HISTORY_ALL_SELECT) == ["TVP 1 HD", "Eurosport 1"]
+    assert "is hidden from the zap history" not in caplog.text
+
+    async_fire_mqtt_message(hass, CHANNELS_TOPIC, json.dumps(CHANNELS))
+    await hass.async_block_till_done()
+
+    assert options(hass, HISTORY_SELECT) == ["TVP 1 HD"]
+    assert hass.states.get(HISTORY_SELECT).state == "TVP 1 HD"
+
+
+async def test_a_changed_channel_list_filters_the_history_again(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A channel added to the hidden bouquet on the receiver leaves the list at once."""
+    capable(box_on_the_broker)
+    box_on_the_broker[ZAP_HISTORY_TOPIC] = history(TVP, TVN)
+    entry = hiding(config_entry, SPORT["name"])
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+    assert options(hass, HISTORY_SELECT) == ["TVP 1 HD", "TVN HD"]
+
+    edited = json.loads(json.dumps(CHANNELS))
+    edited["bouquets"][1]["channels"].append({"sref": SREF_TWO, "name": "TVN HD"})
+    async_fire_mqtt_message(hass, CHANNELS_TOPIC, json.dumps(edited))
+    await hass.async_block_till_done()
+
+    assert options(hass, HISTORY_SELECT) == ["TVP 1 HD"]
+
+
+async def test_membership_is_checked_against_every_published_bouquet(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """"Bouquets to offer" narrows the controls, not what the hide option can see.
+
+    Offered: Ulubione only. Hidden: Sport. The Sport copy of "TVN HD", reached through
+    Ulubione, is still hidden; a channel reached through Filmy - published, not
+    offered, not hidden - still shows.
+    """
+    filmy_bouquet = '1:7:1:0:0:0:0:0:0:0:FROM BOUQUET "userbouquet.filmy.tv" ORDER BY bouquet'
+    film_sref = "1:0:19:8181:3F3:1:C00000:0:0:0:"
+    with_filmy = json.loads(json.dumps(CHANNELS))
+    with_filmy["bouquets"].append(
+        {"name": "Filmy", "sref": filmy_bouquet, "channels": [{"sref": film_sref, "name": "Kino"}]}
+    )
+    capable(box_on_the_broker)
+    box_on_the_broker[CHANNELS_TOPIC] = json.dumps(with_filmy)
+    box_on_the_broker[ZAP_HISTORY_TOPIC] = history(
+        TVP, TVN_SPORT_VIA_ULUBIONE, EURO, _entry(film_sref, "Kino", filmy_bouquet, "Filmy")
+    )
+    entry = MockConfigEntry(
+        domain=config_entry.domain,
+        title=config_entry.title,
+        unique_id=config_entry.unique_id,
+        data=dict(config_entry.data),
+        options={HIDDEN_OPTION: [SPORT["name"]], "bouquets": [ULUBIONE["name"]]},
+    )
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+
+    assert options(hass, HISTORY_SELECT) == ["TVP 1 HD", "Kino"]
+
+
+@pytest.mark.parametrize("language", ["pl", "de", "en"])
+async def test_an_entry_without_a_name_keeps_its_place(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    language: str,
+) -> None:
+    """The options are exactly the history: a nameless entry gets a label, not a gap.
+
+    The name the channel list gives the same service if there is one, otherwise a
+    placeholder in the installation's language that carries the reference.
+    """
+    hass.config.language = language
+    unknown_sref = "1:0:19:9A9A:3F3:1:C00000:0:0:0:"
+    capable(box_on_the_broker)
+    box_on_the_broker[ZAP_HISTORY_TOPIC] = history(
+        {**TVN, "name": None},
+        _entry(unknown_sref, None, ULUBIONE["sref"], ULUBIONE["name"]),
+        TVP,
+    )
+    enable_the_unfiltered_select(hass, config_entry)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    placeholder = {
+        "pl": "Kanał bez nazwy (1:0:19:9A9A:3F3:1:C00000:0:0:0)",
+        "de": "Sender ohne Namen (1:0:19:9A9A:3F3:1:C00000:0:0:0)",
+        "en": "Unnamed channel (1:0:19:9A9A:3F3:1:C00000:0:0:0)",
+    }[language]
+    # The entity ids follow the installation's language, so they are looked up.
+    registry = er.async_get(hass)
+    filtered, unfiltered = (
+        registry.async_get_entity_id("select", DOMAIN, f"{NODE_ID}_{key}")
+        for key in ("zap_history", "zap_history_all")
+    )
+    for entity_id in (filtered, unfiltered):
+        assert options(hass, entity_id) == ["TVN HD", placeholder, "TVP 1 HD"]
+
+    await async_arm_box_reply(hass, "zap_history", SERVICE_TOPIC, playing(unknown_sref, ""))
+    await _select(hass, filtered, placeholder)
+    assert_published(
+        mqtt_mock, command_topic("zap_history"), json.dumps({"sref": unknown_sref})
+    )
+
+
+async def test_a_history_zap_refused_during_playback_is_translated(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """`cmd/zap_history` has one reason code, and it is read in the household's language."""
+    capable(box_on_the_broker)
+    box_on_the_broker[ZAP_HISTORY_TOPIC] = history(TVP, TVN)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    await _arm_refusal(hass, "zap_history", "a recording is being played back", "playback")
+
+    with pytest.raises(HomeAssistantError) as raised:
+        await _select(hass, HISTORY_SELECT, "TVN HD")
+    assert raised.value.translation_key == "zap_history_playback"
+
+
+async def test_a_history_zap_without_a_code_is_the_boxs_own_sentence(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The channel leaving the history carries no code; the sentence is the answer."""
+    capable(box_on_the_broker)
+    box_on_the_broker[ZAP_HISTORY_TOPIC] = history(TVP, TVN)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    await _arm_refusal(
+        hass, "zap_history", "that channel is no longer in the receiver's zap history", None
+    )
+
+    with pytest.raises(HomeAssistantError) as raised:
+        await _select(hass, HISTORY_SELECT, "TVN HD")
+    assert raised.value.translation_key == "command_refused"
+
+
+def test_the_screen_open_refusal_names_what_is_open_in_every_language() -> None:
+    """A menu, the channel list or the EPG - the household has to know which to close."""
+    from pathlib import Path  # noqa: PLC0415
+
+    component = Path(__file__).parent.parent / "custom_components" / "enigma2_mqtt"
+    expected = {
+        "strings.json": ("menu", "channel list", "EPG"),
+        "translations/en.json": ("menu", "channel list", "EPG"),
+        "translations/pl.json": ("menu", "lista kanałów", "EPG"),
+        "translations/de.json": ("Menü", "Senderliste", "EPG"),
+    }
+    for name, words in expected.items():
+        strings = json.loads((component / name).read_text(encoding="utf-8"))
+        message = strings["exceptions"]["history_clear_screen_open"]["message"]
+        for word in words:
+            assert word in message, f"{name}: {word}"
+        assert strings["exceptions"]["zap_history_playback"]["message"].strip()

@@ -51,6 +51,7 @@ from .const import (
     TOPIC_CHANNELS,
     TOPIC_SERVICE,
     TOPIC_ZAP_HISTORY,
+    ZAP_HISTORY_REASONS,
 )
 from .entity import Enigma2Entity, OptionalEntities
 from .services import async_select_bouquet
@@ -61,6 +62,16 @@ KEY_BOUQUET = "bouquet"
 KEY_CHANNEL = "channel"
 KEY_ZAP_HISTORY = "zap_history"
 KEY_ZAP_HISTORY_ALL = "zap_history_all"
+
+# The label of a history entry whose name the receiver could not resolve and no
+# published bouquet knows either. An option is a plain string Home Assistant does not
+# translate, so the language is picked here, from the installation's own; the service
+# reference in brackets keeps two such entries apart and says which channel it is.
+UNNAMED_CHANNEL: dict[str, str] = {
+    "pl": "Kanał bez nazwy ({sref})",
+    "de": "Sender ohne Namen ({sref})",
+    "en": "Unnamed channel ({sref})",
+}
 
 # What a box has to name before either select is worth creating: the channel list to
 # build the options from, and the channel-list context that says which of them is live
@@ -331,11 +342,30 @@ class Enigma2ZapHistorySelect(Enigma2Select):
 
     @callback
     def _async_read_state(self) -> None:
-        """Rebuild the list from the history, and mark what is playing inside it."""
+        """Rebuild the list from the history, and mark what is playing inside it.
+
+        Every entry is an option, a nameless one included: the options are exactly the
+        receiver's history. An entry the receiver sent without a name is labelled with
+        the name a published bouquet gives the same service, or, failing that, with a
+        readable placeholder carrying its reference.
+        """
         self._set_options(
-            _named_entries(self.box.zap_history_entries(filtered=self._filtered)),
+            [
+                (self._label(entry), entry["sref"])
+                for entry in self.box.zap_history_entries(filtered=self._filtered)
+            ],
             (self.box.state.service or {}).get("sref"),
         )
+
+    def _label(self, entry: dict[str, Any]) -> str:
+        """Return what the household reads for one history entry."""
+        if name := entry.get("name"):
+            return name
+        if name := self.box.published_channel_name(entry["sref"]):
+            return name
+        language = (self.hass.config.language if self.hass else "en") or "en"
+        template = UNNAMED_CHANNEL.get(language.split("-")[0], UNNAMED_CHANNEL["en"])
+        return template.format(sref=entry["sref"].rstrip(":"))
 
     async def async_select_option(self, option: str) -> None:
         """Go back to this channel the way the receiver's own screen does.
@@ -353,4 +383,5 @@ class Enigma2ZapHistorySelect(Enigma2Select):
             "zap_history",
             json.dumps({"sref": sref}),
             effect=lambda: same_service((box.state.service or {}).get("sref"), sref),
+            reasons=ZAP_HISTORY_REASONS,
         )

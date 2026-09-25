@@ -645,6 +645,7 @@
     "history_clear_pip": {"message": "Wyświetlany jest obraz w obrazie, a 0 działa na niego - lista nie zostałaby wyczyszczona."},
     "history_clear_playback": {"message": "Dekoder odtwarza nagranie. Zatrzymaj je i spróbuj ponownie."},
     "history_clear_not_cleared": {"message": "Dekoder nie wyczyścił listy ostatnio oglądanych."},
-    "history_clear_screen_open": {"message": "Na ekranie dekodera jest otwarte menu - zamknij je i spróbuj ponownie."}
+    "history_clear_screen_open": {"message": "Na ekranie dekodera jest otwarte menu, lista kanałów lub EPG - zamknij je i spróbuj ponownie."},
+    "zap_history_playback": {"message": "Dekoder odtwarza nagranie - zatrzymaj je i spróbuj ponownie."}
     }
   }

@@ -750,6 +750,9 @@ receiver names the `zap_history` capability, and a receiver that stops naming it
 - **The options are exactly the channels in that history**, in its order, numbered like
   „Kanał" when two carry the same name. Nothing is kept on this side: the history is the
   receiver's, holds at most twenty channels there, and a restart of its interface empties it.
+  An entry the receiver sends without a name keeps its place: it is labelled with the name
+  the channel list gives the same service, or, if no published bouquet has it, „Kanał bez
+  nazwy (...)" („Unnamed channel", „Sender ohne Namen") with its service reference.
 - **The state is the channel playing now**, matched to `service` by identity, when it is one of
   the options. Since plugin 0.3.0 nearly every zap - from the remote, „Kanał", the media player
   or the `zap` action - enters the history, so that is normally the first option. It is
@@ -761,6 +764,9 @@ receiver names the `zap_history` capability, and a receiver that stops naming it
   receiver's own History Zap screen makes, so the channel moves to the front - and waits for
   `service` to name it. Choosing what is already playing sends nothing. From standby the
   receiver wakes first. The history screen has no timeshift question, so neither does this.
+  The receiver refuses while it is playing back a recording, and that refusal is shown in
+  the household's language; a channel that has left the history in the meantime is refused
+  in the receiver's own words.
 - **„Ostatnio oglądane" leaves out** the bouquets named in the
   [option](#options); with the option empty the two lists are the same. It never has a hidden
   channel as its state, because its state can only be one of its options.

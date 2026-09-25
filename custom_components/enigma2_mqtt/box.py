@@ -1799,8 +1799,10 @@ class Enigma2Box:
     def _normalize_zap_history(payload: dict[str, Any]) -> dict[str, Any]:
         """Strip an untrusted `zap_history` payload to the four fields of the contract.
 
-        An entry is kept only with a name and a reference, because a row with either
-        missing is a row nobody can read or nothing can tune. `bouquet` and
+        An entry is kept whenever it has a reference: the list has to be exactly the
+        receiver's history, so an entry whose name the receiver could not resolve stays,
+        with `name` `None`, and the selects give it a label of their own. An entry with
+        no reference is dropped, because nothing could tune it. `bouquet` and
         `bouquet_name` are `None` unless they are non-empty strings: an entry with no
         path, a radio bouquet or one the plugin does not publish all say `null`, and
         the filter treats every one of them alike. `True` is an `int` in Python and is
@@ -1824,7 +1826,7 @@ class Enigma2Box:
                 continue
             sref = text(item.get("sref"))
             name = text(item.get("name"))
-            if sref is None or name is None:
+            if sref is None:
                 continue
             entries.append(
                 {
@@ -1841,6 +1843,17 @@ class Enigma2Box:
             "limit": whole(payload.get("limit")),
             "panic_button": panic_button if isinstance(panic_button, bool) else None,
         }
+
+    def published_channel_name(self, sref: Any) -> str | None:
+        """Return the name a published bouquet gives this service, by identity, if any."""
+        for bouquet in self.published_bouquets:
+            for channel in bouquet["channels"]:
+                if not isinstance(channel, dict):
+                    continue
+                name = channel.get("name")
+                if isinstance(name, str) and name and same_service(channel.get("sref"), sref):
+                    return name
+        return None
 
     @property
     def zap_history_panic_button(self) -> bool | None:

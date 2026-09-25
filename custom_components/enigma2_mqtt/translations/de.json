@@ -645,6 +645,7 @@
     "history_clear_pip": {"message": "Bild-in-Bild wird angezeigt, und die 0 wirkt darauf - der Verlauf würde nicht geleert."},
     "history_clear_playback": {"message": "Der Receiver spielt eine Aufnahme ab. Beende sie und versuche es erneut."},
     "history_clear_not_cleared": {"message": "Der Receiver hat seinen Verlauf nicht geleert."},
-    "history_clear_screen_open": {"message": "Auf dem Bildschirm des Receivers ist ein Menü geöffnet - schließe es und versuche es erneut."}
+    "history_clear_screen_open": {"message": "Auf dem Bildschirm des Receivers ist ein Menü, die Senderliste oder der EPG geöffnet - schließe es und versuche es erneut."},
+    "zap_history_playback": {"message": "Der Receiver spielt eine Aufnahme ab - beende sie und versuche es erneut."}
     }
   }
