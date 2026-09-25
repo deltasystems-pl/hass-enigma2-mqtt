@@ -241,7 +241,7 @@
           "wake_on_lan": {
             "name": "Wake-on-LAN",
             "state": {
-              "not_supported": "Not supported: this receiver cannot be woken over the network from deep standby, only by its remote, its front button or a timer"
+              "not_supported": "Not supported: this receiver cannot be woken over the network from deep standby, only by its remote, its front button or a timer, and on some receivers also by switching on a TV connected over HDMI, if HDMI-CEC is on"
             }
           }
         }
@@ -258,7 +258,7 @@
           "wake_on_lan": {
             "name": "Wake-on-LAN",
             "state": {
-              "not_supported": "Not supported: the magic packet is sent, but this receiver cannot be woken by it from deep standby, only by its remote, its front button or a timer"
+              "not_supported": "Not supported: the magic packet is sent, but this receiver cannot be woken by it from deep standby, only by its remote, its front button or a timer, and on some receivers also by switching on a TV connected over HDMI, if HDMI-CEC is on"
             }
           }
         }

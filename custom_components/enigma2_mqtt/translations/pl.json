@@ -215,7 +215,7 @@
           "wake_on_lan": {
             "name": "Wake-on-LAN",
             "state": {
-              "not_supported": "Nieobsługiwane: tego dekodera nie da się wybudzić z głębokiego uśpienia przez sieć, tylko pilotem, przyciskiem na panelu przednim albo timerem"
+              "not_supported": "Nieobsługiwane: tego dekodera nie da się wybudzić z głębokiego uśpienia przez sieć, tylko pilotem, przyciskiem na panelu przednim, timerem, a na niektórych dekoderach także włączeniem telewizora podłączonego przez HDMI, jeśli działa HDMI-CEC"
             }
           }
         }
@@ -232,7 +232,7 @@
           "wake_on_lan": {
             "name": "Wake-on-LAN",
             "state": {
-              "not_supported": "Nieobsługiwane: pakiet zostanie wysłany, ale ten dekoder nie obudzi się nim z głębokiego uśpienia, tylko pilotem, przyciskiem na panelu przednim albo timerem"
+              "not_supported": "Nieobsługiwane: pakiet zostanie wysłany, ale ten dekoder nie obudzi się nim z głębokiego uśpienia, tylko pilotem, przyciskiem na panelu przednim, timerem, a na niektórych dekoderach także włączeniem telewizora podłączonego przez HDMI, jeśli działa HDMI-CEC"
             }
           }
         }
