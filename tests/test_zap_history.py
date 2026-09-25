@@ -92,6 +92,7 @@ REASONS = (
     "pip",
     "playback",
     "not_cleared",
+    "screen_open",
 )
 
 HISTORY_SELECT = "select.dekoder_salon_recently_watched"

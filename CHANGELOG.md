@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **„Wyczyść ostatnio oglądane"** does what the remote's 0 key does with the receiver's
   panic-button setting on: it empties the history and switches to channel 1, the first channel
   of the first bouquet. Every case in which 0 would not clear - standby, the setting off, a
-  history of one channel, timeshift, picture-in-picture, a recording played back - is refused
+  history of one channel, timeshift, picture-in-picture, a recording played back, a menu open on the receiver - is refused
   with a message in the household's language, from a new optional `reason` code on
   `last_error`; the button is unavailable while the setting is off. The press is proved by a
   **new** history payload of at most one entry, never by a list that was already short.

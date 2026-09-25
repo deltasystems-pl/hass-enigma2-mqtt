@@ -667,7 +667,8 @@ each refusal carries a reason code that Home Assistant shows **in the household'
 standby; the panic-button setting off; a history of at most one channel; timeshift, where 0
 would ask on the television whether to leave it; the moment after timeshift during which the
 receiver holds zaps; picture-in-picture showing with 0 set to act on it; a recording being
-played back; and, defensively, a history that was still longer than one entry afterwards. A
+played back; a menu, the channel list or the EPG open on the receiver's screen, where the key
+would not reach the history; and, defensively, a history that was still longer than one entry afterwards. A
 code this release does not know, or none, is raised in the receiver's own English sentence.
 The press waits for a **new** `zap_history` payload holding at most one entry - not for the
 list to be short, which it already is before a press the receiver refuses for exactly that

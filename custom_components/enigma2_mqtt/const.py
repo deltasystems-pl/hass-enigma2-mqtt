@@ -313,6 +313,7 @@ HISTORY_CLEAR_REASONS: Final = (
     "pip",
     "playback",
     "not_cleared",
+    "screen_open",
 )
 
 # The four states the topic may report. Anything else is not part of the contract and

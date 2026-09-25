@@ -670,6 +670,7 @@
     "history_clear_zap_blocked": {"message": "The receiver is holding zaps for a moment after timeshift. Try again in a few seconds."},
     "history_clear_pip": {"message": "Picture-in-picture is showing and 0 is set to act on it, so the history would not be cleared."},
     "history_clear_playback": {"message": "A recording is being played back. Stop it and try again."},
-    "history_clear_not_cleared": {"message": "The receiver did not clear its zap history."}
+    "history_clear_not_cleared": {"message": "The receiver did not clear its zap history."},
+    "history_clear_screen_open": {"message": "A menu, the channel list or the EPG is open on the receiver's screen, where 0 would not reach the history. Close it and try again."}
     }
   }
