@@ -315,6 +315,10 @@ HISTORY_CLEAR_REASONS: Final = (
     "not_cleared",
     "screen_open",
 )
+# The one reason code `cmd/zap_history` refuses with; its other refusals (the channel
+# left the history, a malformed payload) carry no code and are shown in the receiver's
+# own words. Translated as `zap_history_<reason>`.
+ZAP_HISTORY_REASONS: Final = ("playback",)
 
 # The four states the topic may report. Anything else is not part of the contract and
 # is read as "it did not say".

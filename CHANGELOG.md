@@ -187,6 +187,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **„Ostatnio oglądane" and „(wszystkie)" list every entry of the receiver's history**,
+  including one the receiver sent without a name, labelled from the channel list or as
+  „Kanał bez nazwy (...)"; before, such an entry was left out. A history zap refused during
+  playback of a recording is shown in the household's language, and the Polish and German
+  texts of the „menu open" refusal now name the channel list and the EPG as the English one
+  does.
 - **One entity that fails on a message no longer stops the others from updating.** Every entity
   of a receiver is told about a message in turn, and an exception in one of them used to skip
   every entity after it for that message and put a traceback in the log on each message for as
