@@ -25,7 +25,8 @@ Supported: the latest release. There are no long-term support branches.
 ## What this integration handles
 
 **Broker credentials.** Give each receiver its own broker login, restricted by ACL to its own
-topics - the README has the snippet. The credential lives on the box, and most Enigma2 images
+topics - [DOCUMENTATION.md §3](DOCUMENTATION.md#3-configuration) has the snippet, and says
+why the Home Assistant Mosquitto add-on does not enforce it. The credential lives on the box, and most Enigma2 images
 ship with a default root password and an open telnet or SSH service, so treat the receiver as
 the least trusted device on the network and change that password.
 
@@ -41,8 +42,8 @@ over SSH to your receiver when you ask it to install or update the plugin. The o
 for a newer plugin release on GitHub is **off by default**. Nothing is reported anywhere.
 
 **Privacy of the topics.** The `key` and `epg` topics reveal what is watched and which buttons
-are pressed, and the screen image is a picture of the television. The README documents the
-recorder exclusions; key publishing can be switched off on the box.
+are pressed, and the screen image is a picture of the television. [DOCUMENTATION.md §10](DOCUMENTATION.md#10-privacy)
+documents the recorder exclusions; key publishing can be switched off on the box.
 
 ## Supply chain
 

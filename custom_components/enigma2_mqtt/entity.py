@@ -5,11 +5,11 @@ the availability rule are written once here rather than twenty-six times.
 
 Two decisions live in this file.
 
-**The unique id is `<node_id>_<key>`** and the key is the entity's translation key. That
-makes the English translation the definition of the entity id - Home Assistant derives
-an object id from the entity's name in the default language, not in the user's - so the
-Polish and German names can be anything a household would recognise without a single
-automation or template breaking.
+**The unique id is `<node_id>_<key>`** and the key is the entity's translation key, so it
+is the same in every language. The entity id is not: Home Assistant derives the object id
+from the entity's name in the installation's language when the entity is first
+registered, so every translation's name is load-bearing and an existing entity's name is
+never renamed in any of them.
 
 **An entity is unavailable when the box is offline, and also when the topic it reads
 has never arrived.** The plugin only publishes the feature areas it managed to hook on
