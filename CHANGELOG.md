@@ -7,30 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-25
+
+The release that follows the receiver plugin's own 0.3.0: the list of wants two days of household
+use produced, planned in [ADR-0003](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0003-control-feedback-and-household-features.md).
+
+0.2.0 made the receiver usable from Home Assistant and said why a control did nothing. This one
+adds what the plugin can now do: a button that restarts a stuck softcam, with an opt-in auto-heal;
+a button that runs the receiver's EPG import, and a sensor that follows every import; a discreet
+toast beside the popup, as a second notify entity and a `style` on the `message` action; what is on
+now and next across the bouquet the receiver is walking; what the enigma2 process itself is using;
+the receiver's own zap history, as two selects and a clear button; a note on the deep standby and
+Wake-on-LAN buttons when the receiver cannot be woken over the network; and a remote uninstall.
+The softcam restart, the EPG import and the uninstall each need a permission that is off as
+shipped and can only be set on the receiver's own setup screen, so an installation that changes
+nothing there is offered no new control the receiver would refuse (see [ADR-0005](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0005-softcam-restart.md)).
+
+**Removing the plugin is an explicit, confirmed action and a one-way door.** It is offered in
+*Configure* only while the receiver permits it; the receiver removes itself, and SSH, where the
+installer's credentials were kept, only verifies (see [ADR-0004](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0004-remote-uninstall.md) and [ADR-0006](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0006-remote-uninstall-plugin-acts-ssh-verifies.md)).
+Deleting a receiver's entry still never uninstalls anything.
+
+**A zap from Home Assistant now enters the receiver's zap history**, with plugin 0.3.0, and a
+channel chosen from outside the bouquet the receiver is walking moves the receiver's channel list
+to that channel's bouquet, as the remote's number entry does.
+
+**Popup text loses every backslash with plugin 0.3.0**, as toast text does: a literal
+`\n` in a `message` no longer breaks a line; send a real newline instead.
+
+The receiver plugin bundled with this release is byte for byte the package published as the
+plugin's own v0.3.0 release.
+
 ### Added
 
 - **The receiver's zap history** - the channels its own History Zap screen lists on NEXT and
   PREVIOUS - as two selects and a button, on a plugin that publishes it (capabilities
-  `zap_history` and `history_clear`, plugin 0.3.0). **„Ostatnio oglądane"** („Recently
+  `zap_history` and `history_clear`, plugin 0.3.0). **"Ostatnio oglądane"** ("Recently
   watched") offers exactly the channels in that history, newest first, shows the channel
   playing now when it is one of them, and goes back to one through `cmd/zap_history`, the call
-  the receiver's own screen makes. **„Ostatnio oglądane (wszystkie)"** is the same list with
+  the receiver's own screen makes. **"Ostatnio oglądane (wszystkie)"** is the same list with
   nothing hidden, **disabled by default**; once enabled its state - the channel playing now -
   is recorded like any state, which the documentation says and shows how to exclude.
-  **„Wyczyść ostatnio oglądane"** does what the remote's 0 key does with the receiver's
+  **"Wyczyść ostatnio oglądane"** does what the remote's 0 key does with the receiver's
   panic-button setting on: it empties the history and switches to channel 1, the first channel
   of the first bouquet. Every case in which 0 would not clear - standby, the setting off, a
   history of one channel, timeshift, picture-in-picture, a recording played back, a menu open on the receiver - is refused
   with a message in the household's language, from a new optional `reason` code on
   `last_error`; the button is unavailable while the setting is off. The press is proved by a
   **new** history payload of at most one entry, never by a list that was already short.
-- **Bouquets hidden from „Ostatnio oglądane"**, an option that leaves a bouquet's channels
+- **Bouquets hidden from "Ostatnio oglądane"**, an option that leaves a bouquet's channels
   out of that one select - also when they were reached through another bouquet, and, while
-  anything is hidden, every entry whose bouquet cannot be checked. „Ostatnio oglądane
-  (wszystkie)", „Kanał", „Bukiet" and the media player are untouched. It is a filter in Home
+  anything is hidden, every entry whose bouquet cannot be checked. "Ostatnio oglądane
+  (wszystkie)", "Kanał", "Bukiet" and the media player are untouched. It is a filter in Home
   Assistant: the receiver still publishes its whole history and every channel on the broker.
   Diagnostics summarise the history as a count, with no channel names or references.
-- **„Remove the plugin from the receiver" („Usuń wtyczkę z dekodera")**, a menu entry in the
+- **"Remove the plugin from the receiver" ("Usuń wtyczkę z dekodera")**, a menu entry in the
   receiver's *Configure*, offered only while the receiver is on the broker, states
   `uninstall_allowed: true` and claims the `uninstall` capability - a permission set on the
   receiver's own setup screen and off as shipped, so almost every installation sees *Configure*
@@ -41,24 +72,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after its subscriptions are confirmed, and watches for `info` and the announcement to be
   retracted before `offline`. Where the installer's SSH credentials were kept, SSH verifies: it
   reads before and after, including a hash of the receiver's plugin settings computed on the
-  receiver, and never writes. The flow ends on „removed and verified", „removed, not verified" with
-  the reason, „the receiver said it removed the plugin", „the receiver refused" with its own words,
-  „the receiver started the removal but aborted it" with its own words - which say what state
+  receiver, and never writes. The flow ends on "removed and verified", "removed, not verified" with
+  the reason, "the receiver said it removed the plugin", "the receiver refused" with its own words,
+  "the receiver started the removal but aborted it" with its own words - which say what state
   the package is in - once any retraction has arrived as the command was sent (not somebody
-  else's before it), even without the `offline`, „the removal did not
-  complete", or „the receiver did not act". The plugin says `offline` before it runs opkg, so the
+  else's before it), even without the `offline`, "the removal did not
+  complete", or "the receiver did not act". The plugin says `offline` before it runs opkg, so the
   flow keeps listening after it - through the SSH readbacks, or for the rest of the minute without
   them - and a receiver that comes back and says why ends it at once. A dropped or timed-out SSH
   connection only costs the verification, a restart that never came does not hide the other
   readbacks, the hook check waits for OpenWebif, and a briefly held opkg lock (a lock somebody holds, never one that cannot be created)
   is asked again; a lock still held before the command refuses the removal before anything is
-  published, „opkg on the receiver is busy &mdash; try again in a few minutes". That is asked of the lock
+  published, "opkg on the receiver is busy &mdash; try again in a few minutes". That is asked of the lock
   itself - the installer's helper, run from standard input, takes it without waiting and lets go -
   because `opkg status` does not take the lock and answers normally while another opkg run holds
   it (measured on opkg 0.6.3); a probe that cannot run only costs the verification. A
   receiver in `ha_mode: off`, which has no announcement to retract, is recognised by its `info`
   retraction and `offline`. Nothing about the entry changes, and nothing is reloaded.
-- **[ADR-0006](docs/adr/0006-remote-uninstall-plugin-acts-ssh-verifies.md)** supersedes ADR-0004's
+- **[ADR-0006](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0006-remote-uninstall-plugin-acts-ssh-verifies.md)** supersedes ADR-0004's
   transport decision: an `opkg remove` over SSH would skip the plugin's ordered retraction and leave
   every retained topic behind, so the plugin always acts and SSH only witnesses.
 - **What enigma2 itself is using** - memory, its high-water mark, threads, open files and when
@@ -67,8 +98,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   answer if it was already collecting; the rest are switched off until something is wrong. They
   appear whenever the receiver announces the capability, and a receiver that stops announcing it
   never loses them.
-- **„Restart softcam", a button that restarts the receiver's card-sharing client**, and a
-  „Softcam" diagnostic beside it. The household symptom is a channel that stops decoding;
+- **"Restart softcam", a button that restarts the receiver's card-sharing client**, and a
+  "Softcam" diagnostic beside it. The household symptom is a channel that stops decoding;
   underneath it, on images whose softcam binary has a long name, the image's own liveness
   check cannot recognise the process it started and adds another copy at every interface
   restart. The button stops every instance and starts exactly one, with the line the image
@@ -82,7 +113,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   seconds, at most once every ten minutes, and never while a recording is running or due -
   the same guard a manual press goes through, because a restart landing on the opening
   seconds of a recording is worse than a scrambled one.
-- 🔴 The button needs **two gates** and both are the receiver's. The **permission**
+- The button needs **two gates** and both are the receiver's. The **permission**
   `softcam_restart_allowed` is set on the receiver's own setup screen and refused over
   MQTT, as `deep_standby_allowed` already is: a setting that enables a command stays
   outside what anything with publish rights on the broker can reach. It is therefore not
@@ -92,27 +123,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and refuses the command, so no button is offered for it. A plugin that does not report
   the permission gets no button, and a receiver that has simply gone quiet keeps whatever
   it had.
-- **[ADR-0005](docs/adr/0005-softcam-restart.md) records both gates and the rule behind
+- **[ADR-0005](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0005-softcam-restart.md) records both gates and the rule behind
   them**, mirroring the plugin's own ADR-0005. The decision worth knowing about is that
-  „Created on X" no longer implies „removed on not-X" here: a control that would be
+  "Created on X" no longer implies "removed on not-X" here: a control that would be
   permanently refused is removed when its capability says so, and a diagnostic with a
   history is not, because deleting it takes the household's rename, area and recorded
   history with it and a quiet capability is not a decision anybody made.
-- **„EPG &ndash; aktywny bukiet", what is on now and next across the bouquet the receiver is
+- **"EPG &ndash; aktywny bukiet", what is on now and next across the bouquet the receiver is
   walking.** The state is how many of its channels have something to show; the `channels`
   attribute lists every channel of that bouquet with its programme now and next (title, begin
   and end), read from the grid the receiver already publishes for it. It follows the bouquet:
-  switching bouquets on the remote or through „Bukiet" switches the list, and a grid for any
+  switching bouquets on the remote or through "Bukiet" switches the list, and a grid for any
   other bouquet leaves it alone. Now and next follow the clock as well as the grid, so a
-  programme that has ended stops being „now" when it ends rather than at the next grid refresh.
+  programme that has ended stops being "now" when it ends rather than at the next grid refresh.
   A receiver in no bouquet at all reads `0`; a bouquet whose grid has not arrived reads
-  `unknown`, so „no grid" and „nothing on" stay apart. 🔴 The channel list is excluded from the
+  `unknown`, so "no grid" and "nothing on" stay apart. The channel list is excluded from the
   recorder - Home Assistant does not do that for an attribute of ours on its own, and a
   bouquet's worth of programmes rewritten every time one of them ends does not belong in the
   database. Created while the receiver announces both the `epg_grid` and `bouquet_context`
   capabilities, and never removed when they go quiet.
-- **„Ekran &ndash; dyskretnie", a discreet toast on the television** (English „OSD toast"), beside
-  „Ekran OSD". The popup takes focus and waits in the receiver's queue behind an open channel
+- **"Ekran &ndash; dyskretnie", a discreet toast on the television** (English "OSD toast"), beside
+  "Ekran OSD". The popup takes focus and waits in the receiver's queue behind an open channel
   list; the toast is a small overlay in a corner that takes no key press, hides itself after
   five seconds and is replaced by the next one. A title is folded into the text as it is for
   the popup, and the text is cut at 200 characters, where the receiver cuts a toast. Created
@@ -123,35 +154,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without a `timeout` stays five seconds, and one outside 1-30 seconds is refused before
   anything is sent, since nothing on a toast can dismiss it. A toast aimed at a receiver
   that does not offer one is refused the same way.
-
-- **„Pobierz EPG", a button that runs the receiver's own EPG-Importer now** (English „Import
-  EPG"), and **„Import EPG", a diagnostic** (English „EPG import") that says whether an import is
+- **"Pobierz EPG", a button that runs the receiver's own EPG-Importer now** (English "Import
+  EPG"), and **"Import EPG", a diagnostic** (English "EPG import") that says whether an import is
   `idle`, `running`, `done` or `failed`, with when it started and finished, how many events the
   importer processed, and why it failed. The sensor follows every import, including the ones the
-  image's own schedule starts, so a press refused as „already running" is never unexplained. The
+  image's own schedule starts, so a press refused as "already running" is never unexplained. The
   press waits until the receiver reports the import running; every refusal - no permission, an
   import already running, a recording running or due within ten minutes, the image's own run due
   within ten minutes, no sources selected - raises the receiver's own sentence, and so does a
   start that failed. The import is the image's: at its end menus freeze for two to three
-  seconds while the image saves the guide, and the importer's own deep-standby and „clear old
+  seconds while the image saves the guide, and the importer's own deep-standby and "clear old
   EPG" settings apply as they do to a scheduled run.
-- 🔴 The button has **two gates, both the receiver's**, as „Restart softcam" does: the
+- The button has **two gates, both the receiver's**, as "Restart softcam" does: the
   permission `epg_import_allowed`, set on the receiver and refused over MQTT, and the
   `epg_import` capability, claimed only where the plugin found the importer loaded and able to
-  import in place. Only a stated „no" to the permission removes the button; the sensor, which
+  import in place. Only a stated "no" to the permission removes the button; the sensor, which
   follows the capability alone, is never removed.
-- **„Głębokie uśpienie" and „Obudź (WoL)" say so when the receiver cannot be woken over the
+- **"Głębokie uśpienie" and "Obudź (WoL)" say so when the receiver cannot be woken over the
   network.** From plugin 0.3.0 the receiver reports `info.wol`, read from its image's own
   Wake-on-LAN switch. Where it reports `supported: false` - as a receiver whose image has no
   such switch does - both buttons carry a `wake_on_lan` attribute with the value
   `not_supported`, for automations and dashboards to read. Its translation says that the
   receiver wakes from deep standby only by its remote, its front button or a timer, and on
-  „Obudź (WoL)" adds that the packet is still sent; Home Assistant shows it only to
+  "Obudź (WoL)" adds that the packet is still sent; Home Assistant shows it only to
   administrators, under ⋮ -> Details in the button's dialog, because a button has no control of
   its own there that could show it. Where
   the receiver reports `supported: true`, or an older plugin reports nothing, the buttons are
   exactly as they were. Neither button is renamed in any language, so no entity id moves.
-- **The help text of „Show the deep standby and reboot buttons" no longer promises a wake.**
+- **The help text of "Show the deep standby and reboot buttons" no longer promises a wake.**
   It said deep standby takes the receiver off the network until a magic packet wakes it; it now
   says a magic packet wakes it if the receiver supports that, in all three languages.
 
@@ -161,37 +191,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   remote zap does. One consequence is visible here: choosing a channel from the media player's
   source list that is outside the bouquet the receiver is walking now **moves the receiver's
   channel list to the bouquet the channel is published under**, as the remote's number entry
-  does - „Bukiet" and „Kanał" follow, and channel up and down walk that bouquet afterwards.
+  does - "Bukiet" and "Kanał" follow, and channel up and down walk that bouquet afterwards.
   Nothing in this integration changed for it; the plugin's CHANGELOG has the details.
-
 - **An empty `info` now withdraws the receiver's permission to be uninstalled.** It used to be
   ignored like any payload that does not parse, which kept the last stated permission in memory
   until Home Assistant restarted and would have left the removal on offer for a receiver whose
   plugin had already gone. The rest of the last `info` is kept as before.
 - **The options form is now the step `settings`**, behind the menu above where it appears. Nothing
   on it moved.
-- 🔴 **Deleting a receiver's entry is now tested to send exactly one message** -
+- **Deleting a receiver's entry is now tested to send exactly one message** -
   `cmd/ha_mode = discovery` - and to open no SSH connection, under every combination of kept
   credentials, permission and availability. It never uninstalls anything, and never did.
-
 - **A `message` action without `style` is byte-for-byte the popup it was**, but its `timeout`
   default of ten seconds now comes from the handler rather than the action schema, so that a
   toast without a `timeout` gets its own five seconds rather than the popup's ten.
-
 - **A guided install whose name field was left empty now titles the entry with the name the
   receiver already has**, rather than with the node ID. Nothing is written to the receiver for an
   empty field - a box that has a name keeps it, and one that has none is named after its box type
   by the plugin, as on a first start - so this only changes what Home Assistant calls the entry it
   creates. A name of nothing but spaces counts as empty on both sides, and a name that was typed is
   written and wins as before.
+- **The bundled receiver plugin is the plugin's own 0.3.0 release.** It is built from the tag's
+  own commit
+  [`26c996b`](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/tree/26c996bcfa6cecc3ad8540f3fe2a86d74862c93b)
+  and is byte for byte the package published on that release, which anyone can check against the
+  SHA-256 in `bundled/metadata.json`.
+- **Popup text loses every backslash with plugin 0.3.0**, as toast text does. A literal
+  `\n` in the text of a `message` action or of "Ekran OSD" no longer breaks a line on the
+  television; send a real newline instead. Nothing in this integration changed for it.
 
 ### Fixed
 
-- **„Ostatnio oglądane" and „(wszystkie)" list every entry of the receiver's history**,
+- **"Ostatnio oglądane" and "(wszystkie)" list every entry of the receiver's history**,
   including one the receiver sent without a name, labelled from the channel list or as
-  „Kanał bez nazwy (...)"; before, such an entry was left out. A history zap refused during
+  "Kanał bez nazwy (...)"; before, such an entry was left out. A history zap refused during
   playback of a recording is shown in the household's language, and the Polish and German
-  texts of the „menu open" refusal now name the channel list and the EPG as the English one
+  texts of the "menu open" refusal now name the channel list and the EPG as the English one
   does.
 - **One entity that fails on a message no longer stops the others from updating.** Every entity
   of a receiver is told about a message in turn, and an exception in one of them used to skip
@@ -204,13 +239,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lock is now the file named by `option lock_file` in the receiver's opkg configuration, or, where
   the configuration names none, both built-in defaults (`/run` for current opkg, `/var/lock` for
   older releases), taken with `lockf` as opkg takes it and removed afterwards as opkg removes it.
-  What that buys is narrower than „opkg is kept out": opkg reads its status file *before* it
+  What that buys is narrower than "opkg is kept out": opkg reads its status file *before* it
   locks, so the helper excludes an opkg run only where their locks would overlap - one already
   holding the lock is waited for, and one asking while the helper holds it fails its own lock
   and changes nothing. The image's daily package-list update is the least relevant case; the
   real one is somebody installing or removing a package from the receiver's own menu during a
   guided install or its rollback.
-- **„opkg is busy" is now said, not swallowed.** A snapshot that cannot get opkg's lock within
+- **"opkg is busy" is now said, not swallowed.** A snapshot that cannot get opkg's lock within
   20 seconds, or a rollback's restore within 40 - each inside the 30- and 60-second command it
   runs under, and one bound for the whole wait however many lock files there are - ends the
   install with its own sentence: the package manager is busy, try again in a minute; or, for the
@@ -608,6 +643,7 @@ actions the README describes arrive in a later release.
   every push, every pull request, once a week and on the release tag itself, and a release
   is only published when the tag, the manifest version and the changelog agree.
 
-[Unreleased]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/releases/tag/v0.1.0

@@ -19,10 +19,11 @@ inside enigma2 and publishes the moment something happens - a zap, a programme c
 standby, a recording, a volume step, a key on the remote. This integration turns those
 topics into a native `media_player`, a `remote`, an OSD `notify` target and device triggers.
 
-> **Status - released as v0.2.0**, alongside the receiver plugin's own v0.2.0. The entity and
-> action surface, the guided SSH installer, the verified local plugin bundle and the update path
-> are all in this release, and the installer has been run end to end on a receiver - including a
-> real rollback - with the defects those runs found fixed and the run after them passing.
+> **Status - released as v0.3.0**, alongside the receiver plugin's own v0.3.0. It adds the
+> features household use asked for - a softcam restart, an EPG import, a discreet toast, the EPG of
+> the active bouquet, the receiver's zap history, what enigma2 itself is using and a confirmed
+> remote uninstall - to the entity and action surface, guided SSH installer, verified local plugin
+> bundle and update path that 0.2.0 shipped and ran end to end on a receiver.
 
 ## What you get
 
@@ -90,12 +91,13 @@ about 45 seconds instead of at the end of a poll cycle.
 
 | Integration | Plugin | Status |
 |---|---|---|
-| 0.2.0 | 0.2.0 | current release |
+| 0.3.0 | 0.3.0 | current release |
+| 0.2.0 | 0.2.0 | superseded |
 | 0.1.0 | 0.1.0 | superseded |
 
 The integration ships the plugin it was built against, so the two move together. The bundle in
 this release is byte for byte the package on the plugin's own
-[releases page](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/tag/v0.2.0), and
+[releases page](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/tag/v0.3.0), and
 `custom_components/enigma2_mqtt/bundled/metadata.json` carries the SHA-256 to check it with.
 
 The integration refuses nothing when the versions differ, but the `update` entity tells you
@@ -207,15 +209,15 @@ quality bar we hold ourselves to is [docs/QUALITY.md](docs/QUALITY.md).
 - [x] **M1** - config flow (discovered + manual), the device page, diagnostics. Released as
       **v0.1.0**
 - [x] **M2** - plugin state and discovery complete, commands with guards: *the receiver plugin's
-      milestone, released as its **v0.2.0**, which is what its feed and releases page serve. Its
-      long passive soak and the deep-standby drill are still open*
+      milestone, released as its **v0.2.0**. Its long passive soak and the
+      deep-standby drill are still open*
 - [x] **M3** - the entities above, actions, device triggers, diagnostics, translations. Released
-      as **v0.2.0**, which is what HACS serves
+      as **v0.2.0**
 - [x] **M4** - SSH installer, bundled IPK and `update`: *run end to end on a receiver, rollback
       included.* The installer was run on a box that did not have the plugin, and a rollback
       exercised for real - a deliberately wrong broker password, the plugin refused, the receiver
       restored to the byte and its interface restarted. The four defects those runs found are
-      fixed in this release: a pending discovery offer blocked the guided install, the success
+      fixed in 0.2.0: a pending discovery offer blocked the guided install, the success
       screen was lost, the rollback misjudged the restart and left its lock behind, and a refusal
       over a mismatched identity named neither side. The run after those fixes closed it - the
       rollback's verdict was right, its transaction lock released and the receiver reported as
@@ -225,11 +227,11 @@ quality bar we hold ourselves to is [docs/QUALITY.md](docs/QUALITY.md).
 - [ ] **M6** - `v1.0.0`: HACS default store, deep standby and Wake-on-LAN drilled
 - [ ] **M7** - afterwards: broker-login provisioning, further images
 
-HACS serves **0.2.0** and the receiver plugin's feed serves its own **0.2.0**, so the two halves
+HACS serves **0.3.0** and the receiver plugin's feed serves its own **0.3.0**, so the two halves
 are in step and the version on a receiver or in HACS says which release you are running.
 Everything after M4 is unreleased.
 
-### What 0.2.0 shipped, and what 0.3.0 will carry
+### What 0.2.0 and 0.3.0 shipped
 
 Two days of household use produced a list of problems and a list of wants, and they were split
 into two releases. The reasoning is in
@@ -262,11 +264,13 @@ into two releases. The reasoning is in
 
 The full list is in [CHANGELOG.md](CHANGELOG.md).
 
-**0.3.0 - features**, following the receiver plugin: a **second notify entity** for the discreet
-toast and a `style` field on the `message` action; a **softcam** button and sensor (the auto-heal
-settings are in the options, the permission is not); an **EPG import** button and status sensor; an
-**EPG sensor for the active bouquet** whose payload is declared unrecorded; the **process**
-sensors, already in review; and a **remote uninstall** - removing the plugin from the receiver as
+**0.3.0 - features**, released 2026-09-25 alongside the plugin's own 0.3.0: a **second notify
+entity** for the discreet toast and a `style` field on the `message` action; a **softcam** button
+and sensor (the auto-heal settings are in the options, the permission is not); an **EPG import**
+button and status sensor; an **EPG sensor for the active bouquet** whose payload is declared
+unrecorded; the **process** sensors; the receiver's own **zap history** as two selects and a clear
+button; a note on the deep standby and Wake-on-LAN buttons when the receiver **cannot be woken
+over the network**; and a **remote uninstall** - removing the plugin from the receiver as
 an explicit, confirmed action rather than a side effect of deleting the configuration entry,
 offered only while the box says it permits removal, and a one-way door; the receiver removes
 itself in the order only it can keep, and SSH, where the installer's credentials were kept, only
