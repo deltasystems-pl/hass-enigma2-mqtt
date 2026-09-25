@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-25
+
+A small release on top of 0.3.0. What a household notices is one piece of text: where the
+receiver reports that it cannot be woken over the network, "Głębokie uśpienie" and "Obudź (WoL)"
+now also say that switching on a TV connected over HDMI wakes some receivers, if HDMI-CEC is on.
+The documentation is corrected to match what Home Assistant does: entity ids follow the
+installation's language where Home Assistant makes native ids, not the English translation keys,
+as recorded in [ADR-0007](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0007-entity-ids-follow-the-installation-language.md).
+No entity is renamed, and the bundled receiver plugin is still its own v0.3.0 release, unchanged.
+
 ### Changed
 
 - **"Głębokie uśpienie" and "Obudź (WoL)" name one more way to wake the receiver.** Where the
@@ -18,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
-- [ADR-0007](docs/adr/0007-entity-ids-follow-the-installation-language.md) supersedes the
+- [ADR-0007](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0007-entity-ids-follow-the-installation-language.md) supersedes the
   paragraph of the PRD (ADR-0000 §6.3) that said entity ids derive from the English translation
   keys. They do not: Home Assistant makes an entity id from the entity's name in the
   installation's language when it is first registered - for the languages it lists as making
@@ -664,7 +674,8 @@ actions the README describes arrive in a later release.
   every push, every pull request, once a week and on the release tag itself, and a release
   is only published when the tag, the manifest version and the changelog agree.
 
-[Unreleased]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/releases/tag/v0.1.0

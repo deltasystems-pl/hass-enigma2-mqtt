@@ -60,7 +60,8 @@ works too: copy `custom_components/enigma2_mqtt` into your `config/custom_compon
 
 | Integration | Plugin | Status |
 |---|---|---|
-| 0.3.0 | 0.3.0 | current release |
+| 0.3.1 | 0.3.0 | current release |
+| 0.3.0 | 0.3.0 | superseded |
 | 0.2.0 | 0.2.0 | superseded |
 | 0.1.0 | 0.1.0 | superseded |
 
