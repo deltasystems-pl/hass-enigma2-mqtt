@@ -17,6 +17,11 @@ television: the size and the time it was taken answer every question a bug repor
 of it, and the picture itself answers none of them. `key` is what somebody pressed on
 the remote a moment ago - it is not state, it has no lasting value here, and a log of
 household behaviour is not something to attach to a public issue by accident.
+
+`zap_history` is summarised too, as a count and the three scalar fields, with no channel
+name and no reference in it - filtered or not. It is the channels somebody watched, in
+the order they watched them, and the hidden-bouquet option exists because some of them
+are nobody else's business.
 """
 
 from __future__ import annotations
@@ -125,6 +130,7 @@ async def async_get_config_entry_diagnostics(
             "softcam": state.softcam,
             "epg_import": state.epg_import,
             "channels": _summarise_channels(state.channels),
+            "zap_history": _summarise_zap_history(state.zap_history),
             "last_error": state.last_error,
             "screen": {
                 "bytes": len(state.screen) if state.screen else 0,
@@ -179,4 +185,16 @@ def _summarise_channels(channels: dict[str, Any] | None) -> dict[str, Any] | Non
         ]
         if isinstance(bouquets, list)
         else None,
+    }
+
+
+def _summarise_zap_history(history: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Return the zap history as its shape: how many entries, and nothing they name."""
+    if history is None:
+        return None
+    return {
+        "entries": len(history.get("entries") or []),
+        "current": history.get("current"),
+        "limit": history.get("limit"),
+        "panic_button": history.get("panic_button"),
     }

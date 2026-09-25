@@ -142,7 +142,8 @@
           "check_github_releases": "Auf veröffentlichte Plugin-Versionen prüfen",
           "configure_ssh": "SSH-Zugangsdaten für Plugin-Updates einrichten",
           "keep_ssh_credentials": "SSH-Zugangsdaten für Updates behalten",
-          "source_list_scope": "Sender in der Quellenliste des Media Players"
+          "source_list_scope": "Sender in der Quellenliste des Media Players",
+          "history_hidden_bouquets": "In „Zuletzt gesehen“ ausgeblendete Bouquets"
         },
         "data_description": {
           "dangerous_buttons": "Der Tiefschlaf nimmt den Receiver vom Netz, bis ihn ein Magic Packet weckt, sofern der Receiver das unterstützt, und der Neustart unterbricht, was er gerade tut. Die Schaltflächen erscheinen erst, wenn beide Bedingungen erfüllt sind: diese Option ist eingeschaltet, und der Receiver selbst erlaubt den Tiefschlaf — diese Erlaubnis wird am Gerät unter Menü → Plugins → MQTT Bridge gesetzt und ist von hier aus nicht änderbar. Ein älteres Plugin, das diese Erlaubnis nicht meldet, überlässt die Entscheidung dieser Option. Die Schaltflächen sind voreingestellt ausgeblendet, damit sie auf einem gemeinsamen Dashboard nicht einen Fehlgriff neben der Lautstärke liegen, und das Plugin verweigert beide während einer Aufnahme, unabhängig von dieser Einstellung.",
@@ -157,7 +158,8 @@
           "softcam_autoheal": "Standardmäßig aus. Eingeschaltet startet der Receiver sein Softcam selbst neu, wenn der Sender verschlüsselt ist und für die unten angegebene Zeit nicht entschlüsselt hat — höchstens einmal alle zehn Minuten und nie während einer laufenden oder unmittelbar bevorstehenden Aufnahme. Die Schaltfläche „Softcam neu starten“ ist dasselbe von Hand; ob der Receiver beides überhaupt ausführt, entscheidet seine eigene Berechtigung, die am Gerät unter Menü → Plugins → MQTT Bridge gesetzt wird, denn eine Einstellung, die einen Befehl freischaltet, bleibt bewusst außerhalb dessen, was etwas mit Schreibrechten am Broker erreichen kann.",
           "softcam_autoheal_seconds": "Wie lange ein Sender nicht entschlüsseln darf, bevor der Receiver das Softcam neu startet. Ein gesunder verschlüsselter Sender erneuert etwa alle zehn Sekunden, ein kurzes Fenster meldet also einen Fehler auf einem funktionierenden Receiver; die neunzig Sekunden des Plugins sind etwa neun ausgebliebene Erneuerungen. Das Fenster beginnt bei jedem Senderwechsel von vorn. 30 bis 600 Sekunden.",
           "check_github_releases": "Standardmäßig aus, und aus bedeutet, dass diese Integration mit nichts außer deinem Broker spricht. Eingeschaltet fragt sie höchstens alle 24 Stunden beim Repository des Plugins nach der veröffentlichten Version und zeigt sie an der Versions-Entität an. Die Antwort und der Zeitpunkt der Abfrage werden gespeichert, sodass ein Neuladen des Receivers oder ein Neustart von Home Assistant das bereits Bekannte zeigt, statt erneut zu fragen. Sie lädt nichts herunter: Installiert wird weiterhin nur aus dem hier mitgelieferten Paket.",
-          "source_list_scope": "Alle angebotenen Bouquets ergeben eine Liste aus allen — so hat diese Integration es bisher gehalten — und bei tausend Sendern ist das ein Auswahlfeld mit tausend Zeilen. Das aktive Bouquet ist die kurze Liste, auf der der Receiver selbst steht, dieselbe, die seine Sendertasten auf und ab durchlaufen, und dieselbe, die die Auswahl „Kanal“ zeigt. Ein Receiver, der kein aktives Bouquet veröffentlicht hat, behält die lange Liste, weil es nichts gibt, worauf sie zu kürzen wäre. In beiden Fällen wechselt die Auswahl „Bouquet“ das Bouquet, und die Aktion zap nimmt eine Dienstreferenz und ignoriert diese Einstellung."
+          "source_list_scope": "Alle angebotenen Bouquets ergeben eine Liste aus allen — so hat diese Integration es bisher gehalten — und bei tausend Sendern ist das ein Auswahlfeld mit tausend Zeilen. Das aktive Bouquet ist die kurze Liste, auf der der Receiver selbst steht, dieselbe, die seine Sendertasten auf und ab durchlaufen, und dieselbe, die die Auswahl „Kanal“ zeigt. Ein Receiver, der kein aktives Bouquet veröffentlicht hat, behält die lange Liste, weil es nichts gibt, worauf sie zu kürzen wäre. In beiden Fällen wechselt die Auswahl „Bouquet“ das Bouquet, und die Aktion zap nimmt eine Dienstreferenz und ignoriert diese Einstellung.",
+          "history_hidden_bouquets": "Sender dieser Bouquets erscheinen nicht in „Zuletzt gesehen“ — gleich, ob über dieses Bouquet oder über ein anderes umgeschaltet wurde. Solange hier etwas gewählt ist, wird auch ein Sender ausgelassen, dessen Bouquet sich nicht prüfen lässt — ein Radio-Bouquet oder eines, das der Receiver nicht veröffentlicht. Leer zeigt alles. Das blendet sie nur in dieser einen Entität aus: „Zuletzt gesehen (alle)“, „Kanal“, „Bouquet“ und der Media Player bieten sie weiter an, der Verlaufsbildschirm des Receivers zeigt sie, und der Receiver veröffentlicht jeden Eintrag und jeden Sender auf dem Broker, wo jedes Broker-Login sie lesen kann. Der Zustand von „Zuletzt gesehen (alle)“ ist, sobald diese Entität aktiviert ist, der gerade laufende Sender — auch aus ausgeblendeten Bouquets — und landet wie jeder Zustand im Recorder; soll er das nicht, schließe diese Entität in der Recorder-Konfiguration aus."
         }
       },
       "ssh_host": {"title": "Mit dem Receiver verbinden", "data": {"ssh_host": "Receiver-Adresse", "ssh_port": "SSH-Port"}},
@@ -249,6 +251,9 @@
       },
       "epg_import": {
         "name": "EPG importieren"
+      },
+      "history_clear": {
+        "name": "Zuletzt gesehen leeren"
       }
     },
     "event": {
@@ -384,6 +389,12 @@
       },
       "channel": {
         "name": "Kanal"
+      },
+      "zap_history": {
+        "name": "Zuletzt gesehen"
+      },
+      "zap_history_all": {
+        "name": "Zuletzt gesehen (alle)"
       }
     }
   },
@@ -625,6 +636,15 @@
     "update_no_credentials": {"message": "Für diesen Receiver sind keine SSH-Zugangsdaten gespeichert. Richte ihn neu ein, setze den Haken bei „SSH-Zugangsdaten für Updates behalten“ und versuche es erneut."},
     "update_failed": {"message": "Plugin-Aktualisierung fehlgeschlagen: {reason}"},
     "channel_not_in_active_bouquet": {"message": "{channel} liegt nicht in dem Bouquet, auf dem der Receiver steht, und wird daher von der Quellenliste nicht angeboten. Stelle die Auswahl „Bouquet“ zuerst auf das zugehörige Bouquet um oder verwende die Aktion enigma2_mqtt.zap, die eine Dienstreferenz nimmt und dieser Einschränkung nicht unterliegt."},
-    "option_no_longer_offered": {"message": "{option} steht nicht mehr auf dieser Liste. Der Receiver hat seine Senderliste während der Auswahl neu veröffentlicht; öffne die Liste erneut und wähle aus dem, was jetzt darin steht."}
+    "option_no_longer_offered": {"message": "{option} steht nicht mehr auf dieser Liste. Der Receiver hat seine Senderliste während der Auswahl neu veröffentlicht; öffne die Liste erneut und wähle aus dem, was jetzt darin steht."},
+    "history_clear_standby": {"message": "Der Receiver ist im Standby, wo die 0 den Verlauf nicht leert."},
+    "history_clear_panic_off": {"message": "Am Receiver ist die „Panik-Taste“ ausgeschaltet - die 0 schaltet dort nur auf den vorherigen Sender zurück."},
+    "history_clear_too_short": {"message": "In „Zuletzt gesehen“ steht höchstens ein Sender - es gibt nichts zu leeren."},
+    "history_clear_timeshift": {"message": "Timeshift läuft - der Receiver würde auf dem Bildschirm fragen, ob er ihn beenden soll. Beende Timeshift und versuche es erneut."},
+    "history_clear_zap_blocked": {"message": "Der Receiver hält Umschaltungen nach Timeshift kurz zurück. Versuche es in ein paar Sekunden erneut."},
+    "history_clear_pip": {"message": "Bild-in-Bild wird angezeigt, und die 0 wirkt darauf - der Verlauf würde nicht geleert."},
+    "history_clear_playback": {"message": "Der Receiver spielt eine Aufnahme ab. Beende sie und versuche es erneut."},
+    "history_clear_not_cleared": {"message": "Der Receiver hat seinen Verlauf nicht geleert."},
+    "history_clear_screen_open": {"message": "Auf dem Bildschirm des Receivers ist ein Menü geöffnet - schließe es und versuche es erneut."}
     }
   }

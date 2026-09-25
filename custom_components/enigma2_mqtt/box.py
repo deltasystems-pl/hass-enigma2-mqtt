@@ -19,7 +19,7 @@ object yet because the config entry does not exist while the flow is running.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -49,6 +49,7 @@ from .const import (
     CONF_BOUQUETS,
     CONF_DEEP_STANDBY_ALLOWED,
     CONF_EPG_IMPORT_ALLOWED,
+    CONF_HISTORY_HIDDEN_BOUQUETS,
     CONF_NAME,
     CONF_NODE_ID,
     CONF_RECEIVER_HOST,
@@ -105,6 +106,7 @@ from .const import (
     TOPIC_TIMERS,
     TOPIC_TUNER,
     TOPIC_VOLUME,
+    TOPIC_ZAP_HISTORY,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -545,6 +547,10 @@ class _Pending:
     cmd: str
     predicate: Callable[[], bool]
     future: asyncio.Future[None]
+    # The refusal codes this command has a translation of its own for, each under
+    # `<cmd>_<reason>`. Empty for nearly every command: the receiver's sentence is then
+    # the whole answer, as it always was.
+    reasons: frozenset[str] = frozenset()
 
     @callback
     def resolve(self) -> None:
@@ -553,16 +559,28 @@ class _Pending:
             self.future.set_result(None)
 
     @callback
-    def fail(self, error: str) -> None:
-        """Report that the box complained about this command."""
-        if not self.future.done():
-            self.future.set_exception(
-                Enigma2CommandError(
-                    translation_domain=DOMAIN,
-                    translation_key="command_refused",
-                    translation_placeholders={"command": self.cmd, "reason": error},
-                )
+    def fail(self, error: str, reason: Any = None) -> None:
+        """Report that the box complained about this command.
+
+        A `reason` this command knows is raised as its own translation, so the household
+        reads why in its own language; anything else - no code, a code from a newer
+        plugin, a code that is not a string - is the receiver's English sentence, which
+        is never wrong, only untranslated.
+        """
+        if self.future.done():
+            return
+        if isinstance(reason, str) and reason in self.reasons:
+            refusal = Enigma2CommandError(
+                translation_domain=DOMAIN,
+                translation_key=f"{self.cmd}_{reason}",
             )
+        else:
+            refusal = Enigma2CommandError(
+                translation_domain=DOMAIN,
+                translation_key="command_refused",
+                translation_placeholders={"command": self.cmd, "reason": error},
+            )
+        self.future.set_exception(refusal)
 
 
 @callback
@@ -625,6 +643,11 @@ class Enigma2State:
     epg_import_retained: bool = False
     bouquet: dict[str, Any] | None = None
     channels: dict[str, Any] | None = None
+    # The receiver's zap history, normalised; see `_normalize_zap_history`.
+    zap_history: dict[str, Any] | None = None
+    # Whether the last `zap_history` arrived retained: a replay of what the broker held,
+    # which can never be the answer to a press of the clear button.
+    zap_history_retained: bool = False
     last_error: dict[str, Any] | None = None
     # Whether the last complaint arrived with the retain flag set. A retained payload
     # is what the broker had before we subscribed, so it is a replay of something that
@@ -669,6 +692,9 @@ class Enigma2Box:
         # The bouquet the source list scope last complained about, so that it is said
         # once rather than on every republished channel list.
         self._scope_fallback_warned: str | None = None
+        # Hidden bouquet names already reported as missing from `channels`, for the same
+        # reason: the filter runs on every payload of three topics.
+        self._hidden_missing_warned: set[str] = set()
 
     # ------------------------------------------------------------------ properties
 
@@ -846,19 +872,24 @@ class Enigma2Box:
         already the plugin's own `bouquets_for_select` selection: the option narrows
         what the box offers, it can never widen it.
         """
-        channels = self.state.channels or {}
-        bouquets = channels.get("bouquets")
-        if not isinstance(bouquets, list):
-            return []
-        usable = [
-            bouquet
-            for bouquet in bouquets
-            if isinstance(bouquet, dict) and isinstance(bouquet.get("channels"), list)
-        ]
+        usable = self.published_bouquets
         if not (chosen := self.entry.options.get(CONF_BOUQUETS)):
             return usable
         wanted = set(chosen)
         return [bouquet for bouquet in usable if bouquet.get("name") in wanted]
+
+    @property
+    def published_bouquets(self) -> list[dict[str, Any]]:
+        """Return every bouquet on the `channels` topic that lists channels, options ignored."""
+        channels = self.state.channels or {}
+        bouquets = channels.get("bouquets")
+        if not isinstance(bouquets, list):
+            return []
+        return [
+            bouquet
+            for bouquet in bouquets
+            if isinstance(bouquet, dict) and isinstance(bouquet.get("channels"), list)
+        ]
 
     @property
     def bouquet_names(self) -> list[str]:
@@ -1129,6 +1160,7 @@ class Enigma2Box:
         *,
         effect: Callable[[], bool] | None = None,
         timeout: float = COMMAND_TIMEOUT,
+        reasons: Collection[str] = (),
     ) -> None:
         """Send a command and wait for proof that it worked.
 
@@ -1144,12 +1176,17 @@ class Enigma2Box:
 
         A command with no observable effect at all (`send_key`, `message`) passes no
         `effect` and waits only long enough to hear a complaint.
+
+        `reasons` are the refusal codes the command has translations for; a complaint
+        carrying one of them in `last_error.reason` raises `<name>_<reason>` instead of
+        the receiver's English sentence.
         """
         already_done = effect is not None and effect()
         pending = _Pending(
             cmd=name,
             predicate=effect if effect is not None else lambda: False,
             future=self.hass.loop.create_future(),
+            reasons=frozenset(reasons),
         )
         self._pending.append(pending)
         try:
@@ -1251,6 +1288,8 @@ class Enigma2Box:
             self._softcam_received(msg)
         elif suffix == TOPIC_EPG_IMPORT:
             self._epg_import_received(msg)
+        elif suffix == TOPIC_ZAP_HISTORY:
+            self._zap_history_received(msg)
         elif suffix.startswith(f"{TOPIC_EPG_GRID}/"):
             self._epg_grid_received(suffix[len(TOPIC_EPG_GRID) + 1 :], msg.payload)
         elif (attribute := self._OBJECT_TOPICS.get(suffix)) is not None:
@@ -1736,6 +1775,162 @@ class Enigma2Box:
         }
 
     @callback
+    def _zap_history_received(self, msg: ReceiveMessage) -> None:
+        """Cache the receiver's zap history, normalised to the published contract.
+
+        The three answers of `_softcam_received`: an empty payload is a retraction and
+        clears the list, a payload that is not JSON leaves the last good one alone, and
+        anything else is normalised and kept. A retraction leaves the topic in `seen`,
+        so the selects stay available with nothing to offer - an empty history, which is
+        what a receiver that has just restarted its interface has too.
+        """
+        if not (decode_payload(msg.payload) or "").strip():
+            self.state.zap_history = None
+            self.state.zap_history_retained = False
+            self._async_updated(TOPIC_ZAP_HISTORY)
+            return
+        if (payload := parse_json_payload(msg.payload)) is None:
+            return
+        self.state.zap_history = self._normalize_zap_history(payload)
+        self.state.zap_history_retained = msg.retain
+        self._async_updated(TOPIC_ZAP_HISTORY)
+
+    @staticmethod
+    def _normalize_zap_history(payload: dict[str, Any]) -> dict[str, Any]:
+        """Strip an untrusted `zap_history` payload to the four fields of the contract.
+
+        An entry is kept only with a name and a reference, because a row with either
+        missing is a row nobody can read or nothing can tune. `bouquet` and
+        `bouquet_name` are `None` unless they are non-empty strings: an entry with no
+        path, a radio bouquet or one the plugin does not publish all say `null`, and
+        the filter treats every one of them alike. `True` is an `int` in Python and is
+        refused where a number is expected.
+        """
+
+        def text(value: Any) -> str | None:
+            return value if isinstance(value, str) and value else None
+
+        def whole(value: Any) -> int | None:
+            return (
+                value
+                if isinstance(value, int) and not isinstance(value, bool) and value >= 0
+                else None
+            )
+
+        raw = payload.get("entries")
+        entries: list[dict[str, Any]] = []
+        for item in raw if isinstance(raw, list) else []:
+            if not isinstance(item, dict):
+                continue
+            sref = text(item.get("sref"))
+            name = text(item.get("name"))
+            if sref is None or name is None:
+                continue
+            entries.append(
+                {
+                    "sref": sref,
+                    "name": name,
+                    "bouquet": text(item.get("bouquet")),
+                    "bouquet_name": text(item.get("bouquet_name")),
+                }
+            )
+        panic_button = payload.get("panic_button")
+        return {
+            "entries": entries,
+            "current": whole(payload.get("current")),
+            "limit": whole(payload.get("limit")),
+            "panic_button": panic_button if isinstance(panic_button, bool) else None,
+        }
+
+    @property
+    def zap_history_panic_button(self) -> bool | None:
+        """Return the receiver's panic-button setting, as the history last stated it.
+
+        `None` is a receiver that has not said, which is not `False`: only a stated
+        "off" means the 0 key would go back one channel instead of clearing.
+        """
+        return (self.state.zap_history or {}).get("panic_button")
+
+    def zap_history_entries(self, *, filtered: bool) -> list[dict[str, Any]]:
+        """Return the zap history, newest first, with the hidden bouquets left out if asked.
+
+        The unfiltered list is exactly what the receiver published. The filtered one
+        applies `history_hidden_bouquets`, and with that option empty it is the same
+        list. With it set, an entry stays only when **both** hold:
+
+        1. its bouquet is a published bouquet, and not a hidden one; and
+        2. its channel is not a member of any hidden bouquet - so a channel of a hidden
+           bouquet reached through another one stays hidden too.
+
+        **It fails toward hiding.** An entry with no path, a radio bouquet or a bouquet
+        the plugin does not publish cannot be checked against the option, so while the
+        option is set it is left out. The unfiltered select still shows it.
+
+        This hides entries from one Home Assistant entity and nothing else. The receiver
+        publishes every entry on `zap_history`, and every channel of every bouquet on
+        `channels`, to anybody on the broker.
+        """
+        entries = list((self.state.zap_history or {}).get("entries") or [])
+        if not filtered:
+            return entries
+        hidden = {
+            name
+            for name in self.entry.options.get(CONF_HISTORY_HIDDEN_BOUQUETS) or []
+            if isinstance(name, str) and name
+        }
+        if not hidden:
+            return entries
+        published = self.published_bouquets
+        self._warn_missing_hidden(hidden, published)
+        hidden_members = {
+            service_identity(channel.get("sref"))
+            for bouquet in published
+            if bouquet.get("name") in hidden
+            for channel in bouquet["channels"]
+            if isinstance(channel, dict)
+        } - {""}
+        visible: list[dict[str, Any]] = []
+        for entry in entries:
+            bouquet = next(
+                (
+                    candidate
+                    for candidate in published
+                    if same_service(candidate.get("sref"), entry.get("bouquet"))
+                ),
+                None,
+            )
+            if bouquet is None or bouquet.get("name") in hidden:
+                continue
+            if service_identity(entry.get("sref")) in hidden_members:
+                continue
+            visible.append(entry)
+        return visible
+
+    @callback
+    def _warn_missing_hidden(
+        self, hidden: set[str], published: list[dict[str, Any]]
+    ) -> None:
+        """Say once, per name, that a hidden bouquet is not on the channel list.
+
+        Nothing is said before `channels` has arrived at all: every name is missing from
+        a list nobody has sent yet. A renamed or deleted bouquet is the usual cause, and
+        its channels are then no longer recognised as hidden when reached through
+        another bouquet - which is what the log line is for.
+        """
+        if self.state.channels is None:
+            return
+        names = {bouquet.get("name") for bouquet in published}
+        for name in sorted(hidden - names - self._hidden_missing_warned):
+            _LOGGER.warning(
+                "Receiver %s: bouquet %s is hidden from the zap history but is not on "
+                "the receiver's channel list; its channels are no longer recognised "
+                "when they are reached through another bouquet",
+                self.node_id,
+                name,
+            )
+        self._hidden_missing_warned = (self._hidden_missing_warned | hidden) - names
+
+    @callback
     def _announcement_received(self, msg: ReceiveMessage) -> None:
         """Track the box's announcement, which carries the user's chosen name."""
         if (announcement := parse_json_payload(msg.payload)) is None:
@@ -1805,9 +2000,10 @@ class Enigma2Box:
         if not msg.retain and error is not None:
             cmd = error.get("cmd")
             text = str(error.get("error") or "")
+            reason = error.get("reason")
             for pending in list(self._pending):
                 if pending.cmd == cmd:
-                    pending.fail(text)
+                    pending.fail(text, reason)
         self._async_updated(TOPIC_LAST_ERROR)
 
     @callback

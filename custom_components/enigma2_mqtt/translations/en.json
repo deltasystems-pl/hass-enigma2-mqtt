@@ -168,7 +168,8 @@
           "check_github_releases": "Check for published plugin releases"
           ,"configure_ssh": "Configure SSH credentials for plugin updates"
           ,"keep_ssh_credentials": "Keep SSH credentials for updates"
-          ,"source_list_scope": "Channels in the media player's source list"
+          ,"source_list_scope": "Channels in the media player's source list",
+          "history_hidden_bouquets": "Bouquets hidden from “Recently watched”"
         },
         "data_description": {
           "dangerous_buttons": "Deep standby takes the receiver off the network until a magic packet wakes it, if the receiver supports that, and reboot interrupts whatever it is doing. Two gates have to be open before the buttons appear: this option, and the receiver's own permission for deep standby, which is set on the box itself under Menu → Plugins → MQTT Bridge and cannot be changed from here. An older plugin that does not report that permission leaves this option deciding alone. The buttons are hidden by default so that neither is one mis-tap away on a shared dashboard, and the plugin refuses both while a recording is running, whatever is set here.",
@@ -183,7 +184,8 @@
           "softcam_autoheal": "Off by default. On, the receiver restarts its own softcam when the channel is encrypted and has not been decoding for the time below — at most once every ten minutes, and never while a recording is running or due. The “Restart softcam” button is the manual version of the same thing; whether the receiver will do either is its own permission, set on the box under Menu → Plugins → MQTT Bridge, because a setting that enables a command is deliberately outside what anything with publish rights can reach.",
           "softcam_autoheal_seconds": "How long a channel may go without decoding before the receiver restarts the softcam. A healthy encrypted channel renews about every ten seconds, so a short window reports a fault on a working receiver; the plugin's ninety seconds is about nine missed renewals. The window starts again at every channel change. 30 to 600 seconds.",
           "check_github_releases": "Off by default, and off means this integration talks to nothing but your broker. On, it asks the plugin's repository which release is published, at most once every 24 hours, and says so on the version entity. The answer and the time it was asked are saved, so reloading the receiver or restarting Home Assistant shows what is already known rather than asking again. It never downloads anything: installing still uses only the bundle shipped here.",
-          "source_list_scope": "Every bouquet on offer is one list of all of them, which is what this integration has always done — on a receiver with a thousand channels that is a dropdown of a thousand rows. The active bouquet is the short list the receiver itself is on, the one its channel up and down walk, and the same one the “Channel” select shows; a receiver that has published no active bouquet keeps the long list, because there is nothing to shorten it to. Either way the “Bouquet” select changes bouquets, and the zap action takes a service reference and ignores this setting."
+          "source_list_scope": "Every bouquet on offer is one list of all of them, which is what this integration has always done — on a receiver with a thousand channels that is a dropdown of a thousand rows. The active bouquet is the short list the receiver itself is on, the one its channel up and down walk, and the same one the “Channel” select shows; a receiver that has published no active bouquet keeps the long list, because there is nothing to shorten it to. Either way the “Bouquet” select changes bouquets, and the zap action takes a service reference and ignores this setting.",
+          "history_hidden_bouquets": "Channels of these bouquets are left out of “Recently watched”, whether they were reached through the bouquet or through another one. While anything is chosen here, a channel whose bouquet cannot be checked — a radio bouquet, or one the receiver does not publish — is left out as well. Empty shows everything. This hides them from that one entity only: “Recently watched (all)”, “Channel”, “Bouquet” and the media player still offer them, the receiver's own History Zap screen shows them, and the receiver publishes every entry and every channel on the broker, where any broker login can read them. The state of “Recently watched (all)”, once that entity is enabled, is the channel playing now, hidden bouquets included, and it goes into the recorder like any state; exclude that entity in the recorder's configuration if it must not."
         }
       }
       ,"ssh_host": {"title": "Connect to the receiver", "data": {"ssh_host": "Receiver host", "ssh_port": "SSH port"}}
@@ -275,6 +277,9 @@
       },
       "epg_import": {
         "name": "Import EPG"
+      },
+      "history_clear": {
+        "name": "Clear recently watched"
       }
     },
     "event": {
@@ -410,6 +415,12 @@
       },
       "channel": {
         "name": "Channel"
+      },
+      "zap_history": {
+        "name": "Recently watched"
+      },
+      "zap_history_all": {
+        "name": "Recently watched (all)"
       }
     }
   },
@@ -651,6 +662,15 @@
     "update_no_credentials": {"message": "No SSH credentials are stored for this receiver. Reconfigure it and tick “Keep SSH credentials for updates”, then try again."},
     "update_failed": {"message": "Plugin update failed: {reason}"},
     "channel_not_in_active_bouquet": {"message": "{channel} is not in the bouquet the receiver is on, so the source list does not offer it. Switch the “Bouquet” select to the bouquet it belongs to first, or use the enigma2_mqtt.zap action, which takes a service reference and is not scoped."},
-    "option_no_longer_offered": {"message": "{option} is no longer on this list. The receiver republished its channels while it was being chosen; open the list again and pick from what is there now."}
+    "option_no_longer_offered": {"message": "{option} is no longer on this list. The receiver republished its channels while it was being chosen; open the list again and pick from what is there now."},
+    "history_clear_standby": {"message": "The receiver is in standby, where 0 does not clear its zap history."},
+    "history_clear_panic_off": {"message": "The receiver's panic-button setting is off, so 0 only goes back to the previous channel and clears nothing."},
+    "history_clear_too_short": {"message": "The receiver's zap history holds at most one channel — there is nothing to clear."},
+    "history_clear_timeshift": {"message": "Timeshift is running — the receiver would ask on screen whether to leave it. Leave timeshift and try again."},
+    "history_clear_zap_blocked": {"message": "The receiver is holding zaps for a moment after timeshift. Try again in a few seconds."},
+    "history_clear_pip": {"message": "Picture-in-picture is showing and 0 is set to act on it, so the history would not be cleared."},
+    "history_clear_playback": {"message": "A recording is being played back. Stop it and try again."},
+    "history_clear_not_cleared": {"message": "The receiver did not clear its zap history."},
+    "history_clear_screen_open": {"message": "A menu, the channel list or the EPG is open on the receiver's screen, where 0 would not reach the history. Close it and try again."}
     }
   }

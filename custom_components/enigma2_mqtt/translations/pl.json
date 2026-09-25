@@ -142,7 +142,8 @@
           "check_github_releases": "Sprawdzaj opublikowane wydania wtyczki",
           "configure_ssh": "Skonfiguruj dane SSH do aktualizacji wtyczki",
           "keep_ssh_credentials": "Zachowaj dane SSH do aktualizacji",
-          "source_list_scope": "Kanały na liście źródeł odtwarzacza"
+          "source_list_scope": "Kanały na liście źródeł odtwarzacza",
+          "history_hidden_bouquets": "Bukiety ukryte w „Ostatnio oglądane”"
         },
         "data_description": {
           "dangerous_buttons": "Głębokie uśpienie odcina dekoder od sieci, dopóki nie obudzi go pakiet budzący — o ile dekoder to obsługuje — a restart przerywa to, co dekoder właśnie robi. Przyciski pojawiają się dopiero, gdy spełnione są dwa warunki: ta opcja jest włączona, a sam dekoder zgadza się na głębokie uśpienie — zgodę ustawia się na dekoderze w Menu → Wtyczki → MQTT Bridge i nie da się jej zmienić stąd. Starsza wtyczka, która tej zgody nie zgłasza, zostawia decyzję tej opcji. Przyciski są domyślnie ukryte, żeby na wspólnym panelu nie leżały o jedno nieuważne dotknięcie od głośności, a wtyczka i tak odmawia obu podczas nagrywania, niezależnie od tego ustawienia.",
@@ -157,7 +158,8 @@
           "softcam_autoheal": "Domyślnie wyłączone. Włączone — dekoder sam restartuje softcam, gdy kanał jest zaszyfrowany i nie odkodowuje przez czas podany niżej: najwyżej raz na dziesięć minut i nigdy w trakcie nagrania ani tuż przed nim. Przycisk „Restart softcam” robi to samo ręcznie; o tym, czy dekoder w ogóle na to pozwoli, decyduje jego własne uprawnienie, ustawiane na dekoderze w Menu → Wtyczki → MQTT Bridge, bo ustawienie włączające polecenie celowo pozostaje poza zasięgiem czegokolwiek, co może publikować na brokerze.",
           "softcam_autoheal_seconds": "Jak długo kanał może nie odkodowywać, zanim dekoder zrestartuje softcam. Sprawny zaszyfrowany kanał odnawia się mniej więcej co dziesięć sekund, więc krótkie okno zgłasza awarię na działającym dekoderze; dziewięćdziesiąt sekund wtyczki to około dziewięciu nieodebranych odnowień. Okno zaczyna się od nowa przy każdej zmianie kanału. Od 30 do 600 sekund.",
           "check_github_releases": "Domyślnie wyłączone, a wyłączone znaczy, że ta integracja nie łączy się z niczym poza Twoim brokerem. Włączone — pyta repozytorium wtyczki o opublikowane wydanie nie częściej niż raz na 24 godziny i pokazuje je na encji wersji. Odpowiedź i godzina zapytania są zapisywane, więc przeładowanie dekodera albo restart Home Assistanta pokazuje to, co już wiadomo, zamiast pytać ponownie. Nic nie pobiera: instalacja nadal korzysta wyłącznie z pakietu dołączonego tutaj.",
-          "source_list_scope": "Wszystkie oferowane bukiety to jedna lista ze wszystkich — tak ta integracja działała dotąd — a przy tysiącu kanałów jest to lista rozwijana o tysiącu pozycji. Aktywny bukiet to krótka lista, na której stoi sam dekoder, ta sama, po której chodzą kanał w górę i w dół, i ta sama, którą pokazuje wybór „Kanał”. Dekoder, który nie opublikował aktywnego bukietu, zostaje przy długiej liście, bo nie ma czym jej skrócić. Tak czy inaczej bukiet zmienia się wyborem „Bukiet”, a akcja zap przyjmuje referencję usługi i nie podlega temu ustawieniu."
+          "source_list_scope": "Wszystkie oferowane bukiety to jedna lista ze wszystkich — tak ta integracja działała dotąd — a przy tysiącu kanałów jest to lista rozwijana o tysiącu pozycji. Aktywny bukiet to krótka lista, na której stoi sam dekoder, ta sama, po której chodzą kanał w górę i w dół, i ta sama, którą pokazuje wybór „Kanał”. Dekoder, który nie opublikował aktywnego bukietu, zostaje przy długiej liście, bo nie ma czym jej skrócić. Tak czy inaczej bukiet zmienia się wyborem „Bukiet”, a akcja zap przyjmuje referencję usługi i nie podlega temu ustawieniu.",
+          "history_hidden_bouquets": "Kanały tych bukietów nie pojawiają się w „Ostatnio oglądane” — niezależnie od tego, czy przełączono na nie z tego bukietu, czy z innego. Gdy cokolwiek jest tu wybrane, pomijany jest też kanał, którego bukietu nie da się sprawdzić — bukiet radiowy albo taki, którego dekoder nie publikuje. Puste — widać wszystko. Ukrywa je tylko w tej jednej encji: „Ostatnio oglądane (wszystkie)”, „Kanał”, „Bukiet” i odtwarzacz nadal je oferują, ekran historii na samym dekoderze je pokazuje, a dekoder publikuje każdy wpis i każdy kanał na brokerze, gdzie odczyta je każdy login brokera. Stan „Ostatnio oglądane (wszystkie)”, gdy ta encja jest włączona, to kanał odtwarzany teraz — także z ukrytych bukietów — i trafia on do rejestratora jak każdy stan; jeśli nie powinien, wyklucz tę encję w konfiguracji rejestratora."
         }
       },
       "ssh_host": {"title": "Połącz z dekoderem", "data": {"ssh_host": "Adres dekodera", "ssh_port": "Port SSH"}},
@@ -249,6 +251,9 @@
       },
       "epg_import": {
         "name": "Pobierz EPG"
+      },
+      "history_clear": {
+        "name": "Wyczyść ostatnio oglądane"
       }
     },
     "event": {
@@ -384,6 +389,12 @@
       },
       "channel": {
         "name": "Kanał"
+      },
+      "zap_history": {
+        "name": "Ostatnio oglądane"
+      },
+      "zap_history_all": {
+        "name": "Ostatnio oglądane (wszystkie)"
       }
     }
   },
@@ -625,6 +636,15 @@
     "update_no_credentials": {"message": "Dla tego dekodera nie zapisano danych SSH. Skonfiguruj go ponownie i zaznacz „Zachowaj dane SSH do aktualizacji”, a potem spróbuj jeszcze raz."},
     "update_failed": {"message": "Aktualizacja wtyczki nie powiodła się: {reason}"},
     "channel_not_in_active_bouquet": {"message": "{channel} nie należy do bukietu, na którym jest dekoder, więc lista źródeł go nie oferuje. Najpierw przełącz wybór „Bukiet” na właściwy bukiet albo użyj akcji enigma2_mqtt.zap, która przyjmuje referencję usługi i nie podlega temu ograniczeniu."},
-    "option_no_longer_offered": {"message": "{option} nie ma już na tej liście. Dekoder opublikował listę kanałów na nowo w trakcie wybierania; otwórz listę ponownie i wskaż coś, co jest na niej teraz."}
+    "option_no_longer_offered": {"message": "{option} nie ma już na tej liście. Dekoder opublikował listę kanałów na nowo w trakcie wybierania; otwórz listę ponownie i wskaż coś, co jest na niej teraz."},
+    "history_clear_standby": {"message": "Dekoder jest w trybie czuwania."},
+    "history_clear_panic_off": {"message": "Na dekoderze wyłączono „przycisk paniki” - 0 przełącza tam tylko na poprzedni kanał."},
+    "history_clear_too_short": {"message": "Na liście ostatnio oglądanych jest najwyżej jeden kanał - nie ma czego czyścić."},
+    "history_clear_timeshift": {"message": "Trwa timeshift - dekoder zapytałby na ekranie, czy go zakończyć. Zakończ timeshift i spróbuj ponownie."},
+    "history_clear_zap_blocked": {"message": "Dekoder przez chwilę po timeshifcie wstrzymuje przełączanie kanałów. Spróbuj ponownie za kilka sekund."},
+    "history_clear_pip": {"message": "Wyświetlany jest obraz w obrazie, a 0 działa na niego - lista nie zostałaby wyczyszczona."},
+    "history_clear_playback": {"message": "Dekoder odtwarza nagranie. Zatrzymaj je i spróbuj ponownie."},
+    "history_clear_not_cleared": {"message": "Dekoder nie wyczyścił listy ostatnio oglądanych."},
+    "history_clear_screen_open": {"message": "Na ekranie dekodera jest otwarte menu - zamknij je i spróbuj ponownie."}
     }
   }

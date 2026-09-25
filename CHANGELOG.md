@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The receiver's zap history** - the channels its own History Zap screen lists on NEXT and
+  PREVIOUS - as two selects and a button, on a plugin that publishes it (capabilities
+  `zap_history` and `history_clear`, plugin 0.3.0). **„Ostatnio oglądane"** („Recently
+  watched") offers exactly the channels in that history, newest first, shows the channel
+  playing now when it is one of them, and goes back to one through `cmd/zap_history`, the call
+  the receiver's own screen makes. **„Ostatnio oglądane (wszystkie)"** is the same list with
+  nothing hidden, **disabled by default**; once enabled its state - the channel playing now -
+  is recorded like any state, which the documentation says and shows how to exclude.
+  **„Wyczyść ostatnio oglądane"** does what the remote's 0 key does with the receiver's
+  panic-button setting on: it empties the history and switches to channel 1, the first channel
+  of the first bouquet. Every case in which 0 would not clear - standby, the setting off, a
+  history of one channel, timeshift, picture-in-picture, a recording played back, a menu open on the receiver - is refused
+  with a message in the household's language, from a new optional `reason` code on
+  `last_error`; the button is unavailable while the setting is off. The press is proved by a
+  **new** history payload of at most one entry, never by a list that was already short.
+- **Bouquets hidden from „Ostatnio oglądane"**, an option that leaves a bouquet's channels
+  out of that one select - also when they were reached through another bouquet, and, while
+  anything is hidden, every entry whose bouquet cannot be checked. „Ostatnio oglądane
+  (wszystkie)", „Kanał", „Bukiet" and the media player are untouched. It is a filter in Home
+  Assistant: the receiver still publishes its whole history and every channel on the broker.
+  Diagnostics summarise the history as a count, with no channel names or references.
 - **„Remove the plugin from the receiver" („Usuń wtyczkę z dekodera")**, a menu entry in the
   receiver's *Configure*, offered only while the receiver is on the broker, states
   `uninstall_allowed: true` and claims the `uninstall` capability - a permission set on the
@@ -135,6 +156,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   says a magic packet wakes it if the receiver supports that, in all three languages.
 
 ### Changed
+
+- With plugin 0.3.0, **a zap from Home Assistant enters the receiver's zap history** the way a
+  remote zap does. One consequence is visible here: choosing a channel from the media player's
+  source list that is outside the bouquet the receiver is walking now **moves the receiver's
+  channel list to the bouquet the channel is published under**, as the remote's number entry
+  does - „Bukiet" and „Kanał" follow, and channel up and down walk that bouquet afterwards.
+  Nothing in this integration changed for it; the plugin's CHANGELOG has the details.
 
 - **An empty `info` now withdraws the receiver's permission to be uninstalled.** It used to be
   ignored like any payload that does not parse, which kept the last stated permission in memory

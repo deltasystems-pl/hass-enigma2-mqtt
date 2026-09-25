@@ -217,6 +217,7 @@ on the form, as before.
 | **Wake-on-LAN MAC address** | the address the box reports on `info` | The target of the magic packet the „Obudź (WoL)" button, `media_player.turn_on` and `remote.turn_on` send. Set it when the receiver reports a different interface from the one that is plugged in - a box on Wi-Fi does not answer a packet sent to its cable port. Written as `00:00:5e:00:53:01`, `00-00-5e-00-53-01`, `0000.5e00.5301` or `00005e005301`, in any case; it is stored lower-case and colon-separated whichever you type, and anything that is not an address fails the form rather than failing later from inside `wake_on_lan`. Whichever address a packet would go to - the override, or the one the box reports - is registered on the device as its MAC connection, so the rest of Home Assistant knows it too. On current Home Assistant that connection does not merge devices across integrations, so a router or DHCP integration may still show a second card for the same receiver; it is there so that what *is* keyed on a MAC can find this one. A value stored by an earlier release that is not an address is dropped once at startup, with a line in the log. |
 | **Bouquets to offer** | every bouquet the box publishes | Which bouquets feed the media player's channel list and the media browser. The choices are the bouquets on the `channels` topic, and a name can be typed for one the box has not published yet. This narrows the plugin's own `bouquets_for_select`; it cannot widen it. |
 | **Channels in the media player's source list** | every bouquet on offer | What `media_player.source_list` holds, and nothing else. **Every bouquet on offer** is what this integration has always done and stays the default, so an existing installation does not change under an automation that names a channel; on a receiver with about a thousand channels it is a dropdown of about a thousand rows. **The active bouquet** is the short list the receiver's own channel ± is walking, which is also what the „Kanał" select shows. `select_source` follows this setting; the `zap` action takes a service reference and does not. Three cases keep the long list whatever is chosen, because there is nothing to shorten it to and an empty source list would leave no way to change channel: a receiver that publishes no channel-list context (an older plugin without `bouquet_context`), a context naming a bouquet the **Bouquets to offer** option excludes, and a context naming a bouquet with no playable channel in it. The last two are logged as a warning, once per bouquet. 🔴 This setting is **not** about the recorder: Home Assistant declares `source_list` an unrecorded attribute and the recorder removes it before it measures a state against its size limit, so the long list never reached the database in the first place. |
+| **Bouquets hidden from "Recently watched"** („Bukiety ukryte w „Ostatnio oglądane"") | none | Which bouquets' channels [„Ostatnio oglądane"](#46-selects) leaves out - and that one entity only: „Ostatnio oglądane (wszystkie)", „Kanał", „Bukiet" and the media player are untouched. The choices are the bouquets on the `channels` topic, and a name can be typed. With it empty every entry shows. With a bouquet chosen, an entry shows only when its bouquet is a published bouquet that is not hidden **and** its channel is not a member of any hidden bouquet, so a channel of a hidden bouquet reached through another one stays hidden. While anything is chosen, an entry that cannot be checked - no bouquet path, a radio bouquet, a bouquet the plugin does not publish - is hidden too. A hidden name that is no longer on the `channels` topic is logged once. 🔴 **This is a filter in Home Assistant, not privacy on the network**: the receiver publishes every entry of its history on `zap_history` and every channel of every bouquet on `channels`, retained, to any broker login; its own History Zap screen, the plugin's OpenWebif page and „Ostatnio oglądane (wszystkie)" show everything. See [§4.6](#46-selects) for what the recorder keeps. |
 | **Check for published plugin releases** | off | The only thing this integration can do that is not talking to your own broker, which is why it is off. Turned on, the version entity asks the plugin repository which release is published - **at most once every 24 hours** - and reports the tag in its summary, in a `published_version` attribute and in the release link. The time of the last request and its answer are written to `.storage/enigma2_mqtt.release_check`, keyed by config entry, so reloading the receiver, saving the options or restarting Home Assistant shows what is already known instead of spending another request; the record is deleted when the receiver is removed. At most 64 KiB of the answer is read, and a tag is only believed if it is at most 64 characters and parses as a version. The release link is only followed if it points into this plugin's own releases. It downloads nothing and it never raises `latest_version`: `install` can only ever put the bundle shipped here on a receiver, and offering a version the installer would refuse would be a button that lies. Failures - a rate limit, a timeout, an answer that is not a release - are a debug line and nothing else. |
 
 When a recent plugin advertises its configurable publishers, the same form also controls key
@@ -548,6 +549,7 @@ it is the opposite: the answer is coming, and the dashboard should not sit still
 | `refresh_epg` | *Odśwież EPG* | `<node_id>_refresh_epg` | `cmd/epg_grid` · only while the box names the `epg_grid` capability | silence |
 | `softcam_restart` | *Restart softcam* | `<node_id>_softcam_restart` | `cmd/softcam_restart` · **both gates below** | silence |
 | `epg_import` | *Pobierz EPG* | `<node_id>_epg_import` | `cmd/epg_import` · **both gates below** | a new `epg_import` payload in `running` |
+| `history_clear` | *Wyczyść ostatnio oglądane* | `<node_id>_history_clear` | `cmd/history_clear` · only while the receiver names the `history_clear` capability; unavailable while `zap_history` says `panic_button: false` | a **new** `zap_history` payload with at most one entry |
 | `plugin` | *Wtyczka MQTT Bridge* | `<node_id>_plugin` | an `update` entity: installed = `info.plugin`, latest = the plugin release this version was written against | - |
 
 **Every button waits for the receiver**, on the same path as the actions below. A refusal
@@ -651,6 +653,27 @@ A retained copy the broker replays after a reconnect is never the answer, becaus
 describe the previous run. While an import runs the
 receiver also refuses its own deep standby, reboot and interface restart, which would lose it.
 
+**„Wyczyść ostatnio oglądane"** does what the remote's **0** key does on the receiver with its
+panic-button setting on: it empties the receiver's zap history and **switches to channel 1** -
+the first channel of the first bouquet, because the image has no „panic channel" setting of its
+own - and closes picture-in-picture if it is open. The receiver runs the key's own handler; no
+key is injected. There is no permission behind it: `cmd/zap` needs none, and `cmd/key KEY_0`
+already does the same with none. The settings that change what it does are the receiver's:
+`panicbutton` (off, and 0 only goes back one channel - the button is then unavailable),
+`multibouquet`, `pip_zero_button` and `check_timeshift`.
+
+The receiver refuses the press in every case where 0 would not clear the history either, and
+each refusal carries a reason code that Home Assistant shows **in the household's language**:
+standby; the panic-button setting off; a history of at most one channel; timeshift, where 0
+would ask on the television whether to leave it; the moment after timeshift during which the
+receiver holds zaps; picture-in-picture showing with 0 set to act on it; a recording being
+played back; a menu, the channel list or the EPG open on the receiver's screen, where the key
+would not reach the history; and, defensively, a history that was still longer than one entry afterwards. A
+code this release does not know, or none, is raised in the receiver's own English sentence.
+The press waits for a **new** `zap_history` payload holding at most one entry - not for the
+list to be short, which it already is before a press the receiver refuses for exactly that
+reason - and a retained copy the broker replays after a reconnect is never the answer.
+
 **„Głębokie uśpienie" and „Restart" need two gates open**: the Home Assistant option
 [below](#options), and the receiver's own `deep_standby_allowed`, which is set on the box under
 *Menu -> Plugins -> MQTT Bridge* and cannot be written over MQTT - a setting that *enables* a
@@ -677,8 +700,10 @@ only once a day, and then only to report a tag - see [Options](#options).
 |---|---|---|---|---|
 | `bouquet` | *Bukiet* | `<node_id>_bouquet` | `channels`, `bouquet` | `cmd/bouquet` |
 | `channel` | *Kanał* | `<node_id>_channel` | `channels`, `bouquet`, `service` | `cmd/zap` |
+| `zap_history` | *Ostatnio oglądane* | `<node_id>_zap_history` | `zap_history`, `service`, `channels` | `cmd/zap_history` |
+| `zap_history_all` | *Ostatnio oglądane (wszystkie)* · **disabled by default** | `<node_id>_zap_history_all` | `zap_history`, `service`, `channels` | `cmd/zap_history` |
 
-Both exist **only while the receiver names the `channels` and `bouquet_context` capabilities**.
+„Bukiet" and „Kanał" exist **only while the receiver names the `channels` and `bouquet_context` capabilities**.
 A plugin that cannot switch a channel-list context has nothing for either of them to do, and a
 receiver that loses the capability has them taken out of the entity registry rather than left
 behind unavailable. A receiver that has not said what it can do yet keeps whatever it has -
@@ -716,6 +741,48 @@ silence is not "no".
 Both selects report **nothing selected** rather than an invented option - the receiver is on the
 radio list, on a bouquet nobody published, or tuned outside the bouquet it is walking. That is
 ordinary operation and not a fault.
+
+**„Ostatnio oglądane" and „Ostatnio oglądane (wszystkie)"** follow the receiver's own zap
+history - the list its „History Zap" screen shows when NEXT or PREVIOUS is pressed - which the
+plugin publishes, newest first, on the retained `zap_history` topic. They exist while the
+receiver names the `zap_history` capability, and a receiver that stops naming it keeps them.
+
+- **The options are exactly the channels in that history**, in its order, numbered like
+  „Kanał" when two carry the same name. Nothing is kept on this side: the history is the
+  receiver's, holds at most twenty channels there, and a restart of its interface empties it.
+- **The state is the channel playing now**, matched to `service` by identity, when it is one of
+  the options. Since plugin 0.3.0 nearly every zap - from the remote, „Kanał", the media player
+  or the `zap` action - enters the history, so that is normally the first option. It is
+  **nothing selected** when the playing channel is not in the list: a zap the receiver does not
+  record (during timeshift, in picture-in-picture zap mode, or to a channel in no published
+  bouquet), a zap by something the plugin does not see (OpenWebif, a zap timer), or just after
+  an interface restart. An invented option would claim a way back that does not exist.
+- **Choosing one** sends `cmd/zap_history` with its service reference - the call the
+  receiver's own History Zap screen makes, so the channel moves to the front - and waits for
+  `service` to name it. Choosing what is already playing sends nothing. From standby the
+  receiver wakes first. The history screen has no timeshift question, so neither does this.
+- **„Ostatnio oglądane" leaves out** the bouquets named in the
+  [option](#options); with the option empty the two lists are the same. It never has a hidden
+  channel as its state, because its state can only be one of its options.
+- **„Ostatnio oglądane (wszystkie)" leaves out nothing** and is **disabled by default**. 🔴 Its
+  options are not recorded - Home Assistant declares a select's `options` unrecorded - but
+  **its state is**: once enabled, the name of the channel playing now, hidden bouquets
+  included, goes into the recorder and the logbook on every zap, exactly as the „Kanał"
+  sensor already records it. An integration cannot exclude an entity's state from the
+  recorder; if that must not happen, exclude it in `configuration.yaml`:
+
+  ```yaml
+  recorder:
+    exclude:
+      entities:
+        - select.dekoder_salon_ostatnio_ogladane_wszystkie
+  ```
+
+  A dashboard card that shows it only to some users hides a card, nothing more: Home Assistant
+  has no per-entity permissions.
+
+The contract of the topic and both commands, and why the plugin's zaps are recorded, are in the
+plugin's `docs/TOPICS.md` and its ADR-0014.
 
 ## 5. Actions
 
@@ -820,11 +887,13 @@ so the MAC address, the IP address and the configuration URL built from it are r
 are the broker and SSH credential keys - those are named in the redaction list before the
 installer of M4 can create one, rather than after.
 
-Three things are summarised rather than included, because their contents answer no question a
+Four things are summarised rather than included, because their contents answer no question a
 bug report asks and describe a household instead. **`screen`** appears as a size and the moment
 it was taken, never as the picture of somebody's television. **`channels`** appears as the
 bouquet names and how many services each holds, not as the channel list. **`key`** does not
-appear at all: it is who pressed what a moment ago, which is not state.
+appear at all: it is who pressed what a moment ago, which is not state. **`zap_history`**
+appears as the number of entries, `current`, `limit` and `panic_button` - no channel name and
+no reference, whatever the hide option says.
 
 One thing is stated rather than left to be worked out. The **`plugin`** block gives the version
 installed on the box, the version bundled here, the version this release was written against,
