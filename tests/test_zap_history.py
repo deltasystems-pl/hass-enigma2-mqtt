@@ -1246,3 +1246,55 @@ def test_the_screen_open_refusal_names_what_is_open_in_every_language() -> None:
         for word in words:
             assert word in message, f"{name}: {word}"
         assert strings["exceptions"]["zap_history_playback"]["message"].strip()
+
+
+# ------------------------------------------------------------ nameless entries
+
+
+async def test_a_nameless_entry_is_filtered_like_any_other(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A missing name changes the label, never whether the hide option applies.
+
+    With Sport hidden: a nameless entry from a bouquet the receiver does not publish
+    fails toward hiding, and a nameless Sport channel reached through Ulubione is still
+    a member of Sport. The nameless Ulubione channel that belongs to no hidden bouquet
+    stays. The unfiltered select keeps all three.
+    """
+    unpublished = '1:7:1:0:0:0:0:0:0:0:FROM BOUQUET "userbouquet.hidden.tv" ORDER BY bouquet'
+    capable(box_on_the_broker)
+    box_on_the_broker[ZAP_HISTORY_TOPIC] = history(
+        _entry("1:0:19:6B6B:3F3:1:C00000:0:0:0:", None, unpublished, None),
+        {**TVN_SPORT_VIA_ULUBIONE, "name": None},
+        {**TVP, "name": None},
+    )
+    entry = hiding(config_entry, SPORT["name"])
+    enable_the_unfiltered_select(hass, entry)
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+
+    assert options(hass, HISTORY_SELECT) == ["TVP 1 HD"]
+    assert len(options(hass, HISTORY_ALL_SELECT)) == 3
+
+
+async def test_a_nameless_entry_finds_its_name_by_identity_not_spelling(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The history may spell the reference in another case or without the last colon.
+
+    The name is looked up by the same eleven-field identity the filter uses, so the
+    channel list's name is found and no placeholder appears.
+    """
+    capable(box_on_the_broker)
+    box_on_the_broker[ZAP_HISTORY_TOPIC] = history(
+        {**TVN, "sref": SREF_TWO.lower().rstrip(":"), "name": None},
+        {**TVP, "sref": SREF.lower(), "name": None},
+    )
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    assert options(hass, HISTORY_SELECT) == ["TVN HD", "TVP 1 HD"]
