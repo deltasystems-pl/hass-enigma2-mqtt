@@ -34,6 +34,7 @@ from .const import (
     PLUGIN_MIN_VERSION,
     TOPIC_INTEGRATION_PREFIX,
 )
+from .release_store import async_release_index_cache
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -118,6 +119,21 @@ async def async_setup_entry(
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await _async_publish_integration(hass, entry)
+
+    # The retained release index, repaired from the verified copy this Home Assistant holds:
+    # on every setup and whenever the broker connection comes back. A receiver without
+    # internet reads its versions from it, and a receiver sees the same serial as nothing new.
+    cache = async_release_index_cache(hass)
+    await cache.async_republish()
+
+    @callback
+    def _connection(connected: bool) -> None:
+        if connected:
+            entry.async_create_background_task(
+                hass, cache.async_republish(), name=f"{DOMAIN} republish release index"
+            )
+
+    entry.async_on_unload(mqtt.async_subscribe_connection_status(hass, _connection))
     return True
 
 

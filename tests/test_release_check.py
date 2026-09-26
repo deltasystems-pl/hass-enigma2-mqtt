@@ -17,10 +17,12 @@ from typing import Any
 from unittest.mock import patch
 
 from freezegun.api import FrozenDateTimeFactory
+from homeassistant.components.mqtt.const import MQTT_CONNECTION_STATE
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.setup import async_setup_component
 import homeassistant.util.dt as dt_util
 import pytest
@@ -28,7 +30,10 @@ from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_fire_time_changed,
 )
-from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
+from pytest_homeassistant_custom_component.test_util.aiohttp import (
+    AiohttpClientMocker,
+    AiohttpClientMockResponse,
+)
 
 from custom_components.enigma2_mqtt import release_index, release_store
 from custom_components.enigma2_mqtt.const import (
@@ -93,6 +98,20 @@ def _published(mqtt_mock: Any) -> list[Any]:
         call for call in mqtt_mock.async_publish.call_args_list
         if call.args[0] == TOPIC_RELEASE_INDEX
     ]
+
+
+def _relayed(mqtt_mock: Any) -> list[bytes]:
+    """The distinct indexes relayed on the retained topic, in the order they first went out.
+
+    The held index is relayed again on every setup and reconnect, so what a test asks is which
+    indexes were relayed, not how often.
+    """
+    seen: list[bytes] = []
+    for call in _published(mqtt_mock):
+        index = base64.b64decode(json.loads(call.args[1])["index"])
+        if index not in seen:
+            seen.append(index)
+    return seen
 
 
 def _cache(hass: HomeAssistant) -> release_store.ReleaseIndexCache:
@@ -160,8 +179,8 @@ async def test_a_new_index_is_accepted_announced_and_relayed(
         assert fragment in message
     assert notify.call_args.kwargs["notification_id"] == f"{DOMAIN}_release_index_{key_id}_1"
 
+    assert _relayed(mqtt_mock) == [pair[0]]
     relayed = _published(mqtt_mock)
-    assert len(relayed) == 1
     topic, payload, qos, retain = relayed[0].args[:4]
     assert (topic, qos, retain) == (TOPIC_RELEASE_INDEX, 1, True)
     body = json.loads(payload)
@@ -192,7 +211,7 @@ async def test_two_receivers_make_one_request(
     assert other.state is ConfigEntryState.LOADED
 
     assert aioclient_mock.call_count == 2
-    assert len(_published(mqtt_mock)) == 1
+    assert len(_relayed(mqtt_mock)) == 1
 
 
 async def test_the_daily_check_asks_once_a_day_with_the_etag(
@@ -217,14 +236,17 @@ async def test_the_daily_check_asks_once_a_day_with_the_etag(
         assert aioclient_mock.call_count == 2
 
         _serve(aioclient_mock, pair, status=304, etag='"v1"')
+        published = len(_published(mqtt_mock))
         freezer.tick(RELEASE_CHECK_INTERVAL)
         async_fire_time_changed(hass)
         await hass.async_block_till_done()
+        # A check that finds nothing new relays nothing: only setup and reconnect repeat it.
+        assert len(_published(mqtt_mock)) == published
 
     assert aioclient_mock.call_count == 1
     assert aioclient_mock.mock_calls[0][3] == {"If-None-Match": '"v1"'}
     assert notify.call_count == 1
-    assert len(_published(mqtt_mock)) == 1
+    assert len(_relayed(mqtt_mock)) == 1
     assert hass.states.get(PLUGIN).attributes["check_error"] is None
 
 
@@ -247,7 +269,7 @@ async def test_the_same_bytes_again_are_nothing_new(
 
     assert aioclient_mock.call_count == 4
     assert notify.call_count == 1
-    assert len(_published(mqtt_mock)) == 1
+    assert len(_relayed(mqtt_mock)) == 1
     assert hass.states.get(PLUGIN).attributes["check_error"] is None
 
 
@@ -414,7 +436,8 @@ async def test_an_index_the_rule_refuses_changes_nothing(
     assert state.attributes["check_error"] == reason
     assert state.attributes["index_serial"] == stored
     assert notify.call_count == 0
-    assert _published(mqtt_mock) == []
+    # The held index is relayed again at setup; the refused one never is.
+    assert _relayed(mqtt_mock) == [index]
 
 
 async def test_after_the_spare_key_the_main_key_is_refused_for_good(
@@ -462,6 +485,8 @@ async def test_an_index_that_is_not_signed_or_too_large_is_refused(
     _serve(aioclient_mock, (index, sign(1, RELEASES)[1]))
     with patch(NOTIFY) as notify:
         await _setup_checking(hass, config_entry)
+    # A signature that does not verify is read once more before it is believed.
+    assert aioclient_mock.call_count == (4 if reason == "bad_signature" else 2)
 
     state = hass.states.get(PLUGIN)
     assert state.attributes["check_error"] == reason
@@ -551,7 +576,7 @@ async def test_a_withdrawal_is_announced(
     assert "Withdrawn: 0.4.0" in message
     listed = hass.states.get(PLUGIN).attributes["available_versions"]
     assert "0.4.0" not in [item["version"] for item in listed]
-    assert len(_published(mqtt_mock)) == 2
+    assert len(_relayed(mqtt_mock)) == 2
 
 
 # ---------------------------------------------------------------- the manual limit --
@@ -724,3 +749,271 @@ def test_an_unverified_context_is_refused(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(release_store, "get_default_context", lambda: unverified)
     with pytest.raises(RuntimeError, match="verifying"):
         release_store.verified_context()
+
+
+# ------------------------------------------------------------------ recovery and repair --
+
+
+async def test_a_dropped_index_is_taken_back_when_the_same_one_is_fetched(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    hass_storage: dict[str, Any],
+) -> None:
+    """The stored bytes were damaged; the memory says serial 3 was accepted. The same genuine
+    serial 3 is not a replay of anything held: it is taken back, silently - nothing new was
+    learned, so nothing is announced or relayed."""
+    index, sig = sign(3, RELEASES)
+    keys = keyset("test")
+    hass_storage[RELEASE_INDEX_STORAGE_KEY] = {
+        "version": RELEASE_INDEX_STORAGE_VERSION,
+        "data": {
+            "index": base64.b64encode(index.replace(b"0.4.0", b"0.9.0")).decode(),
+            "sig": base64.b64encode(sig).decode(),
+            "checked": (dt_util.utcnow() - timedelta(days=2)).isoformat(),
+            "trust": release_index.store(
+                None, keys, {"serials": {keys[0].key_id: 3}, "silenced": []},
+                acceptance=False,
+            ),
+        },
+    }
+    _serve(aioclient_mock, (index, sig))
+    with patch(NOTIFY) as notify:
+        await _setup_checking(hass, config_entry)
+
+    state = hass.states.get(PLUGIN)
+    assert state.attributes["check_error"] is None
+    assert state.attributes["index_serial"] == 3
+    assert notify.call_count == 0
+    # Relayed, because a verified index is held again - but announced to nobody.
+    assert _relayed(mqtt_mock) == [index]
+
+    # A genuinely older serial is still a replay.
+    _serve(aioclient_mock, sign(2, RELEASES))
+    _cache(hass).checked = dt_util.utcnow() - timedelta(minutes=11)
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call("button", "press", {ATTR_ENTITY_ID: CHECK}, blocking=True)
+    assert hass.states.get(PLUGIN).attributes["check_error"] == "replay"
+    assert hass.states.get(PLUGIN).attributes["index_serial"] == 3
+
+
+async def test_a_stamp_in_the_future_blocks_nothing(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """A host that booted with its clock ahead wrote it; it is not a check that happened."""
+    await async_setup_box(hass, config_entry)
+    cache = _cache(hass)
+    await cache.async_load()
+    cache.checked = dt_util.utcnow() + timedelta(days=1)
+    _serve(aioclient_mock, sign(1, RELEASES))
+    with patch(NOTIFY):
+        await hass.services.async_call("button", "press", {ATTR_ENTITY_ID: CHECK}, blocking=True)
+    assert aioclient_mock.call_count == 2
+    assert hass.states.get(PLUGIN).attributes["index_serial"] == 1
+
+
+async def test_the_daily_check_runs_every_day_not_every_other(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """The stamp is taken a moment after the timer starts, so the timer's next firing is a
+    moment short of a day after it."""
+    _serve(aioclient_mock, sign(1, RELEASES))
+    with patch(NOTIFY):
+        await _setup_checking(hass, config_entry)
+        cache = _cache(hass)
+        cache.checked = cache.checked + timedelta(milliseconds=50)
+        _serve(aioclient_mock, sign(1, RELEASES))
+        freezer.tick(RELEASE_CHECK_INTERVAL)
+        async_fire_time_changed(hass)
+        await hass.async_block_till_done()
+    assert aioclient_mock.call_count >= 1
+
+
+async def test_the_held_index_is_relayed_again_on_setup_and_on_reconnect(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    hass_storage: dict[str, Any],
+) -> None:
+    """A broker restarted without persistence, or a retained topic overwritten, is repaired
+    from the verified copy Home Assistant holds - which a receiver sees as nothing new."""
+    index, sig = sign(3, RELEASES)
+    keys = keyset("test")
+    hass_storage[RELEASE_INDEX_STORAGE_KEY] = {
+        "version": RELEASE_INDEX_STORAGE_VERSION,
+        "data": {
+            "index": base64.b64encode(index).decode(),
+            "sig": base64.b64encode(sig).decode(),
+            "checked": dt_util.utcnow().isoformat(),
+            "trust": release_index.store(
+                None, keys, {"serials": {keys[0].key_id: 3}, "silenced": []},
+                acceptance=False,
+            ),
+        },
+    }
+    with patch(NOTIFY) as notify:
+        await async_setup_box(hass, config_entry)
+        relayed = _published(mqtt_mock)
+        assert len(relayed) == 1
+        body = json.loads(relayed[0].args[1])
+        assert base64.b64decode(body["index"]) == index
+        assert relayed[0].args[3] is True
+
+        async_dispatcher_send(hass, MQTT_CONNECTION_STATE, True)
+        await hass.async_block_till_done()
+        assert len(_published(mqtt_mock)) == 2
+    assert notify.call_count == 0
+    assert aioclient_mock.call_count == 0
+
+
+async def test_nothing_unverified_is_relayed_on_setup(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+) -> None:
+    index, sig = sign(3, RELEASES)
+    hass_storage[RELEASE_INDEX_STORAGE_KEY] = {
+        "version": RELEASE_INDEX_STORAGE_VERSION,
+        "data": {
+            "index": base64.b64encode(index.replace(b"0.4.0", b"0.9.0")).decode(),
+            "sig": base64.b64encode(sig).decode(),
+            "checked": dt_util.utcnow().isoformat(),
+            "trust": None,
+        },
+    }
+    await async_setup_box(hass, config_entry)
+    assert _published(mqtt_mock) == []
+
+
+def _sequence(*bodies: bytes):
+    """A side effect answering each request with the next body, then the last one again."""
+    remaining = list(bodies)
+
+    async def _answer(method, url, data):
+        body = remaining.pop(0) if len(remaining) > 1 else remaining[0]
+        return AiohttpClientMockResponse(method, url, response=body)
+
+    return _answer
+
+
+async def test_a_pair_caught_mid_publication_is_read_again(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The index and its signature are two requests; a publication can land between them."""
+    old, new = sign(1, RELEASES[1:]), sign(2, RELEASES)
+    await async_setup_box(hass, config_entry)
+    _serve(aioclient_mock, old)
+    with patch(NOTIFY):
+        await hass.services.async_call("button", "press", {ATTR_ENTITY_ID: CHECK}, blocking=True)
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(INDEX_URL, side_effect=_sequence(new[0], new[0]))
+    aioclient_mock.get(SIG_URL, side_effect=_sequence(old[1], new[1]))
+    _cache(hass).checked = dt_util.utcnow() - timedelta(minutes=11)
+    with patch(NOTIFY) as notify, caplog.at_level(logging.WARNING):
+        await hass.services.async_call("button", "press", {ATTR_ENTITY_ID: CHECK}, blocking=True)
+
+    assert aioclient_mock.call_count == 4
+    # The second read asks for the whole pair again: a 304 there would leave a torn pair.
+    assert aioclient_mock.mock_calls[0][3] == {"If-None-Match": '"one"'}
+    assert not aioclient_mock.mock_calls[2][3]
+    assert hass.states.get(PLUGIN).attributes["index_serial"] == 2
+    assert not [r for r in caplog.records if "refused" in r.message]
+    assert notify.call_count == 1
+
+
+async def test_a_pair_that_stays_torn_is_said_to_be_unverified_not_forged(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    old, new = sign(1, RELEASES[1:]), sign(2, RELEASES)
+    await async_setup_box(hass, config_entry)
+    _serve(aioclient_mock, old)
+    with patch(NOTIFY):
+        await hass.services.async_call("button", "press", {ATTR_ENTITY_ID: CHECK}, blocking=True)
+
+    _serve(aioclient_mock, (new[0], old[1]))
+    _cache(hass).checked = dt_util.utcnow() - timedelta(minutes=11)
+    with patch(NOTIFY) as notify, pytest.raises(HomeAssistantError) as raised:
+        await hass.services.async_call("button", "press", {ATTR_ENTITY_ID: CHECK}, blocking=True)
+
+    assert raised.value.translation_key == "release_check_unverified"
+    assert aioclient_mock.call_count == 4
+    assert hass.states.get(PLUGIN).attributes["check_error"] == "bad_signature"
+    assert hass.states.get(PLUGIN).attributes["index_serial"] == 1
+    notify.assert_not_called()
+
+
+async def test_a_lower_serial_is_never_taken_back(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    hass_storage: dict[str, Any],
+) -> None:
+    """Holding nothing is not a reason to believe an older index: only the very serial the
+    memory remembers is taken back."""
+    index, sig = sign(3, RELEASES)
+    keys = keyset("test")
+    hass_storage[RELEASE_INDEX_STORAGE_KEY] = {
+        "version": RELEASE_INDEX_STORAGE_VERSION,
+        "data": {
+            "index": base64.b64encode(index.replace(b"0.4.0", b"0.9.0")).decode(),
+            "sig": base64.b64encode(sig).decode(),
+            "checked": (dt_util.utcnow() - timedelta(days=2)).isoformat(),
+            "trust": release_index.store(
+                None, keys, {"serials": {keys[0].key_id: 3}, "silenced": []},
+                acceptance=False,
+            ),
+        },
+    }
+    _serve(aioclient_mock, sign(2, RELEASES))
+    with patch(NOTIFY):
+        await _setup_checking(hass, config_entry)
+
+    state = hass.states.get(PLUGIN)
+    assert state.attributes["check_error"] == "replay"
+    assert state.attributes["index_serial"] is None
+    assert _relayed(mqtt_mock) == []
+
+
+async def test_a_held_index_that_no_longer_verifies_is_not_relayed(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """What goes out in this integration's name is checked again on the way out."""
+    await async_setup_box(hass, config_entry)
+    cache = _cache(hass)
+    index, sig = sign(3, RELEASES)
+    cache.index_raw, cache.signature_raw = index.replace(b"0.4.0", b"0.9.0"), sig
+    await cache.async_republish()
+    assert _published(mqtt_mock) == []
+    cache.index_raw = index
+    await cache.async_republish()
+    assert _relayed(mqtt_mock) == [index]

@@ -15,9 +15,10 @@ exists only while an install path does. Without one there is no badge: `latest_v
 installed version, and anything newer is said in the summary and the attributes, with the way to
 an install path.
 Today the only path is the SSH installer with the bundle, so the only installable version is the
-bundle's, when it is newer than what the receiver runs and the index has not withdrawn it; the
-versions the index lists beyond it are information, not offers, until this integration can
-download a package.
+bundle's - offered when its release number is higher than what the receiver runs, and never when
+it is below the floor or withdrawn; the versions the index lists beyond it are information, not
+offers, until this integration can download a package. A build of the same number as the one
+running is never offered by itself: it is a choice, made in the select or by name.
 
 **The select** is honoured only while it is enabled in the entity registry. Disabled - its
 default - it counts as `latest`, whatever was stored the last time somebody used it, so a
@@ -36,7 +37,7 @@ from homeassistant.helpers import entity_registry as er
 
 from . import bundle as bundle_module, release_index
 from .box import Enigma2Box, Enigma2MqttConfigEntry
-from .buildid import Build, base_version, build_of, is_newer
+from .buildid import Build, base_version, build_of, is_newer, same_number
 from .bundle import BundledPlugin, BundleError
 from .const import (
     CONF_PLUGIN_TARGET_VERSION,
@@ -152,20 +153,66 @@ class PluginVersions:
         release = self._release(self.bundle.version)
         return release.get("withdrawn") if release else None
 
+    def floor(self) -> str:
+        """The lowest version anybody may install: the higher of this integration's floor and
+        the last verified index's - this integration's alone while no index is known."""
+        if self.index is None:
+            return PLUGIN_MIN_VERSION
+        return release_index.effective_floor(self.index, PLUGIN_MIN_VERSION)
+
+    def bundle_refusal(self) -> tuple[str, dict[str, str]] | None:
+        """Why the bundle may not be installed at all, or None.
+
+        The one rule of ADR-0008 section 2 holds for the bundle as for anything the index
+        lists: a version below the floor, or one the index has withdrawn, is never offered
+        and never installed. The floor exists to keep people off a bad version, and it has to
+        hold most of all for a household that has not updated this integration yet - which is
+        exactly the one still carrying that bundle.
+        """
+        if self.bundle is None:
+            return None
+        if (reason := self.bundle_withdrawn()) is not None:
+            return "withdrawn", {"version": self.bundle.version, "reason": reason}
+        floor = self.floor()
+        bundle_base = base_version(self.bundle.version)
+        if bundle_base is None or bundle_base < base_version(floor):
+            return "below_floor", {"version": self.bundle.version, "floor": floor}
+        return None
+
     # ------------------------------------------------------------------ the offers --
 
+    def _installable(self) -> Build | None:
+        """The bundle, when this card has a path and the rule allows it - else None."""
+        if self.path is None or self.bundle_refusal() is not None:
+            return None
+        return self.bundled()
+
     def offers(self) -> list[Build]:
-        """The versions this card can install over what the receiver runs, newest first."""
+        """What the card offers by itself: a higher release number than the receiver runs.
+
+        Only the number counts (ADR-0008 section 3). A build of the same number - the release
+        over a development build, or a development candidate over the release - is never
+        offered by itself, whichever commit is later: it may be older code, and a badge would
+        make a downgrade one press away. It is a choice (`choices`).
+        """
         installed = self.installed()
-        bundled = self.bundled()
-        if (
-            installed is None
-            or bundled is None
-            or self.path is None
-            or self.bundle_withdrawn() is not None
-        ):
+        bundled = self._installable()
+        if installed is None or bundled is None:
             return []
         return [bundled] if is_newer(bundled, installed) else []
+
+    def choices(self) -> list[Build]:
+        """What somebody may choose in the select: the offers, and a same-number build that
+        is not the one running."""
+        installed = self.installed()
+        bundled = self._installable()
+        if installed is None or bundled is None:
+            return []
+        if is_newer(bundled, installed) or (
+            same_number(bundled, installed) and bundled.display != installed.display
+        ):
+            return [bundled]
+        return []
 
     def select_enabled(self) -> bool:
         """Whether „Wersja wtyczki do instalacji" is enabled in the entity registry."""
@@ -188,20 +235,49 @@ class PluginVersions:
         return self.stored_target() if self.select_enabled() else TARGET_LATEST
 
     def select_options(self) -> list[str]:
-        """`latest`, then every version this card can install, newest first."""
-        return [TARGET_LATEST, *(build.display for build in self.offers())]
+        """`latest`, then every version somebody may choose, newest first."""
+        return [TARGET_LATEST, *(build.display for build in self.choices())]
+
+    def explicit(self) -> Build | None:
+        """The build chosen by name in the enabled select, when it is still a choice."""
+        target = self.target()
+        if target == TARGET_LATEST:
+            return None
+        for build in self.choices():
+            if build.display == target:
+                return build
+        return None
 
     def chosen(self) -> Build | None:
-        """The build the card would install now, or None when there is nothing to install."""
+        """The build the card would install now, or None when there is nothing to install.
+
+        An explicit choice first - it is the consent, including for a same-number build - and
+        otherwise the newest offer.
+        """
+        if (explicit := self.explicit()) is not None:
+            return explicit
         offers = self.offers()
-        if not offers:
+        return offers[0] if offers else None
+
+    def same_version_release(self) -> str | None:
+        """The release of the running development build's own number, when one is available.
+
+        What the card says instead of a badge: „Wersja rozwojowa; dostępne wydanie 0.3.0."
+        Available means the bundle is that release, or the index lists it for this
+        integration.
+        """
+        installed = self.installed()
+        if installed is None or installed.is_release:
             return None
-        target = self.target()
-        if target != TARGET_LATEST:
-            for build in offers:
-                if build.display == target:
-                    return build
-        return offers[0]
+        # Available whether or not this card has an install path: it is information.
+        bundled = self.bundled() if self.bundle_refusal() is None else None
+        if bundled is not None and bundled.is_release and same_number(bundled, installed):
+            return bundled.version
+        base = base_version(installed.version)
+        for item in self.available():
+            if item["compatible"] and base_version(item["version"]) == base:
+                return item["version"]
+        return None
 
     def latest(self) -> Build | None:
         """`latest_version`: the chosen offer, else what is installed - never a badge without
@@ -255,7 +331,7 @@ class PluginVersions:
     def builds(self) -> dict[str, Build]:
         """Every build this entity names, by the string it names it with."""
         found: dict[str, Build] = {}
-        for build in (self.installed(), self.bundled(), *self.offers()):
+        for build in (self.installed(), self.bundled(), *self.choices()):
             if build is not None:
                 found.setdefault(build.display, build)
         return found

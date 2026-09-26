@@ -417,3 +417,33 @@ def test_the_contract_and_its_named_exceptions_are_pinned() -> None:
         "timers-lists-finished",
         "zap-under-popup-recorded",
     )
+
+
+# ------------------------------------------------------------ keys other than the release's --
+
+
+def test_the_release_keys_are_accepted_as_they_are() -> None:
+    assert release_index.check_embedded(
+        release_index.EMBEDDED, "enigma2_mqtt.release_index"
+    ) == release_index.EMBEDDED
+
+
+def test_a_test_key_set_containing_a_release_key_is_refused_loudly() -> None:
+    """One test-signed index from a higher-ranked test key would silence the release key."""
+    main = release_index.RELEASE_KEYS[0]
+    test = _keysets()["test"]
+    mixed = (main, release_index.Key(test[1].key_id, 2, test[1].public, 0))
+    with pytest.raises(release_index.OverlappingKeys, match=main.key_id):
+        release_index.check_embedded(mixed, "enigma2_mqtt.release_index_acceptance")
+
+
+def test_test_keys_never_write_the_release_store() -> None:
+    """A lab build that swapped the keys and forgot the store key is refused, not run."""
+    test = _keysets()["test"]
+    with pytest.raises(release_index.OverlappingKeys, match="store"):
+        release_index.check_embedded(test, "enigma2_mqtt.release_index")
+    assert release_index.check_embedded(test, "enigma2_mqtt.release_index_acceptance") == test
+
+
+def test_the_release_keys_are_the_embedded_ones_in_this_build() -> None:
+    assert release_index.RELEASE_KEYS == release_index.EMBEDDED

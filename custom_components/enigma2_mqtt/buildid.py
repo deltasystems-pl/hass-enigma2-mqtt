@@ -16,18 +16,17 @@ for everything else, with `.dirty` when the tracked files differed. The part aft
 label, never a pre-release: opkg and PEP 440 disagree about how `0.4.0rc1` sorts against `0.4.0`,
 and nothing here orders versions by the label.
 
-**The order.** Different `N.N.N` compare as versions. The same `N.N.N`:
+**The order is the release number, and nothing else** (decided 2026-09-26, ADR-0008 section 3).
+A higher `N.N.N` is newer. The same `N.N.N` is never newer, in either direction: a development
+build of 0.3.0 may be newer or older code than the 0.3.0 release, so neither is offered over the
+other as an update - that would be a one-click downgrade for somebody running a fix. A
+development build is still never shown as current: the display says what it is, and the card
+says that the release is available. A same-number build is installed only when somebody asks for
+it by name - the version select, or `update.install` with that version. The commit time is kept
+as information and orders nothing.
 
-- a development build is never current against the release of its own number - the release is
-  newer, so a receiver on a development build is offered the release back (the plugin's
-  "repair": its update of the version already running is refused only when both the running
-  and the staged build are the release);
-- otherwise the later commit time is newer, and an unknown time is never newer - which is what
-  lets a candidate bundled in a candidate integration be offered over the release it will
-  replace.
-
-An unknown build of a version the signed index lists is given that release's commit time: it
-displays as the release, and it is compared as one.
+An unknown build of a version the signed index lists is given that release's commit time, for
+the attributes: it displays as the release.
 """
 
 from __future__ import annotations
@@ -159,21 +158,18 @@ def base_version(value: str | None) -> tuple[int, int, int] | None:
 
 
 def is_newer(latest: Build, installed: Build) -> bool:
-    """Whether `latest` is newer than `installed` - the order in the module docstring."""
+    """Whether `latest` has a higher release number than `installed` - and nothing else."""
     latest_base = base_version(latest.version)
     installed_base = base_version(installed.version)
     if latest_base is None or installed_base is None:
         return False
-    if latest_base != installed_base:
-        return latest_base > installed_base
-    if latest.display == installed.display:
-        return False
-    if latest.is_release and not installed.is_release:
-        # A development build is never current against the release of its own number.
-        return True
-    if latest.time is None or installed.time is None:
-        return False
-    return latest.time > installed.time
+    return latest_base > installed_base
+
+
+def same_number(one: Build, other: Build) -> bool:
+    """Whether two builds carry the same release number."""
+    base = base_version(one.version)
+    return base is not None and base == base_version(other.version)
 
 
 # ------------------------------------------------------------------ reading a package --

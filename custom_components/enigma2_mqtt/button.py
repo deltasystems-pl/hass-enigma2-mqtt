@@ -89,6 +89,7 @@ from .const import (
 from .entity import Enigma2Entity, OptionalEntities
 from .release_store import (
     ERROR_BAD_MEMORY,
+    ERROR_BAD_SIGNATURE,
     RESULT_FAILED,
     SIGNATURE_OR_ORDER,
     CheckRateLimited,
@@ -539,7 +540,9 @@ class Enigma2CheckPluginUpdateButton(Enigma2Entity, ButtonEntity):
             ) from limited
         if result.outcome != RESULT_FAILED:
             return
-        if result.error in SIGNATURE_OR_ORDER:
+        if result.error == ERROR_BAD_SIGNATURE:
+            key = "release_check_unverified"
+        elif result.error in SIGNATURE_OR_ORDER:
             key = "release_check_refused"
         elif result.error == ERROR_BAD_MEMORY:
             key = "release_check_bad_memory"

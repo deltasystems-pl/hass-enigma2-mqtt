@@ -23,6 +23,7 @@ from homeassistant.components.update import ATTR_VERSION
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_ENTITY_ID, STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 import homeassistant.util.dt as dt_util
@@ -35,13 +36,16 @@ from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClien
 
 from custom_components.enigma2_mqtt import bundle as bundle_module, release_index
 from custom_components.enigma2_mqtt.const import (
+    CONF_BOUQUETS,
     CONF_CHECK_GITHUB_RELEASES,
+    CONF_DANGEROUS_BUTTONS,
     CONF_PLUGIN_TARGET_VERSION,
     CONF_SSH_HOST,
     CONF_SSH_HOST_KEY,
     CONF_SSH_PASSWORD,
     CONF_SSH_PORT,
     CONF_SSH_USERNAME,
+    CONF_WOL_MAC,
     PLUGIN_INDEX_ORIGIN,
     TARGET_LATEST,
 )
@@ -64,6 +68,7 @@ from .conftest import (
     async_setup_box_then_retained,
 )
 from .signed_index import commit_time_of, keyset, release, sign
+from .test_options_flow import PLUGIN_DEFAULT_SETTINGS, PLUGIN_SETTINGS, _arm_config_ack
 
 PLUGIN = "update.dekoder_salon_plugin"
 SELECT = "select.dekoder_salon_plugin_version_to_install"
@@ -117,10 +122,15 @@ async def _report(hass: HomeAssistant, version: str, build: dict | None = None) 
 
 
 async def _accept(
-    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, serial: int, releases: list
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    serial: int,
+    releases: list,
+    *,
+    floor: str = "0.2.0",
 ) -> None:
     """Have the cache accept a signed index, as a press of the check button would."""
-    pair = sign(serial, releases)
+    pair = sign(serial, releases, floor=floor)
     aioclient_mock.clear_requests()
     aioclient_mock.get(INDEX_URL, content=pair[0])
     aioclient_mock.get(SIG_URL, content=pair[1])
@@ -131,7 +141,7 @@ async def _accept(
     await hass.async_block_till_done()
 
 
-def _dev_build(commit: str = DEV_COMMIT, time: int = 1790500000) -> dict[str, Any]:
+def _dev_build(commit: str = DEV_COMMIT, time: int = 1790400000) -> dict[str, Any]:
     return {"commit": commit, "time": time, "dirty": False, "flavour": "development",
             "on_disk": None}
 
@@ -260,28 +270,85 @@ async def test_a_skip_is_dropped_when_latest_version_moves(
 # ------------------------------------------------------------------- build ids --
 
 
-async def test_a_development_build_is_never_current_against_its_release(
+@pytest.mark.parametrize("offset", [-86400, 86400], ids=["older code", "newer code"])
+async def test_a_development_build_is_named_and_never_badged_back_to_its_release(
     hass: HomeAssistant,
     mqtt_mock,
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
+    offset: int,
 ) -> None:
-    """Item 9: the receiver ran a development build of 0.3.0 and the card called it current.
+    """Item 9, as decided on 2026-09-26: never shown as current, never a one-click downgrade.
 
-    Its build id arrives after the entities exist, as on a real broker.
+    The receiver runs a development build of 0.3.0 and the bundle is the 0.3.0 release. The
+    development build may be newer code than the release, so the release is not an update:
+    `latest_version` is the installed build, and the summary and the attributes say plainly
+    that this is a development build and that the release is available. Its build id arrives
+    after the entities exist, as on a real broker.
     """
     config_entry.add_to_hass(hass)
     hass.config_entries.async_update_entry(
         config_entry, data={**config_entry.data, **CREDENTIALS}
     )
-    box_on_the_broker[INFO_TOPIC] = json.dumps({**INFO, "build": _dev_build()})
+    box_on_the_broker[INFO_TOPIC] = json.dumps(
+        {**INFO, "build": _dev_build(time=commit_time_of("0.3.0") + offset)}
+    )
     await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
 
     state = hass.states.get(PLUGIN)
     assert state.attributes["installed_version"] == "0.3.0+g46ea0e3"
+    assert state.attributes["latest_version"] == "0.3.0+g46ea0e3"
+    assert state.state == STATE_OFF
+    assert state.attributes["development_build"] is True
+    assert state.attributes["same_version_release"] == PLUGIN_VERSION
+    summary = state.attributes["release_summary"]
+    assert f"Development build; release {PLUGIN_VERSION} available." in summary
+
+
+async def test_the_select_can_still_choose_the_release_over_a_development_build(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A deliberate choice, not a badge: enabled, the select offers the release, and choosing
+    it makes the card offer and install it."""
+    await _setup(hass, config_entry, credentials=True)
+    await _enable_select(hass, config_entry)
+    await _report(hass, "0.3.0", _dev_build())
+
+    assert hass.states.get(PLUGIN).state == STATE_OFF
+    assert hass.states.get(SELECT).attributes["options"] == [TARGET_LATEST, PLUGIN_VERSION]
+    await hass.services.async_call(
+        "select", "select_option", {ATTR_ENTITY_ID: SELECT, "option": PLUGIN_VERSION},
+        blocking=True,
+    )
+    state = hass.states.get(PLUGIN)
     assert state.attributes["latest_version"] == PLUGIN_VERSION
     assert state.state == STATE_ON
-    assert "development build" in state.attributes["release_summary"]
+    with patch("custom_components.enigma2_mqtt.update.async_install") as install:
+        await hass.services.async_call(
+            "update", "install", {ATTR_ENTITY_ID: PLUGIN}, blocking=True
+        )
+    install.assert_awaited_once()
+
+
+async def test_a_development_build_of_an_older_number_gets_the_badge(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A higher release number is an update, whatever build the receiver runs."""
+    await _setup(hass, config_entry, credentials=True)
+    await _report(hass, "0.2.0", _dev_build())
+
+    state = hass.states.get(PLUGIN)
+    assert state.attributes["installed_version"] == "0.2.0+g46ea0e3"
+    assert state.attributes["latest_version"] == PLUGIN_VERSION
+    assert state.state == STATE_ON
+    assert state.attributes["development_build"] is True
+    assert state.attributes["same_version_release"] is None
 
 
 async def test_a_development_build_without_an_install_path_is_named_not_badged(
@@ -335,7 +402,8 @@ async def test_a_release_flavour_the_index_does_not_know_is_a_development_build(
 
     state = hass.states.get(PLUGIN)
     assert state.attributes["installed_version"] == "0.3.0+g46ea0e3"
-    assert state.state == STATE_ON
+    assert state.attributes["development_build"] is True
+    assert state.state == STATE_OFF
 
 
 def _candidate_bundle(time: int):
@@ -347,52 +415,47 @@ def _candidate_bundle(time: int):
     )
 
 
-async def test_a_candidate_bundle_is_offered_over_the_release_it_replaces(
+@pytest.mark.parametrize("offset", [100, -100], ids=["later commit", "earlier commit"])
+async def test_a_same_number_candidate_is_never_badged_but_can_be_chosen(
     hass: HomeAssistant,
     mqtt_mock,
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
     aioclient_mock: AiohttpClientMocker,
+    offset: int,
+    request: pytest.FixtureRequest,
 ) -> None:
-    """The later commit of the same N.N.N is newer; the strings differ, so HA asks us."""
-    candidate = _candidate_bundle(commit_time_of("0.3.0") + 100)
-    with patch.object(bundle_module, "load_bundled_plugin", return_value=candidate):
-        await _setup(hass, config_entry, credentials=True)
-    # Without the index, the installed 0.3.0's time is unknown: not newer.
-    assert hass.states.get(PLUGIN).state == STATE_OFF
-
+    """A candidate bundled over the release of its own number: no badge, whichever commit is
+    later - commit time is information, not an order. Chosen in the select, it is offered and
+    installed: the choice is the consent."""
+    candidate = _candidate_bundle(commit_time_of("0.3.0") + offset)
+    # For the whole test: enabling the select reloads the entry, which loads the bundle again.
+    stack = patch.object(bundle_module, "load_bundled_plugin", return_value=candidate)
+    stack.start()
+    request.addfinalizer(stack.stop)
+    await _setup(hass, config_entry, credentials=True)
     await _accept(hass, aioclient_mock, 1, [release("0.3.0")])
+
     state = hass.states.get(PLUGIN)
     assert state.attributes["installed_version"] == "0.3.0"
-    assert state.attributes["latest_version"] == "0.3.0+gabc1234"
     assert state.attributes["bundled_version"] == "0.3.0+gabc1234"
-    assert state.state == STATE_ON
-
-    with patch("custom_components.enigma2_mqtt.update.async_install") as install:
-        await hass.services.async_call(
-            "update",
-            "install",
-            {ATTR_ENTITY_ID: PLUGIN, ATTR_VERSION: "0.3.0+gabc1234"},
-            blocking=True,
-        )
-    install.assert_awaited_once()
-
-
-async def test_an_older_candidate_is_not_offered(
-    hass: HomeAssistant,
-    mqtt_mock,
-    box_on_the_broker: dict[str, str | bytes],
-    config_entry: MockConfigEntry,
-    aioclient_mock: AiohttpClientMocker,
-) -> None:
-    candidate = _candidate_bundle(commit_time_of("0.3.0") - 100)
-    with patch.object(bundle_module, "load_bundled_plugin", return_value=candidate):
-        await _setup(hass, config_entry, credentials=True)
-    await _accept(hass, aioclient_mock, 1, [release("0.3.0")])
-
-    state = hass.states.get(PLUGIN)
     assert state.attributes["latest_version"] == "0.3.0"
     assert state.state == STATE_OFF
+
+    await _enable_select(hass, config_entry)
+    assert hass.states.get(SELECT).attributes["options"] == [TARGET_LATEST, "0.3.0+gabc1234"]
+    await hass.services.async_call(
+        "select", "select_option", {ATTR_ENTITY_ID: SELECT, "option": "0.3.0+gabc1234"},
+        blocking=True,
+    )
+    state = hass.states.get(PLUGIN)
+    assert state.attributes["latest_version"] == "0.3.0+gabc1234"
+    assert state.state == STATE_ON
+    with patch("custom_components.enigma2_mqtt.update.async_install") as install:
+        await hass.services.async_call(
+            "update", "install", {ATTR_ENTITY_ID: PLUGIN}, blocking=True
+        )
+    install.assert_awaited_once()
 
 
 # ------------------------------------------------------------------- the select --
@@ -724,9 +787,13 @@ async def test_a_development_build_can_be_put_back_on_the_release(
     """Same N.N.N is not a downgrade: `0.3.0+g...` sorts above `0.3.0` only in PEP 440."""
     await _setup(hass, config_entry, credentials=True)
     await _report(hass, "0.3.0", _dev_build())
+    # Only when asked for by name: the card offers nothing here.
     with patch("custom_components.enigma2_mqtt.update.async_install") as install:
         await hass.services.async_call(
-            "update", "install", {ATTR_ENTITY_ID: PLUGIN}, blocking=True
+            "update",
+            "install",
+            {ATTR_ENTITY_ID: PLUGIN, ATTR_VERSION: PLUGIN_VERSION},
+            blocking=True,
         )
     install.assert_awaited_once()
 
@@ -835,3 +902,125 @@ async def test_the_domain_holds_one_picture_per_entry(
     await hass.config_entries.async_reload(config_entry.entry_id)
     await hass.async_block_till_done()
     assert await async_plugin_versions(hass, config_entry) is not first
+
+
+# ------------------------------------------------------------- the one rule, for the bundle --
+
+
+async def test_a_bundle_below_the_index_floor_is_not_offered_or_installed(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """The floor is "the lowest version anybody may install" - the bundle included.
+
+    It is raised to keep people off a bad version, and it has to hold for a household that
+    has not updated this integration yet, which is exactly the one still carrying that bundle.
+    """
+    await _setup(hass, config_entry, credentials=True)
+    await _report(hass, "0.2.0")
+    await _accept(
+        hass,
+        aioclient_mock,
+        1,
+        [release("0.3.1"), release("0.3.0"), release("0.2.0")],
+        floor="0.3.1",
+    )
+
+    state = hass.states.get(PLUGIN)
+    assert state.attributes["latest_version"] == "0.2.0"
+    assert state.state == STATE_OFF
+    summary = state.attributes["release_summary"]
+    assert "0.3.1" in summary
+    assert "below" in summary
+    with (
+        patch("custom_components.enigma2_mqtt.update.async_install") as install,
+        pytest.raises(HomeAssistantError) as raised,
+    ):
+        await hass.services.async_call(
+            "update",
+            "install",
+            {ATTR_ENTITY_ID: PLUGIN, ATTR_VERSION: PLUGIN_VERSION},
+            blocking=True,
+        )
+    assert raised.value.translation_key == "update_version_below_floor"
+    assert raised.value.translation_placeholders == {
+        "version": PLUGIN_VERSION,
+        "floor": "0.3.1",
+    }
+    install.assert_not_called()
+
+
+async def test_a_candidate_bundle_the_index_does_not_list_is_held_to_its_floor(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    candidate = _candidate_bundle(commit_time_of("0.3.0") + 100)
+    with patch.object(bundle_module, "load_bundled_plugin", return_value=candidate):
+        await _setup(hass, config_entry, credentials=True)
+    await _report(hass, "0.2.0")
+    await _accept(hass, aioclient_mock, 1, [release("0.4.0")], floor="0.4.0")
+
+    state = hass.states.get(PLUGIN)
+    assert state.attributes["latest_version"] == "0.2.0"
+    assert state.state == STATE_OFF
+
+
+async def test_saving_the_options_keeps_the_chosen_version(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """The choice is stored in the options but set by the select, not by the form."""
+    # The save turns the daily check on, and the reload asks; the origin has nothing yet.
+    aioclient_mock.get(INDEX_URL, status=404)
+    await async_setup_box(hass, config_entry)
+    hass.config_entries.async_update_entry(
+        config_entry,
+        options={**config_entry.options, CONF_PLUGIN_TARGET_VERSION: PLUGIN_VERSION},
+    )
+    async_fire_mqtt_message(
+        hass, INFO_TOPIC, json.dumps({**INFO, "settings": PLUGIN_DEFAULT_SETTINGS})
+    )
+    await hass.async_block_till_done()
+    await _arm_config_ack(hass)
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_DANGEROUS_BUTTONS: False,
+            CONF_WOL_MAC: "",
+            CONF_BOUQUETS: [],
+            CONF_CHECK_GITHUB_RELEASES: True,
+            **PLUGIN_SETTINGS,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert config_entry.options[CONF_CHECK_GITHUB_RELEASES] is True
+    assert config_entry.options[CONF_PLUGIN_TARGET_VERSION] == PLUGIN_VERSION
+
+
+async def test_a_bundle_at_the_floor_is_offered(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """The floor is the lowest version that may be installed - itself included."""
+    await _setup(hass, config_entry, credentials=True)
+    await _report(hass, "0.2.0")
+    await _accept(hass, aioclient_mock, 1, [release("0.3.0")], floor=PLUGIN_VERSION)
+
+    state = hass.states.get(PLUGIN)
+    assert state.attributes["latest_version"] == PLUGIN_VERSION
+    assert state.state == STATE_ON

@@ -12,9 +12,13 @@ plugin's **signed release index** lists are information: they appear in the summ
 attributes, never as `latest_version` until this integration can install them.
 
 The picture is worked out in `plugin_versions.py`, shared with the select that lets a
-household pin a version. Which build is newer than which is `buildid.is_newer`: different
-`N.N.N` compare as versions, a development build is never current against the release of
-its own number, and otherwise the later commit is newer.
+household pin a version. Which build is newer than which is `buildid.is_newer`, and it is the
+release number and nothing else (ADR-0008 section 3, decided 2026-09-26): a higher number
+badges; the same number never does, in either direction. A development build is not shown as
+current - its display and the summary say what it is, and that the release of its number is
+available - but the release is not offered over it, because it may be older code. A
+same-number build is installed only when chosen by name: in the version select, which then
+turns the state on, or with `update.install` and that version.
 """
 
 from __future__ import annotations
@@ -86,6 +90,23 @@ SUMMARY_NEWER = "update_summary_newer"
 SUMMARY_DEVELOPMENT = "update_summary_development"
 SUMMARY_PUBLISHED = "update_summary_published"
 SUMMARY_LIMIT = 255
+# Why the bundle may not be installed, in the words the summary uses.
+_REFUSAL_SENTENCES = {
+    "withdrawn": "update_summary_withdrawn",
+    "below_floor": "update_summary_below_floor",
+}
+
+
+def _build_attribute(build: Build | None) -> dict[str, Any] | None:
+    """A build as the attributes show it: what it is, never how it sorts."""
+    if build is None or not build.known:
+        return None
+    return {
+        "commit": build.commit,
+        "time": build.time,
+        "dirty": build.dirty,
+        "flavour": build.flavour,
+    }
 
 # The attributes the recorder is not given: the list of releases changes with every index and
 # says nothing a history graph needs.
@@ -174,6 +195,9 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         # Assistant's `version_is_newer` - which only has the strings - can be answered with
         # what is known about each.
         self._builds: dict[str, Build] = {}
+        # The build chosen by name in the enabled version select, whose display string then
+        # counts as an update whatever its number (`version_is_newer`).
+        self._explicit: str | None = None
         self._refresh_install_feature()
 
     async def async_added_to_hass(self) -> None:
@@ -261,7 +285,16 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             installed.version if installed is not None else None, offered
         )
         has_path = bool(self.supported_features & UpdateEntityFeature.INSTALL)
-        if compatibility == COMPATIBILITY_OLDER:
+        if (release := self._versions.same_version_release()) is not None:
+            # First, because it is the one thing the version strings cannot say: the
+            # receiver runs a development build, and the release of its number exists.
+            sentences.append(self._text(SUMMARY_DEVELOPMENT, version=release))
+        refusal = self._versions.bundle_refusal()
+        if refusal is not None and compatibility == COMPATIBILITY_OLDER:
+            # The bundle is newer than the receiver's plugin, and still may not be installed.
+            code, placeholders = refusal
+            sentences.append(self._text(_REFUSAL_SENTENCES[code], **placeholders))
+        elif compatibility == COMPATIBILITY_OLDER:
             sentences.append(
                 self._text(
                     SUMMARY_OLDER if has_path else SUMMARY_OLDER_NO_INSTALL,
@@ -270,16 +303,6 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             )
         elif compatibility == COMPATIBILITY_NEWER:
             sentences.append(self._text(SUMMARY_NEWER, version=offered))
-        elif (
-            installed is not None
-            and bundled is not None
-            and has_path
-            and not installed.is_release
-            and bundled.is_release
-        ):
-            sentences.append(
-                self._text(SUMMARY_DEVELOPMENT, installed=installed.display, version=offered)
-            )
         if (newest := self._versions.newest_beyond()) is not None:
             sentences.append(self._text(SUMMARY_PUBLISHED, version=newest))
 
@@ -313,11 +336,15 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         )
 
     def version_is_newer(self, latest_version: str, installed_version: str) -> bool:
-        """Whether `latest_version` is newer, judged on the builds behind the two strings.
+        """Whether the card should say "update available" for `latest_version`.
 
-        Home Assistant asks this only when the two strings differ. A string this entity did
-        not produce is compared by its `N.N.N` alone.
+        Home Assistant asks this only when the two strings differ. A higher release number
+        is an update. So is a build somebody chose by name in the enabled version select -
+        the choice is the consent, including for a build of the same number, which is never
+        an update by itself.
         """
+        if latest_version == self._explicit:
+            return True
         latest = self._builds.get(latest_version) or Build(version=latest_version)
         installed = self._builds.get(installed_version) or Build(version=installed_version)
         return is_newer(latest, installed)
@@ -331,6 +358,8 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         bundled = versions.bundled()
         latest = versions.latest()
         self._builds = versions.builds()
+        explicit = versions.explicit()
+        self._explicit = explicit.display if explicit is not None else None
         self._refresh_install_feature()
         self._attr_installed_version = installed.display if installed is not None else None
         self._attr_latest_version = latest.display if latest is not None else None
@@ -361,6 +390,15 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
                 else None
             ),
             "update_path": versions.path,
+            # A development build is never shown as current: these say what it is, and
+            # which release of its own number is available instead of a badge for it.
+            "development_build": (
+                not installed.is_release if installed is not None else None
+            ),
+            "same_version_release": versions.same_version_release(),
+            # Information only - nothing orders or offers by them.
+            "installed_build": _build_attribute(installed),
+            "bundled_build": _build_attribute(bundled),
         }
         self._attr_release_summary = self._summary(installed, bundled)
 
@@ -389,11 +427,12 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
                 translation_domain="enigma2_mqtt",
                 translation_key="update_version_unavailable",
             )
-        if (reason := versions.bundle_withdrawn()) is not None:
+        if (refusal := versions.bundle_refusal()) is not None:
+            code, placeholders = refusal
             raise HomeAssistantError(
                 translation_domain="enigma2_mqtt",
-                translation_key="update_version_withdrawn",
-                translation_placeholders={"version": bundled.version, "reason": reason},
+                translation_key=f"update_version_{code}",
+                translation_placeholders=placeholders,
             )
 
         data = self._entry.data

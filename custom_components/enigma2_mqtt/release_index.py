@@ -53,7 +53,7 @@ from typing import Any, NamedTuple
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-from .const import PLUGIN_INDEX_KEYS
+from .const import PLUGIN_INDEX_KEYS, RELEASE_INDEX_STORAGE_KEY
 
 PACKAGE = "enigma2-plugin-extensions-mqttbridge"
 SCHEMA = 1
@@ -186,6 +186,8 @@ def verify(public: bytes, message: bytes, signature: bytes) -> bool:
         return False
     if not _canonical_point(bytes(public)):
         return False
+    # OpenSSL refuses `S >= L` itself, so this changes no verdict today (a mutation test
+    # shows it); it stays so that the rule does not depend on which OpenSSL is linked.
     if int.from_bytes(bytes(signature[32:]), "little") >= _L:
         return False
     try:
@@ -270,9 +272,73 @@ def by_id(keys: Iterable[Key], wanted: str) -> Key | None:
     return None
 
 
+# The release keys, pinned here as well as in `const.py`. `const.py` holds the keys this build
+# judges by - which a lab-only acceptance build replaces with throwaway test keys - and this is
+# what those test keys are checked against.
+RELEASE_KEYS: tuple[Key, ...] = keys_from_data(
+    [
+        {
+            "key_id": "5de3b24c97e88660",
+            "rank": 1,
+            "public": "39Ndn8vAkeWAhYIYWvNubezKuF5F/5aY5E1uo+hSnqQ=",
+            "baseline": 0,
+        },
+        {
+            "key_id": "c72fd83e3e514a25",
+            "rank": 2,
+            "public": "1F2ajhsDoTuqAGdV2QOHdRl8hV4B0kNE0xwVGrpHdfs=",
+            "baseline": 0,
+        },
+    ]
+)
+RELEASE_STORAGE_KEY = "enigma2_mqtt.release_index"
+
+
+class OverlappingKeys(Exception):
+    """A key set other than the release keys that could change what the release keys may do."""
+
+
+def check_embedded(keys: tuple[Key, ...], storage_key: str) -> tuple[Key, ...]:
+    """`keys` if this build may judge by them and keep its memory under `storage_key`.
+
+    The release keys are always allowed. Any other set is a test key set, and two things would
+    make it dangerous - the plugin's `refuse_release_keys` names the first:
+
+    - **it contains a release key.** One index signed by a higher-ranked test key would
+      silence that release key, for good, in the memory the production build reads;
+    - **it writes the production memory.** This integration always writes the `release` part
+      of its stored state, so a build with test keys that kept the production storage key
+      would leave its test serials and silenced keys to the production build that follows.
+
+    Either is refused loudly - the integration does not load - never by quietly falling back
+    to the release keys, or an acceptance build could not be told from the thing it tests.
+    """
+    if {key.key_id for key in keys} == {key.key_id for key in RELEASE_KEYS} and all(
+        by_id(RELEASE_KEYS, key.key_id) == key for key in keys
+    ):
+        return keys
+    release_ids = {key.key_id for key in RELEASE_KEYS}
+    release_publics = {key.public for key in RELEASE_KEYS}
+    shared = sorted(
+        key.key_id for key in keys if key.key_id in release_ids or key.public in release_publics
+    )
+    if shared:
+        raise OverlappingKeys(
+            f"the test key set contains the release key {', '.join(shared)}: test keys never "
+            "include a release key"
+        )
+    if storage_key == RELEASE_STORAGE_KEY:
+        raise OverlappingKeys(
+            f"test keys may not keep their memory in the production store {storage_key}"
+        )
+    return keys
+
+
 # The embedded keys, from `const.py`. Checked when the module loads: a typo in a key must stop the
 # reader, not make it trust nothing - or something else.
-EMBEDDED: tuple[Key, ...] = keys_from_data(PLUGIN_INDEX_KEYS)
+EMBEDDED: tuple[Key, ...] = check_embedded(
+    keys_from_data(PLUGIN_INDEX_KEYS), RELEASE_INDEX_STORAGE_KEY
+)
 
 
 # ------------------------------------------------------------------------------- parsing --

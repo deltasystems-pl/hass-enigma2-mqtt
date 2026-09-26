@@ -124,8 +124,23 @@ would make it `unknown` - and the newer versions, the bundled one included, go i
 the attributes with the way to an install path. That is a **behaviour change** from 0.3.1, where a
 receiver behind the bundle without credentials shows an available update with no install button;
 it is called out in the changelog of the release that makes it. A release build displays `N.N.N`; any other
-build, installed or offered, displays `N.N.N+g<sha7>`, and two builds of the same `N.N.N` compare by
-commit time, so a candidate can be offered over the release it will replace.
+build, installed or offered, displays `N.N.N+g<sha7>`, with `.dirty` when its tree was not clean.
+
+**The card compares release numbers, and nothing else** (decided by the maintainer on
+2026-09-26, replacing this record's earlier "two builds of the same `N.N.N` compare by commit
+time"). A higher number badges as usual. The same number never badges, in either direction: a
+development build installed over the release of its number, and a development candidate bundled
+over an installed release of the same number, are each possibly older code than the other, and a
+badge would make a downgrade one press away. A development build is still never shown as
+current: its display says what it is, and the summary and the attributes say "development build;
+release N.N.N available" (in Polish „Wersja rozwojowa; dostępne wydanie N.N.N."). A same-number
+build is installed only by an explicit choice - picked in the version select, which then turns
+the state on so that the card's own button installs it, or named in `update.install`. The commit
+time stays in the attributes as information and orders nothing.
+
+The rule of section 2 holds for the bundle too: a bundled plugin below the floor, or withdrawn in
+the last verified index, is never offered and never installed, and the summary says why. With no
+verified index yet, only this integration's own floor applies.
 
 | Key | Platform | en | pl | de | Enabled by default |
 |---|---|---|---|---|---|

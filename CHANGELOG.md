@@ -109,12 +109,35 @@ The version card and the release check:
   `latest_version` is now the installed version whenever the card has no way to install, so the
   entity reads "up to date", and the summary still names the bundled version and how to get an
   install path. With credentials nothing changes.
-- **Plugin versions are shown with their build.** A development build of 0.3.0 now reads
-  `0.3.0+g1a2b3c4` (`.dirty` when its tree was not clean), from the build id the plugin publishes
-  on `info.build` after 0.3.0, and is never "current" against the release of its own number: the
-  card offers the release back. Two builds of the same version are ordered by commit time, so a
-  candidate bundle is offered over the release it replaces. Plugins up to 0.3.x report no build id
-  and are shown as before.
+- **Plugin versions are shown with their build, and compared by release number only.** A
+  development build of 0.3.0 now reads `0.3.0+g1a2b3c4` (`.dirty` when its tree was not clean),
+  from the build id the plugin publishes on `info.build` after 0.3.0. It is never shown as current,
+  and never badged for the 0.3.0 release either: it may be newer code than the release, so the
+  summary says „Wersja rozwojowa; dostępne wydanie 0.3.0." (*Development build; release 0.3.0
+  available.*) and the attributes `development_build` and `same_version_release` say the same.
+  The same holds the other way round: a development build bundled in a candidate integration is
+  not badged over an installed release of its number. Either is installed only when chosen by
+  name - in „Wersja wtyczki do instalacji", which then offers it on the card, or with
+  `update.install` and that version. A higher release number badges as before. The build's commit
+  time is shown in `installed_build` / `bundled_build` and orders nothing. Plugins up to 0.3.x
+  report no build id and are shown as before.
+- **The bundled plugin is held to the signed index's floor and withdrawals.** A bundle below the
+  floor, or withdrawn in the last verified index, is never offered or installed, and the summary
+  says why; with no verified index yet, only this integration's own floor (0.2.0) applies.
+- The held index is published again on `enigma2mqtt/release_index` at every setup and every
+  reconnect to the broker, verified first, so a broker restarted without persistence or an
+  overwritten topic is repaired rather than left until the next index.
+- An index and a signature that do not match are read once more before they are judged - a
+  publication can land between the two requests - and a pair that still does not verify is
+  reported as "could not be verified, try again later", not as a forgery. The log keeps the
+  warning.
+- An index whose stored copy was damaged is taken back, silently, when the same genuine index is
+  fetched again; a lower serial is still refused.
+- A "last checked" time in the future - a clock that was ahead - no longer blocks checks, and the
+  daily check runs every day rather than every other one.
+- Saving the options keeps the version chosen in „Wersja wtyczki do instalacji".
+- A build whose embedded keys are not the release keys refuses to load if its keys include a
+  release key or it would keep its memory in the production store.
 - The option „Sprawdzaj opublikowane wydania wtyczki" is now „Sprawdzaj raz dziennie dostępne
   wersje wtyczki" (*Check daily for available plugin versions*), and checks the signed index
   instead of GitHub's latest release. The previous check's per-receiver records in

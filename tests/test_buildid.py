@@ -98,26 +98,21 @@ def _release(time: int | None, version: str = "0.3.0") -> Build:
 @pytest.mark.parametrize(
     ("latest", "installed", "newer"),
     [
-        # Different N.N.N compare as versions, whatever the builds.
+        # Release numbers, and nothing else (decided 2026-09-26, ADR-0008 section 3).
         (_release(1, "0.4.0"), _release(2), True),
         (_release(2), _release(1, "0.4.0"), False),
         (_dev(1, version="0.4.0"), _release(9), True),
+        (_release(1, "0.4.0"), _dev(9), True),
         (Build(version="0.10.0"), Build(version="0.9.0"), True),
-        # Item 9: a development build is never current against the release of its number,
-        # even when it is the later commit.
-        (_release(1), _dev(2), True),
-        (Build(version="0.3.0", time=1), _dev(2), True),
-        # A candidate over the release it will replace: the later commit is newer.
-        (_dev(2, CANDIDATE_COMMIT), _release(1), True),
+        # The same number never badges, in either direction and whichever commit is later:
+        # a development build may be newer or older code than the release of its number.
+        (_release(1), _dev(2), False),
+        (_release(3), _dev(2), False),
+        (Build(version="0.3.0", time=1), _dev(2), False),
+        (_dev(2, CANDIDATE_COMMIT), _release(1), False),
         (_dev(1, CANDIDATE_COMMIT), _release(2), False),
-        # An unknown time is never newer.
-        (_dev(2, CANDIDATE_COMMIT), _release(None), False),
-        (Build(version="0.3.0", commit=CANDIDATE_COMMIT, flavour="development"), _release(1),
-         False),
-        # Two development builds: the later commit.
-        (_dev(2, CANDIDATE_COMMIT), _dev(1), True),
-        (_dev(1, CANDIDATE_COMMIT), _dev(2), False),
-        # The same build is not newer than itself.
+        (_dev(2, CANDIDATE_COMMIT), _dev(1), False),
+        (Build(version="0.3.0", commit=CANDIDATE_COMMIT, dirty=True), _release(1), False),
         (_release(1), _release(1), False),
         # A version that does not sort is not a comparison.
         (Build(version="nightly"), _release(1), False),

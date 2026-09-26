@@ -26,9 +26,13 @@ import hashlib
 import json
 from pathlib import Path
 import sys
+import tarfile
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 CONST = ROOT / "custom_components/enigma2_mqtt/const.py"
+READER = ROOT / "custom_components/enigma2_mqtt/release_index.py"
+BUNDLE_METADATA = ROOT / "custom_components/enigma2_mqtt/bundled/metadata.json"
 VECTORS = ROOT / "tests/vectors/release-index.json"
 SOURCE = ROOT / "tests/vectors/SOURCE.json"
 
@@ -69,6 +73,45 @@ def plugin_keys(trust: Path) -> list[tuple[str, int, str, int]]:
     return sorted(keys)
 
 
+def _value(node: ast.expr) -> object:
+    """A literal, or a product of literals such as `64 * 1024`."""
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        return _value(node.left) * _value(node.right)  # type: ignore[operator]
+    return ast.literal_eval(node)
+
+
+def _bundled_source_checks() -> list[str]:
+    """The same comparison against the plugin this integration bundles, once it can be made.
+
+    The bundled source archive is a release's, and 0.3.0 predates the signed index: it has no
+    `trust.py` and no vectors, and then the pinned commit above is the only comparison there
+    is. From the first bundle that carries them, the bundled plugin must agree too - otherwise
+    this integration could ship a plugin whose keys or vectors are not the ones it checks
+    against.
+    """
+    metadata = json.loads(BUNDLE_METADATA.read_text(encoding="utf-8"))
+    archive = BUNDLE_METADATA.parent / metadata["source_filename"]
+    prefix = f"enigma2-mqtt-bridge-{metadata['source_commit']}/"
+    failures: list[str] = []
+    with tarfile.open(archive, "r:gz") as source:
+        names = set(source.getnames())
+        trust_name = prefix + "src/MQTTBridge/trust.py"
+        vectors_name = prefix + "tests/vectors/release-index.json"
+        if trust_name not in names:
+            print("check-plugin-shared: the bundled plugin predates the signed index; "
+                  "compared with the pinned commit only")
+            return failures
+        with tempfile.TemporaryDirectory() as temporary:
+            trust = Path(temporary) / "trust.py"
+            trust.write_bytes(source.extractfile(trust_name).read())
+            if integration_keys() != plugin_keys(trust):
+                failures.append("the bundled plugin's embedded keys are not PLUGIN_INDEX_KEYS")
+        if vectors_name in names:
+            if source.extractfile(vectors_name).read() != VECTORS.read_bytes():
+                failures.append("the bundled plugin's vectors are not tests/vectors' copy")
+    return failures
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--plugin-tree", type=Path, required=True)
@@ -85,8 +128,25 @@ def main(argv: list[str] | None = None) -> int:
             f"tests/vectors/release-index.json differs from the plugin's at {source['commit']}"
         )
 
-    if integration_keys() != plugin_keys(plugin / "src/MQTTBridge/trust.py"):
+    trust = plugin / "src/MQTTBridge/trust.py"
+    if integration_keys() != plugin_keys(trust):
         failures.append("PLUGIN_INDEX_KEYS in const.py is not the plugin's EMBEDDED key set")
+
+    # The limits and the origin, which the vectors carry only in part.
+    theirs_values = _assignments(trust)
+    ours_values = {**_assignments(READER), **_assignments(CONST)}
+    for theirs_name, ours_name in (
+        ("ORIGIN", "PLUGIN_INDEX_ORIGIN"),
+        ("MAX_JUMP", "MAX_JUMP"),
+        ("MAX_INDEX_BYTES", "MAX_INDEX_BYTES"),
+        ("MAX_SIGNATURE_BYTES", "MAX_SIGNATURE_BYTES"),
+        ("MAX_PACKAGE_BYTES", "MAX_PACKAGE_BYTES"),
+        ("PACKAGE", "PACKAGE"),
+    ):
+        if _value(theirs_values[theirs_name]) != _value(ours_values[ours_name]):
+            failures.append(f"{ours_name} is not the plugin's {theirs_name}")
+
+    failures.extend(_bundled_source_checks())
 
     contract = json.loads((plugin / "docs/contract.json").read_text(encoding="utf-8"))
     constants = _assignments(CONST)

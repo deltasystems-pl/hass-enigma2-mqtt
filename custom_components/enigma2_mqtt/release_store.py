@@ -63,6 +63,7 @@ from .const import (
     PLUGIN_INDEX_ORIGIN,
     PLUGIN_INDEX_SIGNATURE_FILE,
     RELEASE_CHECK_INTERVAL,
+    RELEASE_CHECK_SLACK,
     RELEASE_CHECK_TIMEOUT,
     RELEASE_INDEX_STORAGE_KEY,
     RELEASE_INDEX_STORAGE_VERSION,
@@ -82,8 +83,12 @@ ERROR_BAD_MEMORY = "bad_memory"
 # The refusals a household is told as "the list has a bad signature or is older than the one
 # already known"; everything else from the rule is a malformed or oversized file.
 SIGNATURE_OR_ORDER = frozenset(
-    {"unknown_key", "bad_signature", "key_mismatch", "rank", "replay", "jump", "first_sight"}
+    {"unknown_key", "key_mismatch", "rank", "replay", "jump", "first_sight"}
 )
+# A signature that did not verify twice: said as "could not be verified", because a pair read
+# while a new index was being published fails the same way, and a false alarm at every release
+# would teach anybody to ignore the real one.
+ERROR_BAD_SIGNATURE = "bad_signature"
 
 # What a check came to.
 RESULT_SKIPPED = "skipped"
@@ -164,6 +169,15 @@ async def _async_get(
                     break
         etag = response.headers.get("ETag")
         return status, bytes(body), etag if isinstance(etag, str) else None
+
+
+def _torn(index_raw: bytes, signature_raw: bytes) -> bool:
+    """Whether a pair fails the signature check - the one failure a publication race makes."""
+    try:
+        release_index.authenticate(index_raw, signature_raw, release_index.EMBEDDED)
+    except release_index.Refused as error:
+        return error.reason == "bad_signature"
+    return False
 
 
 def _b64(value: bytes | None) -> str | None:
@@ -308,13 +322,19 @@ class ReleaseIndexCache:
         await self.async_load()
         async with self._lock:
             now = dt_util.utcnow()
-            if self.checked is not None:
+            # A stamp in the future was written by a clock that was ahead - a host that
+            # booted before its time was set - and is not a check that happened: it would
+            # otherwise block every check for as long as the clock had been wrong.
+            if self.checked is not None and self.checked <= now:
                 elapsed = now - self.checked
                 if manual and elapsed < RELEASE_MANUAL_INTERVAL:
                     raise CheckRateLimited(
                         self.checked, (RELEASE_MANUAL_INTERVAL - elapsed).total_seconds()
                     )
-                if not manual and elapsed < RELEASE_CHECK_INTERVAL:
+                # The daily timer fires a day after it was scheduled, and the stamp was taken
+                # a moment after that: without the slack every other firing is skipped, and a
+                # daily check becomes one every two days.
+                if not manual and elapsed < RELEASE_CHECK_INTERVAL - RELEASE_CHECK_SLACK:
                     return CheckResult(RESULT_SKIPPED)
             # Stamped and stored before the request: a check that fails has spent its turn.
             self.checked = now
@@ -326,35 +346,53 @@ class ReleaseIndexCache:
         return result
 
     async def _async_fetch_and_judge(self) -> CheckResult:
+        """Fetch the pair and judge it - reading it a second time before calling it forged.
+
+        The index and its signature are two requests, and a publication can land between
+        them: a new index with the old signature, or the other way round. That pair does
+        not verify, and it is no forgery. So a pair whose signature does not verify is read
+        once more, fresh; only a second failure is judged - and even then the household is
+        told that the list could not be verified, not that it was forged (the log keeps the
+        warning, for whoever looks).
+        """
         session = async_get_clientsession(self.hass)
         headers = {"If-None-Match": self.etag} if self.etag and self.index_raw else {}
-        try:
-            status, index_raw, etag = await _async_get(
-                session,
-                PLUGIN_INDEX_ORIGIN + PLUGIN_INDEX_FILE,
-                release_index.MAX_INDEX_BYTES,
-                headers,
-            )
-            if status == 304:
-                self.fetched = dt_util.utcnow()
+        for attempt in (1, 2):
+            try:
+                status, index_raw, etag = await _async_get(
+                    session,
+                    PLUGIN_INDEX_ORIGIN + PLUGIN_INDEX_FILE,
+                    release_index.MAX_INDEX_BYTES,
+                    headers,
+                )
+                if status == 304:
+                    self.fetched = dt_util.utcnow()
+                    return CheckResult(RESULT_UNCHANGED)
+                _, signature_raw, _ = await _async_get(
+                    session,
+                    PLUGIN_INDEX_ORIGIN + PLUGIN_INDEX_SIGNATURE_FILE,
+                    release_index.MAX_SIGNATURE_BYTES,
+                    {},
+                )
+            except _Fetched as error:
+                _LOGGER.debug("The plugin release index check failed: %s", error)
+                return CheckResult(RESULT_FAILED, error.code)
+            except (TimeoutError, aiohttp.ClientError) as error:
+                _LOGGER.debug("The plugin release index could not be fetched: %s", error)
+                return CheckResult(RESULT_FAILED, ERROR_UNREACHABLE)
+            self.fetched = dt_util.utcnow()
+            if index_raw == self.index_raw and signature_raw == self.signature_raw:
+                # The exact bytes already held: nothing new, and not a failure.
+                self.etag = etag
                 return CheckResult(RESULT_UNCHANGED)
-            _, signature_raw, _ = await _async_get(
-                session,
-                PLUGIN_INDEX_ORIGIN + PLUGIN_INDEX_SIGNATURE_FILE,
-                release_index.MAX_SIGNATURE_BYTES,
-                {},
-            )
-        except _Fetched as error:
-            _LOGGER.debug("The plugin release index check failed: %s", error)
-            return CheckResult(RESULT_FAILED, error.code)
-        except (TimeoutError, aiohttp.ClientError) as error:
-            _LOGGER.debug("The plugin release index could not be fetched: %s", error)
-            return CheckResult(RESULT_FAILED, ERROR_UNREACHABLE)
-        self.fetched = dt_util.utcnow()
-        if index_raw == self.index_raw and signature_raw == self.signature_raw:
-            # The exact bytes already held: nothing new, and not a failure.
-            self.etag = etag
-            return CheckResult(RESULT_UNCHANGED)
+            if attempt == 1 and _torn(index_raw, signature_raw):
+                _LOGGER.debug(
+                    "The plugin release index and its signature do not match; reading both "
+                    "again in case a publication landed between the two requests"
+                )
+                headers = {}
+                continue
+            break
         return await self._async_judge(index_raw, signature_raw, etag)
 
     async def _async_judge(
@@ -373,6 +411,10 @@ class ReleaseIndexCache:
         try:
             accepted = release_index.accept(index_raw, signature_raw, keys, memory)
         except release_index.Refused as error:
+            if error.reason == "replay" and await self._async_take_back(
+                index_raw, signature_raw, etag, memory
+            ):
+                return CheckResult(RESULT_UNCHANGED)
             _LOGGER.warning(
                 "The plugin release index was refused (%s): %s", error.reason, error.detail
             )
@@ -385,6 +427,67 @@ class ReleaseIndexCache:
         await self._async_announce(previous, accepted.index)
         await self._async_publish()
         return CheckResult(RESULT_ACCEPTED)
+
+    async def _async_take_back(
+        self,
+        index_raw: bytes,
+        signature_raw: bytes,
+        etag: str | None,
+        memory: dict[str, Any],
+    ) -> bool:
+        """Hold again an index this reader already accepted, when it holds no index at all.
+
+        The case: the stored bytes were damaged or dropped (`_restore`), while the trust
+        memory - rightly - still says which serial was accepted. The same genuine index then
+        comes back from the origin, and the rule calls its equal serial a replay. It is not a
+        replay of anything held; it is the very index the memory remembers. So, and only so -
+        nothing held, the signature verified by one of this reader's keys, and a serial
+        **equal** to the one the memory holds for that key - the bytes are taken back:
+        silently, because nothing new was learned, and without touching the memory. A lower
+        serial stays a replay, and so does an equal serial while another index is held (an
+        equal serial with other bytes is exactly what the rule refuses).
+        """
+        if self.index_raw is not None:
+            return False
+        try:
+            index, key = release_index.authenticate(
+                index_raw, signature_raw, release_index.EMBEDDED
+            )
+        except release_index.Refused:
+            return False
+        if memory["serials"].get(key.key_id) != index["serial"]:
+            return False
+        self.index_raw, self.signature_raw = index_raw, signature_raw
+        self.index, self.key_id, self.etag = index, key.key_id, etag
+        await self._async_save()
+        _LOGGER.info(
+            "Took back the plugin release index serial %s, which this Home Assistant had "
+            "accepted before and no longer held",
+            index["serial"],
+        )
+        await self._async_publish()
+        return True
+
+    async def async_republish(self) -> None:
+        """Put the held index on the broker again, retained - verified first.
+
+        On every setup and every reconnect to the broker: a broker restarted without
+        persistence, a publish that failed while it was down, or a broker client that
+        overwrote the retained topic would otherwise leave receivers without internet on a
+        wrong or missing index until the next serial. A receiver sees the same serial as
+        nothing new. The bytes are verified again before they go out, because what is
+        published in this integration's name must be what it would accept today.
+        """
+        await self.async_load()
+        if self.index_raw is None or self.signature_raw is None:
+            return
+        try:
+            release_index.authenticate(
+                self.index_raw, self.signature_raw, release_index.EMBEDDED
+            )
+        except release_index.Refused:
+            return
+        await self._async_publish()
 
     async def _async_announce(
         self, previous: dict[str, Any] | None, index: dict[str, Any]

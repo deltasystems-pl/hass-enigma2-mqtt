@@ -543,6 +543,9 @@ PLUGIN_INDEX_KEYS: Final[tuple[dict[str, object], ...]] = (
 # could only ever see the same bytes.
 RELEASE_CHECK_INTERVAL: Final = timedelta(hours=24)
 RELEASE_MANUAL_INTERVAL: Final = timedelta(minutes=10)
+# How much short of a day the daily check may run: the timer fires a day after it was set, and
+# the stamp it is judged by was taken a moment later.
+RELEASE_CHECK_SLACK: Final = timedelta(minutes=10)
 RELEASE_CHECK_TIMEOUT: Final = 10
 # The second layout of the release check's storage. The first lived under
 # `enigma2_mqtt.release_check`, one record per receiver; it is removed the first time
