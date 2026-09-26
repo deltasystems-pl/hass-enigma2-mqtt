@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- **Installable plugin versions from a signed release index are planned**, in
+  [ADR-0008](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0008-signed-plugin-index.md)
+  (proposed), the Home Assistant half of the plugin's
+  [ADR-0015](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0015-signed-self-update.md):
+  plugin versions come only from the plugin's signed release index; compatibility is the plugin's
+  contract major (1, from plugin 0.2.0) with no upper bound inside it; the update card offers what
+  it will install, and only while it can install it; an upgrade goes through the receiver when the
+  receiver permits it and over SSH when it does not, never both; a receiver without internet gets
+  the index and the package through Home Assistant and verifies both itself; older versions only
+  through a confirmed SSH step in the options flow; every restart the installer causes keeps the
+  household's channel, from 0.4.0 - the released 0.3.x installer still restarts with `init 4` /
+  `init 3`; and a "Force plugin reinstall (SSH)" button, for administrators, as the recovery path.
+  It records two known defects to fix before the plugin adds such values: an unknown `oscam` reader
+  `kind` discards the whole `oscam` payload, and an unknown `key` `press` is read as a short press.
+  Nothing is built yet.
+- ADR-0000 §6.3's `update` row and §7, ADR-0002 §6, ADR-0004 §4, ADR-0006 §5 and SECURITY.md's
+  "No telemetry" and "Supply chain" paragraphs are marked as superseded in part by ADR-0008
+  (proposed). Each still describes every released integration exactly; SECURITY.md's policy is
+  rewritten when the first release that implements ADR-0008 ships. ADR-0002 §6's "no release check
+  that phones home" has not held since the opt-in release check of 0.2.0, and the marker says so.
+
 ## [0.3.1] - 2026-09-25
 
 A small release on top of 0.3.0. What a household notices is one piece of text: where the

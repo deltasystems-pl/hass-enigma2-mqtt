@@ -41,6 +41,17 @@ broker credential.
 over SSH to your receiver when you ask it to install or update the plugin. The optional check
 for a newer plugin release on GitHub is **off by default**. Nothing is reported anywhere.
 
+> **Superseded in part by [ADR-0008](docs/adr/0008-signed-plugin-index.md) (proposed):** an
+> integration that implements it fetches the plugin's signed release index and plugin packages from
+> the plugin's fixed HTTPS origin - only when you ask for a check, an install or a downgrade, or
+> when the daily check is on - asks GitHub's API once per install to cross-check a package's
+> digest, and serves a verified package, without authentication, to one receiver's address on your
+> LAN for ten minutes when that receiver has no internet access. That is not built: every released
+> integration behaves exactly as this paragraph says. The policy here - what is trusted, how the
+> signing keys are kept and rotated, that an index does not expire, and that HACS is an unsigned
+> path - is rewritten in the documentation pass that ships with the first release implementing
+> ADR-0008, not before.
+
 **Privacy of the topics.** The `key` and `epg` topics reveal what is watched and which buttons
 are pressed, and the screen image is a picture of the television. [DOCUMENTATION.md §10](DOCUMENTATION.md#10-privacy)
 documents the recorder exclusions; key publishing can be switched off on the box.
@@ -54,3 +65,9 @@ candidate may pin reviewed code newer than the last plugin tag without pretendin
 tagged release; a published release pins an immutable public commit of
 [enigma2-mqtt-bridge](https://github.com/deltasystems-pl/enigma2-mqtt-bridge). CI reproduces both
 archives before publishing, and the installer verifies the IPK again before uploading it.
+
+> **Superseded in part by [ADR-0008](docs/adr/0008-signed-plugin-index.md) (proposed):** the bundle
+> stays, but it is to stop being the only package the installer uploads. A package downloaded at
+> runtime is one the plugin's signed release index lists, verified by signature, size and sha256 -
+> not rebuilt by this repository's CI. Not built yet; rewritten with the rest of this policy when
+> the first release implementing ADR-0008 ships.

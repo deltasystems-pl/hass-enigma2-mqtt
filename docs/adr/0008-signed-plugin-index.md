@@ -1,0 +1,256 @@
+# ADR-0008: Plugin versions come from the plugin's signed release index; the update card installs through the receiver when it may and over SSH when it must; older versions only through a confirmed SSH step
+
+**Status:** proposed - accepted with the first code that implements it
+**Date:** 2026-09-26
+**Supersedes:** in part, once accepted - [ADR-0002](0002-scope-after-m0.md) §6, "There is no
+runtime download path for executable code, and there is no release check that phones home" (its
+second half stopped being true in 0.2.0, whose opt-in release check nothing superseded at the time;
+this record says so); [ADR-0000](0000-prd.md) §7's "no outbound connection other than the user's
+broker", and §6.3's `update` row, whose latest version is the bundled one; [ADR-0004](0004-remote-uninstall.md)
+§4's "does nothing else" and [ADR-0006](0006-remote-uninstall-plugin-acts-ssh-verifies.md) §5's
+"one publish" - removing an entry publishes two messages; and the "No telemetry" and "Supply chain"
+paragraphs of [SECURITY.md](../../SECURITY.md). Until this record is accepted, each of them
+describes every released integration exactly; each carries a marker saying where it will stop doing
+so, and SECURITY.md's policy is rewritten when the first release that implements this record ships.
+
+The receiver's half is [ADR-0015](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0015-signed-self-update.md)
+in the plugin repository. Three documents there are shared ground and are not repeated here: the
+contract version and its rule, in [TOPICS.md, "Contract version"](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TOPICS.md#contract-version),
+with the same contract as data in [contract.json](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/contract.json);
+and the install transaction both programs implement - the names on the receiver, the lock and its
+stale rule, the snapshot, the marker and the restart rule - in
+[TRANSACTION.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TRANSACTION.md).
+The records are read together; this one says only what Home Assistant decides.
+
+## Context
+
+The update entity reports `info.plugin` as installed and the bundled plugin as the latest version,
+and `install` runs the SSH installer with the bundled package when the installer's credentials were
+kept. It compares version strings, so a development build and the release with the same number look
+the same. A receiver without stored SSH credentials is offered nothing. The opt-in release check
+added in 0.2.0 asks the plugin repository which release is published, and deliberately never raises
+the offered version above the bundle, because nothing could install it.
+
+The plugin repository now defines what a compatible plugin is - a contract major, and a rule for
+what a release may change inside one - and proposes that the plugin update itself, from a release
+index signed with a key kept off GitHub. Some receivers have no internet access and are reached only
+through the household's LAN; the Home Assistant that manages them usually does have it.
+
+Every restart the released installer causes stops the receiver's interface with `init 4` and starts
+it with `init 3`: the install under one trap (`installer.py` l.1452 at 0.3.1), the rollback as two
+separate SSH commands (l.1136 and l.1171). The image saves its settings - the channel being watched among
+them - only on a clean quit, and a signal stop never reaches that code; on a receiver, measured, the
+interface came back on another channel than the one playing. OpenWebif's own restart (power state 3)
+is the image's clean quit.
+
+Two facts about Home Assistant shape the recovery button below: `update.install` is for
+administrators only and `button.press` is not; and the options flow reloads the entry only when its
+options change, so storing or forgetting SSH credentials - which live in the entry's data - reloads
+nothing.
+
+## Decision
+
+### 1. The signed index is the only list of versions
+
+Versions, their sizes, sha256 values, commits, compatibility, dependencies, the floor and the
+withdrawals come from the plugin's release index and nowhere else. The integration fetches it from
+the plugin's fixed HTTPS origin with verified TLS and no redirects, and accepts it only when the
+Ed25519 signature verifies with a public key embedded in this integration, and when its trust rule
+holds: the serial increases for that key and by at most 1000 (a key seen for the first time within
+1000 of a baseline embedded at build time), and the key's rank is not below the highest rank already
+accepted. Two keys are embedded, a main key and a sealed spare of higher rank; the key set and ranks
+equal the plugin's. The trust memory is kept per embedded key set, by its fingerprint, so a build
+carrying other keys can never raise the rank the release keys are judged by.
+
+An explicit check, an install or a downgrade is consent to fetch. The daily check stays opt-in, on
+the existing option, and manual checks share a ten-minute limit. GitHub's API is used only for one
+digest cross-check per install - a mismatch refuses, an unreachable API is noted and does not - and
+its answer is kept per version for a day. The per-receiver records of the old release check are
+dropped.
+
+### 2. Compatible means the same contract major
+
+A release is offered when its contract major is this integration's (`1`), its version is at or
+above both this integration's floor (`0.2.0`, below which lies contract 0) and the index's floor,
+this integration is at or above the release's own `min_integration`, it is not withdrawn, and the
+receiver has every package it depends on - which the receiver checks and refuses. There is no upper
+bound inside a major: the plugin's rule lets a release add topics, members, commands, capabilities
+and settings, add a value to an enumeration, add a refusal and tighten free text, and never remove,
+retype or change a meaning - except as a named in-major exception, which the plugin decides in the
+pull request that makes it, after checking it against this integration's code and citing it by file
+and line. Four are named so far: `zap-moves-channel-list` and `epg-grid-generated-means-changed` (0.3.0),
+`timers-lists-finished` and `zap-under-popup-recorded` (not yet released).
+
+This integration's half of the rule: ignore what it does not know, treat a value of an enumeration
+it does not know as unknown, and read a member it expects and does not find as the older plugin it
+is. A plugin that publishes no `info.contract` is contract 0 below 0.2.0 and contract 1 for 0.2.0 and
+0.3.x. The major and the floor are declared in `const.py` - the manifest cannot carry them - and
+published, retained, on `enigma2mqtt/integration/<node_id>` so a receiver applies the same rule;
+`SUPPORTED_PLUGIN_VERSION` stays what it is, the version shown when no bundle loads. The rule is tested
+against the plugin's own vectors, read from the bundled source archive.
+
+### 3. The card offers what it will install, and only when it can
+
+`latest_version` is the version this card will install - the newest compatible release, or the one
+chosen in a select - and it exists only while an install path exists; without one, the index's news
+goes into the summary and the attributes, never a badge. A release build displays `N.N.N`; any other
+build, installed or offered, displays `N.N.N+g<sha7>`, and two builds of the same `N.N.N` compare by
+commit time, so a candidate can be offered over the release it will replace.
+
+| Key | Platform | en | pl | de | Enabled by default |
+|---|---|---|---|---|---|
+| `check_plugin_update` | button | Check for plugin updates | Sprawdź aktualizacje wtyczki | Nach Plugin-Updates suchen | yes |
+| `plugin_install_version` | select | Plugin version to install | Wersja wtyczki do instalacji | Zu installierende Plugin-Version | no |
+| `force_reinstall` | button | Force plugin reinstall (SSH) | Wymuś reinstalację wtyczki (SSH) | Plugin-Neuinstallation erzwingen (SSH) | no |
+
+All three are diagnostic. Their names are chosen once, in every language
+([ADR-0007](0007-entity-ids-follow-the-installation-language.md)); no existing name changes. The
+select's first option is the newest compatible release; a choice is stored in the entry's options,
+honoured only while the select is enabled, and offers only versions above the installed one.
+
+### 4. Through the receiver when it may, over SSH when it must - never both
+
+| The receiver reports | SSH credentials | Upgrade | Downgrade |
+|---|---|---|---|
+| `self_update`, and `update_allowed` on | any | over MQTT, `cmd/update` with a relay address | options flow, SSH |
+| otherwise | stored | the SSH installer, with the verified package | options flow, SSH |
+| otherwise | none | none | none |
+
+After a refusal or a rollback over MQTT the card says so and does not try SSH. Over MQTT the
+command is published once the broker has confirmed the subscription that hears the answer, and the
+transaction is followed for up to 21 minutes - one more than the receiver's own hard limit - after
+which the card says it is still running on the receiver and keeps following. Success is `installed`
+together with the target's version and commit on `info`. A transaction the receiver started shows
+as in progress only while it started within the last 21 minutes, so a stale or forged retained
+state cannot hold the card for longer.
+
+### 5. A receiver without internet gets both from Home Assistant, and verifies both itself
+
+After every newly accepted index the integration publishes it, retained, on
+`enigma2mqtt/release_index`. To a receiver that asks, it serves the package, already verified, at
+`/api/enigma2_mqtt/relay/<token>`: unauthenticated, 32 random bytes, answering only the receiver's
+own IPv4 address from `info` (no address, or only an IPv6 one, and no token is issued), for ten
+minutes, repeatably - the address crosses the broker, so single use would only let a broker client
+spend it first, and the bytes are a public signed package anyway. One token per receiver and
+version, three per receiver at most, and never one a known transaction is using. The address is
+Home Assistant's own on the receiver's subnet, else its internal URL, never an external or cloud
+one; with neither, the relay is refused and the text says where to set the local address. The
+receiver checks the index and the package against the signature itself: Home Assistant is a
+courier, not an authority.
+
+### 6. Older versions only through a confirmed SSH step
+
+A downgrade is never sent over MQTT. The options flow offers the versions from the floor up to below
+the installed one, names what disappears - the entities and actions whose capability the target
+predates, and updating over MQTT when the target cannot - and needs a tick box. It installs with
+`--force-downgrade`, restarts by the rule below, and ends with the target's own `cmd/reset` after
+the proof, so the older plugin forgets the retained topics only newer ones publish. Never below the
+floor, never a withdrawn version.
+
+### 7. Every restart the installer causes keeps the household's channel - from 0.4.0
+
+The installer follows the restart rule of
+[TRANSACTION.md §5](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TRANSACTION.md#5-the-restart-rule-planned-for-040-both-programs):
+
+- **Restart (R1)** wherever only the plugin's files changed: the preflight refuses while recording,
+  streaming, in standby or with a timer due within ten minutes, and checks every package the release
+  depends on; then OpenWebif's power state 3 on the receiver itself, judged by the enigma2 pid
+  changing within 60 seconds, never by the call's exit status. No new pid means the image asked a
+  question on the television. It is not forced: the plugin's files and package metadata go back by
+  staged renames (never the settings), the pid is read again, and the result says that the update
+  was withdrawn, that the previous plugin is running, and that the question may still be on the
+  television, where either answer is safe.
+- **Stop (R2)** only where the interface must not run - a rollback that puts the settings back, a
+  forced reinstall into an interface that keeps crashing: the playing service and standby state are
+  recorded, then the stop, the restore, the service written back into the settings and the start
+  run on the receiver as one detached script whose trap starts the interface on any interruption.
+- **Verify (R3)** after every restart on every path: the service and standby state are compared
+  with the record and restored if they differ - the channel at most once, and only while the
+  receiver is still on the service it started on - and the recorded bouquet is restored with
+  `cmd/bouquet` where the plugin has it.
+
+The lock's owner record carries the installer's transaction id, so the recovery of an interrupted
+transaction finds its snapshot by id, never by a clock that may have started in 1970. Two
+assumptions under R2 - that `init 4` loses unsaved settings, and that the image comes back on a
+channel written while it is stopped - are not yet measured on a receiver, and are measured before
+the code that relies on them merges.
+
+**The released 0.3.x installer is not changed.** It keeps `init 4` / `init 3` on every path, so an
+update through it can bring a receiver back on another channel than the one it was playing.
+
+### 8. A recovery path that needs nothing from the plugin
+
+"Force plugin reinstall (SSH)" reinstalls the bundled package - only the bundled package - over SSH,
+with every installer safeguard, the shared lock and the restart rule, even over a newer plugin
+(with `--force-downgrade`, said in the confirmation), and refuses a bundle the index has withdrawn.
+Its proof does not need the plugin to answer: a new enigma2 pid holding the plugin's log file open,
+plus the announcement and the bundle's version and commit when the plugin is switched on; a plugin
+switched off in its own settings is reinstalled and stays off, and the result says so.
+
+- **Two presses, one administrator.** The first press arms it for 30 seconds and posts the
+  confirmation as a notice, never an error, so an automation is not aborted; a second press within
+  30 seconds by the same Home Assistant administrator starts it. A press by anybody else arms
+  nothing, starts nothing, raises nothing, and posts a notice saying who may.
+- **It reads the receiver, not the topic.** It asks the lock on the receiver, never the retained
+  state, so a forged in-progress state cannot block it. It refuses an interface that runs while
+  OpenWebif is silent, and one stopped on purpose (runlevel 4 with nothing of ours); it proceeds
+  without the recording guards only when enigma2 is absent on three samples over ten seconds - a
+  respawn loop, in which nothing can record; and it recovers runlevel 4 left by an interrupted
+  transaction of this project.
+- **It exists only while SSH credentials are stored.** One helper writes and removes the credentials
+  and signals the change; the button is created then, disabled by default, and removed with its
+  registry entry when they are forgotten. That is a deliberate exception to "entities are never
+  removed when a capability stops being named": that rule protects against silence from a receiver,
+  and this follows a decision the user took in Home Assistant.
+
+### 9. The guided installer may grant `update_allowed`, and nothing else
+
+A tick box, off by default, whose help text says that anything able to publish on the broker could
+then order an update to a newer version, and that the Home Assistant Mosquitto add-on enforces no
+ACL. Only when it is ticked is `update_allowed` written into the provisioning file the installer
+already writes over SSH. The rule of [ADR-0003](0003-control-feedback-and-household-features.md) §8
+holds - a setting that enables a command never travels over the broker: the permission is never on
+the options form and never in `cmd/config`, and the receiver refuses it from the broker. It is the
+first permission this integration writes, and the only one.
+
+### 10. Removing an entry publishes two messages
+
+The retraction of `enigma2mqtt/integration/<node_id>` and the existing `cmd/ha_mode` = `discovery`.
+Still no SSH, and still nothing is removed from the receiver. The retained `enigma2mqtt/release_index`
+stays: a signed index is harmless to anybody who reads it.
+
+## Consequences
+
+- The integration downloads executable code for a receiver - from one origin, verified by signature,
+  size and sha256 - and serves it unauthenticated on the LAN, to one address, for ten minutes, to a
+  receiver that verifies it again. The relay address travels over the broker, so a broker client can
+  see it and name a host for the receiver to fetch from; the worst it achieves is a refusal.
+- Every plugin release needs an offline signing step before this card offers it. A lost key delays
+  updates; a stolen one needs new releases of both halves, because a receiver reset later still
+  accepts the stolen key until a release drops it. Using the spare is irreversible, so it is never
+  exercised in production.
+- There is no index expiry: a withheld index cannot be detected, and a withdrawal reaches an
+  installation only with a newer index.
+- HACS, this integration's own update path, stays unsigned and rooted in GitHub - and this
+  integration holds the receiver's root credentials when they are kept. `SECURITY.md` says so when
+  it is rewritten.
+- Three new diagnostic entities, two of them disabled by default; no rename. One of them appears and
+  disappears with the stored credentials, and a dashboard card pointing at it goes blank when they
+  are forgotten.
+- The installer and the plugin's helper share one lock. The released installer's 30-minute stale
+  rule binds every later implementation, which may only lengthen it, and the two are tested against
+  each other's released code.
+- On the SSH path the running plugin has no doors: it runs with the new files on disk until the
+  restart, for up to 60 seconds when the image asks a question. Accepted as bounded; the MQTT path
+  closes its doors.
+- **Two known defects contradict this integration's half of the contract rule** (lines at 0.3.1), and each
+  needs an integration release that fixes it before any plugin release adds such a value - the
+  plugin's TOPICS.md lists both as not tolerated:
+  - an `oscam` reader `kind` other than `reader`, `server` or `unknown` makes `_normalize_oscam`
+    return nothing (`box.py` l.1486, the check at l.1510), and the caller then discards the whole
+    payload (l.1474-1476): the last good sample stays on the panel and goes stale;
+  - a `key` `press` other than `short` or `long` is read as `short` (`box.py` l.1983-1987), so a new
+    kind of press would fire the automations and device triggers of a short press.
+- The test that deleting an entry makes exactly one publish becomes a test for exactly two.
+- If this is reversed, the card goes back to the bundle over SSH, and the integration back to making
+  no connection but the broker and, when asked, the receiver.
