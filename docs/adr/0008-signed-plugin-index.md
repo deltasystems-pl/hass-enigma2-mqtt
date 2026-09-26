@@ -6,7 +6,8 @@
 runtime download path for executable code, and there is no release check that phones home" (its
 second half stopped being true in 0.2.0, whose opt-in release check nothing superseded at the time;
 this record says so); [ADR-0000](0000-prd.md) §7's "no outbound connection other than the user's
-broker", and §6.3's `update` row, whose latest version is the bundled one; [ADR-0004](0004-remote-uninstall.md)
+broker" and its supply-chain bullet, and §6.3's `update` row, whose latest version is the higher of
+the installed and the bundled one; [ADR-0004](0004-remote-uninstall.md)
 §4's "does nothing else" and [ADR-0006](0006-remote-uninstall-plugin-acts-ssh-verifies.md) §5's
 "one publish" - removing an entry publishes two messages; and the "No telemetry" and "Supply chain"
 paragraphs of [SECURITY.md](../../SECURITY.md). Until this record is accepted, each of them
@@ -24,17 +25,25 @@ The records are read together; this one says only what Home Assistant decides.
 
 ## Context
 
-The update entity reports `info.plugin` as installed and the bundled plugin as the latest version,
-and `install` runs the SSH installer with the bundled package when the installer's credentials were
-kept. It compares version strings, so a development build and the release with the same number look
-the same. A receiver without stored SSH credentials is offered nothing. The opt-in release check
-added in 0.2.0 asks the plugin repository which release is published, and deliberately never raises
-the offered version above the bundle, because nothing could install it.
+The update entity reports `info.plugin` as installed and, as the latest version, the higher of the
+installed and the bundled plugin (`update.py` l.155-166 at 0.3.1), and `install` runs the SSH
+installer with the bundled package when the installer's credentials were kept. It compares version
+strings, so a development build and the release with the same number look the same. A receiver on
+an older plugin without stored SSH credentials is shown **an available update with no install
+button**: the install feature follows the credentials (l.424-429), the latest version does not, and
+the summary says how to get there by hand. The opt-in release check added in 0.2.0 asks the plugin
+repository which release is published, and deliberately never raises the offered version above the
+bundle, because nothing could install it.
 
 The plugin repository now defines what a compatible plugin is - a contract major, and a rule for
 what a release may change inside one - and proposes that the plugin update itself, from a release
-index signed with a key kept off GitHub. Some receivers have no internet access and are reached only
-through the household's LAN; the Home Assistant that manages them usually does have it.
+index signed with Ed25519. The **main key** is used only in the plugin repository's CI, by a signing
+job that runs in the GitHub Environment `release-signing`, which admits the `main` branch and nothing
+else and releases the key only to a run the maintainer approves by hand; release tags `v*` are
+protected by a tag ruleset. A **spare key of higher rank** stays sealed offline and signs nothing
+unless the main key is leaked or lost; its emergency publication is a separate workflow that holds
+no secret. Some receivers have no internet access and are reached only through the household's LAN;
+the Home Assistant that manages them usually does have it.
 
 Every restart the released installer causes stops the receiver's interface with `init 4` and starts
 it with `init 3`: the install under one trap (`installer.py` l.1452 at 0.3.1), the rollback as two
@@ -62,11 +71,19 @@ accepted. Two keys are embedded, a main key and a sealed spare of higher rank; t
 equal the plugin's. The trust memory is kept per embedded key set, by its fingerprint, so a build
 carrying other keys can never raise the rank the release keys are judged by.
 
+Every newly accepted index is announced: a warning in the log and a persistent notification naming
+its serial, its `key_id`, the versions it adds and withdraws, and its floor - so an index the
+maintainer did not approve is seen by anybody who looks, not only installed.
+
 An explicit check, an install or a downgrade is consent to fetch. The daily check stays opt-in, on
-the existing option, and manual checks share a ten-minute limit. GitHub's API is used only for one
-digest cross-check per install - a mismatch refuses, an unreachable API is noted and does not - and
-its answer is kept per version for a day. The per-receiver records of the old release check are
-dropped.
+the existing option, and manual checks share a ten-minute limit. **Both limits live in Home
+Assistant's storage**, not in the entity: one verified index cache for all receivers - the index, its
+signature, its serial, its ETag and when it was fetched - which the daily stamp and the ten-minute
+limit are judged from. A limit kept in the entity is reset by every reload, options save and restart,
+which is why the release check's store exists today; the index cache takes its place, and the
+per-receiver records of the old release check are dropped when the store migrates. GitHub's API is
+used only for one digest cross-check per install - a mismatch refuses, an unreachable API is noted
+and does not - and its answer is kept per version for a day.
 
 ### 2. Compatible means the same contract major
 
@@ -92,8 +109,12 @@ against the plugin's own vectors, read from the bundled source archive.
 ### 3. The card offers what it will install, and only when it can
 
 `latest_version` is the version this card will install - the newest compatible release, or the one
-chosen in a select - and it exists only while an install path exists; without one, the index's news
-goes into the summary and the attributes, never a badge. A release build displays `N.N.N`; any other
+chosen in a select - while an install path exists. **Without one there is no update badge**:
+`latest_version` equals the installed version, so the entity's state is `off` - not `None`, which
+would make it `unknown` - and the newer versions, the bundled one included, go into the summary and
+the attributes with the way to an install path. That is a **behaviour change** from 0.3.1, where a
+receiver behind the bundle without credentials shows an available update with no install button;
+it is called out in the changelog of the release that makes it. A release build displays `N.N.N`; any other
 build, installed or offered, displays `N.N.N+g<sha7>`, and two builds of the same `N.N.N` compare by
 commit time, so a candidate can be offered over the release it will replace.
 
@@ -105,8 +126,10 @@ commit time, so a candidate can be offered over the release it will replace.
 
 All three are diagnostic. Their names are chosen once, in every language
 ([ADR-0007](0007-entity-ids-follow-the-installation-language.md)); no existing name changes. The
-select's first option is the newest compatible release; a choice is stored in the entry's options,
-honoured only while the select is enabled, and offers only versions above the installed one.
+select's first option is `latest` ("Latest compatible"), resolved to the newest compatible release
+when the card installs; it is also what counts while the select is disabled. Any other choice is
+stored in the entry's options, honoured only while the select is enabled, and offers only versions
+above the installed one.
 
 ### 4. Through the receiver when it may, over SSH when it must - never both
 
@@ -208,10 +231,17 @@ switched off in its own settings is reinstalled and stays off, and the result sa
 A tick box, off by default, whose help text says that anything able to publish on the broker could
 then order an update to a newer version, and that the Home Assistant Mosquitto add-on enforces no
 ACL. Only when it is ticked is `update_allowed` written into the provisioning file the installer
-already writes over SSH. The rule of [ADR-0003](0003-control-feedback-and-household-features.md) §8
-holds - a setting that enables a command never travels over the broker: the permission is never on
-the options form and never in `cmd/config`, and the receiver refuses it from the broker. It is the
-first permission this integration writes, and the only one.
+already writes over SSH.
+
+The rule of [ADR-0003](0003-control-feedback-and-household-features.md) §8 - a setting that enables a
+command is **box-only** - is read the way the plugin defines it: box-only means **set on the
+receiver** - its setup screen, its OpenWebif page, or the provisioning file it reads at start - and
+never over the broker. On that reading the rule holds: the permission is never on the options form
+and never in `cmd/config`, and the receiver refuses it from the broker. This repository has said it
+more narrowly until now - "set at the television and refused over MQTT" in `config_flow.py`
+(l.858-859 at 0.3.1), "set on the receiver's own setup screen" in DOCUMENTATION.md (l.995-997) - and
+both change, to the reading above, with the code that adds the tick box. It is the first permission
+this integration writes, and the only one.
 
 ### 10. Removing an entry publishes two messages
 
@@ -225,21 +255,42 @@ stays: a signed index is harmless to anybody who reads it.
   size and sha256 - and serves it unauthenticated on the LAN, to one address, for ten minutes, to a
   receiver that verifies it again. The relay address travels over the broker, so a broker client can
   see it and name a host for the receiver to fetch from; the worst it achieves is a refusal.
-- Every plugin release needs an offline signing step before this card offers it. A lost key delays
-  updates; a stolen one needs new releases of both halves, because a receiver reset later still
-  accepts the stolen key until a release drops it. Using the spare is irreversible, so it is never
-  exercised in production.
+- This card offers a plugin release only after the maintainer has approved the signing job for it in
+  the plugin repository's CI; between the release and that approval, the version is on the opkg feed
+  and in the next bundle, but not in the index.
+- A deleted environment secret is not a lost key: it is entered again from the main key's encrypted
+  offline backup. Only losing both copies moves signing to the spare, and that is irreversible - every
+  reader that accepts a spare-signed index ignores the main key from then on - so the spare is never
+  exercised in production. A **leak** of the main key - through a malicious workflow, a compromised
+  action or the maintainer's account - is treated as a theft: the secret is deleted, the spare signs
+  the next index, and the next release of both halves drops the main key, because a receiver or an
+  installation reset later still accepts the leaked key until a release no longer embeds it.
+- **What CI signing does not protect against.** Because the main key is used in CI, a compromise of
+  the maintainer's GitHub account, a malicious workflow change merged to `main`, or a compromised
+  action in the signing job can produce a validly signed index - and this integration would then
+  offer and install what it names. What stands in the way: the approval gate (the key reaches only a
+  run the maintainer approves), the environment that admits `main` only (never another branch, a tag
+  or a fork), the tag ruleset on `v*`, the `main` ruleset (a workflow change needs a pull request and
+  green CI), enforced pinning of every action to a full commit SHA, a passkey or two-factor
+  authentication on the account, the persistent notification for every newly accepted index (§1),
+  and the offline spare with a release that drops the main key. Stated plainly: against a compromise
+  of the maintainer's account this makes a malicious update **detectable, and recoverable once the
+  account - or another channel for a spare-signed index - is under the maintainer's control again;
+  it does not prevent it**.
 - There is no index expiry: a withheld index cannot be detected, and a withdrawal reaches an
   installation only with a newer index.
 - HACS, this integration's own update path, stays unsigned and rooted in GitHub - and this
-  integration holds the receiver's root credentials when they are kept. `SECURITY.md` says so when
-  it is rewritten.
+  integration holds the receiver's root credentials when they are kept. With the main key in CI, the
+  signed index now shares that root of trust: the signature adds the checks above, not a second,
+  independent root. `SECURITY.md` says so when it is rewritten.
 - Three new diagnostic entities, two of them disabled by default; no rename. One of them appears and
   disappears with the stored credentials, and a dashboard card pointing at it goes blank when they
   are forgotten.
 - The installer and the plugin's helper share one lock. The released installer's 30-minute stale
-  rule binds every later implementation, which may only lengthen it, and the two are tested against
-  each other's released code.
+  rule binds every later implementation, which may only lengthen it. Only the plugin's tests run
+  against the other program's released code - a copy of this integration's released
+  `installer_helper.py`; this integration tests the plugin's helper from the bundled source archive,
+  which is the candidate it ships, not a release.
 - On the SSH path the running plugin has no doors: it runs with the new files on disk until the
   restart, for up to 60 seconds when the image asks a question. Accepted as bounded; the MQTT path
   closes its doors.
@@ -249,7 +300,7 @@ stays: a signed index is harmless to anybody who reads it.
   - an `oscam` reader `kind` other than `reader`, `server` or `unknown` makes `_normalize_oscam`
     return nothing (`box.py` l.1486, the check at l.1510), and the caller then discards the whole
     payload (l.1474-1476): the last good sample stays on the panel and goes stale;
-  - a `key` `press` other than `short` or `long` is read as `short` (`box.py` l.1983-1987), so a new
+  - a `key` `press` other than `short` or `long` is read as `short` (`box.py` l.1985-1987), so a new
     kind of press would fire the automations and device triggers of a short press.
 - The test that deleting an entry makes exactly one publish becomes a test for exactly two.
 - If this is reversed, the card goes back to the bundle over SSH, and the integration back to making

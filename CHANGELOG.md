@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through a confirmed SSH step in the options flow; every restart the installer causes keeps the
   household's channel, from 0.4.0 - the released 0.3.x installer still restarts with `init 4` /
   `init 3`; and a "Force plugin reinstall (SSH)" button, for administrators, as the recovery path.
+  The index's main signing key is used only in the plugin repository's CI, in a signing job the
+  maintainer approves by hand, with a spare key of higher rank sealed offline; the record says
+  plainly what that does not protect against - a compromised maintainer account, a malicious
+  workflow merged to `main` or a compromised action in the signing job - and what makes such an
+  index visible and recoverable. It also decides that a card without an install path shows no update
+  badge, which changes 0.3.1's behaviour for a receiver behind the bundle without SSH credentials.
   It records two known defects to fix before the plugin adds such values: an unknown `oscam` reader
   `kind` discards the whole `oscam` payload, and an unknown `key` `press` is read as a short press.
   Nothing is built yet.
