@@ -105,6 +105,18 @@ INSTALL_PHASES = (
 )
 
 
+# The installer outcomes the update card states as a sentence of their own.
+_UPDATE_SENTENCES: dict[InstallerErrorCode, str] = {
+    InstallerErrorCode.RESTART_WITHDRAWN: "update_withdrawn",
+    InstallerErrorCode.STANDBY: "update_standby",
+    InstallerErrorCode.STREAMING: "update_streaming",
+    InstallerErrorCode.RESTART_UNOBSERVED: "update_restart_unobserved",
+    InstallerErrorCode.ROLLBACK_UNOBSERVED: "update_rollback_unobserved",
+    InstallerErrorCode.RESTART_UNCONFIRMED: "update_restart_unconfirmed",
+    InstallerErrorCode.WITHDRAW_FAILED: "update_withdraw_failed",
+}
+
+
 def _version(value: str | None) -> Version | None:
     """Parse a plugin version without guessing how an unknown version sorts."""
     if not value:
@@ -511,6 +523,12 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
                 InstallerErrorCode.HOST_KEY_CHANGED,
             ):
                 self._entry.async_start_reauth(self.hass)
+            if (sentence := _UPDATE_SENTENCES.get(err.code)) is not None:
+                # Outcomes a household has to be told in words: a code on the update
+                # card would not say that a question may still be on the television.
+                raise HomeAssistantError(
+                    translation_domain="enigma2_mqtt", translation_key=sentence
+                ) from err
             raise HomeAssistantError(
                 translation_domain="enigma2_mqtt",
                 translation_key="update_failed",
