@@ -45,11 +45,16 @@ What this costs, what it rules out, and what has to change because of it.
 
 | ADR | Title | Status |
 |---|---|---|
-| [0000](0000-prd.md) | Product requirements (PRD) | accepted, amended by [ADR-0001](0001-m0-decisions.md) and extended by [ADR-0002](0002-scope-after-m0.md) and [ADR-0003](0003-control-feedback-and-household-features.md), §6.3's paragraph on entity ids superseded by [ADR-0007](0007-entity-ids-follow-the-installation-language.md) |
+| [0000](0000-prd.md) | Product requirements (PRD) | accepted, amended by [ADR-0001](0001-m0-decisions.md) and extended by [ADR-0002](0002-scope-after-m0.md) and [ADR-0003](0003-control-feedback-and-household-features.md), §6.3's paragraph on entity ids superseded by [ADR-0007](0007-entity-ids-follow-the-installation-language.md), §6.3's `update` row, §7's "no outbound connection other than the user's broker" and §7's supply-chain bullet superseded in part by [ADR-0008](0008-signed-plugin-index.md) (proposed) |
 | [0001](0001-m0-decisions.md) | M0 sign-off - the three open questions | accepted |
-| [0002](0002-scope-after-m0.md) | Scope added and changed after M0 | accepted, extended by [ADR-0003](0003-control-feedback-and-household-features.md) |
+| [0002](0002-scope-after-m0.md) | Scope added and changed after M0 | accepted, extended by [ADR-0003](0003-control-feedback-and-household-features.md), §6 superseded in part by [ADR-0008](0008-signed-plugin-index.md) (proposed) |
 | [0003](0003-control-feedback-and-household-features.md) | Control feedback and household features - the 0.2.0 and 0.3.0 plan | accepted, extended by [ADR-0004](0004-remote-uninstall.md), §3 superseded in part by [ADR-0005](0005-softcam-restart.md) |
-| [0004](0004-remote-uninstall.md) | Remote uninstall behind a box-side permission | accepted, §3 and the first consequence superseded by [ADR-0006](0006-remote-uninstall-plugin-acts-ssh-verifies.md) |
+| [0004](0004-remote-uninstall.md) | Remote uninstall behind a box-side permission | accepted, §3 and the first consequence superseded by [ADR-0006](0006-remote-uninstall-plugin-acts-ssh-verifies.md), §4's "does nothing else" superseded in part by [ADR-0008](0008-signed-plugin-index.md) (proposed) |
 | [0005](0005-softcam-restart.md) | Two gates for the softcam button, and a diagnostic that is never taken away | accepted |
-| [0006](0006-remote-uninstall-plugin-acts-ssh-verifies.md) | Remote uninstall - the plugin acts, SSH verifies, and the confirmation is a flow step | accepted |
+| [0006](0006-remote-uninstall-plugin-acts-ssh-verifies.md) | Remote uninstall - the plugin acts, SSH verifies, and the confirmation is a flow step | accepted, §5 superseded in part by [ADR-0008](0008-signed-plugin-index.md) (proposed) |
 | [0007](0007-entity-ids-follow-the-installation-language.md) | Entity ids follow the installation's language, so every translated name is load-bearing | accepted |
+| [0008](0008-signed-plugin-index.md) | Plugin versions come from the plugin's signed release index; the update card installs through the receiver when it may and over SSH when it must; older versions only through a confirmed SSH step | proposed - accepted with the first code that implements it. Supersedes in part [ADR-0000](0000-prd.md) §6.3's `update` row and §7 (the "No telemetry" and supply-chain bullets), [ADR-0002](0002-scope-after-m0.md) §6, [ADR-0004](0004-remote-uninstall.md) §4, [ADR-0006](0006-remote-uninstall-plugin-acts-ssh-verifies.md) §5, and the "No telemetry" and "Supply chain" paragraphs of [SECURITY.md](../../SECURITY.md). The receiver's half is the plugin's [ADR-0015](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0015-signed-self-update.md) |
+
+"Superseded in part by a proposed record" means: the earlier text still describes every released
+integration exactly, and the proposed record says where it will stop doing so. It becomes a
+supersession when the later record is accepted.

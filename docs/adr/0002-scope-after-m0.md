@@ -1,6 +1,6 @@
 # ADR-0002: Scope added and changed after M0
 
-**Status:** accepted
+**Status:** accepted; §6 superseded in part by [ADR-0008](0008-signed-plugin-index.md) (proposed)
 **Date:** 2026-09-21
 
 ## Context
@@ -122,6 +122,17 @@ artifact.
 There is **no runtime download path for executable code**, and there is no release check that
 phones home. An integration that installs software on a device the user cannot easily inspect
 should be inspectable itself; „it works" is not the standard.
+
+> **Superseded in part by [ADR-0008](0008-signed-plugin-index.md) (proposed, 2026-09-26):** the
+> bundle stays, CI still rebuilds it byte for byte, and it is still the only thing the forced
+> reinstall installs. What ADR-0008 changes is the first sentence above: the integration is to
+> download a plugin package at runtime - from the plugin's fixed origin only, only a version its
+> signed release index lists, verified by signature, size and sha256 before it is uploaded or
+> relayed to a receiver. The second half, "no release check that phones home", stopped being true
+> in 0.2.0, which added the opt-in release check (off by default) that ADR-0000 §6.3 described and
+> that this section and "Not yet done" below said did not exist; it asks the plugin repository which
+> release is published. Nothing recorded that at the time, and ADR-0008 does. Until ADR-0008 is accepted and
+> shipped, the first half describes every released integration exactly.
 
 ### 7. Duration and position on the media player
 
