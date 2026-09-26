@@ -281,6 +281,7 @@ def quick_restart_rule(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(installer, "RESTART_POLL_SECONDS", 0.01)
     monkeypatch.setattr(installer, "R2_FOLLOW_TIMEOUT", 0.2)
     monkeypatch.setattr(installer, "R2_FOLLOW_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(installer, "R2_START_GRACE", 0.05)
     monkeypatch.setattr(restart_rule, "SETTLE_TIMEOUT", 0.05)
     monkeypatch.setattr(restart_rule, "SETTLE_POLL_SECONDS", 0.01)
     monkeypatch.setattr(restart_rule, "EFFECT_TIMEOUT", 0.05)

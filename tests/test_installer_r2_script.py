@@ -59,7 +59,8 @@ class Box:
         restore_seconds: float,
         *,
         enigma_stops: bool = True,
-        stop_wait: int = 10,
+        stop_seconds: int = 1,
+        stop_wait: int | None = 10,
         restore_limit: int = 60,
     ) -> None:
         self.base = base
@@ -110,7 +111,7 @@ class Box:
         # `init`: change the runlevel, stop or start the interface, write it down. Like
         # the real one it returns before the interface has gone: enigma2 stops a second
         # later - or, for a receiver whose interface will not stop, never.
-        stop = f"(sleep 1; rm -f {self.enigma}) &" if enigma_stops else ":"
+        stop = f"(sleep {stop_seconds}; rm -f {self.enigma}) &" if enigma_stops else ":"
         _write(
             self.bin / "init",
             "#!/bin/sh\n"
@@ -153,8 +154,7 @@ class Box:
             str(self.root),
             "--dir",
             str(self.dir),
-            "--stop-wait",
-            str(self.stop_wait),
+            *(["--stop-wait", str(self.stop_wait)] if self.stop_wait is not None else []),
             "--restore-limit",
             str(self.restore_limit),
             "--service",
@@ -468,3 +468,21 @@ def test_the_test_suite_cannot_reach_the_system_init(tmp_path: Path, init: str) 
         )
 
     assert not (tmp_path / "r2").exists()
+
+
+def test_the_script_waits_for_an_interface_that_is_slow_to_stop(
+    shell: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With its own default wait, a stop that takes seconds is waited for.
+
+    A wait too short would take the files-only path on every real receiver, where
+    enigma2 takes seconds to go after `init 4`.
+    """
+    box = Box(tmp_path, shell, restore_seconds=0.1, stop_seconds=3, stop_wait=None)
+    box.start(monkeypatch)
+
+    box.wait_for(lambda: "done" in box.status.read_text().split(), timeout=30)
+
+    steps = box.status.read_text().split("\n")[1:]
+    assert steps[:3] == ["stopping 0", "stopped", "restored 0"]
+    box.assert_put_back()

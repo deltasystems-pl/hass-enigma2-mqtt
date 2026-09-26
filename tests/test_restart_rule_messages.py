@@ -42,6 +42,8 @@ TRANSLATIONS = Path(__file__).parent.parent / "custom_components/enigma2_mqtt/tr
         (InstallerErrorCode.RESTART_WITHDRAWN, "update_withdrawn"),
         (InstallerErrorCode.STANDBY, "update_standby"),
         (InstallerErrorCode.STREAMING, "update_streaming"),
+        (InstallerErrorCode.RESTART_UNCONFIRMED, "update_restart_unconfirmed"),
+        (InstallerErrorCode.WITHDRAW_FAILED, "update_withdraw_failed"),
     ],
 )
 async def test_the_update_card_says_it_in_words(
@@ -106,6 +108,13 @@ def test_the_polish_sentence_is_the_one_the_operator_chose() -> None:
         "Dekoder jest w trybie czuwania. Aktualizacja uruchamia ponownie interfejs "
         "dekodera, co go wybudzi i może włączyć telewizor. Włącz dekoder i spróbuj ponownie."
     )
+    # When the files could not be put back, the question may still be answered - and
+    # "yes" then starts the new, unchecked version. The sentence has to say so.
+    assert "Pytanie może nadal być widoczne" in polish["exceptions"]["update_withdraw_failed"][
+        "message"
+    ]
+    # A restart OpenWebif never confirmed is not described as a question it asked.
+    assert "zapytał" not in polish["exceptions"]["update_restart_unconfirmed"]["message"]
     for language in ("en", "de", "pl"):
         texts = json.loads((TRANSLATIONS / f"{language}.json").read_text(encoding="utf-8"))
         assert texts["config"]["abort"]["restart_withdrawn"]

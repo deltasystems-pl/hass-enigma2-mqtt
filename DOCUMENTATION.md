@@ -148,10 +148,11 @@ its snapshot behind as well; from then on it is an ordinary one, and it goes onc
 exist. The uploaded package, the manifest and the helper script live in `/tmp` and are deleted when
 the transaction commits. A restart that has to be undone uses two more places: a rollback
 that puts the plugin's settings back runs as a script from `/tmp/enigma2-mqtt-r2-<nonce>/`,
-removed once it has finished, and putting the plugin directory back builds it first in
-`/usr/lib/enigma2/python/.mqttbridge-staging-<nonce>` - beside the `Plugins` directory, never
-inside it, so enigma2 cannot load it as a second copy of the plugin - and swaps it in by
-renames. Nothing else is written.
+removed once it has been seen to finish. Putting the plugin directory back builds it first in
+`/usr/lib/enigma2/python/.mqttbridge-staging-<nonce>` and swaps it in by renames, while the
+directory it replaces waits in `.mqttbridge-aside-<nonce>` until the swap is over. Both sit beside
+the `Plugins` directory, never inside it, so enigma2 cannot load either as a second copy of the
+plugin. Nothing else is written.
 
 **How the install restarts the receiver.** The plugin only loads at the interface's start, so
 every install and update ends with a restart of the Enigma interface, and it keeps the channel

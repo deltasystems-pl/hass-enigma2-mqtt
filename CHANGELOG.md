@@ -26,7 +26,11 @@ it, and taken out again if that fails.
   timeshift runs or a background job works - the installer waits at most 60 seconds and then
   withdraws the update: the previous plugin's files and package records go back without
   stopping anything, the plugin's settings are left alone, and the update card says so in
-  words. The question may stay on the television; answering either way is safe. If somebody
+  words. The question may stay on the television; answering either way is safe. When OpenWebif
+  never confirmed the request, the update is withdrawn the same way but the sentence does not
+  claim a question; when the old files cannot be put back (the package manager is busy), the
+  sentence says a question may still be on the television and that "yes" there starts the new,
+  unchecked version. If somebody
   answers it while the files go back, the receiver has restarted, and it is put back as it
   was by the rollback below rather than left on a plugin whose files have just been replaced.
 - **Once the restart has been asked for, nothing the installer cannot see makes it stop the
@@ -45,7 +49,9 @@ it, and taken out again if that fails.
   into the settings and starts the interface again. The script is started detached from a
   directory of its own, with its own copy of the installer's helper, and followed through a
   status file; the installer keeps its lock and the script's files until it has seen the
-  interface started again. A dropped SSH connection or a Home Assistant restart therefore cannot
+  interface started again. When the answer to the command that starts it is lost, a missing
+  status file is taken for "never started" only after a grace period and only when the receiver
+  has neither the script's directory nor a process naming it. A dropped SSH connection or a Home Assistant restart therefore cannot
   leave the receiver stopped or half restored; an interruption on the receiver still waits for
   the restore and starts the interface. The restore inside it is limited to 90 seconds, so the
   picture comes back even from one that hangs, and when the interface does not stop within 30

@@ -274,7 +274,9 @@ async def test_home_assistant_stopping_while_the_channel_is_checked_keeps_it_too
                 raise asyncio.CancelledError
         return None
 
-    await _install(hass, install_request, tmp_path, receiver, run=stop)
+    # Committed, and the stop still reaches the caller.
+    with pytest.raises(asyncio.CancelledError):
+        await _install(hass, install_request, tmp_path, receiver, run=stop)
 
     assert stopped["done"]
     assert _r2(receiver) == []
@@ -446,3 +448,136 @@ async def test_the_adapter_turns_a_closed_connection_into_an_os_error() -> None:
 
     with pytest.raises(ConnectionError):
         await _AsyncSshSession(_Connection()).run("pidof enigma2")
+
+
+# --- review round 2 ---------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("late", [3, 15])
+async def test_a_script_that_starts_late_under_a_lost_answer_is_not_given_up(
+    credentials: SshCredentials, monkeypatch: pytest.MonkeyPatch, late: int
+) -> None:
+    """The answer to `r2-start` was lost, and the receiver is still starting the script.
+
+    A missing status file then means "not yet", not "never": the first reads come before
+    the directory exists. Giving up there released the lock and deleted the directory
+    under a script that had just stopped the interface. The late case runs past the grace
+    period and is kept by asking the receiver for the script's directory and process.
+    """
+    monkeypatch.setattr(installer, "R2_FOLLOW_TIMEOUT", 5.0)
+    receiver = FakeReceiver(r2_start_late=late)
+
+    class Dropping(FakeSession):
+        async def run(
+            self, command: str, *, input: bytes | None = None, timeout: float = 30
+        ) -> CommandResult:
+            result = await super().run(command, input=input, timeout=timeout)
+            if " r2-start " in command:
+                raise ConnectionError("SSH connection closed")
+            return result
+
+    async def connect(_credentials: SshCredentials) -> Dropping:
+        return Dropping(receiver)
+
+    await _rollback(credentials, connect)
+
+    assert receiver.restarts == ["stopped"]
+    assert receiver.files["settings"] == "old"
+    assert _released(receiver)
+    # Removed once, after its end was seen - not while it was still starting.
+    assert receiver.r2_removed == [R2_DIR]
+    release = next(i for i, c in enumerate(receiver.commands) if " release " in c)
+    last_read = max(i for i, c in enumerate(receiver.commands) if c.endswith("/status"))
+    assert last_read < release
+
+
+async def test_a_script_that_never_started_leaves_nothing_to_delete(
+    credentials: SshCredentials,
+) -> None:
+    """Concluded only after the grace period and the receiver's own answer; nothing removed."""
+    receiver = FakeReceiver()
+
+    class LostBefore(FakeSession):
+        async def run(
+            self, command: str, *, input: bytes | None = None, timeout: float = 30
+        ) -> CommandResult:
+            if " r2-start " in command:
+                self.receiver.commands.append(command)
+                raise ConnectionError("SSH connection closed")
+            return await super().run(command, input=input, timeout=timeout)
+
+    async def connect(_credentials: SshCredentials) -> LostBefore:
+        return LostBefore(receiver)
+
+    with pytest.raises(InstallerError) as raised:
+        await _rollback(credentials, connect)
+
+    assert raised.value.code is InstallerErrorCode.ROLLBACK_FAILED
+    assert any("/proc/[0-9]*/cmdline" in command for command in receiver.commands)
+    assert receiver.r2_removed == []
+    assert not any(command.startswith("rm -rf") for command in receiver.commands)
+    assert _released(receiver)
+
+
+async def test_a_restart_openwebif_never_confirmed_is_not_called_a_question(
+    hass: HomeAssistant, install_request: InstallRequest, tmp_path: Path
+) -> None:
+    """Withdrawn all the same - nothing restarted - but the sentence does not claim a question."""
+    receiver = FakeReceiver(question_on_restart=True, powerstate_answered=False)
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, install_request, tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.RESTART_UNCONFIRMED
+    assert receiver.withdrawn is True
+    assert _r2(receiver) == []
+
+
+async def test_a_lost_answer_to_the_restart_request_is_not_called_a_question(
+    hass: HomeAssistant, install_request: InstallRequest, tmp_path: Path
+) -> None:
+    receiver = FakeReceiver(question_on_restart=True)
+
+    async def lose_the_answer(self: FakeSession, command: str, **kwargs: Any):
+        if " powerstate --state 3" in command:
+            self.receiver.commands.append(command)
+            raise asyncssh.ConnectionLost("gone")
+        return None
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, install_request, tmp_path, receiver, run=lose_the_answer)
+
+    assert raised.value.code is InstallerErrorCode.RESTART_UNCONFIRMED
+    assert _r2(receiver) == []
+
+
+async def test_the_receivers_own_answer_about_the_script_is_read_from_proc(
+    tmp_path: Path,
+) -> None:
+    """The probe run by a real shell: its own command line never names the path whole."""
+    directory = tmp_path / "tmp" / "enigma2-mqtt-r2-0123456789ab"
+
+    class Local:
+        async def run(self, command: str, **kwargs: Any) -> CommandResult:
+            del kwargs
+            process = await asyncio.create_subprocess_exec(
+                "/bin/sh", "-c", command,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            out, err = await process.communicate()
+            return CommandResult(process.returncode or 0, out.decode(), err.decode())
+
+    assert await installer._async_r2_absent(Local(), str(directory)) is True
+
+    # A process naming the script, before its directory exists.
+    running = await asyncio.create_subprocess_exec(
+        "/bin/sh", "-c", "sleep 5", str(directory / "r2.sh")
+    )
+    try:
+        assert await installer._async_r2_absent(Local(), str(directory)) is False
+    finally:
+        running.kill()
+        await running.wait()
+
+    directory.mkdir(parents=True)
+    assert await installer._async_r2_absent(Local(), str(directory)) is False

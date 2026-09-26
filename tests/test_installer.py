@@ -124,6 +124,12 @@ class FakeReceiver:
     # The stop-and-restore script's own directories, and which of them were removed.
     r2_dirs: set[str] = field(default_factory=set)
     r2_removed: list[str] = field(default_factory=list)
+    # A script whose start is slow: its directory and status file appear only after this
+    # many reads of the status file, and until then a process naming it is running.
+    r2_start_late: int = 0
+    r2_pending: tuple[str, str] | None = None
+    # Whether OpenWebif answers the request for a clean restart.
+    powerstate_answered: bool = True
     withdrawn: bool = False
     # What is actually on the box, so a rollback can be checked by what it put back
     # rather than by which command was sent.
@@ -285,6 +291,8 @@ class FakeSession:
                     receiver.saved_service = receiver.service
                 receiver.files["settings"] = "new"
                 receiver.start_interface("clean")
+            if not receiver.powerstate_answered:
+                return CommandResult(0, '{"answered": false}\n')
             return CommandResult(0, '{"answered": true}\n')
         if " powerstate --state 5" in command:
             receiver.standby = True
@@ -328,10 +336,24 @@ class FakeSession:
                 receiver.files["settings"] = "old"
         if " r2-start " in command:
             words = command.split()
-            receiver.r2_dirs.add(words[words.index("--dir") + 1])
+            directory = words[words.index("--dir") + 1]
+            if receiver.r2_start_late:
+                receiver.r2_pending = (directory, command)
+                return CommandResult(0, '{"pid": 4242}\n')
+            receiver.r2_dirs.add(directory)
             receiver.run_r2(command)
             return CommandResult(0, '{"pid": 4242}\n')
+        if "/proc/[0-9]*/cmdline" in command:
+            # Is anything of the script's there - its directory, or a process naming it?
+            return CommandResult(1 if receiver.r2_dirs or receiver.r2_pending else 0)
         if command.startswith("cat ") and command.endswith("/status"):
+            if receiver.r2_pending is not None:
+                receiver.r2_start_late -= 1
+                if receiver.r2_start_late <= 0:
+                    directory, started = receiver.r2_pending
+                    receiver.r2_pending = None
+                    receiver.r2_dirs.add(directory)
+                    receiver.run_r2(started)
             if command.split()[1].rsplit("/", 1)[0] not in receiver.r2_dirs:
                 return CommandResult(1, "", "cat: can't open: No such file or directory")
             return CommandResult(0, "".join(line + "\n" for line in receiver.r2_steps))

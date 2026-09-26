@@ -89,7 +89,14 @@ RESTART_POLL_SECONDS = 2.0
 # How long a rollback follows its stop-and-restore script on the receiver before it gives
 # up waiting for the interface to be started again: the script's own wait for enigma2 to
 # stop, the restore's own bound, and a margin.
-R2_FOLLOW_TIMEOUT = installer_helper.R2_STOP_WAIT_SECONDS + RESTORE_TIMEOUT + 60.0
+R2_FOLLOW_TIMEOUT = (
+    installer_helper.R2_STOP_WAIT_SECONDS + installer_helper.R2_RESTORE_LIMIT_SECONDS + 60.0
+)
+# When the answer to the command that starts the script was lost, how long a missing
+# status file means only "not yet": Python has to start and import on the receiver
+# before the script's directory exists. After it, the receiver itself is asked whether
+# the directory or any process naming it exists.
+R2_START_GRACE = 30.0
 R2_FOLLOW_POLL_SECONDS = 2.0
 
 ProgressCallback = Callable[[str], None | Awaitable[None]]
@@ -125,6 +132,12 @@ class InstallerErrorCode(StrEnum):
     # lost and did not come back. Nothing is undone, and the lock stays on the receiver
     # so that the next install recovers the transaction by its id.
     RESTART_UNOBSERVED = "restart_unobserved"
+    # OpenWebif did not confirm the restart request and nothing restarted within the
+    # bound: withdrawn like a question, but not described as one.
+    RESTART_UNCONFIRMED = "restart_unconfirmed"
+    # Nothing restarted within the bound and the old files could not be put back: the
+    # new ones are on the receiver, and a question may still be on the television.
+    WITHDRAW_FAILED = "withdraw_failed"
     # The stop-and-restore script of a rollback was started and its end was not seen.
     # It goes on by itself on the receiver; the lock stays until it is stale.
     ROLLBACK_UNOBSERVED = "rollback_unobserved"
@@ -1166,20 +1179,50 @@ def _r2_lines(stdout: str) -> dict[str, str]:
     return steps
 
 
+async def _async_r2_absent(session: InstallerSession, r2_dir: str) -> bool:
+    """Ask the receiver whether the script's directory, and any process naming it, is absent.
+
+    The path is assembled on the receiver from two halves, so this command's own command
+    line - which the scan of `/proc` also reads - never contains it whole; `case` is a
+    shell builtin, so no child's arguments carry it either.
+    """
+    head, tail = r2_dir[:-4], r2_dir[-4:]
+    result = await session.run(
+        f"d=$(printf '%s%s' {shlex.quote(head)} {shlex.quote(tail)}); "
+        'test -e "$d" && exit 1; '
+        "for f in /proc/[0-9]*/cmdline; do "
+        "c=$(tr '\\000' ' ' < \"$f\" 2>/dev/null) || continue; "
+        'case "$c" in *"$d"*) exit 1;; esac; '
+        "done; exit 0",
+        timeout=30,
+    )
+    return result.exit_status == 0
+
+
 async def _async_follow_r2(
     session: InstallerSession | None,
     credentials: SshCredentials,
     connector: Connector,
     status_file: str,
+    *,
+    answered: bool = True,
 ) -> tuple[InstallerSession | None, dict[str, str], bool]:
     """Follow the stop-and-restore script until it has started the interface again.
 
     It runs on the receiver whatever happens here. A dropped connection is only a gap in
     what this end can see, so the following reconnects and carries on; the script, which
     is in a session of its own, notices nothing. The last value says whether the script
-    exists at all: a status file that is not there is a script that never started.
+    exists at all.
+
+    When `r2-start` answered, its status file exists, and a missing one means it never
+    will. When the answer was lost, a missing file may only be early: the command may
+    still be starting on the receiver. Then "never started" is concluded only after a
+    grace period, and only when the receiver has neither the script's directory nor a
+    process naming it - otherwise the script is followed like any other.
     """
-    deadline = time.monotonic() + R2_FOLLOW_TIMEOUT
+    started_at = time.monotonic()
+    deadline = started_at + R2_FOLLOW_TIMEOUT
+    r2_dir = status_file.rsplit("/", 1)[0]
     steps: dict[str, str] = {}
     while True:
         try:
@@ -1187,10 +1230,15 @@ async def _async_follow_r2(
                 session = await connector(credentials)
             result = await session.run(f"cat {shlex.quote(status_file)}", timeout=30)
             if result.exit_status:
-                return session, steps, False
-            steps = _r2_lines(result.stdout)
-            if "started" in steps:
-                return session, steps, True
+                if answered or (
+                    time.monotonic() - started_at >= R2_START_GRACE
+                    and await _async_r2_absent(session, r2_dir)
+                ):
+                    return session, steps, False
+            else:
+                steps = _r2_lines(result.stdout)
+                if "started" in steps:
+                    return session, steps, True
         except (InstallerError, *_CONNECTION_LOST):
             await _async_drop(session)
             session = None
@@ -1290,6 +1338,8 @@ async def _async_rollback(
     # deleted: it goes on by itself on the receiver, and the lock with this
     # transaction's id is what a later install recovers it by.
     tidy = True
+    # Whether the script's end was seen - the only thing that allows removing its files.
+    r2_finished = False
     try:
         session = await connector(credentials)
         # This one goes first and outside every condition. It is the file holding the
@@ -1353,9 +1403,11 @@ async def _async_rollback(
             # Whether it started is decided by its status file, never by this command's
             # answer: a connection lost under it says nothing about the receiver.
             tidy = False
+            answered = True
             try:
                 started = await session.run(command, timeout=30)
             except _CONNECTION_LOST:
+                answered = False
                 await _async_drop(session)
                 session = None
             else:
@@ -1366,11 +1418,12 @@ async def _async_rollback(
                     raise InstallerError(InstallerErrorCode.ROLLBACK_FAILED)
             try:
                 session, steps, present = await _async_follow_r2(
-                    session, credentials, connector, r2_status
+                    session, credentials, connector, r2_status, answered=answered
                 )
                 if present and "started" not in steps:
                     raise InstallerError(InstallerErrorCode.ROLLBACK_UNOBSERVED)
                 tidy = True
+                r2_finished = present
                 if (code := _r2_restore_code(steps)) is not None:
                     restore_error = InstallerError(code)
                 if not present:
@@ -1448,9 +1501,11 @@ async def _async_rollback(
                 progress.lock_released = True
                 _LOGGER.info("Installer rollback: the transaction lock is released")
                 # The helper had to outlive the restore that used it; nothing needs it,
-                # or the script's own directory, now.
-                with suppress(Exception):
-                    await released.run(f"rm -rf {shlex.quote(r2_dir)}", timeout=30)
+                # or the script's own directory, now. A directory is removed only after
+                # its script was seen to finish, never on the strength of its absence.
+                if r2_finished:
+                    with suppress(Exception):
+                        await released.run(f"rm -rf {shlex.quote(r2_dir)}", timeout=30)
                 await _async_remove_helper(released, remote_helper)
             finally:
                 await released.close()
@@ -1592,6 +1647,7 @@ _CONNECTION_LOST = (OSError, TimeoutError, asyncssh.Error)
 _RESTARTED = "restarted"
 _QUESTION = "question"
 _UNOBSERVED = "unobserved"
+_UNCONFIRMED = "unconfirmed"
 
 
 async def _async_drop(session: InstallerSession | None) -> None:
@@ -1653,16 +1709,22 @@ async def _async_clean_restart(
 
     - `restarted`: a new enigma2 runs - or the old one went away and none came back,
       which is a failed restart for the proof to find;
-    - `question`: the old enigma2 is still there, unchanged, at the bound: the image is
-      asking on the television, and that question waits for ever;
+    - `question`: the old enigma2 is still there, unchanged, at the bound, and OpenWebif
+      confirmed the request: the image is asking on the television, and that question
+      waits for ever;
+    - `unconfirmed`: the same, but OpenWebif never confirmed the request - its answer was
+      lost or said nothing - so whether a question is on screen is not known;
     - `unobserved`: the receiver could not be read at all after the request.
     """
+    confirmed = False
     try:
         if session is None:
             session = await connector(credentials)
-        await session.run(
+        asked = await session.run(
             f"python3 {shlex.quote(remote_helper)} powerstate --state 3", timeout=30
         )
+        with suppress(AttributeError, TypeError, ValueError):
+            confirmed = json.loads(asked.stdout).get("answered") is True
     except (InstallerError, *_CONNECTION_LOST):
         await _async_drop(session)
         session = None
@@ -1677,7 +1739,9 @@ async def _async_clean_restart(
         if time.monotonic() >= deadline:
             if seen is None:
                 return session, _UNOBSERVED
-            return session, _QUESTION if old_pids <= seen else _RESTARTED
+            if not old_pids <= seen:
+                return session, _RESTARTED
+            return session, _QUESTION if confirmed else _UNCONFIRMED
         await asyncio.sleep(RESTART_POLL_SECONDS)
 
 
@@ -1733,13 +1797,19 @@ async def _async_withdraw(
         return session, "failed"
 
 
-# How a withdrawal that did not restart anything is reported.
-_WITHDRAWN_CODES = {
-    "done": InstallerErrorCode.RESTART_WITHDRAWN,
-    "overlap": InstallerErrorCode.ROLLBACK_OPKG_OVERLAP,
-    "busy": InstallerErrorCode.ROLLBACK_OPKG_BUSY,
-    "failed": InstallerErrorCode.ROLLBACK_FAILED,
-}
+def _withdrawn_code(outcome: str, withdrawal: str) -> InstallerErrorCode:
+    """How a withdrawal after which nothing restarted is reported.
+
+    Files back (an opkg run meanwhile only puts its database in doubt, which is logged):
+    withdrawn - described as the question the image asked only when OpenWebif confirmed
+    the request. Files not back: the new ones are on the receiver, and whatever is on the
+    television may still be answered - which the sentence has to say.
+    """
+    if withdrawal in ("done", "overlap"):
+        if outcome == _QUESTION:
+            return InstallerErrorCode.RESTART_WITHDRAWN
+        return InstallerErrorCode.RESTART_UNCONFIRMED
+    return InstallerErrorCode.WITHDRAW_FAILED
 
 
 async def _async_release_after_withdraw(
@@ -1992,7 +2062,7 @@ async def _async_install_locked(
                 "the receiver was asked to restart its interface and could not be reached "
                 "afterwards",
             )
-        if outcome == _QUESTION:
+        if outcome in (_QUESTION, _UNCONFIRMED):
             # The image asked on the television instead of restarting. Nothing was
             # stopped; the old enigma2 still runs. Put the old files back under it and
             # say so - unless the receiver restarted meanwhile.
@@ -2028,10 +2098,15 @@ async def _async_install_locked(
                     remote_manifest,
                     remote_provision_tmp,
                 )
+                if withdrawal == "overlap":
+                    _LOGGER.warning(
+                        "Installer: the previous plugin files are back, but another opkg run "
+                        "held opkg's lock for part of it and may have changed its database"
+                    )
                 if remote_lock_claimed:
                     raise InstallerError(InstallerErrorCode.ROLLBACK_LOCK_FAILED)
                 raise InstallerError(
-                    _WITHDRAWN_CODES[withdrawal],
+                    _withdrawn_code(outcome, withdrawal),
                     "the receiver asked on screen whether to restart its interface; the "
                     f"update was withdrawn ({withdrawal}) and nothing was restarted",
                 )
@@ -2124,6 +2199,10 @@ async def _async_install_locked(
         return InstallResult(bundle.version, backup_created, True, provisioned_name)
     except BaseException as err:
         if committed:
+            if isinstance(err, asyncio.CancelledError):
+                # Committed is committed; a stop is still a stop, and the caller must see it.
+                _LOGGER.warning("Installed plugin verified; stopped before tidying up")
+                raise
             _LOGGER.warning("Installed plugin verified; ignoring post-commit cleanup failure")
             return InstallResult(bundle.version, backup_created, True, provisioned_name)
         if no_rollback:

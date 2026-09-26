@@ -238,7 +238,9 @@ async def test_a_withdraw_that_cannot_put_the_files_back_still_stops_nothing(
     with pytest.raises(InstallerError) as raised:
         await _install(hass, install_request, tmp_path, receiver)
 
-    assert raised.value.code is InstallerErrorCode.ROLLBACK_OPKG_BUSY
+    # Its own sentence: the new files are still there, and the question on the television
+    # may still be answered.
+    assert raised.value.code is InstallerErrorCode.WITHDRAW_FAILED
     assert receiver.restarts == []
     assert not any(" r2-start " in command for command in receiver.commands)
     assert any(" release " in command for command in receiver.commands)

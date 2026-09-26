@@ -112,6 +112,8 @@ _UPDATE_SENTENCES: dict[InstallerErrorCode, str] = {
     InstallerErrorCode.STREAMING: "update_streaming",
     InstallerErrorCode.RESTART_UNOBSERVED: "update_restart_unobserved",
     InstallerErrorCode.ROLLBACK_UNOBSERVED: "update_rollback_unobserved",
+    InstallerErrorCode.RESTART_UNCONFIRMED: "update_restart_unconfirmed",
+    InstallerErrorCode.WITHDRAW_FAILED: "update_withdraw_failed",
 }
 
 
