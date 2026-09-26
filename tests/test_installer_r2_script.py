@@ -19,6 +19,7 @@ import os
 from pathlib import Path
 import shutil
 import signal
+import subprocess
 import sys
 import time
 from typing import Any
@@ -27,9 +28,8 @@ import asyncssh
 import pytest
 
 from custom_components.enigma2_mqtt import installer_helper
-from custom_components.enigma2_mqtt.installer_helper import PACKAGE, snapshot, start_r2
+from custom_components.enigma2_mqtt.installer_helper import PACKAGE, snapshot
 
-HELPER = Path(installer_helper.__file__).resolve()
 PLUGIN_DIR = "usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge"
 WATCHED = "1:0:19:283D:3FB:1:C00000:0:0:0:"
 SHELLS = [["/bin/sh"]] + ([["busybox", "sh"]] if shutil.which("busybox") else [])
@@ -57,6 +57,12 @@ class Box:
         self.script = base / "r2.sh"
         self.log = base / "r2.log"
         self.shell = shell
+        # The receiver runs the helper as a file of its own in /tmp; from inside the
+        # package directory the integration's `select.py` would shadow the standard
+        # library's `select`, which `subprocess` imports.
+        self.helper = base / "tmp" / "enigma2-mqtt-installer-0123456789ab.py"
+        self.helper.parent.mkdir(parents=True)
+        shutil.copyfile(installer_helper.__file__, self.helper)
         root = self.root
         _write(
             root / "usr/lib/opkg/status",
@@ -114,22 +120,38 @@ class Box:
     def environ(self) -> dict[str, str]:
         return {**os.environ, "PATH": f"{self.bin}:{os.environ['PATH']}"}
 
+    def command(self) -> list[str]:
+        """The helper's `r2-start`, as the installer sends it, with the stand-ins named."""
+        return [
+            sys.executable,
+            str(self.helper),
+            "r2-start",
+            str(self.backup),
+            "--root",
+            str(self.root),
+            "--script",
+            str(self.script),
+            "--status",
+            str(self.status),
+            "--log",
+            str(self.log),
+            "--service",
+            WATCHED,
+            "--shell",
+            self.shell[0],
+            "--python",
+            str(self.bin / "python-slow"),
+            "--init",
+            str(self.bin / "init"),
+            "--pidof",
+            str(self.bin / "pidof"),
+        ]
+
     def start(self, monkeypatch: pytest.MonkeyPatch) -> int:
         """Start the script the way the installer does: detached, output to a file."""
-        monkeypatch.setattr(sys, "executable", str(self.bin / "python-slow"))
         monkeypatch.setenv("PATH", self.environ()["PATH"])
-        return start_r2(
-            self.root,
-            self.backup,
-            script=self.script,
-            status=self.status,
-            log=self.log,
-            service=WATCHED,
-            provisioning=False,
-            shell=self.shell[0],
-            init=str(self.bin / "init"),
-            pidof=str(self.bin / "pidof"),
-        )
+        started = subprocess.run(self.command(), check=True, capture_output=True, text=True)
+        return int(json.loads(started.stdout)["pid"])
 
     def events_list(self) -> list[str]:
         return self.events.read_text().splitlines()
@@ -292,32 +314,7 @@ async def test_a_connection_dropped_during_the_stop_changes_nothing_on_the_recei
         encoding=None,
     )
     monkeypatch.setenv("PATH", box.environ()["PATH"])
-    command = " ".join(
-        [
-            str(box.bin / "python-slow"),
-            str(HELPER),
-            "r2-start",
-            str(box.backup),
-            "--root",
-            str(box.root),
-            "--script",
-            str(box.script),
-            "--status",
-            str(box.status),
-            "--log",
-            str(box.log),
-            "--service",
-            WATCHED,
-            "--shell",
-            box.shell[0],
-            "--python",
-            str(box.bin / "python-slow"),
-            "--init",
-            str(box.bin / "init"),
-            "--pidof",
-            str(box.bin / "pidof"),
-        ]
-    )
+    command = " ".join(box.command())
     try:
         async with asyncssh.connect(
             "127.0.0.1",

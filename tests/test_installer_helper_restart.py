@@ -14,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import threading
@@ -39,7 +40,16 @@ from custom_components.enigma2_mqtt.installer_helper import (
 
 from . import released_installer_helper_0_3_1 as released
 
-HELPER = Path(installer_helper.__file__)
+
+# The receiver runs the helper as a file of its own in /tmp. Run from inside the package
+# directory instead, Python would put that directory first on `sys.path`, where the
+# integration's `select.py` stands in for the standard library's `select` module.
+@pytest.fixture
+def helper(tmp_path: Path) -> Path:
+    standalone = tmp_path / "tmp" / "enigma2-mqtt-installer-0123456789ab.py"
+    standalone.parent.mkdir()
+    shutil.copyfile(installer_helper.__file__, standalone)
+    return standalone
 PLUGINS = "usr/lib/enigma2/python/Plugins"
 PLUGIN_DIR = f"{PLUGINS}/Extensions/MQTTBridge"
 WATCHED = "1:0:19:283D:3FB:1:C00000:0:0:0:"
@@ -158,7 +168,7 @@ def test_an_interface_that_does_not_answer_records_no_channel(
 
 
 def test_a_zap_carries_the_whole_reference_to_openwebif(
-    tmp_path: Path, webif: tuple[str, dict[str, Any]]
+    tmp_path: Path, webif: tuple[str, dict[str, Any]], helper: Path
 ) -> None:
     """An IPTV reference has a `//`, a `%3a` and a name with a space and a Polish letter.
 
@@ -167,7 +177,7 @@ def test_a_zap_carries_the_whole_reference_to_openwebif(
     """
     url, state = webif
     result = subprocess.run(
-        [sys.executable, str(HELPER), "zap", "--service", IPTV, "--webif", url],
+        [sys.executable, str(helper), "zap", "--service", IPTV, "--webif", url],
         check=False,
     )
 
@@ -176,7 +186,7 @@ def test_a_zap_carries_the_whole_reference_to_openwebif(
 
 
 def test_a_restart_is_asked_for_without_trusting_the_answer(
-    tmp_path: Path, webif: tuple[str, dict[str, Any]]
+    tmp_path: Path, webif: tuple[str, dict[str, Any]], helper: Path
 ) -> None:
     """The quit can reset the very connection that asked for it; that is not a failure."""
     url, state = webif
@@ -184,7 +194,7 @@ def test_a_restart_is_asked_for_without_trusting_the_answer(
 
     assert power_state(3, url) is False
     result = subprocess.run(
-        [sys.executable, str(HELPER), "powerstate", "--state", "3", "--webif", url],
+        [sys.executable, str(helper), "powerstate", "--state", "3", "--webif", url],
         check=False,
         capture_output=True,
     )
@@ -219,7 +229,7 @@ def test_a_reference_that_would_break_the_settings_file_is_refused(
     assert (tmp_path / "etc/enigma2/settings").read_bytes() == before
 
 
-def test_withdrawing_never_touches_the_settings_block(tmp_path: Path) -> None:
+def test_withdrawing_never_touches_the_settings_block(tmp_path: Path, helper: Path) -> None:
     """Withdrawing runs under a live enigma2; its settings are its own until it quits.
 
     The transaction changed no setting, and a block written now is overwritten from
@@ -236,7 +246,7 @@ def test_withdrawing_never_touches_the_settings_block(tmp_path: Path) -> None:
     refused = subprocess.run(
         [
             sys.executable,
-            str(HELPER),
+            str(helper),
             "withdraw",
             str(backup),
             "--settings",
@@ -249,7 +259,7 @@ def test_withdrawing_never_touches_the_settings_block(tmp_path: Path) -> None:
     done = subprocess.run(
         [
             sys.executable,
-            str(HELPER),
+            str(helper),
             "withdraw",
             str(backup),
             "--provisioning",
@@ -461,13 +471,13 @@ def test_this_helper_respects_a_lock_the_released_one_claims(
 
 
 def test_the_claim_says_what_it_reclaimed_on_its_output(
-    tmp_path: Path, one_boot: None
+    tmp_path: Path, one_boot: None, helper: Path
 ) -> None:
     """The installer reads the id from the claim's answer, so the answer is JSON."""
     lock = tmp_path / ".ha-installer.lock"
 
     result = subprocess.run(
-        [sys.executable, str(HELPER), "claim", str(lock), "--id", "0123456789ab"],
+        [sys.executable, str(helper), "claim", str(lock), "--id", "0123456789ab"],
         check=True,
         capture_output=True,
         text=True,
