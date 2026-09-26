@@ -417,16 +417,22 @@ async def test_provisioning_is_written_through_an_unguessable_name_that_is_not_a
 
 
 async def test_the_provisioning_temp_is_removed_even_when_enigma_will_not_stop(
-    hass: HomeAssistant, install_request: InstallRequest, tmp_path: Path
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """That file is the broker password in cleartext, sitting on the receiver's flash.
 
     It used to be deleted by the rollback's first command *after* Enigma had been
     stopped, so a receiver that would not stop - which is a receiver in trouble, exactly
     when a rollback runs - kept it. Deleting it needs nothing stopped, so it goes first
-    and outside every condition.
+    and outside every condition: before the stop-and-restore script is even started.
     """
-    receiver = FakeReceiver()
+    monkeypatch.setattr(
+        "custom_components.enigma2_mqtt.installer.ANNOUNCEMENT_TIMEOUT", 0.01
+    )
+    receiver = FakeReceiver(enigma_dies_at_restart=True)
     bundle = _bundle(tmp_path)
     original = FakeSession.run
 
@@ -434,12 +440,9 @@ async def test_the_provisioning_temp_is_removed_even_when_enigma_will_not_stop(
         if "sha256sum" in command:
             self.receiver.commands.append(command)
             return CommandResult(0, bundle.sha256 + "\n")
-        if command.startswith("init 4"):
+        if " r2-start " in command:
             self.receiver.commands.append(command)
             raise OSError("the receiver stopped answering")
-        if 'trap "init 3"' in command:
-            self.receiver.commands.append(command)
-            return CommandResult(1, "", "restart failed")
         return await original(self, command, **kwargs)
 
     code = await _install(
@@ -461,7 +464,7 @@ async def test_the_provisioning_temp_is_removed_even_when_enigma_will_not_stop(
     assert removals, "the temporary provisioning file was left on the receiver"
     # It went before the attempt to stop Enigma, not after it.
     assert receiver.commands.index(removals[0]) < next(
-        index for index, command in enumerate(receiver.commands) if command.startswith("init 4")
+        index for index, command in enumerate(receiver.commands) if " r2-start " in command
     )
 
 

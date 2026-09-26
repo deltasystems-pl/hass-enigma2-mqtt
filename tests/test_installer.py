@@ -31,13 +31,21 @@ from custom_components.enigma2_mqtt.installer import (
     async_install,
 )
 
-STATUS = json.dumps({"isRecording": False})
+STATUS = json.dumps({"isRecording": False, "inStandby": "false", "isStreaming": "false"})
 TIMERS = json.dumps({"timers": []})
+WATCHED = "1:0:19:283D:3FB:1:C00000:0:0:0:"
+SAVED_EARLIER = "1:0:19:2B66:3F3:1:C00000:0:0:0:"
 
 
 @dataclass
 class FakeReceiver:
-    """A command-aware fake SSH receiver with persistent transaction state."""
+    """A command-aware fake SSH receiver with persistent transaction state.
+
+    It models what the restart rule depends on: enigma2's pid and runlevel, OpenWebif's
+    state (the channel, standby, streaming), the saved `config.tv.lastservice`, the
+    image's question on a clean restart, and the stop-and-restore script, which runs on
+    the receiver whatever happens to the connection that started it.
+    """
 
     fail_on: str | None = None
     # A helper step refused because opkg's lock stayed held: the helper's own exit
@@ -83,6 +91,32 @@ class FakeReceiver:
     # restart went wrong answers SSH and nothing on 127.0.0.1.
     webif_ok: bool = True
     webif_dies_at_restart: bool = False
+    # What OpenWebif reports, and what the settings file would start the image on.
+    service: str | None = WATCHED
+    saved_service: str = SAVED_EARLIER
+    standby: bool = False
+    streaming: bool = False
+    # OpenWebif's power state 3 opens the image's own `TryQuitMainloop`, which asks on
+    # the television - and waits for ever - while timeshift runs or a job is working.
+    question_on_restart: bool = False
+    # Somebody answers "yes" to that question while the installer is putting the old
+    # files back.
+    question_answered_during_withdraw: bool = False
+    restarts: list[str] = field(default_factory=list)
+    zaps: list[str] = field(default_factory=list)
+    # An image that does not start on the saved channel - hypothesis H2 of the restart
+    # rule being wrong - starts on this one instead.
+    start_channel: str | None = None
+    zap_takes_effect: bool = True
+    # A claim that reclaims an abandoned installer lock reports its id; the snapshot
+    # named after it may or may not still be there.
+    reclaimed_id: str = ""
+    snapshots: set[str] = field(default_factory=set)
+    # The stop-and-restore script's status lines, as its status file holds them.
+    r2_steps: list[str] = field(default_factory=list)
+    r2_restore_status: int = 0
+    r2_init3_status: int = 0
+    withdrawn: bool = False
     # What is actually on the box, so a rollback can be checked by what it put back
     # rather than by which command was sent.
     files: dict[str, str] = field(
@@ -99,6 +133,50 @@ class FakeReceiver:
     async def connect(self, credentials: SshCredentials) -> FakeSession:
         assert credentials.host_key == "ssh-ed25519 AAAATEST"
         return FakeSession(self)
+
+    def start_interface(self, how: str) -> None:
+        """Start enigma2 again, on the channel its settings file names.
+
+        The install's restart is the one a test can break; a rollback's restart, onto the
+        plugin that worked before, is the one that works in these fakes.
+        """
+        self.restarts.append(how)
+        self.enigma_pid += 1
+        self.enigma_running = how == "stopped" or not self.enigma_dies_at_restart
+        if how == "stopped":
+            self.webif_ok = True
+        elif self.webif_dies_at_restart:
+            self.webif_ok = False
+        self.service = (
+            (self.start_channel or self.saved_service) if self.enigma_running else None
+        )
+
+    def run_r2(self, command: str) -> None:
+        """What the detached script does on the receiver: stop, restore, write, start."""
+        self.r2_steps.append("begun 4242")
+        self.enigma_running = False
+        self.r2_steps += ["stopping 0", "stopped"]
+        self.restore_flags = ["--settings"] + (
+            ["--provisioning"] if "--provisioning" in command.split() else []
+        )
+        self.r2_steps.append(f"restored {self.r2_restore_status}")
+        if self.r2_restore_status == 0:
+            self.rolled_back = True
+            self.files["plugin"] = "old"
+            self.files["opkg"] = "old"
+            self.files["settings"] = "old"
+            if "--provisioning" in self.restore_flags:
+                self.files["provisioning"] = "old"
+        words = command.split()
+        if "--service" in words:
+            self.saved_service = words[words.index("--service") + 1]
+            self.r2_steps.append("written 0")
+        else:
+            self.r2_steps.append("not_written")
+        self.r2_steps.append(f"started {self.r2_init3_status}")
+        if self.r2_init3_status == 0:
+            self.start_interface("stopped")
+        self.r2_steps.append("done")
 
 
 class FakeSession:
@@ -155,11 +233,56 @@ class FakeSession:
         if "/api/statusinfo" in command:
             if not receiver.webif_ok:
                 return CommandResult(1, "", "wget: can't connect to remote host")
-            return CommandResult(0, json.dumps({"isRecording": receiver.recording}))
+            return CommandResult(
+                0,
+                json.dumps(
+                    {
+                        "isRecording": receiver.recording,
+                        "inStandby": "true" if receiver.standby else "false",
+                        "isStreaming": "true" if receiver.streaming else "false",
+                        "currservice_serviceref": receiver.service or "",
+                    }
+                ),
+            )
         if "/api/timerlist" in command:
             if not receiver.webif_ok:
                 return CommandResult(1, "", "wget: can't connect to remote host")
             return CommandResult(0, json.dumps({"timers": receiver.timers}))
+        if command.endswith(" record"):
+            answering = receiver.webif_ok and receiver.enigma_running
+            return CommandResult(
+                0,
+                json.dumps(
+                    {
+                        "service": receiver.service if answering else None,
+                        "standby": receiver.standby if answering else None,
+                        "saved": receiver.saved_service,
+                    }
+                ),
+            )
+        if " powerstate --state 3" in command:
+            if not receiver.question_on_restart:
+                # A clean quit saves the settings: the channel being watched among them,
+                # and whatever the new plugin wrote into its own block.
+                if receiver.service:
+                    receiver.saved_service = receiver.service
+                receiver.files["settings"] = "new"
+                receiver.start_interface("clean")
+            return CommandResult(0, '{"answered": true}\n')
+        if " powerstate --state 5" in command:
+            receiver.standby = True
+            return CommandResult(0, '{"answered": true}\n')
+        if " zap --service " in command:
+            reference = command.rsplit(" ", 1)[1]
+            receiver.zaps.append(reference)
+            if receiver.zap_takes_effect:
+                receiver.service = reference
+            return CommandResult(0)
+        if " claim " in command:
+            return CommandResult(0, json.dumps({"reclaimed": receiver.reclaimed_id}) + "\n")
+        if command.startswith("test -d /home/root/mqttbridge-backups/"):
+            name = command.split("/home/root/mqttbridge-backups/", 1)[1]
+            return CommandResult(0 if name in receiver.snapshots else 1)
         if " snapshot " in command:
             receiver.backup_exists = True
         if command.startswith("opkg install"):
@@ -168,6 +291,15 @@ class FakeSession:
             receiver.files["opkg"] = "new"
         if command.startswith("set -eu; if [ -L ") and " mv " in command:
             receiver.files["provisioning"] = "new"
+        if " withdraw " in command:
+            receiver.withdrawn = True
+            receiver.restore_flags = [word for word in command.split() if word.startswith("--")]
+            receiver.files["plugin"] = "old"
+            receiver.files["opkg"] = "old"
+            if "--provisioning" in receiver.restore_flags:
+                receiver.files["provisioning"] = "old"
+            if receiver.question_answered_during_withdraw:
+                receiver.start_interface("clean")
         if " restore " in command:
             receiver.rolled_back = True
             receiver.restore_flags = [word for word in command.split() if word.startswith("--")]
@@ -177,7 +309,14 @@ class FakeSession:
                 receiver.files["provisioning"] = "old"
             if "--settings" in receiver.restore_flags:
                 receiver.files["settings"] = "old"
-        if "rm -f /tmp/enigma2-mqtt-installer-" in command:
+        if " r2-start " in command:
+            receiver.run_r2(command)
+            return CommandResult(0, '{"pid": 4242}\n')
+        if command.startswith("cat ") and command.endswith(".status"):
+            return CommandResult(0, "".join(line + "\n" for line in receiver.r2_steps))
+        if "rm -f /tmp/enigma2-mqtt-installer-" in command or (
+            command.startswith("rm -f ") and "/tmp/enigma2-mqtt-installer-" in command
+        ):
             receiver.helper_removed = True
         if command == "pidof enigma2":
             pids = [receiver.enigma_wrapper_pid]
@@ -188,20 +327,6 @@ class FakeSession:
                 # What `pidof` does when nothing matches: exit 1, and say nothing.
                 return CommandResult(1, "", "")
             return CommandResult(0, " ".join(running) + "\n")
-        if command == "init 3" or 'trap "init 3"' in command:
-            receiver.enigma_pid += 1
-        if command == "init 3":
-            # A rollback's restart is the one that works in these fakes; the install's
-            # is the one a test can break.
-            receiver.enigma_running = True
-        if 'trap "init 3"' in command:
-            if receiver.enigma_dies_at_restart:
-                receiver.enigma_running = False
-            # Enigma writes its settings out on the way down, which is why a rollback
-            # has to stop it before restoring them.
-            receiver.files["settings"] = "new"
-            if receiver.webif_dies_at_restart:
-                receiver.webif_ok = False
         if "sha256sum" in command:
             return CommandResult(0, "a" * 64 + "\n")
         return CommandResult(0)
@@ -765,12 +890,11 @@ async def test_rollback_restores_a_receiver_whose_openwebif_died_at_the_restart(
         "settings": "old",
         "provisioning": "old",
     }
-    # Enigma was stopped before the settings were restored and started again afterwards.
-    assert "init 4 || exit $?; sleep 3" in receiver.commands
-    assert receiver.commands.index("init 4 || exit $?; sleep 3") < next(
-        index for index, command in enumerate(receiver.commands) if " restore " in command
-    )
-    assert "init 3" in receiver.commands
+    # Enigma was stopped before the settings were restored and started again afterwards
+    # - by one script on the receiver, which is where that order now lives.
+    assert receiver.r2_steps[:4] == ["begun 4242", "stopping 0", "stopped", "restored 0"]
+    assert receiver.restarts == ["clean", "stopped"]
+    assert not any(command.startswith("init ") for command in receiver.commands)
     assert receiver.helper_removed is True
 
 
@@ -795,7 +919,7 @@ def _slow_to_come_back(digest: str, misses: int) -> Any:
                 # What `pidof` does when nothing matches: exit 1, and say nothing.
                 return CommandResult(1, "", "")
         result = await original(self, command, **kwargs)
-        if command == "init 3":
+        if " r2-start " in command:
             state["restarted"] = True
         return result
 
@@ -910,22 +1034,26 @@ async def test_a_rollback_whose_interface_never_returns_says_so_and_still_unlock
     assert any(" release " in command for command in receiver.commands)
 
 
-async def test_rollback_restarts_enigma_when_restore_transport_raises(
+async def test_a_rollback_whose_script_never_started_stopped_nothing(
     credentials: SshCredentials,
 ) -> None:
+    """The stop and the start are one script on the receiver, so a transport lost
+    before it started leaves the interface running - never stopped with nobody to
+    start it again, which is what two separate commands could do.
+    """
     receiver = FakeReceiver()
 
-    class RaisingRestoreSession(FakeSession):
+    class RaisingStartSession(FakeSession):
         async def run(
             self, command: str, *, input: bytes | None = None, timeout: float = 30
         ) -> CommandResult:
-            if " restore " in command:
+            if " r2-start " in command:
                 self.receiver.commands.append(command)
                 raise OSError("simulated transport loss")
             return await super().run(command, input=input, timeout=timeout)
 
-    async def connect(_credentials: SshCredentials) -> RaisingRestoreSession:
-        return RaisingRestoreSession(receiver)
+    async def connect(_credentials: SshCredentials) -> RaisingStartSession:
+        return RaisingStartSession(receiver)
 
     with pytest.raises(InstallerError) as raised:
         await _async_rollback(
@@ -943,8 +1071,9 @@ async def test_rollback_restarts_enigma_when_restore_transport_raises(
         )
 
     assert raised.value.code is InstallerErrorCode.ROLLBACK_FAILED
-    assert "init 4 || exit $?; sleep 3" in receiver.commands
-    assert "init 3" in receiver.commands
+    assert receiver.enigma_running is True
+    assert receiver.restarts == []
+    assert any(" release " in command for command in receiver.commands)
 
 
 async def _rollback(credentials: SshCredentials, connect: Any) -> None:
@@ -988,7 +1117,7 @@ async def test_a_rollback_whose_init_3_is_refused_is_a_restart_failure(
     credentials: SshCredentials,
 ) -> None:
     """The command not being accepted is the same outcome as it not working."""
-    receiver = FakeReceiver(fail_on="init 3")
+    receiver = FakeReceiver(r2_init3_status=1)
 
     with pytest.raises(InstallerError) as raised:
         await _rollback(credentials, receiver.connect)
@@ -1061,7 +1190,7 @@ async def test_a_rollback_cancelled_at_the_restart_stays_cancelled(
             self.receiver.commands.append(command)
             raise asyncio.CancelledError
         result = await original(self, command, **kwargs)
-        if command == "init 3":
+        if " r2-start " in command:
             state["restarted"] = True
         return result
 
@@ -1228,7 +1357,7 @@ async def test_a_restore_refused_for_a_busy_opkg_says_so(
     credentials: SshCredentials,
 ) -> None:
     """The receiver is still on the new plugin, which is not what a half-done restore is."""
-    receiver = FakeReceiver(busy_on=" restore ")
+    receiver = FakeReceiver(r2_restore_status=installer_helper.EXIT_OPKG_BUSY)
 
     with pytest.raises(InstallerError) as raised:
         await _rollback(credentials, receiver.connect)
@@ -1236,7 +1365,7 @@ async def test_a_restore_refused_for_a_busy_opkg_says_so(
     assert raised.value.code is InstallerErrorCode.ROLLBACK_OPKG_BUSY
     assert receiver.rolled_back is False
     # The interface is started again and the transaction lock released regardless.
-    assert "init 3" in receiver.commands
+    assert receiver.restarts == ["stopped"]
     assert any(" release " in command for command in receiver.commands)
 
 
@@ -1244,7 +1373,7 @@ async def test_only_the_helpers_busy_status_is_read_as_busy(
     credentials: SshCredentials,
 ) -> None:
     """Any other failure of the restore is still the failure it always was."""
-    receiver = FakeReceiver(fail_on=" restore ")
+    receiver = FakeReceiver(r2_restore_status=1)
 
     with pytest.raises(InstallerError) as raised:
         await _rollback(credentials, receiver.connect)
@@ -1281,13 +1410,13 @@ async def test_a_restore_that_lost_opkgs_lock_says_it_was_put_back(
     „Could not be put back as it was" would send somebody to redo a restore that
     happened, so this is its own outcome rather than the restore failing.
     """
-    receiver = FakeReceiver(lock_lost_on=" restore ")
+    receiver = FakeReceiver(r2_restore_status=installer_helper.EXIT_OPKG_LOCK_LOST)
 
     with pytest.raises(InstallerError) as raised:
         await _rollback(credentials, receiver.connect)
 
     assert raised.value.code is InstallerErrorCode.ROLLBACK_OPKG_OVERLAP
-    assert "init 3" in receiver.commands
+    assert receiver.restarts == ["stopped"]
     assert any(" release " in command for command in receiver.commands)
 
 

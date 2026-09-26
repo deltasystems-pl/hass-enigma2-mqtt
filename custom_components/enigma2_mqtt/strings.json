@@ -88,6 +88,8 @@
       "no_space": "The receiver does not have enough free space.",
       "recording": "Installation is blocked while recording.",
       "timer_due": "Installation is blocked because a recording timer is due soon.",
+      "standby": "Installation is blocked while the receiver is in standby.",
+      "streaming": "Installation is blocked while the receiver is streaming.",
       "bundle_missing": "The verified plugin bundle is missing.",
       "bundle_invalid": "The plugin bundle failed verification.",
       "upload_failed": "The plugin upload failed.",
@@ -96,6 +98,7 @@
       "provision_failed": "Writing the MQTT configuration failed.",
       "restart_failed": "The Enigma2 interface did not restart safely.",
       "announcement_timeout": "The plugin did not publish a fresh MQTT announcement after restart.",
+      "restart_withdrawn": "The receiver asked on screen whether to restart its interface, so the installation was withdrawn.",
       "rollback_failed": "Installation failed and rollback also failed; inspect the receiver manually.",
       "rollback_restart_failed": "The receiver was put back as it was, but its interface did not start again.",
       "rollback_lock_failed": "The receiver was put back as it was, but the installer's lock could not be released.",
@@ -128,6 +131,8 @@
       ,"no_space": "The receiver does not have enough free space. Nothing was installed."
       ,"recording": "The receiver is recording. Nothing was installed; try again when the recording has finished."
       ,"timer_due": "A recording is due to start on the receiver. Nothing was installed; try again afterwards."
+      ,"standby": "The receiver is in standby. Installing restarts the receiver's interface, which would wake it and may switch the television on. Nothing was installed; switch the receiver on and try again."
+      ,"streaming": "The receiver is streaming to another device. Installing restarts its interface and would cut the stream off. Nothing was installed; try again when the stream has ended."
       ,"bundle_missing": "The plugin bundle shipped with this integration is missing. Reinstall the integration."
       ,"bundle_invalid": "The plugin bundle shipped with this integration failed verification. Reinstall the integration."
       ,"upload_failed": "The plugin could not be transferred to the receiver. Nothing was changed."
@@ -136,6 +141,7 @@
       ,"provision_failed": "The receiver's MQTT settings could not be written. The receiver was put back as it was."
       ,"restart_failed": "The receiver's interface did not restart safely. The receiver was put back as it was."
       ,"announcement_timeout": "The plugin did not announce itself after the restart. The receiver was put back as it was."
+      ,"restart_withdrawn": "The receiver asked on screen whether to restart its interface, so the installation was withdrawn: the plugin files on the receiver are as they were before, and nothing was restarted. The question may still be visible on the television - answering \"yes\" or \"no\" is safe."
       ,"rollback_failed": "The installation failed and the receiver could not be put back as it was. Check the receiver by hand: the backup taken before the change is in /home/root/mqttbridge-backups."
       ,"rollback_restart_failed": "The installation failed and the receiver was put back as it was, but its interface did not start again. Restart the receiver by hand; nothing else needs undoing."
       ,"rollback_lock_failed": "The receiver was put back as it was, but the installer's transaction lock could not be released. Delete /home/root/mqttbridge-backups/.ha-installer.lock on the receiver, or wait thirty minutes, before installing again."
@@ -661,6 +667,9 @@
     "update_version_unavailable": {"message": "The requested version is not available from this integration’s verified bundle."},
     "update_no_credentials": {"message": "No SSH credentials are stored for this receiver. Reconfigure it and tick “Keep SSH credentials for updates”, then try again."},
     "update_failed": {"message": "Plugin update failed: {reason}"},
+    "update_withdrawn": {"message": "The receiver asked on screen whether to restart its interface, so the update was withdrawn; the previous version of the plugin is running. The question may still be visible on the television - answering \"yes\" or \"no\" is safe."},
+    "update_standby": {"message": "The receiver is in standby. Updating restarts the receiver's interface, which would wake it and may switch the television on. Switch the receiver on and try again."},
+    "update_streaming": {"message": "The receiver is streaming to another device. Updating restarts its interface and would cut the stream off. Try again when the stream has ended."},
     "channel_not_in_active_bouquet": {"message": "{channel} is not in the bouquet the receiver is on, so the source list does not offer it. Switch the “Bouquet” select to the bouquet it belongs to first, or use the enigma2_mqtt.zap action, which takes a service reference and is not scoped."},
     "option_no_longer_offered": {"message": "{option} is no longer on this list. The receiver republished its channels while it was being chosen; open the list again and pick from what is there now."},
     "history_clear_standby": {"message": "The receiver is in standby, where 0 does not clear its zap history."},

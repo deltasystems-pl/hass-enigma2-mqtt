@@ -36,8 +36,8 @@ from homeassistant.components.mqtt import ReceiveMessage
 from homeassistant.core import HomeAssistant, callback
 from packaging.version import InvalidVersion, Version
 
-from . import installer_helper
-from .box import parse_json_payload, state_topic
+from . import installer_helper, restart_rule
+from .box import parse_json_payload, same_service, state_topic
 from .bundle import BundledPlugin, BundleError, load_bundled_plugin
 from .const import (
     DEFAULT_BASE_TOPIC,
@@ -80,6 +80,17 @@ ANNOUNCEMENT_TIMEOUT = 120.0
 # afterwards reads a box that is coming back perfectly well as one that is not.
 ROLLBACK_RESTART_TIMEOUT = ANNOUNCEMENT_TIMEOUT
 ROLLBACK_RESTART_POLL_SECONDS = 3.0
+# How long the forward restart waits for enigma2's pid to change after asking OpenWebif
+# for a clean restart (power state 3). A clean restart takes a few seconds; when it has
+# not happened in this time, the image is asking a question on the television - it does
+# for timeshift and for a background job - and that question has no timeout of its own.
+RESTART_QUESTION_TIMEOUT = 60.0
+RESTART_POLL_SECONDS = 2.0
+# How long a rollback follows its stop-and-restore script on the receiver before it gives
+# up waiting for the interface to be started again: the script's own wait for enigma2 to
+# stop, the restore's own bound, and a margin.
+R2_FOLLOW_TIMEOUT = installer_helper.R2_STOP_WAIT_SECONDS + RESTORE_TIMEOUT + 60.0
+R2_FOLLOW_POLL_SECONDS = 2.0
 
 ProgressCallback = Callable[[str], None | Awaitable[None]]
 
@@ -95,6 +106,10 @@ class InstallerErrorCode(StrEnum):
     NO_SPACE = "no_space"
     RECORDING = "recording"
     TIMER_DUE = "timer_due"
+    # The two conditions a restart of the interface would break, which only the install
+    # path checks: the options screen's credential probe restarts nothing.
+    STANDBY = "standby"
+    STREAMING = "streaming"
     BUNDLE_MISSING = "bundle_missing"
     BUNDLE_INVALID = "bundle_invalid"
     UPLOAD_FAILED = "upload_failed"
@@ -103,6 +118,9 @@ class InstallerErrorCode(StrEnum):
     PROVISION_FAILED = "provision_failed"
     RESTART_FAILED = "restart_failed"
     ANNOUNCEMENT_TIMEOUT = "announcement_timeout"
+    # The image asked on the television whether to restart, and the install was
+    # withdrawn: the old plugin's files are back and nothing was restarted.
+    RESTART_WITHDRAWN = "restart_withdrawn"
     ROLLBACK_FAILED = "rollback_failed"
     ROLLBACK_RESTART_FAILED = "rollback_restart_failed"
     ROLLBACK_LOCK_FAILED = "rollback_lock_failed"
@@ -500,6 +518,26 @@ def _finite_timestamp(value: Any) -> float:
     return parsed
 
 
+def _restart_guard(status_raw: str) -> tuple[bool, bool]:
+    """Return whether the receiver is in standby and whether it is streaming.
+
+    Fail closed like the rest of the preflight: an install restarts the interface, and
+    a restart wakes a receiver in standby - which, with HDMI-CEC on, switches the
+    television on too - and cuts off whoever is watching a stream from it. A receiver
+    that does not say which it is gets no restart.
+    """
+    try:
+        status = json.loads(status_raw)
+    except (TypeError, ValueError) as err:
+        raise InstallerError(InstallerErrorCode.PREFLIGHT_FAILED) from err
+    if not isinstance(status, dict) or "inStandby" not in status or "isStreaming" not in status:
+        raise InstallerError(
+            InstallerErrorCode.PREFLIGHT_FAILED,
+            "OpenWebif did not say whether the receiver is in standby or streaming",
+        )
+    return _strict_bool(status["inStandby"]), _strict_bool(status["isStreaming"])
+
+
 def _timer_guard(status_raw: str, timers_raw: str) -> tuple[bool, int]:
     """Fail closed unless OpenWebif returns understood structured state."""
     try:
@@ -540,8 +578,14 @@ def _timer_guard(status_raw: str, timers_raw: str) -> tuple[bool, int]:
     return recording_value, due
 
 
-async def _async_measure_preflight(session: InstallerSession, *, bundle_size: int = 0) -> Preflight:
-    """Measure every install guard through fixed receiver-local commands."""
+async def _async_measure_preflight(
+    session: InstallerSession, *, bundle_size: int = 0, restart_guards: bool = False
+) -> Preflight:
+    """Measure every install guard through fixed receiver-local commands.
+
+    `restart_guards` adds the two that only a restart of the interface needs - standby
+    and streaming - and only the install path asks for them.
+    """
     image = (
         await _run_checked(
             session,
@@ -669,6 +713,7 @@ async def _async_measure_preflight(session: InstallerSession, *, bundle_size: in
         detail="OpenWebif did not answer with the receiver's timers",
     )
     recording, timers_due = _timer_guard(status.stdout, timers.stdout)
+    standby, streaming = _restart_guard(status.stdout) if restart_guards else (False, False)
     if recording:
         raise InstallerError(
             InstallerErrorCode.RECORDING,
@@ -679,6 +724,17 @@ async def _async_measure_preflight(session: InstallerSession, *, bundle_size: in
             InstallerErrorCode.TIMER_DUE,
             f"{timers_due} recording(s) are due on the receiver within the next "
             f"{TIMER_GUARD_SECONDS // 60} minutes",
+        )
+    if standby:
+        raise InstallerError(
+            InstallerErrorCode.STANDBY,
+            "the receiver is in standby, and restarting its interface would wake it "
+            "and could switch the television on",
+        )
+    if streaming:
+        raise InstallerError(
+            InstallerErrorCode.STREAMING,
+            "the receiver is streaming, and restarting its interface would cut the stream off",
         )
     return Preflight(
         image,
@@ -1073,6 +1129,91 @@ async def _async_remove_helper(session: InstallerSession, remote_helper: str) ->
         _LOGGER.warning("Installer helper left behind on the receiver at %s", remote_helper)
 
 
+def _r2_files(remote_helper: str) -> tuple[str, str, str]:
+    """Return the stop-and-restore script's own files: script, status, output.
+
+    Named after the transaction, beside the helper in `/tmp`, so they go away with a
+    reboot and never collide with another transaction's.
+    """
+    stem = remote_helper.removesuffix(".py").replace(
+        "enigma2-mqtt-installer-", "enigma2-mqtt-r2-"
+    )
+    return f"{stem}.sh", f"{stem}.status", f"{stem}.log"
+
+
+def _r2_lines(stdout: str) -> dict[str, str]:
+    """Read the script's status file into `{step: argument}`; the last word wins."""
+    steps: dict[str, str] = {}
+    for line in stdout.splitlines():
+        step, _, argument = line.strip().partition(" ")
+        if step:
+            steps[step] = argument
+    return steps
+
+
+async def _async_follow_r2(
+    session: InstallerSession | None,
+    credentials: SshCredentials,
+    connector: Connector,
+    status_file: str,
+) -> tuple[InstallerSession | None, dict[str, str]]:
+    """Follow the stop-and-restore script until it has started the interface again.
+
+    It runs on the receiver whatever happens here. A dropped connection is only a gap in
+    what this end can see, so the following reconnects and carries on; the script, which
+    is in a session of its own, notices nothing.
+    """
+    deadline = time.monotonic() + R2_FOLLOW_TIMEOUT
+    steps: dict[str, str] = {}
+    while True:
+        try:
+            if session is None:
+                session = await connector(credentials)
+            result = await session.run(f"cat {shlex.quote(status_file)}", timeout=30)
+            steps = _r2_lines(result.stdout)
+            if "started" in steps:
+                return session, steps
+        except (OSError, TimeoutError, asyncssh.Error, InstallerError):
+            if session is not None:
+                with suppress(Exception):
+                    await session.close()
+            session = None
+        if time.monotonic() >= deadline:
+            return session, steps
+        await asyncio.sleep(R2_FOLLOW_POLL_SECONDS)
+
+
+def _r2_restore_code(steps: dict[str, str]) -> InstallerErrorCode | None:
+    """Return the verdict on the restore the script ran, or None when it succeeded."""
+    rc = steps.get("restored")
+    if rc == "0":
+        return None
+    if rc == str(installer_helper.EXIT_OPKG_BUSY):
+        return InstallerErrorCode.ROLLBACK_OPKG_BUSY
+    if rc == str(installer_helper.EXIT_OPKG_LOCK_LOST):
+        return InstallerErrorCode.ROLLBACK_OPKG_OVERLAP
+    return InstallerErrorCode.ROLLBACK_FAILED
+
+
+def _rollback_record(
+    record: restart_rule.RestartRecord | None, service: str | None, standby: bool | None
+) -> restart_rule.RestartRecord:
+    """Return what R2 keeps: what the receiver plays now, else what it played before.
+
+    Now wins, because it is what the household is watching. The record taken before
+    the install's restart is the fallback for an interface that no longer answers, and
+    the bouquet recorded then is carried over only when it was recorded with the same
+    channel - otherwise nothing says the channel is in it.
+    """
+    if service is None:
+        return record or restart_rule.RestartRecord()
+    if record is not None and same_service(record.service, service):
+        return restart_rule.RestartRecord(
+            service, standby, record.bouquet, record.bouquet_holds_service
+        )
+    return restart_rule.RestartRecord(service, standby)
+
+
 async def _async_rollback(
     credentials: SshCredentials,
     backup: str,
@@ -1086,8 +1227,25 @@ async def _async_rollback(
     restart_started: bool,
     connector: Connector,
     progress: _RollbackProgress | None = None,
+    *,
+    record: restart_rule.RestartRecord | None = None,
+    hass: HomeAssistant | None = None,
+    target: tuple[str, str] | None = None,
 ) -> None:
     """Restore only installer-owned paths and the exact pre-transaction metadata.
+
+    Two ways, by whether the interface was restarted onto the new plugin:
+
+    - **Not restarted**: the old enigma2 is still the running process, so the files and
+      opkg's metadata go back underneath it - each by a rename, the plugin directory by
+      two - and the settings block is left alone: the transaction changed none, and a
+      block written now would be overwritten from memory by the next clean quit.
+    - **Restarted** (R2 of the restart rule): the new plugin ran and may have written its
+      settings, so they go back too, which needs enigma2 stopped. The channel being
+      watched is recorded, then one script on the receiver - started detached, followed
+      through its status file - stops the interface, restores, writes the recorded
+      channel into the settings and starts it again. Then R3 compares and zaps back at
+      most once.
 
     The order is restore, restart, prove the restart, release the lock, and the last of
     those is reached whatever the ones before it did. A receiver whose files are back
@@ -1104,12 +1262,15 @@ async def _async_rollback(
     """
     progress = progress if progress is not None else _RollbackProgress()
     session: InstallerSession | None = None
-    enigma_stopped = False
     old_enigma_pids: set[int] = set()
     restore_error: BaseException | None = None
     restart_error: BaseException | None = None
     release_error: BaseException | None = None
     cancelled: asyncio.CancelledError | None = None
+    r2_script, r2_status, r2_log = _r2_files(remote_helper)
+    # Whether the helper and the script's files may be deleted afterwards: not while a
+    # script this end lost sight of may still be using them.
+    tidy = True
     try:
         session = await connector(credentials)
         # This one goes first and outside every condition. It is the file holding the
@@ -1118,59 +1279,79 @@ async def _async_rollback(
         # able to orphan it.
         with suppress(OSError, TimeoutError):
             await session.run(f"rm -f {shlex.quote(remote_provision_tmp)}", timeout=30)
-        if restart_started:
-            # Stop Enigma before restoring settings, so its shutdown cannot write the
-            # new values back over the old ones.
-            #
+        if not restart_started:
+            commands = [f"rm -f {shlex.quote(remote_ipk)} {shlex.quote(remote_manifest)}"]
+            if install_started:
+                commands.append(
+                    f"python3 {shlex.quote(remote_helper)} restore {shlex.quote(backup)}"
+                    + (" --provisioning" if provision_started else "")
+                )
+            _LOGGER.info("Installer rollback: restoring the receiver from %s", backup)
+            result = await session.run(
+                "set -eu; " + "; ".join(commands), timeout=RESTORE_TIMEOUT
+            )
+            if install_started and result.exit_status == installer_helper.EXIT_OPKG_BUSY:
+                # Nothing was restored: the helper takes opkg's lock before it touches a
+                # file. Which plugin the receiver is on depends on how far the install
+                # got - the likeliest way here is an opkg run from the receiver's menu
+                # that also made the install's own `opkg install` fail on the lock, and
+                # then nothing had changed - so this says "not restored", not "on the new
+                # plugin", and apart from a restore that broke half-way.
+                raise InstallerError(InstallerErrorCode.ROLLBACK_OPKG_BUSY)
+            if install_started and result.exit_status == installer_helper.EXIT_OPKG_LOCK_LOST:
+                # The files are back; what is in doubt is opkg's database, which an opkg
+                # run may have written at the same time. "Could not be put back" would
+                # send somebody to redo a restore that happened.
+                raise InstallerError(InstallerErrorCode.ROLLBACK_OPKG_OVERLAP)
+            if result.exit_status:
+                raise InstallerError(InstallerErrorCode.ROLLBACK_FAILED)
+        else:
             # Nothing measured here may veto the restore, and the preflight is not
             # measured at all: it needs OpenWebif, which is an Enigma plugin and so is
-            # down in exactly the failure this rollback exists for. Letting it raise
-            # meant the restore never ran and the box was left on the new plugin, and
-            # even suppressed it costs eight round trips against a receiver in its worst
-            # state. The pids are read because the restart proof below compares against
-            # them, and failing to read them is not a reason to stop either.
+            # down in exactly the failure this rollback exists for. The pids are read
+            # because the restart proof below compares against them, and the channel
+            # because R3 puts it back; failing to read either is not a reason to stop.
             with suppress(InstallerError):
                 old_enigma_pids = await _async_enigma_pids(session)
-            enigma_stopped = True
-            _LOGGER.info("Installer rollback: stopping the receiver interface")
-            stopped = await session.run("init 4 || exit $?; sleep 3", timeout=30)
-            if stopped.exit_status:
-                raise InstallerError(InstallerErrorCode.ROLLBACK_FAILED)
-        commands = [f"rm -f {shlex.quote(remote_ipk)} {shlex.quote(remote_manifest)}"]
-        if install_started:
-            commands.append(
-                f"python3 {shlex.quote(remote_helper)} restore {shlex.quote(backup)}"
+            service, standby = await restart_rule.async_read_state(session, remote_helper)
+            keep = _rollback_record(record, service, standby)
+            with suppress(OSError, TimeoutError):
+                await session.run(
+                    f"rm -f {shlex.quote(remote_ipk)} {shlex.quote(remote_manifest)}",
+                    timeout=30,
+                )
+            command = (
+                f"python3 {shlex.quote(remote_helper)} r2-start {shlex.quote(backup)} "
+                f"--script {shlex.quote(r2_script)} --status {shlex.quote(r2_status)} "
+                f"--log {shlex.quote(r2_log)}"
+                + (f" --service {shlex.quote(keep.service)}" if keep.service else "")
                 + (" --provisioning" if provision_started else "")
-                + (" --settings" if restart_started else "")
             )
-        _LOGGER.info("Installer rollback: restoring the receiver from %s", backup)
-        result = await session.run("set -eu; " + "; ".join(commands), timeout=RESTORE_TIMEOUT)
-        if install_started and result.exit_status == installer_helper.EXIT_OPKG_BUSY:
-            # Nothing was restored: the helper takes opkg's lock before it touches a
-            # file. Which plugin the receiver is on depends on how far the install got -
-            # the likeliest way here is an opkg run from the receiver's menu that also
-            # made the install's own `opkg install` fail on the lock, and then nothing
-            # had changed - so this says „not restored", not „on the new plugin", and
-            # apart from a restore that broke half-way.
-            raise InstallerError(InstallerErrorCode.ROLLBACK_OPKG_BUSY)
-        if install_started and result.exit_status == installer_helper.EXIT_OPKG_LOCK_LOST:
-            # The files are back; what is in doubt is opkg's database, which an opkg run
-            # may have written at the same time. „Could not be put back" would send
-            # somebody to redo a restore that happened.
-            raise InstallerError(InstallerErrorCode.ROLLBACK_OPKG_OVERLAP)
-        if result.exit_status:
-            raise InstallerError(InstallerErrorCode.ROLLBACK_FAILED)
-    except BaseException as err:
-        restore_error = err
-        if isinstance(err, asyncio.CancelledError):
-            cancelled = err
-    finally:
-        if session is not None and enigma_stopped:
+            _LOGGER.info(
+                "Installer rollback: stopping the receiver interface, restoring from %s "
+                "and starting it again, as one script on the receiver",
+                backup,
+            )
+            started = await session.run(command, timeout=30)
+            if started.exit_status:
+                # The script never ran, so nothing was stopped: the receiver is on the
+                # new plugin with its interface up.
+                raise InstallerError(InstallerErrorCode.ROLLBACK_FAILED)
             try:
-                _LOGGER.info("Installer rollback: starting the receiver interface again")
-                restart = await session.run("init 3", timeout=30)
-                if restart.exit_status:
+                session, steps = await _async_follow_r2(
+                    session, credentials, connector, r2_status
+                )
+                if "started" not in steps:
+                    tidy = False
+                    if "restored" in steps and (code := _r2_restore_code(steps)) is not None:
+                        restore_error = InstallerError(code)
                     raise InstallerError(InstallerErrorCode.ROLLBACK_RESTART_FAILED)
+                if (code := _r2_restore_code(steps)) is not None:
+                    restore_error = InstallerError(code)
+                if steps["started"] not in ("", "0"):
+                    raise InstallerError(InstallerErrorCode.ROLLBACK_RESTART_FAILED)
+                if session is None:
+                    session = await connector(credentials)
                 # A pid that was not there before the interface was stopped proves the
                 # receiver came back; no pid beforehand means Enigma was already stopped
                 # when the rollback began, and any live process is then the proof. It is
@@ -1181,10 +1362,18 @@ async def _async_rollback(
                     "Installer rollback: the receiver interface is running again as pid %s",
                     ", ".join(str(pid) for pid in sorted(restarted_pids)),
                 )
+                await _async_verify_restart(
+                    session, remote_helper, keep, "stopped", hass, target
+                )
             except BaseException as restart_err:
                 restart_error = restart_err
-                if cancelled is None and isinstance(restart_err, asyncio.CancelledError):
+                if isinstance(restart_err, asyncio.CancelledError):
                     cancelled = restart_err
+    except BaseException as err:
+        restore_error = err
+        if isinstance(err, asyncio.CancelledError):
+            cancelled = err
+    finally:
         if session is not None:
             try:
                 await session.close()
@@ -1203,8 +1392,22 @@ async def _async_rollback(
                 raise InstallerError(InstallerErrorCode.ROLLBACK_FAILED)
             progress.lock_released = True
             _LOGGER.info("Installer rollback: the transaction lock is released")
-            # The helper had to outlive the restore that used it; nothing needs it now.
-            await _async_remove_helper(released, remote_helper)
+            if tidy:
+                # The helper had to outlive the restore that used it; nothing needs it now.
+                with suppress(Exception):
+                    await released.run(
+                        f"rm -f {shlex.quote(r2_script)} {shlex.quote(r2_status)} "
+                        f"{shlex.quote(r2_log)}",
+                        timeout=30,
+                    )
+                await _async_remove_helper(released, remote_helper)
+            else:
+                _LOGGER.warning(
+                    "Installer rollback: the stop-and-restore script on the receiver did "
+                    "not report the interface started in time; its status is in %s, and "
+                    "the helper it uses was left in place",
+                    r2_status,
+                )
         finally:
             await released.close()
     except BaseException as release_err:
@@ -1251,6 +1454,174 @@ async def _async_rollback(
         # nobody holds. Reporting the original failure alone would be true and useless:
         # the next attempt is refused as busy, which is the incident this came from.
         raise _RollbackError(InstallerErrorCode.ROLLBACK_LOCK_FAILED) from release_error
+
+
+async def _async_verify_restart(
+    session: InstallerSession,
+    remote_helper: str,
+    record: restart_rule.RestartRecord,
+    restart: str,
+    hass: HomeAssistant | None,
+    target: tuple[str, str] | None,
+) -> restart_rule.RestartOutcome | None:
+    """R3, never a reason to fail: the restart it looks at has already happened.
+
+    The outcome goes into the log as the transaction's record of the restart - what
+    `docs/TRANSACTION.md` in the plugin's repository calls `restart`, `channel`,
+    `bouquet` and `standby`.
+    """
+    try:
+        outcome = await restart_rule.async_verify(
+            session, remote_helper, record, restart=restart
+        )
+        if hass is not None and target is not None:
+            outcome.bouquet = await restart_rule.async_restore_bouquet(
+                hass, target[0], target[1], record, outcome.channel
+            )
+    except Exception:
+        _LOGGER.warning(
+            "The receiver restarted, but whether it kept its channel could not be checked",
+            exc_info=True,
+        )
+        return None
+    _LOGGER.info("Receiver interface restart: %s", outcome.describe())
+    return outcome
+
+
+async def _async_recover_abandoned(
+    session: InstallerSession, remote_helper: str, claimed: str, nonce: str
+) -> None:
+    """Put back what an abandoned installer transaction may have left half-done.
+
+    The claim reports the id of an installer transaction whose lock it reclaimed as
+    stale - one that never released it: its connection died, Home Assistant restarted,
+    the receiver lost power. That transaction writes no record of how far it got, so
+    this cannot say whether it had begun to change or to restore anything, and restores
+    its snapshot again, which is safe to repeat. Which snapshot is decided by the id in
+    the lock's owner record, never by a file time: many receivers have no battery-
+    backed clock, and "newest" is then whatever NTP made of it.
+
+    The interface is running, so this is the restore that runs under it: files and
+    opkg's metadata only, by renames, never the settings block.
+    """
+    try:
+        reclaimed = json.loads(claimed or "{}").get("reclaimed", "")
+    except (AttributeError, ValueError):
+        return
+    if (
+        not isinstance(reclaimed, str)
+        or not installer_helper.TRANSACTION_ID.fullmatch(reclaimed)
+        or reclaimed == nonce
+    ):
+        return
+    abandoned = f"{BACKUP_ROOT}/ha-installer-{reclaimed}"
+    present = await session.run(f"test -d {shlex.quote(abandoned)}", timeout=30)
+    if present.exit_status:
+        return
+    _LOGGER.warning(
+        "Installer: transaction %s was abandoned without releasing its lock; putting "
+        "back its snapshot %s before this one starts",
+        reclaimed,
+        abandoned,
+    )
+    await _run_checked(
+        session,
+        f"python3 {shlex.quote(remote_helper)} withdraw {shlex.quote(abandoned)} --provisioning",
+        InstallerErrorCode.INSTALL_FAILED,
+        timeout=RESTORE_TIMEOUT,
+        detail="the snapshot of an abandoned transaction could not be put back",
+        busy=InstallerErrorCode.OPKG_BUSY,
+    )
+
+
+async def _async_clean_restart(
+    session: InstallerSession, remote_helper: str, old_pids: set[int]
+) -> bool:
+    """R1: ask for the image's own clean restart and wait for a new enigma2.
+
+    OpenWebif's power state 3 is `TryQuitMainloop(3)`: the image stops its services,
+    saves its settings - the channel being watched among them - and exits, and init
+    starts it again. `init 4` never got to the save, which is how a receiver came back
+    on a channel saved hours earlier.
+
+    Judged by the pid, never by the call's answer: the quit can reset the connection
+    that asked for it. True as soon as a new enigma2 runs. At the bound, an interface
+    that went away and did not come back is a restart too - a failed one, which the
+    proof then turns into a rollback. False only when the old enigma2 is still there,
+    unchanged: the image is asking a question on the television, which waits for ever.
+    """
+    with suppress(OSError, TimeoutError):
+        await session.run(
+            f"python3 {shlex.quote(remote_helper)} powerstate --state 3", timeout=30
+        )
+    deadline = time.monotonic() + RESTART_QUESTION_TIMEOUT
+    pids = set(old_pids)
+    while True:
+        with suppress(InstallerError):
+            pids = await _async_enigma_pids(session)
+            if pids - old_pids:
+                return True
+        if time.monotonic() >= deadline:
+            return not old_pids <= pids
+        await asyncio.sleep(RESTART_POLL_SECONDS)
+
+
+async def _async_withdraw(
+    session: InstallerSession, remote_helper: str, backup: str, provision_started: bool
+) -> bool:
+    """Put the old files back under a running enigma2; return whether it restarted meanwhile.
+
+    Files and opkg's metadata only, never the settings block: the transaction changed no
+    setting, and a block written while enigma2 runs is overwritten from memory by its
+    next clean quit - writing it would only race the household's own saves. The helper
+    swaps the plugin directory in by two renames, so a restart answered in the middle
+    meets the whole old tree or the whole new one.
+
+    Then the pid is read again. A new one means somebody answered the question while
+    the files went back; the receiver restarted, and "withdrawn" would be a false
+    report - the caller goes on to the proof, and to R2 if it fails.
+    """
+    _LOGGER.warning(
+        "Installer: the receiver's interface did not restart within %d s - the image is "
+        "asking on the television - so the update is withdrawn and the previous files "
+        "put back",
+        int(RESTART_QUESTION_TIMEOUT),
+    )
+    before = await _async_enigma_pids(session)
+    await _run_checked(
+        session,
+        f"python3 {shlex.quote(remote_helper)} withdraw {shlex.quote(backup)}"
+        + (" --provisioning" if provision_started else ""),
+        InstallerErrorCode.ROLLBACK_FAILED,
+        timeout=RESTORE_TIMEOUT,
+        detail="the previous plugin files could not be put back under the running interface",
+        busy=InstallerErrorCode.ROLLBACK_OPKG_BUSY,
+    )
+    return await _async_enigma_pids(session) != before
+
+
+async def _async_release_after_withdraw(
+    session: InstallerSession,
+    remote_helper: str,
+    remote_lock: str,
+    *leftovers: str,
+) -> bool:
+    """Release the lock after a withdrawal and tidy up; return whether it was released."""
+    try:
+        released = await session.run(
+            f"python3 {shlex.quote(remote_helper)} release {shlex.quote(remote_lock)}",
+            timeout=30,
+        )
+    except (OSError, TimeoutError):
+        return False
+    if released.exit_status:
+        return False
+    with suppress(OSError, TimeoutError):
+        await session.run(
+            "rm -f " + " ".join(shlex.quote(path) for path in (*leftovers, remote_helper)),
+            timeout=30,
+        )
+    return True
 
 
 async def async_install(
@@ -1304,6 +1675,9 @@ async def _async_install_locked(
     backup_created = False
     remote_lock_claimed = False
     committed = False
+    # The image asked a question, the install was withdrawn and the lock released.
+    withdrawn = False
+    record: restart_rule.RestartRecord | None = None
     provisioned_name = ""
     try:
         # Everything up to the transaction lock is a guard, and a guard that refuses
@@ -1316,7 +1690,9 @@ async def _async_install_locked(
         try:
             await _async_progress(progress_cb, "preflight")
             session = await connector(request.credentials)
-            preflight = await _async_measure_preflight(session, bundle_size=len(bundle_bytes))
+            preflight = await _async_measure_preflight(
+                session, bundle_size=len(bundle_bytes), restart_guards=True
+            )
             if preflight.installed_version and _package_version(
                 preflight.installed_version
             ) > _package_version(bundle.version):
@@ -1345,12 +1721,14 @@ async def _async_install_locked(
             raise
         claim = await session.run(
             f"mkdir -p {shlex.quote(BACKUP_ROOT)} && "
-            f"python3 {shlex.quote(remote_helper)} claim {shlex.quote(remote_lock)}",
+            f"python3 {shlex.quote(remote_helper)} claim {shlex.quote(remote_lock)} "
+            f"--id {nonce}",
             timeout=30,
         )
         if claim.exit_status:
             raise InstallerError(InstallerErrorCode.BUSY)
         remote_lock_claimed = True
+        await _async_recover_abandoned(session, remote_helper, claim.stdout, nonce)
         await _run_checked(
             session,
             f"python3 {shlex.quote(remote_helper)} snapshot {shlex.quote(backup)}",
@@ -1376,7 +1754,9 @@ async def _async_install_locked(
         if remote_hash.stdout.strip() != bundle.sha256:
             raise InstallerError(InstallerErrorCode.UPLOAD_FAILED)
 
-        await _async_measure_preflight(session, bundle_size=len(bundle_bytes))
+        await _async_measure_preflight(
+            session, bundle_size=len(bundle_bytes), restart_guards=True
+        )
         await _async_progress(progress_cb, "install")
         install_started = True
         await _run_checked(
@@ -1424,7 +1804,9 @@ async def _async_install_locked(
             )
 
         # The guard is measured again immediately before the only disruptive step.
-        await _async_measure_preflight(session, bundle_size=len(bundle_bytes))
+        await _async_measure_preflight(
+            session, bundle_size=len(bundle_bytes), restart_guards=True
+        )
         # Read before the restart, so that afterwards a process that was not running
         # then is proof the interface really went down and came back. An empty set is a
         # perfectly ordinary answer - a box still booting has no Enigma yet - and any
@@ -1444,16 +1826,45 @@ async def _async_install_locked(
         except TimeoutError as err:
             raise InstallerError(InstallerErrorCode.RESTART_FAILED) from err
 
+        # What the restart has to keep - the channel, standby, the channel-list bouquet -
+        # recorded as late as possible, so that it is what the household is watching.
+        record = await restart_rule.async_record(
+            hass, session, remote_helper, base_topic, node_id
+        )
+
         await _async_progress(progress_cb, "restart")
         restart_started = True
         watch.arm()
-        await _run_checked(
-            session,
-            'sh -c \'trap "init 3" EXIT HUP INT TERM; init 4; sleep 3; '
-            "init 3; trap - EXIT HUP INT TERM'",
-            InstallerErrorCode.RESTART_FAILED,
-            timeout=30,
-        )
+        if not await _async_clean_restart(session, remote_helper, old_enigma_pids):
+            # The image asked on the television instead of restarting. Nothing was
+            # stopped; the old enigma2 still runs. Put the old files back under it and
+            # say so - unless somebody answered while that happened, in which case the
+            # receiver did restart, and the proof below decides as for any restart.
+            try:
+                restarted_meanwhile = await _async_withdraw(
+                    session, remote_helper, backup, provision_started
+                )
+            except InstallerError:
+                # Not put back - opkg busy, most likely. Still no stop-and-restore: that
+                # would stop the interface the image has just asked to keep running.
+                withdrawn = True
+                remote_lock_claimed = not await _async_release_after_withdraw(
+                    session, remote_helper, remote_lock
+                )
+                raise
+            if not restarted_meanwhile:
+                withdrawn = True
+                remote_lock_claimed = not await _async_release_after_withdraw(
+                    session, remote_helper, remote_lock, remote_ipk, remote_manifest,
+                    remote_provision_tmp,
+                )
+                if remote_lock_claimed:
+                    raise InstallerError(InstallerErrorCode.ROLLBACK_LOCK_FAILED)
+                raise InstallerError(
+                    InstallerErrorCode.RESTART_WITHDRAWN,
+                    "the receiver asked on screen whether to restart its interface; the "
+                    "update was withdrawn and the previous plugin files are back",
+                )
         try:
             await session.close()
         except BaseException:
@@ -1470,6 +1881,9 @@ async def _async_install_locked(
         try:
             if not await _async_enigma_pids(cleanup) - old_enigma_pids:
                 raise InstallerError(InstallerErrorCode.RESTART_FAILED)
+            await _async_verify_restart(
+                cleanup, remote_helper, record, "clean", hass, (base_topic, node_id)
+            )
             released = await cleanup.run(
                 f"python3 {shlex.quote(remote_helper)} release {shlex.quote(remote_lock)}",
                 timeout=30,
@@ -1523,6 +1937,11 @@ async def _async_install_locked(
         if committed:
             _LOGGER.warning("Installed plugin verified; ignoring post-commit cleanup failure")
             return InstallResult(bundle.version, backup_created, True, provisioned_name)
+        if withdrawn:
+            # Settled on the receiver already: the old files are back under the old
+            # enigma2 and nothing was stopped. A rollback now would stop the interface
+            # the image just refused to restart.
+            raise
         if session is not None:
             try:
                 await session.close()
@@ -1545,6 +1964,9 @@ async def _async_install_locked(
                     restart_started,
                     connector,
                     rollback,
+                    record=record,
+                    hass=hass,
+                    target=request.target(),
                 )
             except asyncio.CancelledError:
                 _LOGGER.error(

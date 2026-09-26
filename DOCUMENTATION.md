@@ -148,6 +148,35 @@ its snapshot behind as well; from then on it is an ordinary one, and it goes onc
 exist. The uploaded package, the manifest and the helper script live in `/tmp` and are deleted when
 the transaction commits. Nothing else is written.
 
+**How the install restarts the receiver.** The plugin only loads at the interface's start, so
+every install and update ends with a restart of the Enigma interface, and it keeps the channel
+the household is watching:
+
+- The installer asks OpenWebif on the receiver for the image's own restart (power state 3). The
+  image saves its settings on the way down - the channel being watched among them - and init
+  starts it again. The installer judges this by the interface's process id changing within 60
+  seconds, never by OpenWebif's answer, which the restart can cut off.
+- If the process id has not changed after 60 seconds, the image is asking on the television
+  whether to restart - it does while timeshift runs or a background job works. The installer does
+  not force it: it puts the previous plugin's files and package records back under the running
+  interface, leaves the plugin's settings alone, and ends with a sentence saying so. The question
+  may stay on the television; either answer is safe, because the files are back before the
+  sentence is shown. A receiver with timeshift permanently on will ask every time. For those
+  up to 60 seconds the plugin that is running has the new files on disk, and a part of it that
+  it loads for the first time in that window is the new version's - a bounded window,
+  accepted; with the old `init 4` restart it was a few seconds.
+- After the restart the installer compares the channel and the standby state with what they were
+  before, zaps back once if the image started on another channel - never over a channel somebody
+  picked after the start - and puts the channel-list bouquet back through the plugin where that
+  cannot change the channel. The log has one line with the outcome.
+- A rollback that has to put the plugin's settings back stops the interface instead, because a
+  running interface writes its settings over them when it quits. It runs as one script on the
+  receiver - record the channel, stop, restore, write the channel, start - which Home Assistant
+  starts detached and follows, so a lost connection cannot leave the receiver stopped.
+
+An install is refused before anything is changed while the receiver is **in standby** (a restart
+would wake it, and with HDMI-CEC the television) or **streaming** to another device.
+
 **When an install fails.** Every failure ends on a sentence rather than a code, and the sentence
 says what state the receiver was left in. Most of them - no space, a recording running, a bad
 password, the plugin never announcing itself - mean the receiver was put back exactly as it was

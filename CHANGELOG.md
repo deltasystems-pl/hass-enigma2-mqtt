@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+The SSH installer's restarts follow the restart rule of the plugin's
+[`docs/TRANSACTION.md`](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TRANSACTION.md#5-the-restart-rule-planned-for-040-both-programs).
+**Not yet run on a receiver.** It is accepted on hardware before the release that carries
+it, and taken out again if that fails.
+
+- **An install or update over SSH restarts the receiver's interface the way the receiver
+  itself does, and keeps the channel.** Until now every restart the installer made was
+  `init 4` followed by `init 3`. A stop like that never reaches the image's own save, so a
+  receiver could come back on a channel saved hours earlier. The installer now asks OpenWebif
+  for the image's clean restart (power state 3), which saves the settings on the way down, and
+  judges it by the interface's process id changing - never by the answer to the request, which
+  the restart itself can cut off. Nothing in the installer uses `init 4` for an install or an
+  update any more.
+- **When the receiver asks on the television instead of restarting** - the image does while
+  timeshift runs or a background job works - the installer waits at most 60 seconds and then
+  withdraws the update: the previous plugin's files and package records go back without
+  stopping anything, the plugin's settings are left alone, and the update card says so in
+  words. The question may stay on the television; answering either way is safe. If somebody
+  answers it while the files go back, the receiver has restarted, and the install is judged
+  like any other restart instead.
+- **After every restart the installer checks the channel.** It compares the channel and the
+  standby state with what they were before, zaps back once if the image started on another
+  channel - never over a channel somebody picked after the start - and puts the channel-list
+  bouquet back through the plugin, only where that cannot change the channel. What happened is
+  written to the log in one line: restart, channel, bouquet and standby.
+- **A rollback that has to put the plugin's settings back runs as one script on the
+  receiver**: it records the channel, stops the interface, restores, writes the recorded channel
+  into the settings and starts the interface again. The script is started detached and
+  followed through a status file, so a dropped SSH connection or a Home Assistant restart
+  cannot leave the receiver stopped; an interruption on the receiver still waits for the
+  restore and starts the interface.
+- **Installs and updates are refused while the receiver is in standby or streaming**, before
+  anything is changed. A restart would wake a receiver in standby - and, with HDMI-CEC on, the
+  television - and cut a stream off. The credential check on the options screen restarts
+  nothing and still works in standby.
+- The installer's transaction lock names its transaction. An installer transaction that ended
+  without releasing its lock is put back from its own snapshot, found by that name rather than
+  by a file time, before the next install starts.
+
+### Known limits
+
+- For as long as the receiver's question stays unanswered - at most 60 seconds, then the
+  update is withdrawn - the plugin that is running has the new files on disk. Code it loads
+  for the first time in that window is the new version's. With `init 4` that window was a few
+  seconds.
+- A rollback's stop-and-restore cannot survive a `SIGKILL` or a power cut between the stop and
+  the start. Power reboots the receiver; a killed script leaves it stopped, and the transaction
+  lock stays for up to 30 minutes.
+
 ### Documentation
 
 - **Installable plugin versions from a signed release index are planned**, in

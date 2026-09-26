@@ -263,6 +263,29 @@ def auto_enable_custom_integrations(
     yield
 
 
+@pytest.fixture(autouse=True)
+def quick_restart_rule(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Shrink the restart rule's waits from receiver time to test time.
+
+    On a receiver they are tens of seconds - a clean restart, the image's question, an
+    interface coming back and tuning its channel. A fake receiver answers at once or
+    never, so the bounds only have to be long enough to take a few polls. A test about a
+    bound itself sets the one it is about.
+    """
+    from custom_components.enigma2_mqtt import installer, restart_rule
+
+    monkeypatch.setattr(installer, "RESTART_QUESTION_TIMEOUT", 0.05)
+    monkeypatch.setattr(installer, "RESTART_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(installer, "R2_FOLLOW_TIMEOUT", 0.2)
+    monkeypatch.setattr(installer, "R2_FOLLOW_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(restart_rule, "SETTLE_TIMEOUT", 0.05)
+    monkeypatch.setattr(restart_rule, "SETTLE_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(restart_rule, "EFFECT_TIMEOUT", 0.05)
+    monkeypatch.setattr(restart_rule, "EFFECT_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(restart_rule, "BOUQUET_REPLAY_SECONDS", 0.2)
+    monkeypatch.setattr(restart_rule, "BOUQUET_ACK_SECONDS", 0.2)
+
+
 @pytest.fixture
 def expected_lingering_timers() -> bool:
     """Tolerate the MQTT integration's own periodic timer.
