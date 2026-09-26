@@ -43,7 +43,6 @@ from custom_components.enigma2_mqtt.const import (
     MESSAGE_MAX_LENGTH,
 )
 from custom_components.enigma2_mqtt.installer import InstallerError, InstallerErrorCode
-from custom_components.enigma2_mqtt.update import latest_version
 
 from .conftest import (
     INFO,
@@ -318,14 +317,27 @@ async def test_the_plugin_version_entity(
     assert "enigma2-mqtt-bridge/releases" in state.attributes["release_url"]
 
 
-async def test_an_older_plugin_has_an_update(
+async def test_an_older_plugin_has_an_update_where_the_card_can_install_it(
     hass: HomeAssistant,
     mqtt_mock,
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
     """That is exactly the case a topic contract mismatch shows up as."""
-    await async_setup_box(hass, config_entry)
+    config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        config_entry,
+        data={
+            **config_entry.data,
+            CONF_SSH_HOST: "192.0.2.12",
+            CONF_SSH_PORT: 22,
+            CONF_SSH_USERNAME: "root",
+            CONF_SSH_PASSWORD: "example-only",
+            CONF_SSH_HOST_KEY: "ssh-ed25519 example-only",
+        },
+    )
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
 
     async_fire_mqtt_message(hass, INFO_TOPIC, json.dumps({**INFO, "plugin": "0.0.9"}))
     await hass.async_block_till_done()
@@ -333,24 +345,26 @@ async def test_an_older_plugin_has_an_update(
     assert hass.states.get(PLUGIN).state == STATE_ON
 
 
-@pytest.mark.parametrize(
-    ("installed", "supported", "expected"),
-    [
-        ("0.1.0", "0.1.0", "0.1.0"),
-        ("0.0.9", "0.1.0", "0.1.0"),
-        # A box that has run ahead of this integration is not out of date.
-        ("0.3.0", "0.1.0", "0.3.0"),
-        ("0.1.0-r0", "0.1.0", "0.1.0-r0"),
-        ("0.1.0-beta.1", "0.1.0", "0.1.0"),
-        (None, "0.1.0", "0.1.0"),
-        ("nightly", "0.1.0", "0.1.0"),
-    ],
-)
-def test_the_version_offered_is_never_a_downgrade(
-    installed: str | None, supported: str, expected: str
+async def test_an_older_plugin_without_an_install_path_shows_no_badge(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
 ) -> None:
-    """Telling somebody to install an older plugin over a newer one helps nobody."""
-    assert latest_version(installed, supported) == expected
+    """Behaviour change from 0.3.1 (ADR-0008 section 3): no badge the card cannot act on.
+
+    Without SSH credentials the card has no way to install anything, so it names what is
+    installed as the latest and says the rest in its summary.
+    """
+    await async_setup_box(hass, config_entry)
+
+    async_fire_mqtt_message(hass, INFO_TOPIC, json.dumps({**INFO, "plugin": "0.0.9"}))
+    await hass.async_block_till_done()
+
+    state = hass.states.get(PLUGIN)
+    assert state.state == STATE_OFF
+    assert state.attributes["latest_version"] == "0.0.9"
+    assert PLUGIN_VERSION in state.attributes["release_summary"]
 
 
 async def test_update_installs_bundle_without_reprovisioning(
@@ -412,7 +426,7 @@ async def test_missing_bundle_keeps_diagnostic_entity_without_install(
 ) -> None:
     """A damaged distribution cannot offer install or break MQTT entity setup."""
     with patch(
-        "custom_components.enigma2_mqtt.update.load_bundled_plugin",
+        "custom_components.enigma2_mqtt.bundle.load_bundled_plugin",
         side_effect=BundleError("invalid"),
     ):
         await async_setup_box(hass, config_entry)

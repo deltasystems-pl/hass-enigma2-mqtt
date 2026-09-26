@@ -288,7 +288,7 @@ on the form, as before.
 | **Bouquets to offer** | every bouquet the box publishes | Which bouquets feed the media player's channel list and the media browser. The choices are the bouquets on the `channels` topic, and a name can be typed for one the box has not published yet. This narrows the plugin's own `bouquets_for_select`; it cannot widen it. |
 | **Channels in the media player's source list** | every bouquet on offer | What `media_player.source_list` holds, and nothing else. **Every bouquet on offer** is what this integration has always done and stays the default, so an existing installation does not change under an automation that names a channel; on a receiver with about a thousand channels it is a dropdown of about a thousand rows. **The active bouquet** is the short list the receiver's own channel ± is walking, which is also what the „Kanał" select shows. `select_source` follows this setting; the `zap` action takes a service reference and does not. Three cases keep the long list whatever is chosen, because there is nothing to shorten it to and an empty source list would leave no way to change channel: a receiver that publishes no channel-list context (an older plugin without `bouquet_context`), a context naming a bouquet the **Bouquets to offer** option excludes, and a context naming a bouquet with no playable channel in it. The last two are logged as a warning, once per bouquet. 🔴 This setting is **not** about the recorder: Home Assistant declares `source_list` an unrecorded attribute and the recorder removes it before it measures a state against its size limit, so the long list never reached the database in the first place. |
 | **Bouquets hidden from "Recently watched"** („Bukiety ukryte w „Ostatnio oglądane"") | none | Which bouquets' channels [„Ostatnio oglądane"](#46-selects) leaves out - and that one entity only: „Ostatnio oglądane (wszystkie)", „Kanał", „Bukiet" and the media player are untouched. The choices are the bouquets on the `channels` topic, and a name can be typed. With it empty every entry shows. With a bouquet chosen, an entry shows only when its bouquet is a published bouquet that is not hidden **and** its channel is not a member of any hidden bouquet, so a channel of a hidden bouquet reached through another one stays hidden. While anything is chosen, an entry that cannot be checked - no bouquet path, a radio bouquet, a bouquet the plugin does not publish - is hidden too. A hidden name that is no longer on the `channels` topic is logged once. 🔴 **This is a filter in Home Assistant, not privacy on the network**: the receiver publishes every entry of its history on `zap_history` and every channel of every bouquet on `channels`, retained, to any broker login; its own History Zap screen, the plugin's OpenWebif page and „Ostatnio oglądane (wszystkie)" show everything. See [§4.6](#46-selects) for what the recorder keeps. |
-| **Check for published plugin releases** | off | The only thing this integration can do that is not talking to your own broker, which is why it is off. Turned on, the version entity asks the plugin repository which release is published - **at most once every 24 hours** - and reports the tag in its summary, in a `published_version` attribute and in the release link. The time of the last request and its answer are written to `.storage/enigma2_mqtt.release_check`, keyed by config entry, so reloading the receiver, saving the options or restarting Home Assistant shows what is already known instead of spending another request; the record is deleted when the receiver is removed. At most 64 KiB of the answer is read, and a tag is only believed if it is at most 64 characters and parses as a version. The release link is only followed if it points into this plugin's own releases. It downloads nothing and it never raises `latest_version`: `install` can only ever put the bundle shipped here on a receiver, and offering a version the installer would refuse would be a button that lies. Failures - a rate limit, a timeout, an answer that is not a release - are a debug line and nothing else. |
+| **Check daily for available plugin versions** | off | Off means this integration asks nothing on its own. The plugin's **signed release index** - `releases.json` and its signature from the plugin's fixed HTTPS origin, `https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/` - is fetched only when somebody presses **Check for plugin updates** (*Sprawdź aktualizacje wtyczki*), or uses Home Assistant's own "Check for updates" while this option is on. On, it is also fetched **at most once every 24 hours**, one index for every receiver. It is fetched with a verified TLS context and no redirects, at most 64 KiB, and it is accepted only when its Ed25519 signature verifies with a key built into this integration and its serial rises by the rule in [ADR-0008](docs/adr/0008-signed-plugin-index.md) - the same rule the receiver applies. Manual checks share a ten-minute limit. The index, its signature, the stamps and the record of accepted serials are kept in `.storage/enigma2_mqtt.release_index`, so a reload or a restart asks nothing again; the old `.storage/enigma2_mqtt.release_check` is removed. **Every newly accepted index is announced**: a warning in the log and a persistent notification with its serial, its key, the versions it adds and withdraws, and its floor - the index is signed in the plugin repository's CI, so an index nobody expected must be visible. It is then published, retained, on `enigma2mqtt/release_index`, for receivers with no internet of their own - and published again, verified first, at every setup and every reconnect to the broker. An index and a signature that do not match are read once more before they are judged, because a publication can land between the two requests; a pair that still does not verify is reported as "could not be verified", and the log keeps a warning. Nothing but the index is downloaded: installing still uses only the bundle shipped here. |
 
 When a recent plugin advertises its configurable publishers, the same form also controls key
 events, screenshot mode and interval, and the delay before an on-zap screenshot. Older plugins
@@ -626,7 +626,8 @@ it is the opposite: the answer is coming, and the dashboard should not sit still
 | `softcam_restart` | *Restart softcam* | `<node_id>_softcam_restart` | `cmd/softcam_restart` · **both gates below** | silence |
 | `epg_import` | *Pobierz EPG* | `<node_id>_epg_import` | `cmd/epg_import` · **both gates below** | a new `epg_import` payload in `running` |
 | `history_clear` | *Wyczyść ostatnio oglądane* | `<node_id>_history_clear` | `cmd/history_clear` · only while the receiver names the `history_clear` capability; unavailable while `zap_history` says `panic_button: false` | a **new** `zap_history` payload with at most one entry |
-| `plugin` | *Wtyczka MQTT Bridge* | `<node_id>_plugin` | an `update` entity: installed = `info.plugin`, latest = the plugin release this version was written against | - |
+| `check_plugin_update` | *Sprawdź aktualizacje wtyczki* · diagnostic | `<node_id>_check_plugin_update` | no MQTT: fetches the plugin's signed release index, at most once in ten minutes, and available while the box is not | the update card's `index_serial`, `last_check` and `check_error` |
+| `plugin` | *Wtyczka MQTT Bridge* | `<node_id>_plugin` | an `update` entity: installed = `info.plugin` with its build (`0.3.0+g1a2b3c4` for a development build), latest = what the card would install, and the installed version when it cannot install anything (below) | - |
 
 **Every button waits for the receiver**, on the same path as the actions below. A refusal
 raises `HomeAssistantError` carrying the box's own sentence, and „Ostatni błąd" records it.
@@ -768,8 +769,47 @@ to date, because offering it a downgrade would be worse than saying nothing; the
 that it is ahead, and the [diagnostics download](#7-diagnostics) carries the verdict in words
 for a bug report. A version neither side can parse is reported as `unknown` rather than guessed.
 
-Nothing on this card reaches the internet unless the **release check** option is on, and then
-only once a day, and then only to report a tag - see [Options](#options).
+**The card offers what it will install, and only when it can.** Without SSH credentials there is
+no install path, so `latest_version` is the installed version and there is **no update badge** -
+the summary says which version is bundled and how to get an install path. This is a change from
+0.3.1, which showed the bundled version as an update it could not install. With credentials,
+`latest_version` is the bundle whenever its release number is higher than what the receiver runs,
+it is not below the signed index's floor (this integration's own, 0.2.0, while no index is known),
+and the index has not withdrawn it; a bundle the rule refuses is named in the summary with the
+reason, and never installed.
+
+**Versions are shown with their build.** From the plugin release after 0.3.0 the receiver reports
+a build id on `info.build`, and the card shows a development build as `0.3.0+g1a2b3c4` (with
+`.dirty` when its tree was not clean) and a release build as `0.3.0`. **The card compares release
+numbers only.** A higher number is an update. The same number is never one, in either direction:
+a development build of 0.3.0 may be newer or older code than the 0.3.0 release, so the card does
+not offer the release over it - and does not call it current either: the summary says „Wersja
+rozwojowa; dostępne wydanie 0.3.0." (*Development build; release 0.3.0 available.*), and the
+attributes `development_build` and `same_version_release` say the same. A development build
+bundled in a candidate integration is not offered over an installed release of its number
+either. Either is installed only when chosen by name: in *Wersja wtyczki do instalacji* (below),
+which then offers it on the card, or with `update.install` and that version. The builds' commit,
+time, flavour and dirtiness are in `installed_build` and `bundled_build`, as information. A
+plugin up to 0.3.x reports no build id and is shown as the version it reports.
+
+**The signed release index is information here, not an offer.** Its versions appear in the
+summary and in the attributes - `available_versions` (newest first, each with whether this
+integration may offer it and why not; not recorded), `published_version`, `index_serial`,
+`index_age` (whole days since it was built), `last_check`, `check_error` and `update_path` - and
+never as `latest_version` until this integration can install a package it downloads. Nothing on
+this card reaches the internet unless somebody asks for a check or the daily check is on - see
+[Options](#options).
+
+**Check for plugin updates** (*Sprawdź aktualizacje wtyczki*, `button.<device>_sprawdz_aktualizacje_wtyczki`
+on a Polish installation) asks for the index now, at most once in ten minutes; inside that it
+says when the list was read and when it can be read again. **Plugin version to install**
+(*Wersja wtyczki do instalacji*, a select, **disabled by default**) holds a receiver on one version:
+its first option, *Najnowsza zgodna* (`latest`), is the newest version the card can install, and it
+is what counts while the select is disabled. Its other options are the versions the card can
+install that differ from the one running: a higher release number, or a build of the same number -
+today only the bundle. Choosing a same-number build is the one way the card offers it. A choice is stored in the entry's options
+and survives a restart; changing it moves `latest_version`, which makes Home Assistant forget a
+skipped version.
 
 ### 4.6 Selects
 
@@ -779,6 +819,7 @@ only once a day, and then only to report a tag - see [Options](#options).
 | `channel` | *Kanał* | `<node_id>_channel` | `channels`, `bouquet`, `service` | `cmd/zap` |
 | `zap_history` | *Ostatnio oglądane* | `<node_id>_zap_history` | `zap_history`, `service`, `channels` | `cmd/zap_history` |
 | `zap_history_all` | *Ostatnio oglądane (wszystkie)* · **disabled by default** | `<node_id>_zap_history_all` | `zap_history`, `service`, `channels` | `cmd/zap_history` |
+| `plugin_install_version` | *Wersja wtyczki do instalacji* · diagnostic · **disabled by default** | `<node_id>_plugin_install_version` | `info` | none - stored in the entry's options (see the update entity) |
 
 „Bukiet" and „Kanał" exist **only while the receiver names the `channels` and `bouquet_context` capabilities**.
 A plugin that cannot switch a channel-list context has nothing for either of them to do, and a

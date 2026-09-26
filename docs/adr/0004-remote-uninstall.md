@@ -2,7 +2,7 @@
 
 **Status:** accepted 2026-09-22; §3 and the first consequence superseded by
 [ADR-0006](0006-remote-uninstall-plugin-acts-ssh-verifies.md), which also records the implementation;
-§4's "does nothing else" superseded in part by [ADR-0008](0008-signed-plugin-index.md) (proposed)
+§4's "does nothing else" superseded in part by [ADR-0008](0008-signed-plugin-index.md) (accepted)
 **Date:** 2026-09-22
 
 ## Context
@@ -87,7 +87,7 @@ Unchanged, and now written down as a decision rather than left as an implementat
 removing the entry hands the box back to MQTT discovery and does nothing else. Uninstalling the
 plugin is the action above, and only the action above.
 
-> **Superseded in part by [ADR-0008](0008-signed-plugin-index.md) (proposed, 2026-09-26):** removing
+> **Superseded in part by [ADR-0008](0008-signed-plugin-index.md) (accepted 2026-09-26):** removing
 > the entry is also to retract the retained topic `enigma2mqtt/integration/<node_id>`, on which the
 > integration tells the receiver which plugin versions it can work with - a second publish, so
 > "does nothing else" no longer holds. Nothing is removed from the receiver, as this section says.

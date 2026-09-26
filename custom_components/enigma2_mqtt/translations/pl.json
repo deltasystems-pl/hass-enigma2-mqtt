@@ -4,7 +4,13 @@
     "update_summary_older": "Dekoder ma starszą wtyczkę niż ta, którą niesie integracja. Instalacja zastąpi ją dołączoną wersją {version} i nie ruszy ustawień brokera na dekoderze.",
     "update_summary_older_no_install": "Dekoder ma wtyczkę starszą niż dołączona {version}. Nie zapisano danych SSH, więc ta karta nie może jej zainstalować: skonfiguruj dekoder ponownie z opcją „Zachowaj dane SSH do aktualizacji”, albo wgraj plik IPK na dekoder ręcznie.",
     "update_summary_newer": "Dekoder ma wtyczkę nowszą niż dołączona {version}. Nic jej tutaj nie zastąpi — ta karta nigdy nie proponuje cofnięcia wersji.",
-    "update_summary_published": "Repozytorium wtyczki opublikowało {version}. To sprawdzenie tylko o tym informuje; instalacja zawsze korzysta z pakietu dołączonego do tej integracji."
+    "update_summary_published": "Podpisana lista wersji wtyczki zawiera {version}. Ta karta nie może jej jeszcze zainstalować: instaluje wyłącznie pakiet dołączony do tej integracji.",
+    "update_summary_development": "Wersja rozwojowa; dostępne wydanie {version}.",
+    "update_summary_withdrawn": "Dołączona wersja {version} została wycofana: {reason}. Ta karta jej nie zainstaluje.",
+    "update_summary_below_floor": "Dołączona wersja {version} jest starsza niż {floor}, najniższa wersja dopuszczona przez podpisaną listę wersji wtyczki. Ta karta jej nie zainstaluje.",
+    "release_index_notification_title": "Nowa lista wersji wtyczki Enigma2 MQTT Bridge",
+    "release_index_notification_message": "Home Assistant przyjął nową podpisaną listę wersji wtyczki: numer {serial}, klucz {key_id}. Dodane: {added}. Wycofane: {withdrawn}. Najniższa wersja, którą wolno zainstalować: {floor}. Jeśli nie spodziewano się nowego wydania ani wycofania wtyczki, niczego nie instaluj i przeczytaj plik SECURITY.md integracji.",
+    "release_index_none": "brak"
   },
   "config": {
     "flow_title": "{name}",
@@ -153,7 +159,7 @@
           "oscam_telemetry": "Publikuj telemetrię stanu OSCam",
           "softcam_autoheal": "Restartuj softcam samoczynnie, gdy przestaje odkodowywać",
           "softcam_autoheal_seconds": "Czas do samoczynnego restartu (sekundy)",
-          "check_github_releases": "Sprawdzaj opublikowane wydania wtyczki",
+          "check_github_releases": "Sprawdzaj raz dziennie dostępne wersje wtyczki",
           "configure_ssh": "Skonfiguruj dane SSH do aktualizacji wtyczki",
           "keep_ssh_credentials": "Zachowaj dane SSH do aktualizacji",
           "source_list_scope": "Kanały na liście źródeł odtwarzacza",
@@ -171,7 +177,7 @@
           "oscam_telemetry": "Udostępnia stan procesu, API, czytników i serwerów OSCam bez danych prywatnych. Nazwy czytników, adresy, konta i identyfikatory kart nie są publikowane.",
           "softcam_autoheal": "Domyślnie wyłączone. Włączone — dekoder sam restartuje softcam, gdy kanał jest zaszyfrowany i nie odkodowuje przez czas podany niżej: najwyżej raz na dziesięć minut i nigdy w trakcie nagrania ani tuż przed nim. Przycisk „Restart softcam” robi to samo ręcznie; o tym, czy dekoder w ogóle na to pozwoli, decyduje jego własne uprawnienie, ustawiane na dekoderze w Menu → Wtyczki → MQTT Bridge, bo ustawienie włączające polecenie celowo pozostaje poza zasięgiem czegokolwiek, co może publikować na brokerze.",
           "softcam_autoheal_seconds": "Jak długo kanał może nie odkodowywać, zanim dekoder zrestartuje softcam. Sprawny zaszyfrowany kanał odnawia się mniej więcej co dziesięć sekund, więc krótkie okno zgłasza awarię na działającym dekoderze; dziewięćdziesiąt sekund wtyczki to około dziewięciu nieodebranych odnowień. Okno zaczyna się od nowa przy każdej zmianie kanału. Od 30 do 600 sekund.",
-          "check_github_releases": "Domyślnie wyłączone, a wyłączone znaczy, że ta integracja nie łączy się z niczym poza Twoim brokerem. Włączone — pyta repozytorium wtyczki o opublikowane wydanie nie częściej niż raz na 24 godziny i pokazuje je na encji wersji. Odpowiedź i godzina zapytania są zapisywane, więc przeładowanie dekodera albo restart Home Assistanta pokazuje to, co już wiadomo, zamiast pytać ponownie. Nic nie pobiera: instalacja nadal korzysta wyłącznie z pakietu dołączonego tutaj.",
+          "check_github_releases": "Domyślnie wyłączone, a wyłączone znaczy, że ta integracja sama o nic nie pyta: podpisaną listę wersji wtyczki pobiera tylko naciśnięcie „Sprawdź aktualizacje wtyczki” albo, gdy to jest włączone, „Sprawdź aktualizacje” w Home Assistancie. Włączone pobiera tę listę także nie częściej niż raz na 24 godziny, jedną dla wszystkich dekoderów. Lista jest przyjmowana tylko wtedy, gdy jej podpis zgadza się z kluczem wbudowanym w integrację, i jest zapisywana, więc przeładowanie dekodera albo restart Home Assistanta pokazuje to, co już wiadomo, zamiast pytać ponownie. Poza listą nic nie jest pobierane: instalacja nadal korzysta wyłącznie z pakietu dołączonego tutaj.",
           "source_list_scope": "Wszystkie oferowane bukiety to jedna lista ze wszystkich — tak ta integracja działała dotąd — a przy tysiącu kanałów jest to lista rozwijana o tysiącu pozycji. Aktywny bukiet to krótka lista, na której stoi sam dekoder, ta sama, po której chodzą kanał w górę i w dół, i ta sama, którą pokazuje wybór „Kanał”. Dekoder, który nie opublikował aktywnego bukietu, zostaje przy długiej liście, bo nie ma czym jej skrócić. Tak czy inaczej bukiet zmienia się wyborem „Bukiet”, a akcja zap przyjmuje referencję usługi i nie podlega temu ustawieniu.",
           "history_hidden_bouquets": "Kanały tych bukietów nie pojawiają się w „Ostatnio oglądane” — niezależnie od tego, czy przełączono na nie z tego bukietu, czy z innego. Gdy cokolwiek jest tu wybrane, pomijany jest też kanał, którego bukietu nie da się sprawdzić — bukiet radiowy albo taki, którego dekoder nie publikuje. Puste — widać wszystko. Ukrywa je tylko w tej jednej encji: „Ostatnio oglądane (wszystkie)”, „Kanał”, „Bukiet” i odtwarzacz nadal je oferują, ekran historii na samym dekoderze je pokazuje, a dekoder publikuje każdy wpis i każdy kanał na brokerze, gdzie odczyta je każdy login brokera. Stan „Ostatnio oglądane (wszystkie)”, gdy ta encja jest włączona, to kanał odtwarzany teraz — także z ukrytych bukietów — i trafia on do rejestratora jak każdy stan; jeśli nie powinien, wyklucz tę encję w konfiguracji rejestratora."
         }
@@ -223,6 +229,7 @@
       "oscam_api_access": {"name": "Dostęp do API OSCam"}
     },
     "button": {
+      "check_plugin_update": {"name": "Sprawdź aktualizacje wtyczki"},
       "deep_standby": {
         "name": "Głębokie uśpienie",
         "state_attributes": {
@@ -398,6 +405,10 @@
       }
     },
     "select": {
+      "plugin_install_version": {
+        "name": "Wersja wtyczki do instalacji",
+        "state": {"latest": "Najnowsza zgodna"}
+      },
       "bouquet": {
         "name": "Bukiet"
       },
@@ -647,6 +658,13 @@
     "update_version_unknown": {"message": "Dekoder nie zgłosił zainstalowanej wersji wtyczki."},
     "update_downgrade": {"message": "Odmowa zastąpienia nowszej wtyczki starszą wersją z pakietu."},
     "update_version_unavailable": {"message": "Żądana wersja nie jest dostępna w zweryfikowanym pakiecie integracji."},
+    "update_version_withdrawn": {"message": "Wersja wtyczki {version} została wycofana: {reason}"},
+    "update_version_below_floor": {"message": "Wersja wtyczki {version} jest starsza niż {floor}, najniższa wersja dopuszczona przez podpisaną listę wersji wtyczki."},
+    "release_check_unverified": {"message": "Nie udało się zweryfikować listy wersji wtyczki; mogła się właśnie zmieniać. Spróbuj ponownie za kilka minut. Nic nie zmieniono."},
+    "release_check_rate_limited": {"message": "Wersje sprawdzono o {time}. Kolejne sprawdzenie będzie możliwe za {minutes} min."},
+    "release_check_refused": {"message": "Lista wersji wtyczki ma nieprawidłowy podpis albo jest starsza od już znanej. Nic nie zmieniono."},
+    "release_check_failed": {"message": "Nie udało się pobrać listy wersji wtyczki ({reason}). Nic nie zmieniono."},
+    "release_check_bad_memory": {"message": "Zapisanych danych o przyjętych listach wersji wtyczki nie da się odczytać, więc żadna nowa lista nie zostanie przyjęta. Aby zacząć od nowa, usuń plik .storage/enigma2_mqtt.release_index w katalogu konfiguracji Home Assistanta."},
     "update_no_credentials": {"message": "Dla tego dekodera nie zapisano danych SSH. Skonfiguruj go ponownie i zaznacz „Zachowaj dane SSH do aktualizacji”, a potem spróbuj jeszcze raz."},
     "update_failed": {"message": "Aktualizacja wtyczki nie powiodła się: {reason}"},
     "update_withdrawn": {"message": "Dekoder zapytał na ekranie, czy uruchomić ponownie interfejs, więc aktualizację wycofano; działa poprzednia wersja wtyczki. Pytanie może nadal być widoczne na ekranie telewizora - odpowiedź „tak” albo „nie” jest bezpieczna."},

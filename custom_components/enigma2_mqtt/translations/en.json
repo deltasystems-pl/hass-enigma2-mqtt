@@ -4,7 +4,13 @@
     "update_summary_older": "The receiver runs an older plugin than this integration carries. Installing replaces it with the bundled {version} and leaves the receiver's own broker settings alone.",
     "update_summary_older_no_install": "The receiver runs an older plugin than the bundled {version}. No SSH credentials are stored, so this card cannot install it: reconfigure the receiver with “Keep SSH credentials for updates”, or install the IPK on the box by hand.",
     "update_summary_newer": "The receiver runs a plugin newer than the bundled {version}. Nothing here replaces it — this card never offers a downgrade.",
-    "update_summary_published": "The plugin repository has published {version}. This check only reports it; installing always uses the bundle shipped with this integration."
+    "update_summary_published": "The plugin's signed release index lists {version}. This card cannot install it yet: it installs only the bundle shipped with this integration.",
+    "update_summary_development": "Development build; release {version} available.",
+    "update_summary_withdrawn": "The bundled {version} has been withdrawn: {reason}. This card will not install it.",
+    "update_summary_below_floor": "The bundled {version} is below {floor}, the lowest version the plugin's signed index allows. This card will not install it.",
+    "release_index_notification_title": "New list of Enigma2 MQTT Bridge plugin versions",
+    "release_index_notification_message": "Home Assistant accepted a new signed list of plugin versions: serial {serial}, signed with key {key_id}. Added: {added}. Withdrawn: {withdrawn}. Lowest version that may be installed: {floor}. If no plugin release or withdrawal was expected, install nothing and read the integration's SECURITY.md.",
+    "release_index_none": "none"
   },
   "config": {
     "flow_title": "{name}",
@@ -179,7 +185,7 @@
           "oscam_telemetry": "Publish OSCam health telemetry",
           "softcam_autoheal": "Restart the softcam on its own when decoding stops",
           "softcam_autoheal_seconds": "Wait before an automatic restart (seconds)",
-          "check_github_releases": "Check for published plugin releases"
+          "check_github_releases": "Check daily for available plugin versions"
           ,"configure_ssh": "Configure SSH credentials for plugin updates"
           ,"keep_ssh_credentials": "Keep SSH credentials for updates"
           ,"source_list_scope": "Channels in the media player's source list",
@@ -197,7 +203,7 @@
           "oscam_telemetry": "Expose privacy-neutral OSCam process, API, reader and server health. Reader labels, addresses, accounts and card identifiers are never published.",
           "softcam_autoheal": "Off by default. On, the receiver restarts its own softcam when the channel is encrypted and has not been decoding for the time below — at most once every ten minutes, and never while a recording is running or due. The “Restart softcam” button is the manual version of the same thing; whether the receiver will do either is its own permission, set on the box under Menu → Plugins → MQTT Bridge, because a setting that enables a command is deliberately outside what anything with publish rights can reach.",
           "softcam_autoheal_seconds": "How long a channel may go without decoding before the receiver restarts the softcam. A healthy encrypted channel renews about every ten seconds, so a short window reports a fault on a working receiver; the plugin's ninety seconds is about nine missed renewals. The window starts again at every channel change. 30 to 600 seconds.",
-          "check_github_releases": "Off by default, and off means this integration talks to nothing but your broker. On, it asks the plugin's repository which release is published, at most once every 24 hours, and says so on the version entity. The answer and the time it was asked are saved, so reloading the receiver or restarting Home Assistant shows what is already known rather than asking again. It never downloads anything: installing still uses only the bundle shipped here.",
+          "check_github_releases": "Off by default, and off means this integration asks nothing on its own: the plugin's signed list of versions is fetched only when somebody presses “Check for plugin updates”, or uses Home Assistant's own “Check for updates” while this is on. On, the list is also fetched at most once every 24 hours, one list for every receiver. It is accepted only when its signature verifies with a key built into this integration, and it is saved, so reloading the receiver or restarting Home Assistant shows what is already known rather than asking again. Nothing but the list is downloaded: installing still uses only the bundle shipped here.",
           "source_list_scope": "Every bouquet on offer is one list of all of them, which is what this integration has always done — on a receiver with a thousand channels that is a dropdown of a thousand rows. The active bouquet is the short list the receiver itself is on, the one its channel up and down walk, and the same one the “Channel” select shows; a receiver that has published no active bouquet keeps the long list, because there is nothing to shorten it to. Either way the “Bouquet” select changes bouquets, and the zap action takes a service reference and ignores this setting.",
           "history_hidden_bouquets": "Channels of these bouquets are left out of “Recently watched”, whether they were reached through the bouquet or through another one. While anything is chosen here, a channel whose bouquet cannot be checked — a radio bouquet, or one the receiver does not publish — is left out as well. Empty shows everything. This hides them from that one entity only: “Recently watched (all)”, “Channel”, “Bouquet” and the media player still offer them, the receiver's own History Zap screen shows them, and the receiver publishes every entry and every channel on the broker, where any broker login can read them. The state of “Recently watched (all)”, once that entity is enabled, is the channel playing now, hidden bouquets included, and it goes into the recorder like any state; exclude that entity in the recorder's configuration if it must not."
         }
@@ -249,6 +255,7 @@
       "oscam_api_access": {"name": "OSCam API access"}
     },
     "button": {
+      "check_plugin_update": {"name": "Check for plugin updates"},
       "deep_standby": {
         "name": "Deep standby",
         "state_attributes": {
@@ -424,6 +431,10 @@
       }
     },
     "select": {
+      "plugin_install_version": {
+        "name": "Plugin version to install",
+        "state": {"latest": "Latest compatible"}
+      },
       "bouquet": {
         "name": "Bouquet"
       },
@@ -673,6 +684,13 @@
     "update_version_unknown": {"message": "The receiver has not reported its installed plugin version."},
     "update_downgrade": {"message": "Refusing to replace a newer plugin with an older bundled version."},
     "update_version_unavailable": {"message": "The requested version is not available from this integration’s verified bundle."},
+    "update_version_withdrawn": {"message": "Plugin version {version} has been withdrawn: {reason}"},
+    "update_version_below_floor": {"message": "Plugin version {version} is below {floor}, the lowest version the plugin's signed index allows."},
+    "release_check_unverified": {"message": "The list of plugin versions could not be verified; it may have been changing while it was read. Try again in a few minutes. Nothing was changed."},
+    "release_check_rate_limited": {"message": "Versions were checked at {time}. The next check is possible in {minutes} min."},
+    "release_check_refused": {"message": "The list of plugin versions has an invalid signature or is older than the one already known. Nothing was changed."},
+    "release_check_failed": {"message": "The list of plugin versions could not be fetched ({reason}). Nothing was changed."},
+    "release_check_bad_memory": {"message": "The stored record of accepted plugin version lists cannot be read, so no new list is accepted. To start again, delete .storage/enigma2_mqtt.release_index in Home Assistant's configuration directory."},
     "update_no_credentials": {"message": "No SSH credentials are stored for this receiver. Reconfigure it and tick “Keep SSH credentials for updates”, then try again."},
     "update_failed": {"message": "Plugin update failed: {reason}"},
     "update_withdrawn": {"message": "The receiver asked on screen whether to restart its interface, so the update was withdrawn; the previous version of the plugin is running. The question may still be visible on the television - answering \"yes\" or \"no\" is safe."},

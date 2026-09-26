@@ -52,6 +52,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
+import math
 from typing import Any
 
 from homeassistant.components.button import (
@@ -59,9 +60,12 @@ from homeassistant.components.button import (
     ButtonEntity,
     ButtonEntityDescription,
 )
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+import homeassistant.util.dt as dt_util
 
 from .box import (
     Enigma2Box,
@@ -83,8 +87,18 @@ from .const import (
     WAKE_ON_LAN_NOT_SUPPORTED,
 )
 from .entity import Enigma2Entity, OptionalEntities
+from .release_store import (
+    ERROR_BAD_MEMORY,
+    ERROR_BAD_SIGNATURE,
+    RESULT_FAILED,
+    SIGNATURE_OR_ORDER,
+    CheckRateLimited,
+    async_release_index_cache,
+)
 
 PARALLEL_UPDATES = 0
+
+KEY_CHECK_PLUGIN_UPDATE = "check_plugin_update"
 
 # The payload the plugin's press-style commands take. Any payload works; this is the
 # one the contract names, and a log on the box reading `PRESS` is easier to follow
@@ -321,6 +335,7 @@ async def async_setup_entry(
     """Set up the buttons of one box, minus the ones the gates hide."""
     box = entry.runtime_data
     async_add_entities(Enigma2Button(box, description) for description in BUTTONS)
+    async_add_entities([Enigma2CheckPluginUpdateButton(box)])
 
     def wanted() -> bool:
         """Return whether the Home Assistant option asks for the two of them."""
@@ -480,6 +495,63 @@ async def async_setup_entry(
                 has_spoken,
                 async_add_entities,
             ).start()
+        )
+
+
+class Enigma2CheckPluginUpdateButton(Enigma2Entity, ButtonEntity):
+    """„Sprawdź aktualizacje wtyczki": ask the plugin's signed release index now.
+
+    The one button that talks to something other than the broker, and pressing it is the
+    consent to do so: the daily check stays behind its option, off by default, but a person
+    who presses this has asked. It needs nothing from the receiver - the index is the same
+    for every receiver and is fetched by Home Assistant - so it works while the box is
+    asleep, and one press refreshes every receiver's card.
+
+    Every press after the first within ten minutes is answered, not repeated: GitHub Pages
+    keeps the file for ten minutes anyway, so a second request could only return the same
+    bytes, and the answer says when the list was read and when it can be read again. A
+    check that fails raises, in words: the attribute on the update card keeps the code.
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, box: Enigma2Box) -> None:
+        """Set up the button; it reads no topic of the box."""
+        super().__init__(box, KEY_CHECK_PLUGIN_UPDATE, requires=None)
+
+    @property
+    def available(self) -> bool:
+        """Available whatever the receiver is doing: the index is not the receiver's."""
+        return True
+
+    async def async_press(self) -> None:
+        """Check now, or say why not."""
+        cache = async_release_index_cache(self.hass)
+        try:
+            result = await cache.async_check(manual=True)
+        except CheckRateLimited as limited:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="release_check_rate_limited",
+                translation_placeholders={
+                    "time": dt_util.as_local(limited.checked).strftime("%H:%M"),
+                    "minutes": str(max(1, math.ceil(limited.remaining_seconds / 60))),
+                },
+            ) from limited
+        if result.outcome != RESULT_FAILED:
+            return
+        if result.error == ERROR_BAD_SIGNATURE:
+            key = "release_check_unverified"
+        elif result.error in SIGNATURE_OR_ORDER:
+            key = "release_check_refused"
+        elif result.error == ERROR_BAD_MEMORY:
+            key = "release_check_bad_memory"
+        else:
+            key = "release_check_failed"
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key=key,
+            translation_placeholders={"reason": str(result.error)},
         )
 
 

@@ -4,7 +4,13 @@
     "update_summary_older": "Der Receiver hat ein älteres Plugin als das, welches diese Integration mitbringt. Die Installation ersetzt es durch das mitgelieferte {version} und lässt die Broker-Einstellungen des Receivers unberührt.",
     "update_summary_older_no_install": "Der Receiver hat ein älteres Plugin als das mitgelieferte {version}. Es sind keine SSH-Zugangsdaten gespeichert, daher kann diese Karte es nicht installieren: Konfiguriere den Receiver mit „SSH-Zugangsdaten für Updates behalten“ neu, oder spiele das IPK von Hand auf.",
     "update_summary_newer": "Der Receiver hat ein neueres Plugin als das mitgelieferte {version}. Hier ersetzt es nichts — diese Karte bietet nie eine ältere Version an.",
-    "update_summary_published": "Das Repository des Plugins hat {version} veröffentlicht. Diese Prüfung meldet das nur; installiert wird immer aus dem mit dieser Integration gelieferten Paket."
+    "update_summary_published": "Die signierte Versionsliste des Plugins enthält {version}. Diese Karte kann sie noch nicht installieren: Sie installiert nur das mit dieser Integration gelieferte Paket.",
+    "update_summary_development": "Entwicklungsversion; Version {version} verfügbar.",
+    "update_summary_withdrawn": "Die mitgelieferte Version {version} wurde zurückgezogen: {reason}. Diese Karte installiert sie nicht.",
+    "update_summary_below_floor": "Die mitgelieferte Version {version} liegt unter {floor}, der niedrigsten Version, die die signierte Versionsliste des Plugins zulässt. Diese Karte installiert sie nicht.",
+    "release_index_notification_title": "Neue Versionsliste des Plugins Enigma2 MQTT Bridge",
+    "release_index_notification_message": "Home Assistant hat eine neue signierte Versionsliste des Plugins angenommen: Nummer {serial}, Schlüssel {key_id}. Hinzugefügt: {added}. Zurückgezogen: {withdrawn}. Niedrigste Version, die installiert werden darf: {floor}. Wurde weder eine neue Plugin-Version noch ein Rückzug erwartet, nichts installieren und die SECURITY.md der Integration lesen.",
+    "release_index_none": "keine"
   },
   "config": {
     "flow_title": "{name}",
@@ -153,7 +159,7 @@
           "oscam_telemetry": "OSCam-Zustandstelemetrie veröffentlichen",
           "softcam_autoheal": "Softcam selbsttätig neu starten, wenn die Entschlüsselung aussetzt",
           "softcam_autoheal_seconds": "Wartezeit bis zum selbsttätigen Neustart (Sekunden)",
-          "check_github_releases": "Auf veröffentlichte Plugin-Versionen prüfen",
+          "check_github_releases": "Täglich auf verfügbare Plugin-Versionen prüfen",
           "configure_ssh": "SSH-Zugangsdaten für Plugin-Updates einrichten",
           "keep_ssh_credentials": "SSH-Zugangsdaten für Updates behalten",
           "source_list_scope": "Sender in der Quellenliste des Media Players",
@@ -171,7 +177,7 @@
           "oscam_telemetry": "Zeigt den neutralisierten Zustand von OSCam-Prozess, API, Lesern und Servern. Leserbezeichnungen, Adressen, Konten und Kartenkennungen werden nie veröffentlicht.",
           "softcam_autoheal": "Standardmäßig aus. Eingeschaltet startet der Receiver sein Softcam selbst neu, wenn der Sender verschlüsselt ist und für die unten angegebene Zeit nicht entschlüsselt hat — höchstens einmal alle zehn Minuten und nie während einer laufenden oder unmittelbar bevorstehenden Aufnahme. Die Schaltfläche „Softcam neu starten“ ist dasselbe von Hand; ob der Receiver beides überhaupt ausführt, entscheidet seine eigene Berechtigung, die am Gerät unter Menü → Plugins → MQTT Bridge gesetzt wird, denn eine Einstellung, die einen Befehl freischaltet, bleibt bewusst außerhalb dessen, was etwas mit Schreibrechten am Broker erreichen kann.",
           "softcam_autoheal_seconds": "Wie lange ein Sender nicht entschlüsseln darf, bevor der Receiver das Softcam neu startet. Ein gesunder verschlüsselter Sender erneuert etwa alle zehn Sekunden, ein kurzes Fenster meldet also einen Fehler auf einem funktionierenden Receiver; die neunzig Sekunden des Plugins sind etwa neun ausgebliebene Erneuerungen. Das Fenster beginnt bei jedem Senderwechsel von vorn. 30 bis 600 Sekunden.",
-          "check_github_releases": "Standardmäßig aus, und aus bedeutet, dass diese Integration mit nichts außer deinem Broker spricht. Eingeschaltet fragt sie höchstens alle 24 Stunden beim Repository des Plugins nach der veröffentlichten Version und zeigt sie an der Versions-Entität an. Die Antwort und der Zeitpunkt der Abfrage werden gespeichert, sodass ein Neuladen des Receivers oder ein Neustart von Home Assistant das bereits Bekannte zeigt, statt erneut zu fragen. Sie lädt nichts herunter: Installiert wird weiterhin nur aus dem hier mitgelieferten Paket.",
+          "check_github_releases": "Standardmäßig aus, und aus bedeutet, dass diese Integration von sich aus nichts abfragt: Die signierte Versionsliste des Plugins wird nur geholt, wenn jemand „Nach Plugin-Updates suchen“ drückt oder, solange dies eingeschaltet ist, „Nach Updates suchen“ in Home Assistant verwendet. Eingeschaltet wird die Liste außerdem höchstens alle 24 Stunden geholt, eine für alle Receiver. Sie wird nur angenommen, wenn ihre Signatur mit einem in die Integration eingebauten Schlüssel übereinstimmt, und sie wird gespeichert, sodass ein Neuladen des Receivers oder ein Neustart von Home Assistant das bereits Bekannte zeigt, statt erneut zu fragen. Außer der Liste wird nichts heruntergeladen: Installiert wird weiterhin nur aus dem hier mitgelieferten Paket.",
           "source_list_scope": "Alle angebotenen Bouquets ergeben eine Liste aus allen — so hat diese Integration es bisher gehalten — und bei tausend Sendern ist das ein Auswahlfeld mit tausend Zeilen. Das aktive Bouquet ist die kurze Liste, auf der der Receiver selbst steht, dieselbe, die seine Sendertasten auf und ab durchlaufen, und dieselbe, die die Auswahl „Kanal“ zeigt. Ein Receiver, der kein aktives Bouquet veröffentlicht hat, behält die lange Liste, weil es nichts gibt, worauf sie zu kürzen wäre. In beiden Fällen wechselt die Auswahl „Bouquet“ das Bouquet, und die Aktion zap nimmt eine Dienstreferenz und ignoriert diese Einstellung.",
           "history_hidden_bouquets": "Sender dieser Bouquets erscheinen nicht in „Zuletzt gesehen“ — gleich, ob über dieses Bouquet oder über ein anderes umgeschaltet wurde. Solange hier etwas gewählt ist, wird auch ein Sender ausgelassen, dessen Bouquet sich nicht prüfen lässt — ein Radio-Bouquet oder eines, das der Receiver nicht veröffentlicht. Leer zeigt alles. Das blendet sie nur in dieser einen Entität aus: „Zuletzt gesehen (alle)“, „Kanal“, „Bouquet“ und der Media Player bieten sie weiter an, der Verlaufsbildschirm des Receivers zeigt sie, und der Receiver veröffentlicht jeden Eintrag und jeden Sender auf dem Broker, wo jedes Broker-Login sie lesen kann. Der Zustand von „Zuletzt gesehen (alle)“ ist, sobald diese Entität aktiviert ist, der gerade laufende Sender — auch aus ausgeblendeten Bouquets — und landet wie jeder Zustand im Recorder; soll er das nicht, schließe diese Entität in der Recorder-Konfiguration aus."
         }
@@ -223,6 +229,7 @@
       "oscam_api_access": {"name": "OSCam-API-Zugriff"}
     },
     "button": {
+      "check_plugin_update": {"name": "Nach Plugin-Updates suchen"},
       "deep_standby": {
         "name": "Tiefschlaf",
         "state_attributes": {
@@ -398,6 +405,10 @@
       }
     },
     "select": {
+      "plugin_install_version": {
+        "name": "Zu installierende Plugin-Version",
+        "state": {"latest": "Neueste kompatible"}
+      },
       "bouquet": {
         "name": "Bouquet"
       },
@@ -647,6 +658,13 @@
     "update_version_unknown": {"message": "Der Receiver hat seine installierte Plugin-Version nicht gemeldet."},
     "update_downgrade": {"message": "Ein neueres Plugin wird nicht durch eine ältere gebündelte Version ersetzt."},
     "update_version_unavailable": {"message": "Die angeforderte Version ist nicht im geprüften Integrationspaket verfügbar."},
+    "update_version_withdrawn": {"message": "Die Plugin-Version {version} wurde zurückgezogen: {reason}"},
+    "update_version_below_floor": {"message": "Die Plugin-Version {version} liegt unter {floor}, der niedrigsten Version, die die signierte Versionsliste des Plugins zulässt."},
+    "release_check_unverified": {"message": "Die Versionsliste des Plugins konnte nicht geprüft werden; sie wurde möglicherweise gerade geändert. In ein paar Minuten erneut versuchen. Es wurde nichts geändert."},
+    "release_check_rate_limited": {"message": "Die Versionen wurden um {time} geprüft. Die nächste Prüfung ist in {minutes} Min. möglich."},
+    "release_check_refused": {"message": "Die Versionsliste des Plugins hat eine ungültige Signatur oder ist älter als die bereits bekannte. Es wurde nichts geändert."},
+    "release_check_failed": {"message": "Die Versionsliste des Plugins konnte nicht abgerufen werden ({reason}). Es wurde nichts geändert."},
+    "release_check_bad_memory": {"message": "Die gespeicherten Angaben zu angenommenen Versionslisten des Plugins sind nicht lesbar, daher wird keine neue Liste angenommen. Um neu zu beginnen, die Datei .storage/enigma2_mqtt.release_index im Konfigurationsverzeichnis von Home Assistant löschen."},
     "update_no_credentials": {"message": "Für diesen Receiver sind keine SSH-Zugangsdaten gespeichert. Richte ihn neu ein, setze den Haken bei „SSH-Zugangsdaten für Updates behalten“ und versuche es erneut."},
     "update_failed": {"message": "Plugin-Aktualisierung fehlgeschlagen: {reason}"},
     "update_withdrawn": {"message": "Der Receiver hat auf dem Bildschirm gefragt, ob die Oberfläche neu gestartet werden soll, deshalb wurde die Aktualisierung zurückgenommen; die bisherige Version des Plugins läuft. Die Frage kann noch auf dem Fernseher zu sehen sein - „Ja“ und „Nein“ sind beide unbedenklich."},

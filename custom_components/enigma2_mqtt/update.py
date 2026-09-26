@@ -1,38 +1,44 @@
-"""The bundled receiver plugin version and its guarded update action.
+"""The receiver plugin's version, what this card will install, and the guarded install.
 
-Three versions meet in this entity and only two of them may move its state. The
-**installed** version is what the box reports on `info`. The **bundled** version is the
-IPK that ships inside this integration, and it is the only thing `install` can ever put
-on a receiver - so it, and nothing else, is what `latest_version` offers. The
-**published** version is what the plugin repository last released; it is asked for only
-when somebody turns the option on, at most once a day, and it is allowed to appear in
-the summary, in an attribute and in the release link and nowhere else. Letting it raise
-`latest_version` would put an update button on a card that cannot install what it
-promises.
+Several versions meet in this entity and only two of them may move its state. The
+**installed** version is what the box reports on `info`, shown with its build id: a
+development build of 0.3.0 reads `0.3.0+g1a2b3c4`, never plain `0.3.0`. The **latest**
+version is what pressing install would put on the receiver - and only while an install path
+exists; without one it is the installed version, so there is no update badge on a card that
+could not act on it (ADR-0008 section 3, a behaviour change from 0.3.1, which showed the bundle as
+an update even with no way to install it). The **bundled** version is the package this
+integration ships, today the only one the installer can put on a receiver. The versions the
+plugin's **signed release index** lists are information: they appear in the summary and the
+attributes, never as `latest_version` until this integration can install them.
+
+The picture is worked out in `plugin_versions.py`, shared with the select that lets a
+household pin a version. Which build is newer than which is `buildid.is_newer`, and it is the
+release number and nothing else (ADR-0008 section 3, decided 2026-09-26): a higher number
+badges; the same number never does, in either direction. A development build is not shown as
+current - its display and the summary say what it is, and that the release of its number is
+available - but the release is not offered over it, because it may be older code. A
+same-number build is installed only when chosen by name: in the version select, which then
+turns the state on, or with `update.install` and that version.
 """
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
-import json
 import logging
 from typing import Any
 
-import aiohttp
 from homeassistant.components.update import UpdateEntity, UpdateEntityFeature
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.translation import async_get_translations
 import homeassistant.util.dt as dt_util
-from packaging.version import InvalidVersion, Version
 
 from .box import Enigma2Box, Enigma2MqttConfigEntry
-from .bundle import BundleError, load_bundled_plugin
+from .buildid import Build, base_version, is_newer
 from .const import (
     CONF_BASE_TOPIC,
     CONF_CHECK_GITHUB_RELEASES,
@@ -45,12 +51,10 @@ from .const import (
     DEFAULT_BASE_TOPIC,
     DEFAULT_CHECK_GITHUB_RELEASES,
     DOMAIN,
-    PLUGIN_LATEST_RELEASE_URL,
     PLUGIN_RELEASES_URL,
-    RELEASE_BODY_LIMIT,
     RELEASE_CHECK_INTERVAL,
-    RELEASE_CHECK_TIMEOUT,
-    RELEASE_TAG_MAX,
+    SIGNAL_RELEASE_INDEX,
+    SIGNAL_TARGET_VERSION,
     SUPPORTED_PLUGIN_VERSION,
     TOPIC_INFO,
 )
@@ -62,15 +66,16 @@ from .installer import (
     SshCredentials,
     async_install,
 )
-from .release_store import async_release_check_store
+from .plugin_versions import PluginVersions, async_plugin_versions
+from .release_store import CheckRateLimited
 
 _LOGGER = logging.getLogger(__name__)
 
 PARALLEL_UPDATES = 0
 
-# How the plugin on the box stands against the one this integration carries. The words
-# are the answer to "is this receiver a version problem", which is the first question
-# every missing entity and every unrecognised command leads back to.
+# How the plugin on the box stands against the one this integration carries, by `N.N.N`.
+# The words are the answer to "is this receiver a version problem", which is the first
+# question every missing entity and every unrecognised command leads back to.
 COMPATIBILITY_MATCHED = "matched"
 COMPATIBILITY_OLDER = "older_than_bundle"
 COMPATIBILITY_NEWER = "newer_than_bundle"
@@ -82,14 +87,30 @@ COMPATIBILITY_UNKNOWN = "unknown"
 SUMMARY_OLDER = "update_summary_older"
 SUMMARY_OLDER_NO_INSTALL = "update_summary_older_no_install"
 SUMMARY_NEWER = "update_summary_newer"
+SUMMARY_DEVELOPMENT = "update_summary_development"
 SUMMARY_PUBLISHED = "update_summary_published"
 SUMMARY_LIMIT = 255
+# Why the bundle may not be installed, in the words the summary uses.
+_REFUSAL_SENTENCES = {
+    "withdrawn": "update_summary_withdrawn",
+    "below_floor": "update_summary_below_floor",
+}
 
-# The only place a release link may point. The JSON that carries it comes off the
-# network, and a `release_url` is a link a user is invited to click from their own
-# device page - so it is checked against where it is supposed to lead rather than
-# trusted because of the field it arrived in.
-RELEASE_URL_PREFIX = f"{PLUGIN_RELEASES_URL}/"
+
+def _build_attribute(build: Build | None) -> dict[str, Any] | None:
+    """A build as the attributes show it: what it is, never how it sorts."""
+    if build is None or not build.known:
+        return None
+    return {
+        "commit": build.commit,
+        "time": build.time,
+        "dirty": build.dirty,
+        "flavour": build.flavour,
+    }
+
+# The attributes the recorder is not given: the list of releases changes with every index and
+# says nothing a history graph needs.
+ATTR_AVAILABLE_VERSIONS = "available_versions"
 
 # The installer's phases, in the order it reports them. The update card has one bar, so
 # the phase becomes a percentage; the config flow shows the same phases as words.
@@ -117,77 +138,17 @@ _UPDATE_SENTENCES: dict[InstallerErrorCode, str] = {
 }
 
 
-def _version(value: str | None) -> Version | None:
-    """Parse a plugin version without guessing how an unknown version sorts."""
-    if not value:
-        return None
-    try:
-        return Version(value)
-    except InvalidVersion:
-        return None
-
-
-def published_release_url(url: Any) -> str | None:
-    """Return a release link only when it leads to this plugin's releases.
-
-    `html_url` arrives in a JSON document fetched over the network, and it ends up as
-    the "Release notes" link on a device page - somewhere a household is invited to
-    click. A field being called `html_url` says nothing about where it points: a
-    redirected DNS name, a captive portal or a compromised answer can put any address
-    there, `javascript:` included. So the value is compared against where a release of
-    this plugin can actually live, and anything else is dropped rather than shown.
-    """
-    if isinstance(url, str) and url.startswith(RELEASE_URL_PREFIX):
-        return url
-    return None
-
-
-def published_release_version(tag: Any) -> str | None:
-    """Return a tag as a version, or None if it is not one.
-
-    Two separate refusals. The length cap is about the tag as *text*: it reaches an
-    attribute and a sentence on a device page, and there is no version that needs more
-    than a handful of characters. The parse is about the tag as a *version*: everything
-    downstream compares it with the bundled build, and a string that does not sort is
-    not a comparison - it is a label pretending to be one.
-    """
-    if not isinstance(tag, str) or len(tag) > RELEASE_TAG_MAX:
-        return None
-    candidate = tag.strip().removeprefix("v")
-    return candidate if _version(candidate) is not None else None
-
-
-def _newer(candidate: str | None, than: str | None) -> bool:
-    """Return whether one version sorts above another, refusing to guess."""
-    first = _version(candidate)
-    second = _version(than)
-    return first is not None and second is not None and first > second
-
-
-def latest_version(installed: str | None, supported: str) -> str:
-    """Return the version to offer, given what is on the box.
-
-    Whichever of the two is higher: a box that has run ahead of this integration is not
-    out of date, and telling a user to install an older plugin over a newer one would
-    be the one thing worse than saying nothing.
-    """
-    installed_version = _version(installed)
-    supported_version = _version(supported)
-    if installed_version is not None and supported_version is not None:
-        return installed if installed_version > supported_version else supported
-    return supported
-
-
 def plugin_compatibility(installed: str | None, bundled: str | None) -> str:
-    """Return how the plugin on the box stands against the bundled one.
+    """Return how the plugin on the box stands against the bundled one, by `N.N.N`.
 
-    `latest_version` already refuses to offer a downgrade, which makes a receiver ahead
-    of this integration look exactly like one in step: both read "up to date". That is
-    the right thing to show a household and the wrong thing to hand a bug report, so the
-    difference is stated here instead, and the diagnostics download carries it.
+    `latest_version` never offers a downgrade, which makes a receiver ahead of this
+    integration look exactly like one in step: both read "up to date". That is the right
+    thing to show a household and the wrong thing to hand a bug report, so the difference
+    is stated here instead, and the diagnostics download carries it. A build label after
+    `+` is not a version and plays no part.
     """
-    installed_version = _version(installed)
-    bundled_version = _version(bundled)
+    installed_version = base_version(installed)
+    bundled_version = base_version(bundled)
     if installed_version is None or bundled_version is None:
         return COMPATIBILITY_UNKNOWN
     if installed_version < bundled_version:
@@ -203,66 +164,67 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the plugin version entity."""
-    try:
-        bundle = await hass.async_add_executor_job(load_bundled_plugin)
-        bundled_version = bundle.version
-    except BundleError:
-        bundled_version = None
-    async_add_entities(
-        [Enigma2PluginUpdate(entry.runtime_data, entry, bundled_version)]
-    )
+    versions = await async_plugin_versions(hass, entry)
+    async_add_entities([Enigma2PluginUpdate(entry.runtime_data, entry, versions)])
 
 
 class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
-    """The MQTT Bridge plugin's version, against the one this release expects."""
+    """The MQTT Bridge plugin's version, and what this card will install over it."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_release_url = PLUGIN_RELEASES_URL
     _attr_title = "Enigma2 MQTT Bridge"
+    _unrecorded_attributes = frozenset({ATTR_AVAILABLE_VERSIONS})
 
     def __init__(
         self,
         box: Enigma2Box,
         entry: Enigma2MqttConfigEntry,
-        bundled_version: str | None,
+        versions: PluginVersions,
     ) -> None:
         """Set up the update entity."""
         super().__init__(box, "plugin", topics=(TOPIC_INFO,))
         self._entry = entry
-        self._bundled_version = bundled_version
+        self._versions = versions
         self._installing = False
         self._check_releases = bool(
             entry.options.get(CONF_CHECK_GITHUB_RELEASES, DEFAULT_CHECK_GITHUB_RELEASES)
         )
-        self._published_version: str | None = None
-        self._published_url: str | None = None
-        self._last_release_check: datetime | None = None
         self._texts: dict[str, str] = {}
+        # The builds this entity names, by the string it names them with, so that Home
+        # Assistant's `version_is_newer` - which only has the strings - can be answered with
+        # what is known about each.
+        self._builds: dict[str, Build] = {}
+        # The build chosen by name in the enabled version select, whose display string then
+        # counts as an update whatever its number (`version_is_newer`).
+        self._explicit: str | None = None
         self._refresh_install_feature()
 
     async def async_added_to_hass(self) -> None:
-        """Load the summary sentences, and start the opt-in release check."""
+        """Load the summary sentences, follow the index, and start the opt-in daily check."""
         await super().async_added_to_hass()
         self._texts = await async_get_translations(
             self.hass, self.hass.config.language, "common", {DOMAIN}
         )
-        if self._check_releases:
-            # What the last entity heard, and when it asked. This entity is a reload, an
-            # options save or a restart away from that one, and none of those is a
-            # reason to spend another request or to blank the tag on the card.
-            (
-                self._last_release_check,
-                self._published_version,
-                self._published_url,
-            ) = await async_release_check_store(self.hass).async_get(
-                self._entry.entry_id
+        self.async_on_remove(
+            async_dispatcher_connect(self.hass, SIGNAL_RELEASE_INDEX, self._handle_box_update)
+        )
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                f"{SIGNAL_TARGET_VERSION}_{self._entry.entry_id}",
+                self._handle_box_update,
             )
+        )
+        if self._check_releases:
             # Saving the options reloads the entry, so the option is read once here and
-            # the timer only exists on an entity that was built while it was on.
+            # the timer only exists on an entity that was built while it was on. The cache
+            # keeps the stamp, so every receiver's timer together still makes one request a
+            # day, and a reload or a restart none.
             self.async_on_remove(
                 async_track_time_interval(
                     self.hass,
-                    self._async_check_release,
+                    self._async_daily_check,
                     RELEASE_CHECK_INTERVAL,
                     cancel_on_shutdown=True,
                 )
@@ -271,11 +233,31 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             # rather than leaving it to finish against an entity that is already gone.
             self._entry.async_create_background_task(
                 self.hass,
-                self._async_check_release(),
+                self._async_daily_check(),
                 name=f"{DOMAIN} release check {self._entry.entry_id}",
             )
         self._async_read_state()
         self.async_write_ha_state()
+
+    async def _async_daily_check(self, now: datetime | None = None) -> None:
+        """The opt-in daily check. Its failures are the attributes' business, not a log's."""
+        del now
+        await self._versions.cache.async_check(manual=False)
+
+    async def async_update(self) -> None:
+        """Home Assistant's "Check for updates": a check now, if the option asks for checks.
+
+        Off, this integration talks to nothing but the broker, and a button in Home
+        Assistant's settings is not a reason to change that. On, it is a manual check and
+        shares the ten-minute limit with „Sprawdź aktualizacje wtyczki" - silently, because
+        this is asked of every update entity at once and a refusal would be noise.
+        """
+        if not self._check_releases:
+            return
+        try:
+            await self._versions.cache.async_check(manual=True)
+        except CheckRateLimited:
+            return
 
     def _text(self, slug: str, **placeholders: str) -> str | None:
         """Return one translated sentence, or None when the language lacks it."""
@@ -290,37 +272,46 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             _LOGGER.debug("The translated sentence %s has an unexpected placeholder", slug)
             return None
 
-    def _summary(self, offered: str) -> str | None:
+    def _summary(self, installed: Build | None, bundled: Build | None) -> str | None:
         """Say what the version numbers mean, and what to do about it.
 
         `latest_version` is a number on a card with an install button that may not be
-        there. Which of the two cases a household is looking at - and, when the button
-        is missing, how to get it - is not deducible from two version strings.
+        there. Which of the cases a household is looking at - and, when the button is
+        missing, how to get it - is not deducible from two version strings.
         """
-        sentences: list[str] = []
-        compatibility = plugin_compatibility(self.installed_version, offered)
-        if compatibility == COMPATIBILITY_OLDER:
+        sentences: list[str | None] = []
+        offered = bundled.display if bundled is not None else SUPPORTED_PLUGIN_VERSION
+        compatibility = plugin_compatibility(
+            installed.version if installed is not None else None, offered
+        )
+        has_path = bool(self.supported_features & UpdateEntityFeature.INSTALL)
+        if (release := self._versions.same_version_release()) is not None:
+            # First, because it is the one thing the version strings cannot say: the
+            # receiver runs a development build, and the release of its number exists.
+            sentences.append(self._text(SUMMARY_DEVELOPMENT, version=release))
+        refusal = self._versions.bundle_refusal()
+        if refusal is not None and compatibility == COMPATIBILITY_OLDER:
+            # The bundle is newer than the receiver's plugin, and still may not be installed.
+            code, placeholders = refusal
+            sentences.append(self._text(_REFUSAL_SENTENCES[code], **placeholders))
+        elif compatibility == COMPATIBILITY_OLDER:
             sentences.append(
                 self._text(
-                    SUMMARY_OLDER
-                    if self.supported_features & UpdateEntityFeature.INSTALL
-                    else SUMMARY_OLDER_NO_INSTALL,
+                    SUMMARY_OLDER if has_path else SUMMARY_OLDER_NO_INSTALL,
                     version=offered,
                 )
             )
         elif compatibility == COMPATIBILITY_NEWER:
             sentences.append(self._text(SUMMARY_NEWER, version=offered))
-        if self._published_version is not None and _newer(self._published_version, offered):
-            sentences.append(
-                self._text(SUMMARY_PUBLISHED, version=self._published_version)
-            )
+        if (newest := self._versions.newest_beyond()) is not None:
+            sentences.append(self._text(SUMMARY_PUBLISHED, version=newest))
 
         # Home Assistant cuts a summary at 255 characters, and where it cuts is where
         # the 255th character happens to fall - mid-word, and in a language with long
         # compounds usually mid-sentence. The sentences here are in priority order: the
         # first says what the version numbers mean and what to do, the second is extra
-        # context about a published tag. A second sentence that will not fit whole is
-        # dropped whole, because half of it reads as a bug rather than as a summary.
+        # context about the index. A second sentence that will not fit whole is dropped
+        # whole, because half of it reads as a bug rather than as a summary.
         summary = ""
         for sentence in sentences:
             if not sentence:
@@ -334,152 +325,114 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
                 break
         return summary or None
 
-    async def _async_check_release(self, now: datetime | None = None) -> None:
-        """Ask the plugin repository what it last published. Opt-in, daily, silent.
-
-        Every failure is a debug line and nothing else. This is a convenience nobody
-        asked to be told about, running against a service with a rate limit shared by
-        everything else on the same address, and a repair notification about GitHub on a
-        receiver's device page would be noise about a problem that is not the receiver's.
-
-        Only reached on an entity built while the option was on: the timer below is not
-        registered otherwise, and changing the option reloads the entry. The interval
-        sets the cadence and the stored stamp enforces it, because a timer that fires
-        early - or a reload, or a restart - must not turn one day's request into two.
-        """
-        del now
-        if (
-            self._last_release_check is not None
-            and dt_util.utcnow() - self._last_release_check < RELEASE_CHECK_INTERVAL
-        ):
-            return
-        # Stamped, and written to storage, before the request rather than after it. A
-        # check that times out has still spent this day's request; a stamp that only
-        # lives in this entity is spent again by the next reload; and retrying on every
-        # state change would turn one unreachable service into a loop. The answer stored
-        # alongside it is the last one that worked, so a failure costs the stamp and
-        # leaves the card saying what it already knew.
-        checked = self._last_release_check = dt_util.utcnow()
-        await self._async_remember(checked)
-        session = async_get_clientsession(self.hass)
-        try:
-            async with (
-                asyncio.timeout(RELEASE_CHECK_TIMEOUT),
-                session.get(
-                    PLUGIN_LATEST_RELEASE_URL,
-                    headers={"Accept": "application/vnd.github+json"},
-                ) as response,
-            ):
-                if response.status != 200:
-                    # 403 with no body is the rate limit, and it is the answer a busy
-                    # address gets rather than a fault anybody can fix.
-                    _LOGGER.debug(
-                        "The plugin release check answered HTTP %s", response.status
-                    )
-                    return
-                # Read in chunks with a ceiling rather than in one call: `read(n)` on a
-                # live stream may return less than asked for, so a body that is merely
-                # slow would look truncated, and a body with no end at all would
-                # otherwise be pulled into memory in full before anything noticed.
-                body = bytearray()
-                async for chunk in response.content.iter_chunked(8192):
-                    body.extend(chunk)
-                    if len(body) > RELEASE_BODY_LIMIT:
-                        _LOGGER.debug(
-                            "The plugin release check answered with more than %s bytes",
-                            RELEASE_BODY_LIMIT,
-                        )
-                        return
-            payload = json.loads(bytes(body))
-        except (TimeoutError, aiohttp.ClientError, ValueError) as err:
-            _LOGGER.debug("The plugin release check did not answer: %s", err)
-            return
-
-        version = published_release_version(
-            payload.get("tag_name") if isinstance(payload, dict) else None
-        )
-        if version is None:
-            _LOGGER.debug("The plugin release check returned no usable tag")
-            return
-        self._published_version = version
-        self._published_url = published_release_url(payload.get("html_url"))
-        # Written against the time of the request, not of the answer: the stamp is what
-        # was spent, and a slow reply must not buy back part of the day.
-        await self._async_remember(checked)
-        self._async_read_state()
-        self.async_write_ha_state()
-
-    async def _async_remember(self, checked: datetime) -> None:
-        """Put the stamp and the answer where a reload or a restart will find them."""
-        await async_release_check_store(self.hass).async_set(
-            self._entry.entry_id,
-            checked,
-            self._published_version,
-            self._published_url,
-        )
-
-    def _has_credentials(self) -> bool:
-        """Return whether a complete pinned SSH identity is retained for this box.
-
-        The password is checked the same way as the rest: an empty string is a value
-        Home Assistant will happily store, and advertising an install that is certain
-        to fail authentication is worse than not offering one.
-        """
-        data = self._entry.data
-        return all(
-            isinstance(data.get(key), str) and data[key]
-            for key in (CONF_SSH_HOST, CONF_SSH_USERNAME, CONF_SSH_HOST_KEY, CONF_SSH_PASSWORD)
-        )
-
     def _refresh_install_feature(self) -> None:
-        """Expose install only when a complete pinned SSH identity is retained."""
+        """Expose install only when there is a way to install: today, SSH and the bundle."""
         self._attr_supported_features = (
             UpdateEntityFeature.INSTALL
             | UpdateEntityFeature.SPECIFIC_VERSION
             | UpdateEntityFeature.PROGRESS
-            if self._bundled_version is not None and self._has_credentials()
+            if self._versions.path is not None
             else UpdateEntityFeature(0)
         )
 
+    def version_is_newer(self, latest_version: str, installed_version: str) -> bool:
+        """Whether the card should say "update available" for `latest_version`.
+
+        Home Assistant asks this only when the two strings differ. A higher release number
+        is an update. So is a build somebody chose by name in the enabled version select -
+        the choice is the consent, including for a build of the same number, which is never
+        an update by itself.
+        """
+        if latest_version == self._explicit:
+            return True
+        latest = self._builds.get(latest_version) or Build(version=latest_version)
+        installed = self._builds.get(installed_version) or Build(version=installed_version)
+        return is_newer(latest, installed)
+
     @callback
     def _async_read_state(self) -> None:
-        """Read the plugin version the box reports on `info`."""
-        installed = self.box.info.get("plugin")
-        self._attr_installed_version = installed if isinstance(installed, str) else None
-        offered = self._bundled_version or SUPPORTED_PLUGIN_VERSION
-        self._attr_latest_version = latest_version(self._attr_installed_version, offered)
+        """Work the version picture out again, from the box, the bundle and the index."""
+        versions = self._versions
+        cache = versions.cache
+        installed = versions.installed()
+        bundled = versions.bundled()
+        latest = versions.latest()
+        self._builds = versions.builds()
+        explicit = versions.explicit()
+        self._explicit = explicit.display if explicit is not None else None
         self._refresh_install_feature()
-        # The link follows the published release when one is known, because a card that
+        self._attr_installed_version = installed.display if installed is not None else None
+        self._attr_latest_version = latest.display if latest is not None else None
+        published = versions.newest_listed()
+        # The link follows the newest listed release when there is one, because a card that
         # names a version and links somewhere else is a card nobody can check.
-        self._attr_release_url = self._published_url or PLUGIN_RELEASES_URL
+        self._attr_release_url = (
+            f"{PLUGIN_RELEASES_URL}/tag/v{published}" if published else PLUGIN_RELEASES_URL
+        )
+        issued = cache.issued
         self._attr_extra_state_attributes = {
-            "bundled_version": self._bundled_version,
-            "published_version": self._published_version,
-            "compatibility": plugin_compatibility(self._attr_installed_version, offered),
+            "bundled_version": bundled.display if bundled is not None else None,
+            "published_version": published,
+            "compatibility": plugin_compatibility(
+                installed.version if installed is not None else None,
+                bundled.version if bundled is not None else SUPPORTED_PLUGIN_VERSION,
+            ),
+            ATTR_AVAILABLE_VERSIONS: versions.available(),
+            "last_check": cache.checked.isoformat() if cache.checked else None,
+            "check_error": cache.check_error,
+            "index_serial": cache.serial,
+            # Whole days since the index was built. There is no expiry - a withdrawal
+            # reaches this card only with a newer index - so its age is what says how
+            # fresh the list is.
+            "index_age": (
+                max(0, int((dt_util.utcnow().timestamp() - issued) // 86400))
+                if issued is not None
+                else None
+            ),
+            "update_path": versions.path,
+            # A development build is never shown as current: these say what it is, and
+            # which release of its own number is available instead of a badge for it.
+            "development_build": (
+                not installed.is_release if installed is not None else None
+            ),
+            "same_version_release": versions.same_version_release(),
+            # Information only - nothing orders or offers by them.
+            "installed_build": _build_attribute(installed),
+            "bundled_build": _build_attribute(bundled),
         }
-        self._attr_release_summary = self._summary(offered)
+        self._attr_release_summary = self._summary(installed, bundled)
 
     async def async_install(
         self, version: str | None, backup: bool, **kwargs: Any
     ) -> None:
         """Install the verified bundled plugin while preserving on-box settings."""
         del backup, kwargs
-        installed = _version(self.installed_version)
-        bundled = _version(self._bundled_version)
-        if installed is None or bundled is None:
+        versions = self._versions
+        installed = versions.installed()
+        bundled = versions.bundled()
+        installed_base = base_version(installed.version) if installed is not None else None
+        bundled_base = base_version(bundled.version) if bundled is not None else None
+        if installed_base is None or bundled_base is None or bundled is None:
             raise HomeAssistantError(
                 translation_domain="enigma2_mqtt",
                 translation_key="update_version_unknown",
             )
-        if installed > bundled:
+        if installed_base > bundled_base:
             raise HomeAssistantError(
                 translation_domain="enigma2_mqtt",
                 translation_key="update_downgrade",
             )
-        if version not in (None, self._bundled_version):
+        if version not in (None, bundled.display, bundled.version):
             raise HomeAssistantError(
                 translation_domain="enigma2_mqtt",
                 translation_key="update_version_unavailable",
+            )
+        if (refusal := versions.bundle_refusal()) is not None:
+            code, placeholders = refusal
+            raise HomeAssistantError(
+                translation_domain="enigma2_mqtt",
+                translation_key=f"update_version_{code}",
+                translation_placeholders=placeholders,
             )
 
         data = self._entry.data
@@ -487,11 +440,7 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         if not self.supported_features & UpdateEntityFeature.INSTALL:
             raise HomeAssistantError(
                 translation_domain="enigma2_mqtt",
-                translation_key=(
-                    "update_no_credentials"
-                    if self._bundled_version is not None
-                    else "update_version_unavailable"
-                ),
+                translation_key="update_no_credentials",
             )
         request = InstallRequest(
             credentials=SshCredentials(
