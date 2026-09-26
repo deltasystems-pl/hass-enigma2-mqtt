@@ -14,6 +14,11 @@ import base64
 import hashlib
 import json
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 import pytest
 
 from custom_components.enigma2_mqtt import release_index
@@ -143,15 +148,30 @@ def test_the_verifier_agrees_with_the_plugin_s(case: dict) -> None:
 def test_a_public_key_that_is_not_canonical_is_refused_before_openssl_sees_it() -> None:
     """The one check made here rather than by OpenSSL, because OpenSSL is laxer about it.
 
-    `y` is the field prime itself - the same point as `y = 0`, spelled a second way. The
-    plugin's verifier refuses such a key, and so must this one, whatever the signature.
+    The key is the identity point spelled `y = p + 1` instead of `y = 1`. Under the identity
+    `[S]B = R + [k]A` is `[S]B = R`, so any `R = [S]B` is a signature OpenSSL accepts - this
+    test shows that it does - and the plugin's verifier refuses, because the key is not a
+    canonical encoding. This reader has to give the plugin's verdict, not OpenSSL's.
     """
     prime = 2**255 - 19
-    spelled_twice = prime.to_bytes(32, "little")
-    case = VECTORS["signatures"][0]
-    assert not release_index.verify(
-        spelled_twice, bytes.fromhex(case["message"]), bytes.fromhex(case["signature"])
+    order = 2**252 + 27742317777372353535851937790883648493
+    seed = bytes(range(32))
+    digest = bytearray(hashlib.sha512(seed).digest()[:32])
+    digest[0] &= 248
+    digest[31] &= 127
+    digest[31] |= 64
+    scalar = int.from_bytes(digest, "little") % order
+    point = Ed25519PrivateKey.from_private_bytes(seed).public_key().public_bytes(
+        Encoding.Raw, PublicFormat.Raw
     )
+    signature = point + scalar.to_bytes(32, "little")
+    spelled_twice = (prime + 1).to_bytes(32, "little")
+    message = b"any message at all"
+
+    # OpenSSL takes it: the forgery is real for a reader that asks it alone.
+    Ed25519PublicKey.from_public_bytes(spelled_twice).verify(signature, message)
+    assert not release_index.verify(spelled_twice, message, signature)
+    assert release_index.verify((1).to_bytes(32, "little"), message, signature)
     with pytest.raises(release_index.Refused, match="not an Ed25519 public key"):
         release_index.check_keys(
             [
@@ -200,6 +220,72 @@ def test_accepting_does_not_change_the_memory_it_was_given() -> None:
     )
     assert memory == {"serials": {other: 3}, "silenced": []}
     assert accepted.memory == {"serials": {other: 3, accepted.key.key_id: 1}, "silenced": []}
+
+
+def test_a_state_ignores_disjoint_sets_and_merges_the_overlapping_ones() -> None:
+    """The plugin's own case, ported: what a key set learned stays with the sets it shares."""
+    sets = _keysets()
+    test, plus, other = sets["test"], sets["test-plus"], sets["other"]
+    t1, t2 = test
+    state = release_index.store(
+        None, other, {"serials": {other[0].key_id: 900}, "silenced": []}, acceptance=False
+    )
+    state = release_index.store(
+        state, test, {"serials": {t1.key_id: 40}, "silenced": []}, acceptance=False
+    )
+    # A newer, overlapping set learned more; returning to the older set does not forget it.
+    state = release_index.store(
+        state,
+        plus,
+        {"serials": {t1.key_id: 50, t2.key_id: 1}, "silenced": [t1.key_id]},
+        acceptance=False,
+    )
+    memory = release_index.memory_for(state, test, acceptance=False)
+    assert memory == {"serials": {t1.key_id: 50, t2.key_id: 1}, "silenced": [t1.key_id]}
+    assert other[0].key_id not in memory["serials"]
+    assert release_index.memory_for(state, other, acceptance=False) == {
+        "serials": {other[0].key_id: 900},
+        "silenced": [t1.key_id],
+    }
+    # A set sharing no key with any entry starts fresh.
+    lone = sets["test-spare-only"]
+    lone_state = release_index.store(
+        None, other, {"serials": {other[0].key_id: 1}, "silenced": []}, acceptance=False
+    )
+    assert release_index.memory_for(lone_state, lone, acceptance=False) == (
+        release_index.empty_memory()
+    )
+    # Acceptance and release never meet.
+    assert release_index.memory_for(state, test, acceptance=True) == (
+        release_index.empty_memory()
+    )
+
+
+def test_a_state_takes_the_largest_serial_whatever_order_it_was_stored_in() -> None:
+    sets = _keysets()
+    test, plus = sets["test"], sets["test-plus"]
+    t1 = test[0]
+    state = release_index.store(
+        None, plus, {"serials": {t1.key_id: 50}, "silenced": []}, acceptance=False
+    )
+    state = release_index.store(
+        state, test, {"serials": {t1.key_id: 40}, "silenced": []}, acceptance=False
+    )
+    assert release_index.memory_for(state, test, acceptance=False)["serials"] == {t1.key_id: 50}
+
+
+def test_an_entry_sharing_no_key_is_never_read_even_when_it_names_one() -> None:
+    sets = _keysets()
+    test, other = sets["test"], sets["other"]
+    state = release_index.store(
+        None,
+        other,
+        {"serials": {other[0].key_id: 5}, "silenced": [test[0].key_id]},
+        acceptance=False,
+    )
+    assert release_index.memory_for(state, test, acceptance=False) == (
+        release_index.empty_memory()
+    )
 
 
 def test_which_part_of_the_state_is_meant_is_never_a_default() -> None:

@@ -177,7 +177,7 @@ async def async_remove_entry(
 
     The first message retracts `enigma2mqtt/integration/<node_id>`: the receiver is no
     longer managed by this integration, so nothing may narrow its choice of plugin
-    releases in this integration's name (ADR-0008 §10, which supersedes "one publish").
+    releases in this integration's name (ADR-0008 section 10, which supersedes "one publish").
     The retained `enigma2mqtt/release_index` stays - a signed index is harmless to
     anybody who reads it, and it is not this receiver's.
     """

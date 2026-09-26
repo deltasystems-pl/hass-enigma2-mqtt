@@ -5,7 +5,7 @@ Several versions meet in this entity and only two of them may move its state. Th
 development build of 0.3.0 reads `0.3.0+g1a2b3c4`, never plain `0.3.0`. The **latest**
 version is what pressing install would put on the receiver - and only while an install path
 exists; without one it is the installed version, so there is no update badge on a card that
-could not act on it (ADR-0008 §3, a behaviour change from 0.3.1, which showed the bundle as
+could not act on it (ADR-0008 section 3, a behaviour change from 0.3.1, which showed the bundle as
 an update even with no way to install it). The **bundled** version is the package this
 integration ships, today the only one the installer can put on a receiver. The versions the
 plugin's **signed release index** lists are information: they appear in the summary and the

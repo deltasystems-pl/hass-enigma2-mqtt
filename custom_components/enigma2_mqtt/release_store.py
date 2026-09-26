@@ -80,7 +80,7 @@ ERROR_REDIRECT = "redirect"
 ERROR_HTTP = "http_error"
 ERROR_BAD_MEMORY = "bad_memory"
 # The refusals a household is told as "the list has a bad signature or is older than the one
-# already known" (spec §ae.10); everything else from the rule is a malformed or oversized file.
+# already known"; everything else from the rule is a malformed or oversized file.
 SIGNATURE_OR_ORDER = frozenset(
     {"unknown_key", "bad_signature", "key_mismatch", "rank", "replay", "jump", "first_sight"}
 )

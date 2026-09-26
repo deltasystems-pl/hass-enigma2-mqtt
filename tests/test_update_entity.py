@@ -1,6 +1,6 @@
 """What the version card says, what it offers, and what „Wersja wtyczki do instalacji" changes.
 
-Three rules meet on this entity (ADR-0008 §3):
+Three rules meet on this entity (ADR-0008 section 3):
 
 - **the card offers what it will install, and only when it can** - `latest_version` is the
   installed version whenever there is no install path, so no badge appears on a card that could
@@ -721,7 +721,7 @@ async def test_a_development_build_can_be_put_back_on_the_release(
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """Same N.N.N is not a downgrade: `0.3.0+g…` sorts above `0.3.0` only in PEP 440."""
+    """Same N.N.N is not a downgrade: `0.3.0+g...` sorts above `0.3.0` only in PEP 440."""
     await _setup(hass, config_entry, credentials=True)
     await _report(hass, "0.3.0", _dev_build())
     with patch("custom_components.enigma2_mqtt.update.async_install") as install:

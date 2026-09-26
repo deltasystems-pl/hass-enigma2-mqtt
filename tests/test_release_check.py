@@ -270,6 +270,24 @@ async def test_six_reloads_are_still_one_request(
     assert hass.states.get(PLUGIN).attributes["index_serial"] == 1
 
 
+async def test_a_check_that_failed_has_still_spent_the_day(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Stamped before the request: a service that is down is not asked again on every reload."""
+    aioclient_mock.get(INDEX_URL, status=403)
+    await _setup_checking(hass, config_entry)
+    assert aioclient_mock.call_count == 1
+    assert hass.states.get(PLUGIN).attributes["check_error"] == "http_error"
+
+    await hass.config_entries.async_reload(config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert aioclient_mock.call_count == 1
+
+
 async def test_a_restart_within_the_day_asks_nothing_and_still_knows(
     hass: HomeAssistant,
     mqtt_mock,
@@ -555,14 +573,15 @@ async def test_the_button_checks_once_in_ten_minutes_and_says_when(
     assert aioclient_mock.call_count == 2
     checked = dt_util.as_local(_cache(hass).checked).strftime("%H:%M")
 
-    freezer.tick(timedelta(minutes=3))
+    # 6.5 minutes left is said as 7: "in 6 min" would send somebody back too early.
+    freezer.tick(timedelta(minutes=3, seconds=30))
     with pytest.raises(HomeAssistantError) as raised:
         await hass.services.async_call("button", "press", {ATTR_ENTITY_ID: CHECK}, blocking=True)
     assert raised.value.translation_key == "release_check_rate_limited"
     assert raised.value.translation_placeholders == {"time": checked, "minutes": "7"}
     assert aioclient_mock.call_count == 2
 
-    freezer.tick(timedelta(minutes=8))
+    freezer.tick(timedelta(minutes=7))
     with patch(NOTIFY):
         await hass.services.async_call("button", "press", {ATTR_ENTITY_ID: CHECK}, blocking=True)
     assert aioclient_mock.call_count == 4

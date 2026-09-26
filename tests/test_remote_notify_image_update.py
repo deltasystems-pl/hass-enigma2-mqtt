@@ -351,7 +351,7 @@ async def test_an_older_plugin_without_an_install_path_shows_no_badge(
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """Behaviour change from 0.3.1 (ADR-0008 §3): no badge the card cannot act on.
+    """Behaviour change from 0.3.1 (ADR-0008 section 3): no badge the card cannot act on.
 
     Without SSH credentials the card has no way to install anything, so it names what is
     installed as the latest and says the rest in its summary.

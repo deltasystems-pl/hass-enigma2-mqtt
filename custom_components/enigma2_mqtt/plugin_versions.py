@@ -9,10 +9,11 @@ once, here, from four sources:
   commit times, and which this integration may offer (`release_index.available`);
 - **this entry** - whether SSH credentials are stored, and the version chosen in the select.
 
-**The card offers what it will install, and only when it can** (ADR-0008 §3). `latest_version`
-is the version the card would install when somebody presses the button, and it exists only while
-an install path does. Without one there is no badge: `latest_version` is the installed version,
-and anything newer is said in the summary and the attributes, with the way to an install path.
+**The card offers what it will install, and only when it can** (ADR-0008 section 3).
+`latest_version` is the version the card would install when somebody presses the button, and it
+exists only while an install path does. Without one there is no badge: `latest_version` is the
+installed version, and anything newer is said in the summary and the attributes, with the way to
+an install path.
 Today the only path is the SSH installer with the bundle, so the only installable version is the
 bundle's, when it is newer than what the receiver runs and the index has not withdrawn it; the
 versions the index lists beyond it are information, not offers, until this integration can

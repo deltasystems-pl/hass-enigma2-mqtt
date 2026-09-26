@@ -129,7 +129,7 @@ def test_the_order(latest: Build, installed: Build, newer: bool) -> None:
 
 
 def test_the_label_is_never_ordered_by() -> None:
-    """`+g…` is a local label: `0.3.0+gffffff0` is not "above" `0.3.0` for being longer."""
+    """`+g...` is a local label: `0.3.0+gffffff0` is not "above" `0.3.0` for being longer."""
     assert base_version("0.3.0+gffffff0.dirty") == (0, 3, 0)
     assert base_version("0.3.0") == (0, 3, 0)
     assert base_version("0.3") is None

@@ -481,7 +481,7 @@ PLUGIN_RELEASES_URL: Final = (
 )
 
 # ---------------------------------------------------------------------------------------
-# Which plugin releases this integration may offer (ADR-0008 §2). The rule is shared with
+# Which plugin releases this integration may offer (ADR-0008 section 2). The rule is shared with
 # the plugin, which applies it to the same signed index: the same contract major, at or
 # above the higher of this floor and the index's, this integration at or above a
 # release's `min_integration`, and not withdrawn. The manifest cannot carry these -

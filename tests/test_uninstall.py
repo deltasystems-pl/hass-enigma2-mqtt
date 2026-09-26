@@ -1484,7 +1484,7 @@ async def test_deleting_the_entry_never_uninstalls(
     confirmed act (ADR-0004), whatever the entry holds and whatever the receiver permits.
     What it sends is the retraction of `enigma2mqtt/integration/<node_id>` - this
     integration no longer speaks for the receiver - and `cmd/ha_mode = discovery`
-    (ADR-0008 §10, which replaced ADR-0006 §5's single publish).
+    (ADR-0008 section 10, which replaced ADR-0006 section 5's single publish).
     """
     info = PERMITTED_INFO if permission else {**PERMITTED_INFO, "settings": {}}
     box_on_the_broker[INFO_TOPIC] = json.dumps(info)
