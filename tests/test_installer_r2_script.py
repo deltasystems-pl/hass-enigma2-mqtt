@@ -32,7 +32,13 @@ from custom_components.enigma2_mqtt.installer_helper import PACKAGE, snapshot
 
 PLUGIN_DIR = "usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge"
 WATCHED = "1:0:19:283D:3FB:1:C00000:0:0:0:"
-SHELLS = [["/bin/sh"]] + ([["busybox", "sh"]] if shutil.which("busybox") else [])
+# The receiver's /bin/sh is bash, run as `sh`; dash and busybox are what other images
+# and development machines have.
+SHELLS = (
+    [["/bin/sh"]]
+    + ([["busybox", "sh"]] if shutil.which("busybox") else [])
+    + ([["bash-as-sh"], ["bash"]] if shutil.which("bash") else [])
+)
 
 
 def _write(path: Path, text: str, mode: int | None = None) -> Path:
@@ -46,17 +52,30 @@ def _write(path: Path, text: str, mode: int | None = None) -> Path:
 class Box:
     """A receiver in a directory: files, a runlevel, an enigma2 that is up or down."""
 
-    def __init__(self, base: Path, shell: list[str], restore_seconds: float) -> None:
+    def __init__(
+        self,
+        base: Path,
+        shell: list[str],
+        restore_seconds: float,
+        *,
+        enigma_stops: bool = True,
+        stop_wait: int = 10,
+        restore_limit: int = 60,
+    ) -> None:
         self.base = base
         self.root = base / "root"
         self.bin = base / "bin"
         self.events = base / "events"
         self.runlevel = base / "runlevel"
         self.enigma = base / "enigma2.running"
-        self.status = base / "r2.status"
-        self.script = base / "r2.sh"
-        self.log = base / "r2.log"
+        # The script's own directory, as the installer names it.
+        self.dir = base / "tmp" / "enigma2-mqtt-r2-0123456789ab"
+        self.status = self.dir / "status"
+        self.script = self.dir / "r2.sh"
+        self.log = self.dir / "log"
         self.shell = shell
+        self.stop_wait = stop_wait
+        self.restore_limit = restore_limit
         # The receiver runs the helper as a file of its own in /tmp; from inside the
         # package directory the integration's `select.py` would shadow the standard
         # library's `select`, which `subprocess` imports.
@@ -88,13 +107,16 @@ class Box:
         self.runlevel.write_text("3\n")
         self.enigma.write_text("100\n")
         self.events.write_text("")
-        # `init`: change the runlevel, stop or start the interface, write it down.
+        # `init`: change the runlevel, stop or start the interface, write it down. Like
+        # the real one it returns before the interface has gone: enigma2 stops a second
+        # later - or, for a receiver whose interface will not stop, never.
+        stop = f"(sleep 1; rm -f {self.enigma}) &" if enigma_stops else ":"
         _write(
             self.bin / "init",
             "#!/bin/sh\n"
             f'echo "init $1" >> {self.events}\n'
             f'echo "$1" > {self.runlevel}\n'
-            f'if [ "$1" = 4 ]; then rm -f {self.enigma}; fi\n'
+            f'if [ "$1" = 4 ]; then\n    {stop}\nfi\n'
             f'if [ "$1" = 3 ]; then echo 101 > {self.enigma}; fi\n',
             0o755,
         )
@@ -129,12 +151,12 @@ class Box:
             str(self.backup),
             "--root",
             str(self.root),
-            "--script",
-            str(self.script),
-            "--status",
-            str(self.status),
-            "--log",
-            str(self.log),
+            "--dir",
+            str(self.dir),
+            "--stop-wait",
+            str(self.stop_wait),
+            "--restore-limit",
+            str(self.restore_limit),
             "--service",
             WATCHED,
             "--shell",
@@ -187,15 +209,31 @@ class Box:
         assert events.count("init 3") == 1
 
 
-@pytest.fixture(params=SHELLS, ids=lambda shell: " ".join(shell))
-def box(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[Box]:
-    shell = request.param
+def _shell(tmp_path: Path, shell: list[str]) -> list[str]:
+    """Return the one executable `start_r2` runs the script with."""
     if shell[0] == "busybox":
-        # `start_r2` runs one executable with the script as its argument.
         wrapper = _write(
             tmp_path / "bin" / "busybox-sh", '#!/bin/sh\nexec busybox sh "$@"\n', 0o755
         )
-        shell = [str(wrapper)]
+        return [str(wrapper)]
+    if shell[0] == "bash-as-sh":
+        # bash started under the name `sh` runs in its POSIX mode, as on the receiver.
+        link = tmp_path / "bash-as-sh" / "sh"
+        link.parent.mkdir()
+        link.symlink_to(shutil.which("bash"))
+        return [str(link)]
+    if shell[0] == "bash":
+        return [str(shutil.which("bash"))]
+    return shell
+
+
+@pytest.fixture(params=SHELLS, ids=lambda shell: " ".join(shell))
+def shell(request: pytest.FixtureRequest, tmp_path: Path) -> list[str]:
+    return _shell(tmp_path, request.param)
+
+
+@pytest.fixture
+def box(shell: list[str], tmp_path: Path) -> Iterator[Box]:
     yield Box(tmp_path, shell, restore_seconds=1.0)
 
 
@@ -355,3 +393,78 @@ def test_the_script_names_nothing_it_was_not_given(
     text = box.script.read_text()
     assert f"service={WATCHED}" in text or f"service='{WATCHED}'" in text
     assert oct(box.script.stat().st_mode & 0o777) == "0o700"
+
+
+def test_the_script_runs_on_its_own_copy_of_the_helper(
+    box: Box, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Home Assistant tidying up its helper - on a stop, say - takes nothing from the script."""
+    box.start(monkeypatch)
+    box.helper.unlink()
+
+    box.wait_for(lambda: "done" in box.status.read_text().split())
+
+    box.assert_put_back()
+
+
+def test_an_interface_that_does_not_stop_keeps_its_settings(
+    shell: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A running enigma2 writes its own settings on its next clean quit.
+
+    So when it has not gone within the wait, the script puts back the files alone and
+    writes neither the settings block nor the channel - both would be overwritten, and a
+    report that they were put back would be false.
+    """
+    box = Box(tmp_path, shell, restore_seconds=0.1, enigma_stops=False, stop_wait=1)
+    box.start(monkeypatch)
+
+    box.wait_for(lambda: "done" in box.status.read_text().split())
+
+    steps = box.status.read_text().split("\n")[1:]
+    assert steps[:3] == ["stopping 0", "stop_timeout", "restored 0"]
+    assert "not_written" in steps
+    assert (box.root / f"{PLUGIN_DIR}/plugin.py").read_text() == "old plugin\n"
+    settings = (box.root / "etc/enigma2/settings").read_text().splitlines()
+    assert "config.plugins.mqttbridge.host=new-broker" in settings
+    assert f"config.tv.lastservice={WATCHED}" not in settings
+
+
+def test_a_restore_that_hangs_is_cut_off_and_the_picture_comes_back(
+    shell: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Picture first: a restore cut off part-way is repeated later; no picture is not."""
+    box = Box(tmp_path, shell, restore_seconds=60, restore_limit=1)
+    started = time.monotonic()
+    box.start(monkeypatch)
+
+    box.wait_for(box.finished, timeout=20)
+
+    assert time.monotonic() - started < 20
+    steps = box.status.read_text().split("\n")
+    restored = next(step for step in steps if step.startswith("restored "))
+    assert restored != "restored 0"
+    box.wait_for(lambda: "init 3" in box.events_list())
+    assert box.runlevel.read_text().strip() == "3"
+    assert box.events_list().count("init 3") == 1
+
+
+@pytest.mark.parametrize("init", ["init", "/sbin/init", "/usr/sbin/init"])
+def test_the_test_suite_cannot_reach_the_system_init(tmp_path: Path, init: str) -> None:
+    """A test that forgot its stand-ins would stop the interface of the machine it runs on."""
+    assert os.environ.get(installer_helper.TEST_GUARD)
+    root = tmp_path / "root"
+    root.mkdir()
+
+    with pytest.raises(RuntimeError, match="stand-ins"):
+        installer_helper.start_r2(
+            root,
+            root / "backup",
+            directory=tmp_path / "r2",
+            service=WATCHED,
+            provisioning=False,
+            init=init,
+            pidof=str(tmp_path / "pidof"),
+        )
+
+    assert not (tmp_path / "r2").exists()

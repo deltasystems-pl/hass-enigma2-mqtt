@@ -272,8 +272,11 @@ def quick_restart_rule(monkeypatch: pytest.MonkeyPatch) -> None:
     never, so the bounds only have to be long enough to take a few polls. A test about a
     bound itself sets the one it is about.
     """
-    from custom_components.enigma2_mqtt import installer, restart_rule
+    from custom_components.enigma2_mqtt import installer, installer_helper, restart_rule
 
+    # Not a wait: the stop-and-restore script refuses the machine's own `init` and
+    # `pidof` while this is set, in this process and every one it starts.
+    monkeypatch.setenv(installer_helper.TEST_GUARD, "1")
     monkeypatch.setattr(installer, "RESTART_QUESTION_TIMEOUT", 0.05)
     monkeypatch.setattr(installer, "RESTART_POLL_SECONDS", 0.01)
     monkeypatch.setattr(installer, "R2_FOLLOW_TIMEOUT", 0.2)

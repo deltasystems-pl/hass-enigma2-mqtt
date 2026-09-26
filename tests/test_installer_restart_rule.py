@@ -211,18 +211,22 @@ async def test_a_question_answered_while_the_files_go_back_is_a_restart(
 ) -> None:
     """Somebody pressed "yes" meanwhile: the receiver restarted, so it is never "withdrawn".
 
-    The new process started on whatever it found; the proof decides, and the plugin that
-    announces itself is not the one installed, so the rollback that puts the settings
-    back runs - the stop-and-restore script.
+    And it is never committed either, even when the new plugin announces itself: the
+    answer may have come while the withdraw waited for opkg's lock, so the new plugin
+    started and then its files were replaced by the old ones. A proof would pass on a
+    plugin whose files are gone. The rollback that stops, restores and starts makes the
+    running plugin and the files on disk agree again.
     """
     receiver = FakeReceiver(question_on_restart=True, question_answered_during_withdraw=True)
 
     with pytest.raises(InstallerError) as raised:
-        await _install(hass, install_request, tmp_path, receiver, announces=False)
+        await _install(hass, install_request, tmp_path, receiver, announces=True)
 
-    assert raised.value.code is InstallerErrorCode.ANNOUNCEMENT_TIMEOUT
+    assert raised.value.code is InstallerErrorCode.RESTART_FAILED
     assert receiver.restarts == ["clean", "stopped"]
     assert any(" r2-start " in command for command in receiver.commands)
+    assert not any(" prune " in command for command in receiver.commands)
+    assert receiver.files["plugin"] == "old"
 
 
 async def test_a_withdraw_that_cannot_put_the_files_back_still_stops_nothing(
@@ -387,7 +391,7 @@ async def test_a_connection_lost_while_the_receiver_restores_is_followed_again(
         async def run(
             self, command: str, *, input: bytes | None = None, timeout: float = 30
         ) -> CommandResult:
-            if command.startswith("cat ") and command.endswith(".status") and dropped["left"]:
+            if command.startswith("cat ") and command.endswith("/status") and dropped["left"]:
                 dropped["left"] -= 1
                 raise OSError("connection lost")
             return await super().run(command, input=input, timeout=timeout)

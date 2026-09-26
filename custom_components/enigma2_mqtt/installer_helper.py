@@ -113,7 +113,6 @@ TRANSACTION_ID = re.compile(r"[0-9a-f]{12}")
 # under any name, is a second installation of it - the same trap as a backup copy of a
 # Home Assistant integration left inside `custom_components/`.
 PLUGINS_TREE = "usr/lib/enigma2/python/Plugins"
-STAGING_NAME = re.compile(r"\.mqttbridge-(?:staging|aside)-[0-9a-f]{12}")
 # OpenWebif on the receiver itself. It is asked for the channel being watched and the
 # standby state before a restart, to put them back afterwards, and for the restart.
 WEBIF_URL = "http://127.0.0.1"
@@ -607,6 +606,11 @@ def restore(
             raise ValueError("backed-up OpenWebif bytecode is unsafe")
     else:
         cache_sources = []
+    token = _staging_token(backup)
+    if metadata["plugin"]:
+        # Before anything moves: a swap that cannot be a rename must not leave opkg's
+        # records restored under a plugin tree that is still the new one.
+        _require_one_filesystem(root, plugin)
     with _lock(root, OPKG_LOCK_WAIT_RESTORE_SECONDS):
         current = _stanzas(status_path.read_text(encoding="utf-8"))
         current = [stanza for stanza in current if _package_name(stanza) != PACKAGE]
@@ -631,7 +635,9 @@ def restore(
         for source in info_sources:
             _replace_file(source, info_dir / source.name)
 
-        _replace_tree(root, backup / "plugin" if metadata["plugin"] else None, plugin)
+        _replace_tree(
+            root, backup / "plugin" if metadata["plugin"] else None, plugin, token
+        )
 
         if metadata["webif_shim"] or metadata["webif_cache"]:
             webif_shim.parent.mkdir(parents=True, exist_ok=True)
@@ -703,7 +709,47 @@ def staging_parent(root: Path) -> Path:
     return _path(root, PLUGINS_TREE).parent
 
 
-def _replace_tree(root: Path, source: Path | None, live: Path) -> None:
+def staging_names(token: str) -> tuple[str, str]:
+    """Return the staged and the set-aside directory's names for one transaction.
+
+    These two names, and only these, are what a restore ever creates or removes beside
+    `Plugins` - where enigma2's own `Components`, `Screens` and `Tools` live.
+    """
+    return f".mqttbridge-staging-{token}", f".mqttbridge-aside-{token}"
+
+
+def _staging_token(backup: Path) -> str:
+    """Name the staging directories after the transaction whose snapshot is restored.
+
+    A restore of the same snapshot again - a recovery of an interrupted one - then finds
+    and removes exactly what the interrupted one left. A snapshot not named by this
+    installer gets a fresh token, and so never matches anything already there.
+    """
+    if SNAPSHOT_NAME.fullmatch(backup.name):
+        return backup.name.rsplit("-", 1)[1]
+    return secrets.token_hex(6)
+
+
+def _require_one_filesystem(root: Path, live: Path) -> None:
+    parent = staging_parent(root)
+    beside = live.parent
+    while not beside.exists() and beside != beside.parent:
+        beside = beside.parent
+    if os.stat(str(parent)).st_dev != os.stat(str(beside)).st_dev:
+        raise ValueError(
+            f"{parent} and {live.parent} are on different filesystems; "
+            "the plugin directory cannot be swapped in by a rename"
+        )
+
+
+def _remove_own(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
+def _replace_tree(root: Path, source: Path | None, live: Path, token: str) -> None:
     """Swap a copy of `source` in at `live` with two renames, or take `live` away.
 
     `rename` cannot replace a directory that is not empty, so this is two steps: the
@@ -712,26 +758,23 @@ def _replace_tree(root: Path, source: Path | None, live: Path) -> None:
     plugin, which the installer's proof then catches like any other failed start; it is
     never a tree that is half old and half new, which nothing could catch.
 
-    Leftovers of an earlier swap that was cut off are removed first - by their exact
-    names only, so nothing else beside `Plugins` is ever touched.
+    What an earlier, interrupted restore of the same snapshot left is removed first -
+    by this transaction's two exact names, never by a pattern: the directory beside
+    `Plugins` is enigma2's own.
     """
     parent = staging_parent(root)
-    for leftover in parent.iterdir() if parent.is_dir() else ():
-        if STAGING_NAME.fullmatch(leftover.name):
-            if leftover.is_dir() and not leftover.is_symlink():
-                shutil.rmtree(leftover)
-            else:
-                leftover.unlink()
-    token = secrets.token_hex(6)
-    staged = parent / f".mqttbridge-staging-{token}"
-    aside = parent / f".mqttbridge-aside-{token}"
+    staged_name, aside_name = staging_names(token)
+    staged = parent / staged_name
+    aside = parent / aside_name
+    if source is not None:
+        _require_one_filesystem(root, live)
+    # A set-aside tree left by an interrupted restore of this snapshot is either the
+    # superseded one or - cut off between the two renames - the only copy of what was
+    # live; this restore replaces the live tree either way.
+    _remove_own(staged)
+    _remove_own(aside)
     if source is not None:
         live.parent.mkdir(parents=True, exist_ok=True)
-        if os.stat(str(parent)).st_dev != os.stat(str(live.parent)).st_dev:
-            raise ValueError(
-                f"{parent} and {live.parent} are on different filesystems; "
-                "the plugin directory cannot be swapped in by a rename"
-            )
         shutil.copytree(source, staged, symlinks=True)
     try:
         if live.exists():
@@ -1152,6 +1195,10 @@ def power_state(state: int, base: str = WEBIF_URL) -> bool:
 #   has no picture, so nothing that can be cut off from outside the receiver - an SSH
 #   connection, Home Assistant restarting - may sit between the two. The installer
 #   follows it by reading the status file, and a dropped connection sends it nothing.
+# - It depends on nothing Home Assistant tidies up. It runs from a directory of its own
+#   (`/tmp/enigma2-mqtt-r2-<id>/`) holding its own copy of this helper, its status and
+#   its output; the installer removes that directory only after it has seen the script
+#   start the interface again, and keeps the transaction lock until then.
 # - The trap is set before `init 4`, on EXIT HUP INT TERM PIPE. Without PIPE a shell
 #   whose output reader went away dies on its next write and never runs the trap. The
 #   trap first ignores further signals, so a second one cannot cut off the first.
@@ -1159,17 +1206,21 @@ def power_state(state: int, base: str = WEBIF_URL) -> bool:
 #   runs the trap at once, while the restore child is still working; starting the
 #   interface or writing the channel under it would let the restore rename the
 #   settings file over the channel.
-# - Order: the settings block first, then `lastservice`, then `init 3`. The channel is
-#   written only once `init 4` has been sent, because a running enigma2 would overwrite
-#   it on its next clean quit.
+# - The restore is bounded. A watchdog ends it after its limit, so the picture comes
+#   back even from a restore that hangs; a restore cut off part-way is repeated by the
+#   next install's recovery, which is safe, while a missing picture is not.
+# - The settings block and the channel are written only once enigma2 is seen to be
+#   gone. An enigma2 that has not stopped within the wait still owns its settings and
+#   writes them out on its next clean quit, over anything written now; then the script
+#   puts back the files alone, says `stop_timeout`, and leaves the settings to it.
+# - Order: the settings block first, then `lastservice`, then `init 3`, each by a rename.
 # - It ends in `exit`: after a signal trap that does not exit, the shell carries on with
 #   its next step. `finish` is idempotent, because the EXIT trap runs it a second time.
-# - It does not keep the transaction lock alive. The whole script is bounded - the wait
-#   for the stop, the restore's own bound - far inside the lock's thirty minutes, and
-#   what no trap covers is SIGKILL or power between the stop and the start: power
-#   reboots the receiver, which frees the lock at once, and a killed script leaves the
-#   receiver stopped with the lock held for up to thirty minutes. That residual is
-#   stated, not hidden behind a heartbeat nobody would be left to stop.
+# - It does not keep the transaction lock alive; the installer holds it. What no trap
+#   covers is SIGKILL or power between the stop and the start. Power reboots the
+#   receiver, which frees the lock at once; a killed script leaves the interface stopped
+#   until the receiver is switched off and on again. That residual is stated, not
+#   hidden behind a heartbeat nobody would be left to stop.
 R2_SCRIPT = """#!/bin/sh
 # Enigma2 MQTT Bridge installer: stop the receiver's interface, put the plugin and its
 # settings back, write the channel to start on, and start the interface again.
@@ -1183,6 +1234,7 @@ status={status}
 init={init}
 pidof={pidof}
 restore_pid=
+watchdog=
 restored=
 stopped=
 started=
@@ -1204,6 +1256,10 @@ finish() {{
             say "restored $rc"
         fi
     fi
+    if [ -n "$watchdog" ]; then
+        kill "$watchdog" 2>/dev/null
+        watchdog=
+    fi
     if [ -n "$stopped" ] && [ -n "$service" ]; then
         "$python" "$helper" lastservice --service "$service" --root "$root"
         say "written $?"
@@ -1216,21 +1272,28 @@ finish() {{
 trap 'finish; exit 1' HUP INT TERM PIPE
 trap 'finish' EXIT
 say "begun $$"
-stopped=1
 "$init" 4
 say "stopping $?"
 waited=0
 while "$pidof" enigma2 >/dev/null 2>&1; do
     if [ "$waited" -ge {stop_wait} ]; then
-        say "stop_timeout"
         break
     fi
     sleep 1
     waited=$((waited + 1))
 done
-say "stopped"
-"$python" "$helper" restore "$backup" --settings $provisioning --root "$root" &
+if "$pidof" enigma2 >/dev/null 2>&1; then
+    settings=
+    say "stop_timeout"
+else
+    settings=--settings
+    stopped=1
+    say "stopped"
+fi
+"$python" "$helper" restore "$backup" $settings $provisioning --root "$root" &
 restore_pid=$!
+( sleep {restore_limit}; kill -TERM "$restore_pid" 2>/dev/null ) &
+watchdog=$!
 wait "$restore_pid"
 rc=$?
 restored=$rc
@@ -1242,23 +1305,46 @@ say "done"
 exit 0
 """
 R2_STOP_WAIT_SECONDS = 30
+R2_RESTORE_LIMIT_SECONDS = 90
+# Set by this project's own test suite, and nowhere else. While it is set, the script is
+# refused unless `init` and `pidof` are stand-ins named by absolute path outside the
+# system's directories: a test that forgot them would otherwise stop the interface of the
+# machine the tests run on - as root, in the development environment this was written in.
+TEST_GUARD = "ENIGMA2_MQTT_TESTS_FORBID_SYSTEM_INIT"
+_SYSTEM_DIRECTORIES = ("/sbin/", "/bin/", "/usr/", "/lib/", "/etc/")
+
+
+def _stand_in(command: str) -> bool:
+    return os.path.isabs(command) and not os.path.realpath(command).startswith(
+        _SYSTEM_DIRECTORIES
+    )
+
+
+def r2_files(directory: Path) -> tuple[Path, Path, Path, Path]:
+    """Return the script's own files: its helper copy, the script, its status, its output."""
+    return (
+        directory / "helper.py",
+        directory / "r2.sh",
+        directory / "status",
+        directory / "log",
+    )
 
 
 def start_r2(
     root: Path,
     backup: Path,
     *,
-    script: Path,
-    status: Path,
-    log: Path,
+    directory: Path,
     service: str,
     provisioning: bool,
     shell: str = "/bin/sh",
     python: str = "",
     init: str = "init",
     pidof: str = "pidof",
+    stop_wait: int = R2_STOP_WAIT_SECONDS,
+    restore_limit: int = R2_RESTORE_LIMIT_SECONDS,
 ) -> int:
-    """Write the stop-and-restore script and start it in a session of its own.
+    """Write the stop-and-restore script into its own directory and start it detached.
 
     A new session is a new process group with no controlling terminal: a signal the
     SSH server sends the command's group when its connection closes - which one, if
@@ -1270,20 +1356,26 @@ def start_r2(
     path: busybox's shell runs its built-in applets of those names before anything on
     `PATH`, so a stand-in found through `PATH` would not be the one that runs.
     """
+    if os.environ.get(TEST_GUARD) and not (_stand_in(init) and _stand_in(pidof)):
+        raise RuntimeError(
+            "refusing to run the system's own init or pidof under the test suite; "
+            "name stand-ins by absolute path"
+        )
     if service and not SERVICE_REF.fullmatch(service):
         raise ValueError("not a service reference that fits on one settings line")
-    for path in (script, status, log):
-        if path.is_symlink() or path.exists():
-            raise FileExistsError(path)
+    directory.mkdir(mode=0o700)
+    helper, script, status, log = r2_files(directory)
+    shutil.copyfile(Path(__file__).resolve(), helper)
     text = R2_SCRIPT.format(
         python=shlex.quote(python or sys.executable or "python3"),
-        helper=shlex.quote(str(Path(__file__).resolve())),
+        helper=shlex.quote(str(helper)),
         root=shlex.quote(str(root)),
         backup=shlex.quote(str(backup)),
         service=shlex.quote(service),
         provisioning="--provisioning" if provisioning else "''",
         status=shlex.quote(str(status)),
-        stop_wait=R2_STOP_WAIT_SECONDS,
+        stop_wait=int(stop_wait),
+        restore_limit=int(restore_limit),
         init=shlex.quote(init),
         pidof=shlex.quote(pidof),
     )
@@ -1342,9 +1434,10 @@ def main() -> int:
     parser.add_argument("--service", default="")
     parser.add_argument("--state", type=int, default=0)
     parser.add_argument("--webif", default=WEBIF_URL)
-    parser.add_argument("--status", type=Path)
-    parser.add_argument("--script", type=Path)
-    parser.add_argument("--log", type=Path)
+    # The stop-and-restore script's own directory, which it never shares.
+    parser.add_argument("--dir", type=Path)
+    parser.add_argument("--stop-wait", type=int, default=R2_STOP_WAIT_SECONDS)
+    parser.add_argument("--restore-limit", type=int, default=R2_RESTORE_LIMIT_SECONDS)
     parser.add_argument("--shell", default="/bin/sh")
     # The interpreter the stop-and-restore script runs this helper with; the one running
     # it now unless said otherwise.
@@ -1376,20 +1469,20 @@ def main() -> int:
         for name in prune_snapshots(args.path, keep_name=args.keep_name):
             print(f"pruned superseded installer snapshot {name}", file=sys.stderr)
     elif args.operation == "r2-start":
-        if args.status is None or args.script is None or args.log is None:
-            parser.error("r2-start needs --status, --script and --log")
+        if args.dir is None:
+            parser.error("r2-start needs --dir")
         pid = start_r2(
             args.root,
             args.path,
-            script=args.script,
-            status=args.status,
-            log=args.log,
+            directory=args.dir,
             service=args.service,
             provisioning=args.provisioning,
             shell=args.shell,
             python=args.python,
             init=args.init,
             pidof=args.pidof,
+            stop_wait=args.stop_wait,
+            restore_limit=args.restore_limit,
         )
         print(json.dumps({"pid": pid}))
     elif args.operation in ("snapshot", "restore", "withdraw"):

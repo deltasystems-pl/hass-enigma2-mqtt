@@ -357,9 +357,14 @@ def test_a_swap_that_would_cross_filesystems_is_refused_before_anything_moves(
     monkeypatch.setattr(installer_helper.os, "stat", split_stat)
 
     with pytest.raises(ValueError, match="different filesystems"):
-        restore(tmp_path, backup, restore_provisioning=False, restore_settings=False)
+        restore(tmp_path, backup, restore_provisioning=True, restore_settings=False)
 
+    # Nothing moved: not the plugin tree, and not opkg's records of it either, which
+    # would otherwise describe the old plugin under a tree that is still the new one.
     assert (tmp_path / f"{PLUGIN_DIR}/update.py").exists()
+    assert (tmp_path / f"usr/lib/opkg/info/{PACKAGE}.list").read_text() == "/new\n"
+    assert "Version: 0.3.0" in (tmp_path / "usr/lib/opkg/status").read_text()
+    assert (tmp_path / "etc/enigma2/mqttbridge.json").read_text() == '{"new":true}\n'
 
 
 def _age(lock: Path, seconds: float, monkeypatch: pytest.MonkeyPatch, module: Any) -> None:
@@ -489,3 +494,39 @@ def test_the_claim_says_what_it_reclaimed_on_its_output(
 def test_a_zap_that_openwebif_refuses_is_not_a_zap(tmp_path: Path, socket_enabled: None) -> None:
     assert zap(WATCHED, "http://127.0.0.1:9") is False
     assert zap("bad\nref", "http://127.0.0.1:9") is False
+
+
+def test_a_restore_removes_only_its_own_leftovers_beside_plugins(tmp_path: Path) -> None:
+    """Beside `Plugins` live enigma2's own `Components`, `Screens` and `Tools`.
+
+    A restore removes what an interrupted restore of the same snapshot left - the two
+    names made from its transaction id - and nothing else: not another transaction's,
+    not a name that merely looks like one, not enigma2's.
+    """
+    _receiver(tmp_path)
+    backup = tmp_path / "home/root/mqttbridge-backups/ha-installer-0123456789ab"
+    snapshot(tmp_path, backup)
+    _upgrade(tmp_path)
+    python = staging_parent(tmp_path)
+    keep = [
+        "Components",
+        "Screens",
+        "Tools",
+        "StartEnigma.pyc",
+        ".mqttbridge-staging-XYZ",
+        ".mqttbridge-aside-0123456789abc",
+        ".mqttbridge-staging-ffffffffffff",
+    ]
+    for name in keep:
+        (python / name).mkdir(parents=True, exist_ok=True)
+        (python / name / "f").write_text("x")
+    for name in (".mqttbridge-staging-0123456789ab", ".mqttbridge-aside-0123456789ab"):
+        (python / name).mkdir()
+        (python / name / "plugin.py").write_text("left behind\n")
+
+    restore(tmp_path, backup, restore_provisioning=False, restore_settings=False)
+
+    left = {path.name for path in python.iterdir()}
+    assert left == {*keep, "Plugins"}
+    assert all((python / name / "f").read_text() == "x" for name in keep)
+    assert (tmp_path / f"{PLUGIN_DIR}/plugin.py").read_text() == "old plugin\n"

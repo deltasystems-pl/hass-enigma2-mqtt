@@ -108,6 +108,9 @@ class FakeReceiver:
     # rule being wrong - starts on this one instead.
     start_channel: str | None = None
     zap_takes_effect: bool = True
+    # A restarted interface takes a while before OpenWebif answers: this many reads of
+    # the state after a restart find nothing.
+    blind_reads_after_restart: int = 0
     # A claim that reclaims an abandoned installer lock reports its id; the snapshot
     # named after it may or may not still be there.
     reclaimed_id: str = ""
@@ -116,6 +119,11 @@ class FakeReceiver:
     r2_steps: list[str] = field(default_factory=list)
     r2_restore_status: int = 0
     r2_init3_status: int = 0
+    # An enigma2 that does not go away when told to stop.
+    r2_stop_timeout: bool = False
+    # The stop-and-restore script's own directories, and which of them were removed.
+    r2_dirs: set[str] = field(default_factory=set)
+    r2_removed: list[str] = field(default_factory=list)
     withdrawn: bool = False
     # What is actually on the box, so a rollback can be checked by what it put back
     # rather than by which command was sent.
@@ -154,9 +162,14 @@ class FakeReceiver:
     def run_r2(self, command: str) -> None:
         """What the detached script does on the receiver: stop, restore, write, start."""
         self.r2_steps.append("begun 4242")
-        self.enigma_running = False
-        self.r2_steps += ["stopping 0", "stopped"]
-        self.restore_flags = ["--settings"] + (
+        self.r2_steps.append("stopping 0")
+        stopped = not self.r2_stop_timeout
+        if stopped:
+            self.enigma_running = False
+            self.r2_steps.append("stopped")
+        else:
+            self.r2_steps.append("stop_timeout")
+        self.restore_flags = (["--settings"] if stopped else []) + (
             ["--provisioning"] if "--provisioning" in command.split() else []
         )
         self.r2_steps.append(f"restored {self.r2_restore_status}")
@@ -164,17 +177,18 @@ class FakeReceiver:
             self.rolled_back = True
             self.files["plugin"] = "old"
             self.files["opkg"] = "old"
-            self.files["settings"] = "old"
+            if stopped:
+                self.files["settings"] = "old"
             if "--provisioning" in self.restore_flags:
                 self.files["provisioning"] = "old"
         words = command.split()
-        if "--service" in words:
+        if stopped and "--service" in words:
             self.saved_service = words[words.index("--service") + 1]
             self.r2_steps.append("written 0")
         else:
             self.r2_steps.append("not_written")
         self.r2_steps.append(f"started {self.r2_init3_status}")
-        if self.r2_init3_status == 0:
+        if stopped and self.r2_init3_status == 0:
             self.start_interface("stopped")
         self.r2_steps.append("done")
 
@@ -250,6 +264,9 @@ class FakeSession:
             return CommandResult(0, json.dumps({"timers": receiver.timers}))
         if command.endswith(" record"):
             answering = receiver.webif_ok and receiver.enigma_running
+            if receiver.restarts and receiver.blind_reads_after_restart:
+                receiver.blind_reads_after_restart -= 1
+                answering = False
             return CommandResult(
                 0,
                 json.dumps(
@@ -310,10 +327,16 @@ class FakeSession:
             if "--settings" in receiver.restore_flags:
                 receiver.files["settings"] = "old"
         if " r2-start " in command:
+            words = command.split()
+            receiver.r2_dirs.add(words[words.index("--dir") + 1])
             receiver.run_r2(command)
             return CommandResult(0, '{"pid": 4242}\n')
-        if command.startswith("cat ") and command.endswith(".status"):
+        if command.startswith("cat ") and command.endswith("/status"):
+            if command.split()[1].rsplit("/", 1)[0] not in receiver.r2_dirs:
+                return CommandResult(1, "", "cat: can't open: No such file or directory")
             return CommandResult(0, "".join(line + "\n" for line in receiver.r2_steps))
+        if command.startswith("rm -rf /tmp/enigma2-mqtt-r2-"):
+            receiver.r2_removed.append(command.split()[2])
         if "rm -f /tmp/enigma2-mqtt-installer-" in command or (
             command.startswith("rm -f ") and "/tmp/enigma2-mqtt-installer-" in command
         ):

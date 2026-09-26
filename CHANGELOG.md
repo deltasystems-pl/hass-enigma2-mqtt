@@ -27,8 +27,14 @@ it, and taken out again if that fails.
   withdraws the update: the previous plugin's files and package records go back without
   stopping anything, the plugin's settings are left alone, and the update card says so in
   words. The question may stay on the television; answering either way is safe. If somebody
-  answers it while the files go back, the receiver has restarted, and the install is judged
-  like any other restart instead.
+  answers it while the files go back, the receiver has restarted, and it is put back as it
+  was by the rollback below rather than left on a plugin whose files have just been replaced.
+- **Once the restart has been asked for, nothing the installer cannot see makes it stop the
+  interface.** A connection that drops while it waits for the restart, or while it puts the
+  files back, is connected again and the receiver read again. If the receiver cannot be
+  reached at all, or Home Assistant stops, nothing is undone: the new files stay, the
+  installer's lock stays on the receiver with the transaction's id, and the next install -
+  once the lock is thirty minutes old - puts the previous version back first.
 - **After every restart the installer checks the channel.** It compares the channel and the
   standby state with what they were before, zaps back once if the image started on another
   channel - never over a channel somebody picked after the start - and puts the channel-list
@@ -36,10 +42,17 @@ it, and taken out again if that fails.
   written to the log in one line: restart, channel, bouquet and standby.
 - **A rollback that has to put the plugin's settings back runs as one script on the
   receiver**: it records the channel, stops the interface, restores, writes the recorded channel
-  into the settings and starts the interface again. The script is started detached and
-  followed through a status file, so a dropped SSH connection or a Home Assistant restart
-  cannot leave the receiver stopped; an interruption on the receiver still waits for the
-  restore and starts the interface.
+  into the settings and starts the interface again. The script is started detached from a
+  directory of its own, with its own copy of the installer's helper, and followed through a
+  status file; the installer keeps its lock and the script's files until it has seen the
+  interface started again. A dropped SSH connection or a Home Assistant restart therefore cannot
+  leave the receiver stopped or half restored; an interruption on the receiver still waits for
+  the restore and starts the interface. The restore inside it is limited to 90 seconds, so the
+  picture comes back even from one that hangs, and when the interface does not stop within 30
+  seconds only the plugin's files are put back - its settings belong to the running interface,
+  which writes them out again when it quits.
+- **The channel is checked after the install has been committed**, so losing the connection
+  while the channel is checked can no longer undo an install that proved itself.
 - **Installs and updates are refused while the receiver is in standby or streaming**, before
   anything is changed. A restart would wake a receiver in standby - and, with HDMI-CEC on, the
   television - and cut a stream off. The credential check on the options screen restarts
@@ -55,8 +68,9 @@ it, and taken out again if that fails.
   for the first time in that window is the new version's. With `init 4` that window was a few
   seconds.
 - A rollback's stop-and-restore cannot survive a `SIGKILL` or a power cut between the stop and
-  the start. Power reboots the receiver; a killed script leaves it stopped, and the transaction
-  lock stays for up to 30 minutes.
+  the start. Power reboots the receiver. A killed script leaves the receiver without a picture
+  until somebody switches it off and on again: nothing on the receiver starts the interface by
+  itself, and the next install cannot help, because it needs the interface running.
 
 ### Documentation
 

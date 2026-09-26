@@ -110,6 +110,8 @@ _UPDATE_SENTENCES: dict[InstallerErrorCode, str] = {
     InstallerErrorCode.RESTART_WITHDRAWN: "update_withdrawn",
     InstallerErrorCode.STANDBY: "update_standby",
     InstallerErrorCode.STREAMING: "update_streaming",
+    InstallerErrorCode.RESTART_UNOBSERVED: "update_restart_unobserved",
+    InstallerErrorCode.ROLLBACK_UNOBSERVED: "update_rollback_unobserved",
 }
 
 

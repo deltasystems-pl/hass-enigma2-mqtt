@@ -125,7 +125,7 @@ async def async_read_state(
     """Ask the receiver what it is playing and whether it is in standby."""
     try:
         result = await session.run(f"python3 {shlex.quote(helper)} record", timeout=30)
-    except (OSError, TimeoutError):
+    except Exception:  # noqa: BLE001 - a lost connection is an unanswered question here
         return None, None
     if getattr(result, "exit_status", 1):
         return None, None
@@ -305,10 +305,14 @@ async def async_record(
     base_topic: str,
     node_id: str,
 ) -> RestartRecord:
-    """Take the record R3 compares against, just before a restart."""
-    service, standby = await async_read_state(session, helper)
+    """Take the record R3 compares against, just before a restart.
+
+    The channel is read last. The bouquet's retained topics take a moment to replay, and
+    a channel somebody picks in that moment is the one the clean quit then saves - R3
+    would see it differ from an earlier reading and zap back over the household's choice.
+    """
     bouquet = None
-    holds = False
+    retained: dict[str, Any] = {}
     try:
         retained = await _async_retained(
             hass,
@@ -319,14 +323,12 @@ async def async_record(
             BOUQUET_REPLAY_SECONDS,
         )
         bouquet = _bouquet_sref(retained.get(state_topic(base_topic, node_id, TOPIC_BOUQUET)))
-        if bouquet is not None:
-            holds = _bouquet_holds(
-                retained.get(state_topic(base_topic, node_id, TOPIC_CHANNELS)),
-                bouquet,
-                service,
-            )
     except Exception:  # noqa: BLE001 - a record without a bouquet is still a record
         _LOGGER.debug("The receiver's bouquet could not be recorded", exc_info=True)
+    service, standby = await async_read_state(session, helper)
+    holds = bouquet is not None and _bouquet_holds(
+        retained.get(state_topic(base_topic, node_id, TOPIC_CHANNELS)), bouquet, service
+    )
     return RestartRecord(service, standby, bouquet, holds)
 
 
