@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Build a reproducible plugin IPK and corresponding source bundle from one commit."""
+"""Build a reproducible plugin IPK and corresponding source bundle from one commit.
+
+The package is built by the plugin's own `tools/build-ipk.sh`, from a `git archive` of the
+commit, with the commit, its time and the flavour passed in: that build has no `.git` to read
+them from, and a package built without them is a `development` build with an empty commit - not
+the bytes the plugin's release published. With them, a bundle of a release tag is byte-identical
+to the release asset, which CI checks by rebuilding every bundled byte.
+"""
 
 from __future__ import annotations
 
@@ -49,6 +56,39 @@ def version_from(path: Path) -> str:
         ):
             return value
     raise SystemExit("plugin version is missing or is not a string literal")
+
+
+def flavour_for(plugin: Path, commit: str, version: str) -> str:
+    """`release` when the commit carries the tag `v<version>`, `development` otherwise.
+
+    The plugin's builder records the flavour in the package's build id, and it cannot check it
+    here: it builds from a `git archive` extraction with no `.git`, so it takes the flavour
+    and the commit from whoever builds it. This builder has the checkout, so it answers
+    truthfully - a bundle of a release is a `release` build, byte for byte the package the
+    plugin's release workflow published; a bundle of any other commit (a candidate) is a
+    `development` build and says so.
+    """
+    tags = run("git", "tag", "--points-at", commit, cwd=plugin).split()
+    return "release" if f"v{version}" in tags else "development"
+
+
+def build_environment(commit: str, epoch: str, flavour: str) -> dict[str, str]:
+    """The environment the plugin's `build-ipk.sh` runs in: the build id, and nothing else.
+
+    Commit, time and flavour are what make the package byte-identical to the plugin's own
+    build of the same commit. A test origin or test keys are for acceptance builds only, which
+    this builder never makes, so any found in the caller's environment are dropped rather
+    than passed on.
+    """
+    environment = {
+        **os.environ,
+        "SOURCE_DATE_EPOCH": epoch,
+        "MQTTBRIDGE_BUILD_COMMIT": commit,
+        "MQTTBRIDGE_BUILD_FLAVOUR": flavour,
+    }
+    for name in ("MQTTBRIDGE_BUILD_ORIGIN", "MQTTBRIDGE_BUILD_INDEX_KEYS"):
+        environment.pop(name, None)
+    return environment
 
 
 def replace_bundle(staged: Path, destination: Path) -> None:
@@ -107,14 +147,14 @@ def main() -> None:
             )
         with tarfile.open(archive) as source:
             source.extractall(exported, filter="data")
-        environment = {**os.environ, "SOURCE_DATE_EPOCH": epoch}
+        version = version_from(exported / "src/MQTTBridge/version.py")
+        flavour = flavour_for(plugin, commit, version)
         subprocess.run(
             ["bash", "tools/build-ipk.sh", "--allow-unreleased"],
             cwd=exported,
-            env=environment,
+            env=build_environment(commit, epoch, flavour),
             check=True,
         )
-        version = version_from(exported / "src/MQTTBridge/version.py")
         built = exported / f"dist/{PACKAGE}_{version}_all.ipk"
         if not built.is_file():
             raise SystemExit("plugin build produced no IPK")
@@ -161,7 +201,7 @@ def main() -> None:
             json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
         replace_bundle(staged, destination)
-        print(f"plugin bundle: version={version} commit={commit} files=3")
+        print(f"plugin bundle: version={version} commit={commit} flavour={flavour} files=3")
 
 
 if __name__ == "__main__":

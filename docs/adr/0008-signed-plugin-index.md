@@ -1,6 +1,10 @@
 # ADR-0008: Plugin versions come from the plugin's signed release index; the update card installs through the receiver when it may and over SSH when it must; older versions only through a confirmed SSH step
 
-**Status:** proposed - accepted with the first code that implements it
+**Status:** accepted 2026-09-26, with the first code that implements it: the signed index
+reader, the compatibility rule, the build ids, the two new entities and the no-badge rule
+(§1-§3), the integration topic and the two messages at removal (§2, §10). The install paths of
+§4-§6 and §8-§9 are built in later changes; until each ships, the released integration behaves
+as the records it supersedes describe
 **Date:** 2026-09-26
 **Supersedes:** in part, once accepted - [ADR-0002](0002-scope-after-m0.md) §6, "There is no
 runtime download path for executable code, and there is no release check that phones home" (its
@@ -10,9 +14,9 @@ broker" and its supply-chain bullet, and §6.3's `update` row, whose latest vers
 the installed and the bundled one; [ADR-0004](0004-remote-uninstall.md)
 §4's "does nothing else" and [ADR-0006](0006-remote-uninstall-plugin-acts-ssh-verifies.md) §5's
 "one publish" - removing an entry publishes two messages; and the "No telemetry" and "Supply chain"
-paragraphs of [SECURITY.md](../../SECURITY.md). Until this record is accepted, each of them
-describes every released integration exactly; each carries a marker saying where it will stop doing
-so, and SECURITY.md's policy is rewritten when the first release that implements this record ships.
+paragraphs of [SECURITY.md](../../SECURITY.md). Each of them describes every released integration
+exactly until the first release that implements this record ships; each carries a marker saying
+where it stops doing so, and SECURITY.md's policy is rewritten in that release.
 
 The receiver's half is [ADR-0015](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0015-signed-self-update.md)
 in the plugin repository. Three documents there are shared ground and are not repeated here: the
@@ -80,8 +84,9 @@ the existing option, and manual checks share a ten-minute limit. **Both limits l
 Assistant's storage**, not in the entity: one verified index cache for all receivers - the index, its
 signature, its serial, its ETag and when it was fetched - which the daily stamp and the ten-minute
 limit are judged from. A limit kept in the entity is reset by every reload, options save and restart,
-which is why the release check's store exists today; the index cache takes its place, and the
-per-receiver records of the old release check are dropped when the store migrates. GitHub's API is
+which is why the release check's store exists today; the index cache takes its place
+(`.storage/enigma2_mqtt.release_index`), and the per-receiver records of the old release check
+(`.storage/enigma2_mqtt.release_check`) are removed the first time it loads. GitHub's API is
 used only for one digest cross-check per install - a mismatch refuses, an unreachable API is noted
 and does not - and its answer is kept per version for a day.
 
@@ -104,7 +109,11 @@ is. A plugin that publishes no `info.contract` is contract 0 below 0.2.0 and con
 0.3.x. The major and the floor are declared in `const.py` - the manifest cannot carry them - and
 published, retained, on `enigma2mqtt/integration/<node_id>` so a receiver applies the same rule;
 `SUPPORTED_PLUGIN_VERSION` stays what it is, the version shown when no bundle loads. The rule is tested
-against the plugin's own vectors, read from the bundled source archive.
+against the plugin's own vectors: a byte-identical copy of the plugin's
+`tests/vectors/release-index.json`, pinned to the plugin commit `tests/vectors/SOURCE.json` names
+and compared with the plugin repository in CI together with the embedded keys and the list of
+named exceptions (`tools/check-plugin-shared.py`) - the bundled source archive is a release's, and
+0.3.0's predates the vectors.
 
 ### 3. The card offers what it will install, and only when it can
 

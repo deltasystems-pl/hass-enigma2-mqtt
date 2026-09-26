@@ -1,6 +1,6 @@
 # ADR-0002: Scope added and changed after M0
 
-**Status:** accepted; §6 superseded in part by [ADR-0008](0008-signed-plugin-index.md) (proposed)
+**Status:** accepted; §6 superseded in part by [ADR-0008](0008-signed-plugin-index.md) (accepted)
 **Date:** 2026-09-21
 
 ## Context
@@ -123,7 +123,7 @@ There is **no runtime download path for executable code**, and there is no relea
 phones home. An integration that installs software on a device the user cannot easily inspect
 should be inspectable itself; „it works" is not the standard.
 
-> **Superseded in part by [ADR-0008](0008-signed-plugin-index.md) (proposed, 2026-09-26):** the
+> **Superseded in part by [ADR-0008](0008-signed-plugin-index.md) (accepted 2026-09-26):** the
 > bundle stays, CI still rebuilds it byte for byte, and it is still the only thing the forced
 > reinstall installs. What ADR-0008 changes is the first sentence above: the integration is to
 > download a plugin package at runtime - from the plugin's fixed origin only, only a version its

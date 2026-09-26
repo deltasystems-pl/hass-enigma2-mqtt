@@ -10,6 +10,8 @@ import re
 import tarfile
 from typing import Any
 
+from .buildid import BuildInfoError, package_build
+
 _BUNDLE_DIR = Path(__file__).with_name("bundled")
 _METADATA = _BUNDLE_DIR / "metadata.json"
 _METADATA_LIMIT = 16 * 1024
@@ -41,12 +43,19 @@ class BundleError(RuntimeError):
 
 @dataclass(frozen=True)
 class BundledPlugin:
-    """A validated receiver package ready for the installer to re-read."""
+    """A validated receiver package ready for the installer to re-read.
+
+    `build` is the build id the package carries in its `buildinfo.py` - commit, time, dirty,
+    flavour - or None for a plugin from before build ids (0.3.x and older). It is read out of
+    the package rather than recorded beside it, because the package is what gets installed and
+    what the receiver will report.
+    """
 
     path: Path
     version: str
     sha256: str
     source_commit: str
+    build: dict[str, Any] | None = None
 
 
 def _fail() -> BundleError:
@@ -164,4 +173,20 @@ def load_bundled_plugin() -> BundledPlugin:
     if _digest(package, _IPK_LIMIT) != sha256 or _digest(source, _SOURCE_LIMIT) != source_sha256:
         raise _fail()
     _validate_source_archive(source, source_commit)
-    return BundledPlugin(package, version, sha256, source_commit)
+    build = _package_build(package, source_commit)
+    return BundledPlugin(package, version, sha256, source_commit, build)
+
+
+def _package_build(package: Path, source_commit: str) -> dict[str, Any] | None:
+    """The package's own build id, which must name the commit its source archive is.
+
+    A package that says it was built from another commit than the source shipped beside it is
+    not the bundle this metadata describes, whatever its checksum says.
+    """
+    try:
+        build = package_build(package.read_bytes())
+    except (OSError, BuildInfoError) as error:
+        raise _fail() from error
+    if build is not None and build["commit"] and build["commit"] != source_commit:
+        raise _fail()
+    return build

@@ -1477,11 +1477,14 @@ async def test_deleting_the_entry_never_uninstalls(
     permission: bool,
     online: bool,
 ) -> None:
-    """🔴 The whole of what deleting an entry sends is one `cmd/ha_mode = discovery`.
+    """🔴 The whole of what deleting an entry sends is two messages, and neither uninstalls.
 
     Deleting a configuration entry is a decision about Home Assistant, reached from a page
     people delete things on by accident. Uninstalling is always a separate, named,
     confirmed act (ADR-0004), whatever the entry holds and whatever the receiver permits.
+    What it sends is the retraction of `enigma2mqtt/integration/<node_id>` - this
+    integration no longer speaks for the receiver - and `cmd/ha_mode = discovery`
+    (ADR-0008 §10, which replaced ADR-0006 §5's single publish).
     """
     info = PERMITTED_INFO if permission else {**PERMITTED_INFO, "settings": {}}
     box_on_the_broker[INFO_TOPIC] = json.dumps(info)
@@ -1514,7 +1517,10 @@ async def test_deleting_the_entry_never_uninstalls(
         await hass.async_block_till_done()
 
     assert mqtt_mock.async_publish.call_args_list == [
-        call(HA_MODE_TOPIC, "discovery", 1, False, message_expiry_interval=None)
+        call(
+            f"enigma2mqtt/integration/{NODE_ID}", "", 1, True, message_expiry_interval=None
+        ),
+        call(HA_MODE_TOPIC, "discovery", 1, False, message_expiry_interval=None),
     ]
     assert attempts == []
 

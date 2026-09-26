@@ -932,6 +932,12 @@ EPG_IMPORT_ENTITY_IDS = {
     "button.dekoder_salon_import_epg",
     "sensor.dekoder_salon_epg_import",
 }
+# The signed release index (ADR-0008): the check button, and the version select, which is
+# registered disabled.
+RELEASE_INDEX_ENTITY_IDS = {
+    "button.dekoder_salon_check_for_plugin_updates",
+    "select.dekoder_salon_plugin_version_to_install",
+}
 
 EVERYTHING_ON = {
     "deep_standby_allowed": True,
@@ -1023,4 +1029,5 @@ async def test_no_entity_id_this_integration_already_had_changes(
         *PROCESS_ENTITY_IDS,
         *EPG_ENTITY_IDS,
         *EPG_IMPORT_ENTITY_IDS,
+        *RELEASE_INDEX_ENTITY_IDS,
     }

@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The plugin's signed release index** ([ADR-0008](docs/adr/0008-signed-plugin-index.md), now
+  accepted). Home Assistant reads the list of plugin versions the plugin repository publishes -
+  `releases.json` and its Ed25519 signature, from the plugin's fixed HTTPS origin, with a verified
+  TLS context and no redirects - and accepts it only when a key built into this integration signed
+  it and its serial rises by the rule the receiver applies too: at most 1000 per step, per key, and
+  never a key of lower rank after a higher one. The rule is tested against the plugin's own shared
+  vectors, a byte-identical copy that CI compares with the plugin repository. One index serves
+  every receiver; it is kept in `.storage/enigma2_mqtt.release_index` with its ETag and the record
+  of accepted serials, so a reload or a restart asks nothing again.
+- **Every newly accepted index is announced**: a warning in the log and a persistent notification
+  with its serial, its key, the versions it adds and withdraws, and its floor. The index is signed
+  in the plugin repository's CI, so one nobody expected has to be visible, not only installed.
+- The accepted index is published, retained, on `enigma2mqtt/release_index`, so a receiver with
+  no internet of its own can verify and use it.
+- **„Sprawdź aktualizacje wtyczki"** (*Check for plugin updates*), a diagnostic button that asks
+  for the index now - pressing it is consent to ask, with the daily check on or off - at most once
+  in ten minutes, shared with Home Assistant's own "Check for updates". Inside the ten minutes it
+  says when the list was read and when it can be read again.
+- **„Wersja wtyczki do instalacji"** (*Plugin version to install*), a diagnostic select, disabled
+  by default: „Najnowsza zgodna" (`latest`) or a version the card can install above the one
+  running. The choice is stored in the entry's options and counts only while the select is
+  enabled. Today the card installs only the bundled plugin, so that is the only version listed.
+- The update entity's attributes `available_versions` (not recorded), `last_check`,
+  `check_error`, `index_serial`, `index_age` and `update_path`.
+- The retained topic `enigma2mqtt/integration/<node_id>` - this integration's version, the
+  contract major (1) and the lowest plugin version it supports (0.2.0) - published on every
+  setup, for the receiver to apply the same compatibility rule.
+- Compatibility is the plugin's contract major, with no upper bound inside it: a release is listed
+  as offerable when its contract is 1, it is at or above 0.2.0 and the index's floor, this
+  integration meets its `min_integration`, and it is not withdrawn. The four named in-major
+  exceptions of contract 1 are listed in `const.py`, and CI compares the list with the plugin's
+  `contract.json`.
+
 ### Changed
 
 The SSH installer's restarts follow the restart rule of the plugin's
@@ -67,6 +102,34 @@ it, and taken out again if that fails.
   without releasing its lock is put back from its own snapshot, found by that name rather than
   by a file time, before the next install starts.
 
+The version card and the release check:
+
+- **Behaviour change: no update badge without an install path.** A receiver behind the bundled
+  plugin with no SSH credentials stored used to show an update that the card could not install.
+  `latest_version` is now the installed version whenever the card has no way to install, so the
+  entity reads "up to date", and the summary still names the bundled version and how to get an
+  install path. With credentials nothing changes.
+- **Plugin versions are shown with their build.** A development build of 0.3.0 now reads
+  `0.3.0+g1a2b3c4` (`.dirty` when its tree was not clean), from the build id the plugin publishes
+  on `info.build` after 0.3.0, and is never "current" against the release of its own number: the
+  card offers the release back. Two builds of the same version are ordered by commit time, so a
+  candidate bundle is offered over the release it replaces. Plugins up to 0.3.x report no build id
+  and are shown as before.
+- The option „Sprawdzaj opublikowane wydania wtyczki" is now „Sprawdzaj raz dziennie dostępne
+  wersje wtyczki" (*Check daily for available plugin versions*), and checks the signed index
+  instead of GitHub's latest release. The previous check's per-receiver records in
+  `.storage/enigma2_mqtt.release_check` are removed.
+- **Removing an entry publishes two messages**: the retraction of
+  `enigma2mqtt/integration/<node_id>`, then `cmd/ha_mode = discovery` as before (ADR-0008 §10,
+  superseding ADR-0006 §5's single publish). Still no SSH, and nothing is removed from the
+  receiver.
+- The bundle builder passes the bundled commit and its flavour - `release` for a commit carrying
+  its release tag, `development` otherwise - to the plugin's `build-ipk.sh`, which records them in
+  the package's build id. A bundle of a release is therefore byte-identical to the release asset
+  once the plugin carries build ids; CI's rebuild of every bundled byte checks it, with the plugin's
+  tags fetched. The bundled plugin's build id is read out of the package, and a package that names
+  another commit than its source archive is refused.
+
 ### Known limits
 
 - For as long as the receiver's question stays unanswered - at most 60 seconds, then the
@@ -100,7 +163,7 @@ it, and taken out again if that fails.
   badge, which changes 0.3.1's behaviour for a receiver behind the bundle without SSH credentials.
   It records two known defects to fix before the plugin adds such values: an unknown `oscam` reader
   `kind` discards the whole `oscam` payload, and an unknown `key` `press` is read as a short press.
-  Nothing is built yet.
+  Accepted since, with the first code that implements it - see Added and Changed above.
 - ADR-0000 §6.3's `update` row and §7, ADR-0002 §6, ADR-0004 §4, ADR-0006 §5 and SECURITY.md's
   "No telemetry" and "Supply chain" paragraphs are marked as superseded in part by ADR-0008
   (proposed). Each still describes every released integration exactly; SECURITY.md's policy is

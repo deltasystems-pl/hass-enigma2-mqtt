@@ -11,6 +11,7 @@ this list is long - there is no core MQTT integration filling in the gaps.
 
 from __future__ import annotations
 
+import json
 import logging
 
 from homeassistant.components import mqtt
@@ -19,6 +20,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.loader import async_get_integration
 
 from .box import Enigma2Box, Enigma2MqttConfigEntry, command_topic, normalise_mac
 from .const import (
@@ -28,8 +30,10 @@ from .const import (
     DEFAULT_BASE_TOPIC,
     DOMAIN,
     HA_MODE_DISCOVERY,
+    PLUGIN_CONTRACT,
+    PLUGIN_MIN_VERSION,
+    TOPIC_INTEGRATION_PREFIX,
 )
-from .release_store import async_release_check_store
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -113,7 +117,41 @@ async def async_setup_entry(
     await box.async_start()
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    await _async_publish_integration(hass, entry)
     return True
+
+
+def integration_topic(node_id: str) -> str:
+    """The retained topic that tells one receiver which integration manages it."""
+    return f"{TOPIC_INTEGRATION_PREFIX}/{node_id}"
+
+
+async def _async_publish_integration(
+    hass: HomeAssistant, entry: Enigma2MqttConfigEntry
+) -> None:
+    """Tell the receiver which plugin releases this integration can work with.
+
+    Retained, so a receiver that connects later - or restarts - reads it at once, and on every
+    setup, so the version in it follows an upgrade of this integration. The plugin applies
+    the same compatibility rule to its own update check with it: the contract major, and the
+    lowest plugin version this integration supports. Best effort: a receiver without it falls
+    back to its own major and the index's floor, which is only less precise.
+    """
+    integration = await async_get_integration(hass, DOMAIN)
+    payload = json.dumps(
+        {
+            "integration": str(integration.version) if integration.version else None,
+            "contract": PLUGIN_CONTRACT,
+            "plugin_min": PLUGIN_MIN_VERSION,
+        },
+        separators=(",", ":"),
+    )
+    try:
+        await mqtt.async_publish(
+            hass, integration_topic(entry.data[CONF_NODE_ID]), payload, qos=1, retain=True
+        )
+    except HomeAssistantError as error:
+        _LOGGER.debug("Could not publish the integration topic: %s", error)
 
 
 async def async_unload_entry(
@@ -128,7 +166,7 @@ async def async_unload_entry(
 async def async_remove_entry(
     hass: HomeAssistant, entry: Enigma2MqttConfigEntry
 ) -> None:
-    """Hand a removed box back to MQTT discovery.
+    """Hand a removed box back to MQTT discovery - two messages, and nothing else.
 
     Adding a box switches its plugin into `integration` mode, which makes the plugin
     retract the discovery payloads the core MQTT integration builds entities from.
@@ -137,12 +175,12 @@ async def async_remove_entry(
     This is best effort on purpose: the box may be off, the broker may be gone, and
     neither is a reason to refuse to remove a config entry.
 
-    The release check's stored stamp goes with it. It is keyed by entry id, and Home
-    Assistant does not reuse one, so a record left behind is a row nothing will ever
-    read again - and, if the same receiver is added back, a stamp from its previous life
-    deciding whether its new one may ask a question.
+    The first message retracts `enigma2mqtt/integration/<node_id>`: the receiver is no
+    longer managed by this integration, so nothing may narrow its choice of plugin
+    releases in this integration's name (ADR-0008 §10, which supersedes "one publish").
+    The retained `enigma2mqtt/release_index` stays - a signed index is harmless to
+    anybody who reads it, and it is not this receiver's.
     """
-    await async_release_check_store(hass).async_remove(entry.entry_id)
     try:
         if not await mqtt.async_wait_for_mqtt_client(hass):
             _LOGGER.debug(
@@ -150,6 +188,9 @@ async def async_remove_entry(
                 entry.data[CONF_NODE_ID],
             )
             return
+        await mqtt.async_publish(
+            hass, integration_topic(entry.data[CONF_NODE_ID]), "", qos=1, retain=True
+        )
         await mqtt.async_publish(
             hass,
             command_topic(
@@ -163,7 +204,8 @@ async def async_remove_entry(
         )
     except (HomeAssistantError, KeyError):
         _LOGGER.warning(
-            "Could not switch %s back to discovery mode; do it on the receiver's "
-            "setup screen if you want its MQTT discovery entities back",
+            "Could not tell %s that it was removed, nor switch it back to discovery "
+            "mode; do it on the receiver's setup screen if you want its MQTT discovery "
+            "entities back",
             entry.data.get(CONF_NODE_ID),
         )
