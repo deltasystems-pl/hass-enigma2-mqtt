@@ -100,6 +100,7 @@ from .const import (
     TOPIC_POWER,
     TOPIC_PROCESS,
     TOPIC_RECORDING,
+    TOPIC_RELAY_REQUEST,
     TOPIC_SCREEN,
     TOPIC_SERVICE,
     TOPIC_SOFTCAM,
@@ -695,6 +696,8 @@ class Enigma2Box:
         # Hidden bouquet names already reported as missing from `channels`, for the same
         # reason: the filter runs on every payload of three topics.
         self._hidden_missing_warned: set[str] = set()
+        # Who answers the receiver's `relay_request`: set when the entry is set up.
+        self.relay_request_handler: Callable[[Any], None] | None = None
 
     # ------------------------------------------------------------------ properties
 
@@ -1310,8 +1313,21 @@ class Enigma2Box:
             self._key_received(msg)
         elif suffix == TOPIC_LAST_ERROR:
             self._last_error_received(msg)
+        elif suffix == TOPIC_RELAY_REQUEST:
+            self._relay_request_received(msg)
         else:
             _LOGGER.debug("Ignoring unknown topic %s", msg.topic)
+
+    @callback
+    def _relay_request_received(self, msg: ReceiveMessage) -> None:
+        """Hand a receiver's request for a package to the relay - unless it is retained.
+
+        An event, never retained: a retained request is somebody's leftover, and answering it
+        at every reconnect would issue an address nobody is waiting for.
+        """
+        if msg.retain or self.relay_request_handler is None:
+            return
+        self.relay_request_handler(msg.payload)
 
     @callback
     def _availability_received(self, msg: ReceiveMessage) -> None:

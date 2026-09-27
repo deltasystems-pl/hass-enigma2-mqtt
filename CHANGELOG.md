@@ -42,6 +42,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   own digest of the release asset is compared with the signed checksum: a disagreement refuses, an
   API that cannot be reached is noted in the log and does not. The card never installs an older
   version than the one running.
+- **The relay for a receiver without internet.** When a receiver installs a release from its own
+  screen and cannot reach the plugin's origin, it publishes `relay_request`; Home Assistant answers
+  on `cmd/relay` with an address on itself - `/api/enigma2_mqtt/relay/<token>` - from which that
+  receiver alone may download the package, verified by Home Assistant first and by the receiver
+  again. No authentication, so the grant is bound instead: a 43-character random token, the
+  receiver's IPv4 address from `info.ip` (any other address gets `404` and a warning; a receiver
+  without an IPv4 address gets no answer), ten minutes, fetchable repeatedly until then. One grant
+  per receiver and version, at most three per receiver, and a grant being sent is never evicted
+  or replaced. A request is judged against the held index first; asking again for a version whose
+  grant is live gets the same address without a download; a new download at most once a minute
+  per receiver; never a retained request. The address is Home Assistant's own on the receiver's
+  subnet, else its internal URL - never the external one - and only in the shape the receiver
+  accepts: no IPv6 address, no user name and password. Requests are answered only for versions
+  this integration would install itself. A refusal after a request was accepted is said in a
+  notification, and so is an answer offered and not downloaded within ten minutes; repeatable
+  warnings are logged once per receiver in ten minutes. The response carries its own headers (no
+  server banner). The binding is as strong as Home Assistant's `trusted_proxies`, and a broker
+  client cycling eligible versions can take a receiver's once-a-minute download
+  (DOCUMENTATION.md).
 - **The SSH installer checks a release's `depends`** - every package the signed entry names -
   with `opkg status` before it takes the lock or a snapshot, and refuses naming every missing
   package. `opkg status` never takes opkg's lock; it sees only a package of that exact name, so a

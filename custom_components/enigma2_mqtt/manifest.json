@@ -1,7 +1,7 @@
 {
   "domain": "enigma2_mqtt",
   "name": "Enigma2 MQTT",
-  "after_dependencies": ["wake_on_lan"],
+  "after_dependencies": ["http", "network", "wake_on_lan"],
   "codeowners": ["@deltasystems-pl"],
   "config_flow": true,
   "dependencies": ["mqtt"],

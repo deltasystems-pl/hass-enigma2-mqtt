@@ -571,6 +571,8 @@ SIGNAL_RELEASE_INDEX: Final = f"{DOMAIN}_release_index"
 # its own can verify and use it - it is signed, so it is harmless to anybody who reads it,
 # and it is never retracted.
 TOPIC_INTEGRATION_PREFIX: Final = "enigma2mqtt/integration"
+# A receiver without internet asking this Home Assistant for a package (not retained).
+TOPIC_RELAY_REQUEST: Final = "relay_request"
 TOPIC_RELEASE_INDEX: Final = "enigma2mqtt/release_index"
 
 # The plugin version the household chose in „Wersja wtyczki do instalacji", stored in the

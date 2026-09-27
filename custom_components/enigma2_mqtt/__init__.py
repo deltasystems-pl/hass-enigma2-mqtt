@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any
 
 from homeassistant.components import mqtt
 from homeassistant.const import Platform
@@ -34,6 +35,7 @@ from .const import (
     PLUGIN_MIN_VERSION,
     TOPIC_INTEGRATION_PREFIX,
 )
+from .relay import async_answer_relay_request, async_get_relay
 from .release_store import async_release_index_cache
 
 _LOGGER = logging.getLogger(__name__)
@@ -119,6 +121,22 @@ async def async_setup_entry(
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await _async_publish_integration(hass, entry)
+
+    # A receiver without internet asks for a package on `relay_request`; the answer is an
+    # address on this Home Assistant, bound to that receiver, which goes with the entry.
+    @callback
+    def _relay_request(payload: Any) -> None:
+        # A background task of the entry: unloading the entry cancels it (Home Assistant waits
+        # up to ten seconds for an entry's ordinary tasks and cancels only its background
+        # ones), and the answer asks after every wait whether the entry is still loaded.
+        entry.async_create_background_task(
+            hass,
+            async_answer_relay_request(hass, entry, box, payload),
+            f"{DOMAIN} relay_request {entry.entry_id}",
+        )
+
+    box.relay_request_handler = _relay_request
+    entry.async_on_unload(lambda: async_get_relay(hass).drop_node(box.node_id))
 
     # The retained release index, repaired from the verified copy this Home Assistant holds -
     # once for every receiver, when the first is set up and whenever the broker connection
