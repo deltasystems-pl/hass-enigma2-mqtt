@@ -8,7 +8,8 @@ same functions against a temporary root.
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
+from collections.abc import Callable
+from contextlib import contextmanager, suppress
 import errno
 import fcntl
 import glob
@@ -1199,28 +1200,54 @@ def power_state(state: int, base: str = WEBIF_URL) -> bool:
 #   (`/tmp/enigma2-mqtt-r2-<id>/`) holding its own copy of this helper, its status and
 #   its output; the installer removes that directory only after it has seen the script
 #   start the interface again, and keeps the transaction lock until then.
-# - The trap is set before `init 4`, on EXIT HUP INT TERM PIPE. Without PIPE a shell
-#   whose output reader went away dies on its next write and never runs the trap. The
-#   trap first ignores further signals, so a second one cannot cut off the first.
-# - The trap waits for a restore that is still running. A signal to the shell alone
-#   runs the trap at once, while the restore child is still working; starting the
-#   interface or writing the channel under it would let the restore rename the
-#   settings file over the channel.
-# - The restore is bounded. A watchdog ends it after its limit, so the picture comes
-#   back even from a restore that hangs; a restore cut off part-way is repeated by the
-#   next install's recovery, which is safe, while a missing picture is not.
+# - The trap is set before `init 4`, on HUP INT TERM PIPE, and all it does is note the
+#   signal. Without PIPE a shell whose output reader went away dies on its next write.
+#   A trap that finished the script itself did so at whatever step the signal landed
+#   on: during the wait for enigma2 to stop, or before the restore was forked, it
+#   started the interface on the plugin this rollback exists to remove; between the
+#   fork and the line that keeps the restore's pid, it did not know there was a restore
+#   to wait for, and the restore went on to rename the settings over the channel under
+#   a running interface, with no `restored` for the installer to read. So these four
+#   signals do not change what the script does - the stop is waited for, the restore
+#   runs to its end or its limit, the channel is written, the interface started, all
+#   within the bounds of a run without one - and one that arrived before the finishing
+#   step began ends the script with exit status 1 and without `done`. Other signals keep
+#   their default action; nothing on a receiver sends them to a detached session.
+# - The restore's result is never taken from `wait`. Measured on bash, the receiver's
+#   `sh`: after an INT and a second trapped signal during one foreground command, a
+#   later `wait` for the restore returned 143 or 129 at once - with the signals ignored
+#   by then - while the restore went on; the channel and the start then went in under
+#   it. So the restore writes its own exit status to a file as its last act, and the
+#   finishing step waits until that file is there or the restore is gone - `kill -0`,
+#   and not a zombie in `/proc` - and reads the verdict from the file. A restore that is
+#   gone without writing one was killed, and the status says `restored lost`.
+# - The waits are measured in time, from `/proc/uptime`, not counted in sleeps: busybox
+#   runs `sleep` itself and a caught signal ends it early, so a count of sleeps let a
+#   few signals turn an interface that was slow to stop into one that never stopped.
+# - The restore is bounded. A watchdog ends it with TERM after its limit, so the picture
+#   comes back even from a restore that hangs, and the finishing step sends KILL ten
+#   seconds after that; a restore cut off part-way is repeated by the next install's
+#   recovery, which is safe, while a missing picture is not. Signals are caught, not
+#   ignored, until the restore and the watchdog are forked, so both start with the
+#   default dispositions and the watchdog's TERM ends the restore.
 # - The settings block and the channel are written only once enigma2 is seen to be
 #   gone. An enigma2 that has not stopped within the wait still owns its settings and
 #   writes them out on its next clean quit, over anything written now; then the script
 #   puts back the files alone, says `stop_timeout`, and leaves the settings to it.
 # - Order: the settings block first, then `lastservice`, then `init 3`, each by a rename.
-# - It ends in `exit`: after a signal trap that does not exit, the shell carries on with
-#   its next step. `finish` is idempotent, because the EXIT trap runs it a second time.
+# - Not `init 3` while the system goes down: when `runlevel` says sysvinit is in
+#   runlevel 0 or 6, the script says `started shutdown` and asks for nothing; the next
+#   start reads the restored files and the channel. Anything else it prints - nothing,
+#   an error, another level - starts the interface as always.
+# - `finish` is idempotent; the EXIT trap, there for an exit nobody planned, would run
+#   it a second time.
 # - It does not keep the transaction lock alive; the installer holds it. What no trap
 #   covers is SIGKILL or power between the stop and the start. Power reboots the
 #   receiver, which frees the lock at once; a killed script leaves the interface stopped
 #   until the receiver is switched off and on again. That residual is stated, not
-#   hidden behind a heartbeat nobody would be left to stop.
+#   hidden behind a heartbeat nobody would be left to stop. A signal to the whole
+#   process group also reaches the restore, which then says it did not finish, and the
+#   interface is started over it; the detached start is what keeps one from being sent.
 R2_SCRIPT = """#!/bin/sh
 # Enigma2 MQTT Bridge installer: stop the receiver's interface, put the plugin and its
 # settings back, write the channel to start on, and start the interface again.
@@ -1231,15 +1258,38 @@ backup={backup}
 service={service}
 provisioning={provisioning}
 status={status}
+rcfile={rcfile}
 init={init}
 pidof={pidof}
+runlevel={runlevel}
 restore_pid=
+restore_until=
 watchdog=
-restored=
 stopped=
 started=
+pending=
+now=
 say() {{
     echo "$1" >> "$status"
+}}
+tick() {{
+    now=
+    if read -r now rest 2>/dev/null < /proc/uptime; then
+        now=${{now%%.*}}
+    fi
+    case "$now" in
+    ''|*[!0-9]*) now=$(date +%s) ;;
+    esac
+}}
+alive() {{
+    kill -0 "$1" 2>/dev/null || return 1
+    state=
+    read -r state 2>/dev/null < "/proc/$1/stat" || return 0
+    state=${{state##*) }}
+    [ "${{state%% *}}" != Z ]
+}}
+pause() {{
+    sleep 0.2 2>/dev/null || sleep 1
 }}
 finish() {{
     if [ -n "$started" ]; then
@@ -1248,13 +1298,25 @@ finish() {{
     started=1
     trap '' HUP INT TERM PIPE
     if [ -n "$restore_pid" ]; then
-        wait "$restore_pid"
-        rc=$?
-        restore_pid=
-        if [ -z "$restored" ]; then
-            restored=$rc
-            say "restored $rc"
+        while [ ! -f "$rcfile" ] && alive "$restore_pid"; do
+            tick
+            if [ "$now" -ge "$restore_until" ]; then
+                kill -KILL "$restore_pid" 2>/dev/null
+            fi
+            if [ "$now" -ge $((restore_until + 5)) ]; then
+                break
+            fi
+            pause
+        done
+        rc=
+        if [ -f "$rcfile" ]; then
+            read -r rc < "$rcfile"
         fi
+        case "$rc" in
+        ''|*[!0-9]*) rc=lost ;;
+        esac
+        say "restored $rc"
+        restore_pid=
     fi
     if [ -n "$watchdog" ]; then
         kill "$watchdog" 2>/dev/null
@@ -1266,21 +1328,30 @@ finish() {{
     else
         say "not_written"
     fi
-    "$init" 3
-    say "started $?"
+    level=$("$runlevel" 2>/dev/null)
+    case "$level" in
+    ?" "[06])
+        say "started shutdown"
+        ;;
+    *)
+        "$init" 3
+        say "started $?"
+        ;;
+    esac
 }}
-trap 'finish; exit 1' HUP INT TERM PIPE
+trap 'pending=1' HUP INT TERM PIPE
 trap 'finish' EXIT
 say "begun $$"
 "$init" 4
 say "stopping $?"
-waited=0
+tick
+stop_until=$((now + {stop_wait}))
 while "$pidof" enigma2 >/dev/null 2>&1; do
-    if [ "$waited" -ge {stop_wait} ]; then
+    tick
+    if [ "$now" -ge "$stop_until" ]; then
         break
     fi
     sleep 1
-    waited=$((waited + 1))
 done
 if "$pidof" enigma2 >/dev/null 2>&1; then
     settings=
@@ -1290,17 +1361,18 @@ else
     stopped=1
     say "stopped"
 fi
-"$python" "$helper" restore "$backup" $settings $provisioning --root "$root" &
+"$python" "$helper" restore "$backup" $settings $provisioning --root "$root" \\
+    --rc-file "$rcfile" &
 restore_pid=$!
+tick
+restore_until=$((now + {restore_limit} + 10))
 ( sleep {restore_limit}; kill -TERM "$restore_pid" 2>/dev/null ) &
 watchdog=$!
-wait "$restore_pid"
-rc=$?
-restored=$rc
-restore_pid=
-say "restored $rc"
 finish
-trap - EXIT HUP INT TERM PIPE
+trap - EXIT
+if [ -n "$pending" ]; then
+    exit 1
+fi
 say "done"
 exit 0
 """
@@ -1341,6 +1413,7 @@ def start_r2(
     python: str = "",
     init: str = "init",
     pidof: str = "pidof",
+    runlevel: str = "runlevel",
     stop_wait: int = R2_STOP_WAIT_SECONDS,
     restore_limit: int = R2_RESTORE_LIMIT_SECONDS,
 ) -> int:
@@ -1354,7 +1427,8 @@ def start_r2(
 
     `init` and `pidof` are the receiver's own unless a test names stand-ins, by absolute
     path: busybox's shell runs its built-in applets of those names before anything on
-    `PATH`, so a stand-in found through `PATH` would not be the one that runs.
+    `PATH`, so a stand-in found through `PATH` would not be the one that runs. The same
+    holds for `runlevel`, which only reads; the guard below does not insist on it.
     """
     if os.environ.get(TEST_GUARD) and not (_stand_in(init) and _stand_in(pidof)):
         raise RuntimeError(
@@ -1378,6 +1452,8 @@ def start_r2(
         restore_limit=int(restore_limit),
         init=shlex.quote(init),
         pidof=shlex.quote(pidof),
+        runlevel=shlex.quote(runlevel),
+        rcfile=shlex.quote(str(directory / "restore-rc")),
     )
     descriptor = os.open(str(script), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o700)
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
@@ -1444,7 +1520,38 @@ def main() -> int:
     parser.add_argument("--python", default="")
     parser.add_argument("--init", default="init")
     parser.add_argument("--pidof", default="pidof")
+    parser.add_argument("--runlevel", default="runlevel")
+    # Where an operation writes its own exit status as its last act (the stop-and-restore
+    # script's restore): the script reads its verdict there, never from `wait`.
+    parser.add_argument("--rc-file", type=Path)
     args = parser.parse_args()
+    if args.rc_file is not None:
+        return _recording_exit_status(args.rc_file, lambda: _operate(parser, args))
+    return _operate(parser, args)
+
+
+def _recording_exit_status(path: Path, operate: Callable[[], int]) -> int:
+    """Run `operate` and write its exit status to `path`, whole or not at all.
+
+    Whatever ends the operation from inside Python - a return, an exit, an exception -
+    is written, by a rename of a finished file so that a reader never meets half a
+    number. A signal that kills the process writes nothing, and the reader says so.
+    """
+    code = 1
+    try:
+        code = operate()
+    except SystemExit as exit_:
+        code = exit_.code if isinstance(exit_.code, int) else (0 if exit_.code is None else 1)
+        raise
+    finally:
+        with suppress(OSError):
+            staged = path.with_name(path.name + ".tmp")
+            staged.write_text(f"{code}\n", encoding="ascii")
+            os.replace(staged, path)
+    return code
+
+
+def _operate(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     if args.operation == "identity":
         print(json.dumps(read_identity(args.root), sort_keys=True))
     elif args.operation == "lock-probe":
@@ -1481,6 +1588,7 @@ def main() -> int:
             python=args.python,
             init=args.init,
             pidof=args.pidof,
+            runlevel=args.runlevel,
             stop_wait=args.stop_wait,
             restore_limit=args.restore_limit,
         )

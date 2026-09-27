@@ -21,7 +21,7 @@ import asyncssh
 from homeassistant.core import HomeAssistant
 import pytest
 
-from custom_components.enigma2_mqtt import installer
+from custom_components.enigma2_mqtt import installer, installer_helper
 from custom_components.enigma2_mqtt.installer import (
     CommandResult,
     InstallerError,
@@ -390,6 +390,97 @@ async def test_an_interface_that_would_not_stop_is_not_reported_put_back(
     assert receiver.files["plugin"] == "old"
     assert receiver.restore_flags == ["--provisioning"]
     assert receiver.zaps == []
+    assert _released(receiver)
+    assert "only the plugin's files were put back" in raised.value.__cause__.detail
+
+
+@pytest.mark.parametrize(
+    ("restore_status", "code", "note"),
+    [
+        (installer_helper.EXIT_OPKG_BUSY, InstallerErrorCode.ROLLBACK_OPKG_BUSY, "did not stop"),
+        (installer_helper.EXIT_OPKG_LOCK_LOST, InstallerErrorCode.ROLLBACK_FAILED, "opkg"),
+        (143, InstallerErrorCode.ROLLBACK_FAILED, "did not stop"),
+        ("lost", InstallerErrorCode.ROLLBACK_FAILED, "did not stop"),
+    ],
+)
+async def test_an_interface_that_would_not_stop_keeps_the_restores_own_verdict(
+    credentials: SshCredentials, restore_status: int | str, code: InstallerErrorCode, note: str
+) -> None:
+    """'Only the files went back' is true only of a restore that put the files back.
+
+    A restore refused because opkg was busy put nothing back, and one cut off by its
+    watchdog put back an unknown part; the stop that did not happen changes neither. A
+    restore that lost opkg's lock put the files back, but "put back as it was" - that
+    verdict's sentence - is false when the settings were not restored at all.
+    """
+    receiver = FakeReceiver(r2_stop_timeout=True, r2_restore_status=restore_status)
+
+    with pytest.raises(InstallerError) as raised:
+        await _rollback(credentials, receiver.connect)
+
+    assert raised.value.code is code
+    cause = raised.value.__cause__
+    assert "only the plugin's files were put back" not in getattr(cause, "detail", "")
+    assert any(
+        note in text for text in [getattr(cause, "detail", ""), *getattr(cause, "__notes__", [])]
+    )
+    assert _released(receiver)
+
+
+_STOPPED = False
+_NOT_STOPPED = True
+# Every end the script can report, and the verdict each must give. "put back as it was"
+# (rollback_restart_failed, rollback_opkg_overlap) only where the settings went back too.
+VERDICTS = {
+    (_STOPPED, 0, 0): None,
+    (_STOPPED, 0, 1): InstallerErrorCode.ROLLBACK_RESTART_FAILED,
+    (_STOPPED, 75, 0): InstallerErrorCode.ROLLBACK_OPKG_BUSY,
+    (_STOPPED, 75, 1): InstallerErrorCode.ROLLBACK_OPKG_BUSY,
+    (_STOPPED, 76, 0): InstallerErrorCode.ROLLBACK_OPKG_OVERLAP,
+    (_STOPPED, 76, 1): InstallerErrorCode.ROLLBACK_OPKG_OVERLAP,
+    (_STOPPED, 143, 0): InstallerErrorCode.ROLLBACK_FAILED,
+    (_STOPPED, 143, 1): InstallerErrorCode.ROLLBACK_FAILED,
+    (_STOPPED, 127, 0): InstallerErrorCode.ROLLBACK_FAILED,
+    (_STOPPED, 127, 1): InstallerErrorCode.ROLLBACK_FAILED,
+    (_STOPPED, "lost", 0): InstallerErrorCode.ROLLBACK_FAILED,
+    (_STOPPED, "lost", 1): InstallerErrorCode.ROLLBACK_FAILED,
+    (_NOT_STOPPED, 0, 0): InstallerErrorCode.ROLLBACK_FAILED,
+    (_NOT_STOPPED, 0, 1): InstallerErrorCode.ROLLBACK_FAILED,
+    (_NOT_STOPPED, 75, 0): InstallerErrorCode.ROLLBACK_OPKG_BUSY,
+    (_NOT_STOPPED, 75, 1): InstallerErrorCode.ROLLBACK_OPKG_BUSY,
+    (_NOT_STOPPED, 76, 0): InstallerErrorCode.ROLLBACK_FAILED,
+    (_NOT_STOPPED, 76, 1): InstallerErrorCode.ROLLBACK_FAILED,
+    (_NOT_STOPPED, 143, 0): InstallerErrorCode.ROLLBACK_FAILED,
+    (_NOT_STOPPED, 143, 1): InstallerErrorCode.ROLLBACK_FAILED,
+    (_NOT_STOPPED, 127, 0): InstallerErrorCode.ROLLBACK_FAILED,
+    (_NOT_STOPPED, 127, 1): InstallerErrorCode.ROLLBACK_FAILED,
+    (_NOT_STOPPED, "lost", 0): InstallerErrorCode.ROLLBACK_FAILED,
+    (_NOT_STOPPED, "lost", 1): InstallerErrorCode.ROLLBACK_FAILED,
+}
+
+
+@pytest.mark.parametrize(
+    ("stop_timeout", "restored", "started"),
+    list(VERDICTS),
+    ids=[
+        f"{'stop_timeout' if s else 'stopped'}-restored_{r}-started_{t}" for s, r, t in VERDICTS
+    ],
+)
+async def test_every_end_of_the_script_gets_a_true_verdict(
+    credentials: SshCredentials, stop_timeout: bool, restored: int | str, started: int
+) -> None:
+    """The stop, the restore and the start, in every combination the script can report."""
+    receiver = FakeReceiver(
+        r2_stop_timeout=stop_timeout, r2_restore_status=restored, r2_init3_status=started
+    )
+
+    code = None
+    try:
+        await _rollback(credentials, receiver.connect)
+    except InstallerError as err:
+        code = err.code
+
+    assert code is VERDICTS[(stop_timeout, restored, started)]
     assert _released(receiver)
 
 
