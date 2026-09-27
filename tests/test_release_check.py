@@ -1592,8 +1592,7 @@ async def test_a_relay_that_read_the_broker_publishes_nothing_once_the_last_rece
         cache._lock.release()
         await _settled(hass)
 
-    assert order == ["read"]
-    assert _published(mqtt_mock) == []
+    assert (_published(mqtt_mock), order) == ([], ["read"])
     assert cache.serial == serial
     assert notify.call_count == announced
 
