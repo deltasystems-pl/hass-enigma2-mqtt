@@ -9,6 +9,7 @@ the vectors' throwaway test keys, which replace the embedded release keys for th
 from __future__ import annotations
 
 import base64
+from collections.abc import Generator
 from datetime import timedelta
 import json
 import logging
@@ -17,17 +18,24 @@ from typing import Any
 from unittest.mock import patch
 
 from freezegun.api import FrozenDateTimeFactory
-from homeassistant.components.mqtt.const import MQTT_CONNECTION_STATE
+from homeassistant.components.mqtt.const import (
+    MQTT_CONNECTION_STATE,
+    MQTT_PROCESSED_SUBSCRIPTIONS,
+)
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import ATTR_ENTITY_ID
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.dispatcher import (
+    async_dispatcher_connect,
+    async_dispatcher_send,
+)
 from homeassistant.setup import async_setup_component
 import homeassistant.util.dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
+    async_fire_mqtt_message,
     async_fire_time_changed,
 )
 from pytest_homeassistant_custom_component.test_util.aiohttp import (
@@ -51,8 +59,8 @@ from custom_components.enigma2_mqtt.const import (
     TOPIC_RELEASE_INDEX,
 )
 
-from .conftest import BASE_TOPIC, async_setup_box
-from .signed_index import keyset, release, sign
+from .conftest import BASE_TOPIC, async_setup_box, async_setup_box_then_retained
+from .signed_index import VECTORS, keyset, release, sign
 
 INDEX_URL = PLUGIN_INDEX_ORIGIN + "releases.json"
 SIG_URL = PLUGIN_INDEX_ORIGIN + "releases.json.sig"
@@ -61,6 +69,7 @@ CHECK = "button.dekoder_salon_check_for_plugin_updates"
 NOTIFY = "custom_components.enigma2_mqtt.release_store.persistent_notification.async_create"
 
 RELEASES = [release("0.4.0"), release("0.3.0"), release("0.2.0")]
+KEY_IDS = {name: key["key_id"] for name, key in VECTORS["test_keys"].items()}
 
 
 @pytest.fixture(autouse=True)
@@ -83,6 +92,11 @@ def _serve(
     aioclient_mock.get(SIG_URL, content=pair[1])
 
 
+async def _settled(hass: HomeAssistant) -> None:
+    """Wait for the relay too: it runs in the background, because it reads the broker first."""
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+
 async def _setup_checking(hass: HomeAssistant, entry: MockConfigEntry) -> None:
     """Set the receiver up with the daily check on, as the options flow would."""
     entry.add_to_hass(hass)
@@ -90,7 +104,25 @@ async def _setup_checking(hass: HomeAssistant, entry: MockConfigEntry) -> None:
         entry, options={**entry.options, CONF_CHECK_GITHUB_RELEASES: True}
     )
     assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await _settled(hass)
+
+
+@pytest.fixture
+def broker_read_on_a_frozen_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The broker holds nothing on the index topic, and says so at once.
+
+    For the tests that freeze the clock the event loop runs on: Home Assistant sends a
+    SUBSCRIBE only after a short debounce timer, which a frozen clock never lets fire, so a
+    read of what the broker retains would wait for ever. What the broker retains is not what
+    those tests are about.
+    """
+
+    async def _nothing_retained(self: release_store.ReleaseIndexCache) -> None:
+        return None
+
+    monkeypatch.setattr(
+        release_store.ReleaseIndexCache, "_async_read_retained", _nothing_retained
+    )
 
 
 def _published(mqtt_mock: Any) -> list[Any]:
@@ -101,11 +133,7 @@ def _published(mqtt_mock: Any) -> list[Any]:
 
 
 def _relayed(mqtt_mock: Any) -> list[bytes]:
-    """The distinct indexes relayed on the retained topic, in the order they first went out.
-
-    The held index is relayed again on every setup and reconnect, so what a test asks is which
-    indexes were relayed, not how often.
-    """
+    """The distinct indexes relayed on the retained topic, in the order they first went out."""
     seen: list[bytes] = []
     for call in _published(mqtt_mock):
         index = base64.b64decode(json.loads(call.args[1])["index"])
@@ -214,6 +242,7 @@ async def test_two_receivers_make_one_request(
     assert len(_relayed(mqtt_mock)) == 1
 
 
+@pytest.mark.usefixtures("broker_read_on_a_frozen_clock")
 async def test_the_daily_check_asks_once_a_day_with_the_etag(
     hass: HomeAssistant,
     mqtt_mock,
@@ -265,7 +294,7 @@ async def test_the_same_bytes_again_are_nothing_new(
         cache = _cache(hass)
         cache.checked = dt_util.utcnow() - RELEASE_MANUAL_INTERVAL - timedelta(seconds=1)
         await hass.services.async_call("button", "press", {ATTR_ENTITY_ID: CHECK}, blocking=True)
-        await hass.async_block_till_done()
+        await _settled(hass)
 
     assert aioclient_mock.call_count == 4
     assert notify.call_count == 1
@@ -569,6 +598,7 @@ async def test_a_withdrawal_is_announced(
         )
         _cache(hass).checked = dt_util.utcnow() - timedelta(minutes=11)
         await hass.services.async_call("button", "press", {ATTR_ENTITY_ID: CHECK}, blocking=True)
+        await _settled(hass)
 
     message = notify.call_args.args[1]
     assert "serial 2" in message
@@ -582,6 +612,7 @@ async def test_a_withdrawal_is_announced(
 # ---------------------------------------------------------------- the manual limit --
 
 
+@pytest.mark.usefixtures("broker_read_on_a_frozen_clock")
 async def test_the_button_checks_once_in_ten_minutes_and_says_when(
     hass: HomeAssistant,
     mqtt_mock,
@@ -612,6 +643,7 @@ async def test_the_button_checks_once_in_ten_minutes_and_says_when(
     assert aioclient_mock.call_count == 4
 
 
+@pytest.mark.usefixtures("broker_read_on_a_frozen_clock")
 async def test_check_for_updates_shares_the_limit_and_says_nothing(
     hass: HomeAssistant,
     mqtt_mock,
@@ -818,6 +850,7 @@ async def test_a_stamp_in_the_future_blocks_nothing(
     assert hass.states.get(PLUGIN).attributes["index_serial"] == 1
 
 
+@pytest.mark.usefixtures("broker_read_on_a_frozen_clock")
 async def test_the_daily_check_runs_every_day_not_every_other(
     hass: HomeAssistant,
     mqtt_mock,
@@ -840,45 +873,6 @@ async def test_the_daily_check_runs_every_day_not_every_other(
     assert aioclient_mock.call_count >= 1
 
 
-async def test_the_held_index_is_relayed_again_on_setup_and_on_reconnect(
-    hass: HomeAssistant,
-    mqtt_mock,
-    box_on_the_broker: dict[str, str | bytes],
-    config_entry: MockConfigEntry,
-    aioclient_mock: AiohttpClientMocker,
-    hass_storage: dict[str, Any],
-) -> None:
-    """A broker restarted without persistence, or a retained topic overwritten, is repaired
-    from the verified copy Home Assistant holds - which a receiver sees as nothing new."""
-    index, sig = sign(3, RELEASES)
-    keys = keyset("test")
-    hass_storage[RELEASE_INDEX_STORAGE_KEY] = {
-        "version": RELEASE_INDEX_STORAGE_VERSION,
-        "data": {
-            "index": base64.b64encode(index).decode(),
-            "sig": base64.b64encode(sig).decode(),
-            "checked": dt_util.utcnow().isoformat(),
-            "trust": release_index.store(
-                None, keys, {"serials": {keys[0].key_id: 3}, "silenced": []},
-                acceptance=False,
-            ),
-        },
-    }
-    with patch(NOTIFY) as notify:
-        await async_setup_box(hass, config_entry)
-        relayed = _published(mqtt_mock)
-        assert len(relayed) == 1
-        body = json.loads(relayed[0].args[1])
-        assert base64.b64decode(body["index"]) == index
-        assert relayed[0].args[3] is True
-
-        async_dispatcher_send(hass, MQTT_CONNECTION_STATE, True)
-        await hass.async_block_till_done()
-        assert len(_published(mqtt_mock)) == 2
-    assert notify.call_count == 0
-    assert aioclient_mock.call_count == 0
-
-
 async def test_nothing_unverified_is_relayed_on_setup(
     hass: HomeAssistant,
     mqtt_mock,
@@ -897,6 +891,7 @@ async def test_nothing_unverified_is_relayed_on_setup(
         },
     }
     await async_setup_box(hass, config_entry)
+    await _settled(hass)
     assert _published(mqtt_mock) == []
 
 
@@ -1017,3 +1012,401 @@ async def test_a_held_index_that_no_longer_verifies_is_not_relayed(
     cache.index_raw = index
     await cache.async_republish()
     assert _relayed(mqtt_mock) == [index]
+
+
+# ------------------------------------------------- what the broker already retains is read first --
+
+
+class _IndexBroker:
+    """The broker's retained copy of `enigma2mqtt/release_index`.
+
+    Delivered the way a broker delivers it: once the subscription has been acknowledged, and
+    never inside the call that subscribes - which is the order the `retained` fixture produces,
+    and the one no broker does. `None` is a broker that retains nothing on the topic, and
+    `delay` is how long after the acknowledgement the retained message follows.
+    """
+
+    def __init__(self) -> None:
+        self.payload: str | None = None
+        self.delay = 0.0
+        self.deliveries = 0
+
+
+@pytest.fixture
+def index_broker(hass: HomeAssistant, mqtt_mock) -> Generator[_IndexBroker]:
+    broker = _IndexBroker()
+
+    @callback
+    def _processed(subscriptions: list[tuple[str, int]]) -> None:
+        if broker.payload is None:
+            return
+        if any(topic == TOPIC_RELEASE_INDEX for topic, _ in subscriptions):
+            broker.deliveries += 1
+            hass.loop.call_later(
+                broker.delay,
+                async_fire_mqtt_message,
+                hass,
+                TOPIC_RELEASE_INDEX,
+                broker.payload,
+                1,
+                True,
+            )
+
+    unsubscribe = async_dispatcher_connect(hass, MQTT_PROCESSED_SUBSCRIPTIONS, _processed)
+    yield broker
+    unsubscribe()
+
+
+def _trust(serials: dict[str, int], silenced: tuple[str, ...] = ()) -> Any:
+    """A stored trust memory for the test keys, by key name: `{"t1": 3}`."""
+    return release_index.store(
+        None,
+        keyset("test"),
+        {
+            "serials": {KEY_IDS[name]: serial for name, serial in serials.items()},
+            "silenced": [KEY_IDS[name] for name in silenced],
+        },
+        acceptance=False,
+    )
+
+
+def _hold(
+    hass_storage: dict[str, Any],
+    pair: tuple[bytes, bytes],
+    trust: Any,
+    *,
+    etag: str | None = None,
+) -> None:
+    """What this Home Assistant stored the last time it ran: a verified index, and its memory."""
+    hass_storage[RELEASE_INDEX_STORAGE_KEY] = {
+        "version": RELEASE_INDEX_STORAGE_VERSION,
+        "data": {
+            "index": base64.b64encode(pair[0]).decode(),
+            "sig": base64.b64encode(pair[1]).decode(),
+            "etag": etag,
+            "checked": (dt_util.utcnow() - timedelta(days=2)).isoformat(),
+            "trust": trust,
+        },
+    }
+
+
+def _on_the_broker(pair: tuple[bytes, bytes]) -> str:
+    return json.dumps(
+        {"index": base64.b64encode(pair[0]).decode(), "sig": base64.b64encode(pair[1]).decode()}
+    )
+
+
+def _checking(entry: MockConfigEntry) -> MockConfigEntry:
+    """The example receiver's entry with the daily check on from the start."""
+    return MockConfigEntry(
+        domain=DOMAIN,
+        title=entry.title,
+        unique_id=entry.unique_id,
+        data=dict(entry.data),
+        options={CONF_CHECK_GITHUB_RELEASES: True},
+    )
+
+
+async def _reconnect(hass: HomeAssistant) -> None:
+    async_dispatcher_send(hass, MQTT_CONNECTION_STATE, True)
+    await _settled(hass)
+
+
+EMERGENCY = sign(1, [release("0.3.0", withdrawn="the main key was stolen")], key="t2")
+
+
+async def test_an_emergency_index_on_the_broker_is_never_overwritten(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    index_broker: _IndexBroker,
+    config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+) -> None:
+    """The review's probe P9. The retained topic is the documented channel for an index signed
+    with the spare key when the maintainer's account itself is the emergency. Home Assistant's
+    own index, signed with the main key, must not be put back over it - at setup, or at any
+    reconnect - or a receiver that was off at the time never sees the spare's index."""
+    _hold(hass_storage, sign(3, RELEASES), _trust({"t1": 3}))
+    index_broker.payload = _on_the_broker(EMERGENCY)
+    with patch(NOTIFY):
+        await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+        await _settled(hass)
+        await _reconnect(hass)
+
+    assert _published(mqtt_mock) == []
+    # Read both times, not skipped.
+    assert index_broker.deliveries == 2
+
+
+async def test_an_emergency_index_on_the_broker_protects_this_home_assistant_too(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    index_broker: _IndexBroker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    hass_storage: dict[str, Any],
+) -> None:
+    """A retained index the rule accepts is taken, as any newly accepted index is: announced,
+    and from then on it judges what the origin serves - the main key's indexes are refused."""
+    _hold(hass_storage, sign(3, RELEASES), _trust({"t1": 3}))
+    index_broker.payload = _on_the_broker(EMERGENCY)
+    with patch(NOTIFY) as notify:
+        await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+        await _settled(hass)
+    assert notify.call_count == 1
+    assert notify.call_args.kwargs["notification_id"] == (
+        f"{DOMAIN}_release_index_{KEY_IDS['t2']}_1"
+    )
+    state = hass.states.get(PLUGIN)
+    assert state.attributes["index_serial"] == 1
+    assert "0.3.0" not in [item["version"] for item in state.attributes["available_versions"]]
+
+    _serve(aioclient_mock, sign(4, RELEASES))
+    _cache(hass).checked = dt_util.utcnow() - timedelta(minutes=11)
+    with patch(NOTIFY) as notify, pytest.raises(HomeAssistantError):
+        await hass.services.async_call("button", "press", {ATTR_ENTITY_ID: CHECK}, blocking=True)
+    await _settled(hass)
+    assert hass.states.get(PLUGIN).attributes["check_error"] == "rank"
+    assert notify.call_count == 0
+    assert _published(mqtt_mock) == []
+
+
+async def test_an_index_from_the_origin_does_not_overwrite_a_higher_ranked_one(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    index_broker: _IndexBroker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """The same rule after a check, not only at setup: this Home Assistant knew no index, the
+    origin - which whoever holds the maintainer's account controls - serves one signed with the
+    main key, and the broker retains the spare's. The spare's stays, and wins here too."""
+    index_broker.payload = _on_the_broker(EMERGENCY)
+    _serve(aioclient_mock, sign(5, RELEASES))
+    with patch(NOTIFY) as notify:
+        await async_setup_box_then_retained(hass, _checking(config_entry), box_on_the_broker)
+        await _settled(hass)
+
+    assert aioclient_mock.call_count == 2
+    assert _published(mqtt_mock) == []
+    # Both are announced: the one fetched, then the one taken from the broker.
+    assert notify.call_count == 2
+    assert hass.states.get(PLUGIN).attributes["index_serial"] == 1
+
+
+async def test_a_newer_index_of_the_same_key_on_the_broker_is_left_there(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    index_broker: _IndexBroker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    hass_storage: dict[str, Any],
+) -> None:
+    """Taken, and the origin's unchanged file is still nothing new: the ETag names what the
+    origin served last, not where the held index came from."""
+    _hold(hass_storage, sign(3, RELEASES), _trust({"t1": 3}), etag='"three"')
+    index_broker.payload = _on_the_broker(sign(4, RELEASES))
+    with patch(NOTIFY) as notify:
+        await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+        await _settled(hass)
+
+    assert _published(mqtt_mock) == []
+    assert notify.call_count == 1
+    assert hass.states.get(PLUGIN).attributes["index_serial"] == 4
+
+    _serve(aioclient_mock, sign(3, RELEASES), status=304, etag='"three"')
+    await hass.services.async_call("button", "press", {ATTR_ENTITY_ID: CHECK}, blocking=True)
+    assert aioclient_mock.mock_calls[0][3] == {"If-None-Match": '"three"'}
+    state = hass.states.get(PLUGIN)
+    assert state.attributes["check_error"] is None
+    assert state.attributes["index_serial"] == 4
+
+
+async def test_a_retained_index_that_follows_the_acknowledgement_is_still_read(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    index_broker: _IndexBroker,
+    config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+) -> None:
+    """A broker sends the retained message after the acknowledgement, not with it; the read
+    waits a grace for it before it concludes that nothing is retained."""
+    _hold(hass_storage, sign(3, RELEASES), _trust({"t1": 3}))
+    index_broker.payload = _on_the_broker(EMERGENCY)
+    index_broker.delay = release_store.RETAINED_GRACE / 2
+    with patch(NOTIFY):
+        await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+        await _settled(hass)
+
+    assert _published(mqtt_mock) == []
+    assert hass.states.get(PLUGIN).attributes["index_serial"] == 1
+
+
+async def test_the_held_index_is_put_back_only_when_the_broker_lost_it(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    index_broker: _IndexBroker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    hass_storage: dict[str, Any],
+) -> None:
+    """A broker restarted without persistence, or a retained topic cleared, is repaired from
+    the verified copy Home Assistant holds; a broker that kept it is left alone."""
+    index = sign(3, RELEASES)
+    _hold(hass_storage, index, _trust({"t1": 3}))
+    with patch(NOTIFY) as notify:
+        await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+        await _settled(hass)
+        relayed = _published(mqtt_mock)
+        assert len(relayed) == 1
+        topic, payload, qos, retain = relayed[0].args[:4]
+        assert (topic, qos, retain) == (TOPIC_RELEASE_INDEX, 1, True)
+        assert base64.b64decode(json.loads(payload)["index"]) == index[0]
+
+        # The broker kept it: nothing to repair.
+        index_broker.payload = payload
+        await _reconnect(hass)
+        assert len(_published(mqtt_mock)) == 1
+
+        # The broker came back without it.
+        index_broker.payload = None
+        await _reconnect(hass)
+        assert len(_published(mqtt_mock)) == 2
+    assert notify.call_count == 0
+    assert aioclient_mock.call_count == 0
+
+
+@pytest.mark.parametrize(
+    "what_is_retained",
+    [
+        None,
+        _on_the_broker(sign(2, RELEASES)),
+        _on_the_broker((sign(5, RELEASES)[0].replace(b"0.4.0", b"0.9.0"), sign(5, RELEASES)[1])),
+        _on_the_broker((sign(5, RELEASES)[0], sign(5, RELEASES, key="t2")[1])),
+        "not json",
+        json.dumps({"index": "!!", "sig": "!!"}),
+        json.dumps(["not", "an", "object"]),
+    ],
+    ids=[
+        "nothing retained",
+        "an older serial",
+        "a changed index",
+        "another key's signature",
+        "not JSON",
+        "not base64",
+        "not an object",
+    ],
+)
+async def test_a_missing_older_or_invalid_retained_index_is_replaced(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    index_broker: _IndexBroker,
+    config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+    what_is_retained: str | None,
+) -> None:
+    held = sign(3, RELEASES)
+    _hold(hass_storage, held, _trust({"t1": 3}))
+    index_broker.payload = what_is_retained
+    with patch(NOTIFY) as notify:
+        await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+        await _settled(hass)
+
+    assert len(_published(mqtt_mock)) == 1
+    assert _relayed(mqtt_mock) == [held[0]]
+    assert notify.call_count == 0
+    assert hass.states.get(PLUGIN).attributes["index_serial"] == 3
+
+
+async def test_a_lower_ranked_retained_index_is_replaced_whatever_its_serial(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    index_broker: _IndexBroker,
+    config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+) -> None:
+    """Home Assistant holds the spare's index; an index of the main key on the broker is one
+    every reader that has seen the spare refuses."""
+    held = sign(1, RELEASES, key="t2")
+    _hold(hass_storage, held, _trust({"t2": 1}, silenced=("t1",)))
+    index_broker.payload = _on_the_broker(sign(90, RELEASES))
+    with patch(NOTIFY):
+        await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+        await _settled(hass)
+    assert _relayed(mqtt_mock) == [held[0]]
+
+
+@pytest.mark.parametrize("failure", ["subscribe", "acknowledgement"])
+async def test_a_broker_that_cannot_be_read_is_not_written_over(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    index_broker: _IndexBroker,
+    config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    """Not knowing what is retained is not knowing that nothing is: the next reconnect asks
+    again, and until then the topic is left as it is."""
+    _hold(hass_storage, sign(3, RELEASES), _trust({"t1": 3}))
+    with patch(NOTIFY):
+        await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+        await _settled(hass)
+        assert len(_published(mqtt_mock)) == 1
+
+        if failure == "subscribe":
+            with patch(
+                "homeassistant.components.mqtt.async_subscribe",
+                side_effect=HomeAssistantError("MQTT is not set up"),
+            ):
+                await _reconnect(hass)
+        else:
+            # An acknowledgement that does not come in time.
+            monkeypatch.setattr(release_store, "RETAINED_SUBSCRIBE_TIMEOUT", 0)
+            await _reconnect(hass)
+    assert len(_published(mqtt_mock)) == 1
+
+
+async def test_two_receivers_repair_the_index_once(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    index_broker: _IndexBroker,
+    config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+) -> None:
+    """The index is Home Assistant's, not a receiver's: one repair per start and per
+    reconnect, however many receivers are set up."""
+    _hold(hass_storage, sign(3, RELEASES), _trust({"t1": 3}))
+    other = MockConfigEntry(
+        domain=DOMAIN,
+        title="Dekoder sypialnia",
+        unique_id="vuduo4k_005302",
+        data={CONF_NODE_ID: "vuduo4k_005302", CONF_BASE_TOPIC: BASE_TOPIC, CONF_NAME: "Sypialnia"},
+    )
+    other.add_to_hass(hass)
+    with patch(NOTIFY):
+        # Setting up the first loads every entry of the domain, the second included.
+        await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+        await _settled(hass)
+        assert other.state is ConfigEntryState.LOADED
+        assert len(_published(mqtt_mock)) == 1
+
+        await _reconnect(hass)
+        assert len(_published(mqtt_mock)) == 2
+
+        # Reloading one of them is not a new start: the other keeps the repair going.
+        await hass.config_entries.async_reload(other.entry_id)
+        await _settled(hass)
+        assert len(_published(mqtt_mock)) == 2
+        await _reconnect(hass)
+        assert len(_published(mqtt_mock)) == 3

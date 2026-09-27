@@ -137,6 +137,12 @@ _UPDATE_SENTENCES: dict[InstallerErrorCode, str] = {
     InstallerErrorCode.WITHDRAW_FAILED: "update_withdraw_failed",
 }
 
+# The installer's refusals under the one rule, said with the card's sentences for the same.
+_RULED_OUT: dict[InstallerErrorCode, str] = {
+    InstallerErrorCode.BUNDLE_BELOW_FLOOR: "update_version_below_floor",
+    InstallerErrorCode.BUNDLE_WITHDRAWN: "update_version_withdrawn",
+}
+
 
 def plugin_compatibility(installed: str | None, bundled: str | None) -> str:
     """Return how the plugin on the box stands against the bundled one, by `N.N.N`.
@@ -472,6 +478,14 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
                 InstallerErrorCode.HOST_KEY_CHANGED,
             ):
                 self._entry.async_start_reauth(self.hass)
+            if (refused := _RULED_OUT.get(err.code)) is not None:
+                # The installer holds every path to the rule; its refusal reads as the
+                # card's own, facts included.
+                raise HomeAssistantError(
+                    translation_domain="enigma2_mqtt",
+                    translation_key=refused,
+                    translation_placeholders=err.placeholders,
+                ) from err
             if (sentence := _UPDATE_SENTENCES.get(err.code)) is not None:
                 # Outcomes a household has to be told in words: a code on the update
                 # card would not say that a question may still be on the television.

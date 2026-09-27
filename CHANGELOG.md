@@ -123,10 +123,16 @@ The version card and the release check:
   report no build id and are shown as before.
 - **The bundled plugin is held to the signed index's floor and withdrawals.** A bundle below the
   floor, or withdrawn in the last verified index, is never offered or installed, and the summary
-  says why; with no verified index yet, only this integration's own floor (0.2.0) applies.
-- The held index is published again on `enigma2mqtt/release_index` at every setup and every
-  reconnect to the broker, verified first, so a broker restarted without persistence or an
-  overwritten topic is repaired rather than left until the next index.
+  says why; with no verified index yet, only this integration's own floor (0.2.0) applies. The
+  installer itself refuses it, so the guided installer's update of an older plugin is held to the
+  same rule as the update card, and says why in words.
+- The held index is put back on `enigma2mqtt/release_index` when the first receiver is set up and
+  at every reconnect to the broker, verified first, so a broker restarted without persistence or a
+  cleared topic is repaired rather than left until the next index. The topic is read first: a
+  retained index of a higher-ranked key, or a newer one of the same key - an index signed with the
+  spare key in an emergency, above all - is never overwritten, and when the rule accepts it this
+  Home Assistant takes it and announces it like any new index. Once for all receivers, not once
+  per receiver.
 - An index and a signature that do not match are read once more before they are judged - a
   publication can land between the two requests - and a pair that still does not verify is
   reported as "could not be verified, try again later", not as a forgery. The log keeps the

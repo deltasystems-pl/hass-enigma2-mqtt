@@ -120,20 +120,10 @@ async def async_setup_entry(
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await _async_publish_integration(hass, entry)
 
-    # The retained release index, repaired from the verified copy this Home Assistant holds:
-    # on every setup and whenever the broker connection comes back. A receiver without
-    # internet reads its versions from it, and a receiver sees the same serial as nothing new.
-    cache = async_release_index_cache(hass)
-    await cache.async_republish()
-
-    @callback
-    def _connection(connected: bool) -> None:
-        if connected:
-            entry.async_create_background_task(
-                hass, cache.async_republish(), name=f"{DOMAIN} republish release index"
-            )
-
-    entry.async_on_unload(mqtt.async_subscribe_connection_status(hass, _connection))
+    # The retained release index, repaired from the verified copy this Home Assistant holds -
+    # once for every receiver, when the first is set up and whenever the broker connection
+    # comes back, and never over a retained index the rule ranks at or above the held one.
+    async_release_index_cache(hass).async_attach(entry)
     return True
 
 

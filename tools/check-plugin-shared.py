@@ -8,8 +8,9 @@ the other would install what the other refuses:
 
 - the **shared vectors** of the signed release index - a byte-identical copy here, whose
   sha256 `tests/vectors/SOURCE.json` records with the plugin commit it was taken from;
-- the **embedded keys** - `PLUGIN_INDEX_KEYS` in `const.py` against `EMBEDDED` in the plugin's
-  `src/MQTTBridge/trust.py`: ids, ranks, public keys, baselines;
+- the **embedded keys** - `PLUGIN_INDEX_KEYS` in `const.py`, and `RELEASE_KEYS` in
+  `release_index.py`, each against `EMBEDDED` in the plugin's `src/MQTTBridge/trust.py`: ids,
+  ranks, public keys, baselines;
 - the **contract** - `PLUGIN_CONTRACT` against `docs/contract.json`'s major, and
   `PLUGIN_CONTRACT_EXCEPTIONS` against its named in-major exceptions, so that a new exception
   cannot arrive without somebody reading it here.
@@ -53,6 +54,15 @@ def _assignments(path: Path) -> dict[str, ast.expr]:
 def integration_keys() -> list[tuple[str, int, str, int]]:
     """`PLUGIN_INDEX_KEYS` from const.py, as `(key_id, rank, public, baseline)`."""
     value = ast.literal_eval(_assignments(CONST)["PLUGIN_INDEX_KEYS"])
+    return sorted((k["key_id"], k["rank"], k["public"], k["baseline"]) for k in value)
+
+
+def reader_release_keys() -> list[tuple[str, int, str, int]]:
+    """`RELEASE_KEYS` from release_index.py - what a test key set is checked against."""
+    call = _assignments(READER)["RELEASE_KEYS"]
+    if not isinstance(call, ast.Call) or len(call.args) != 1:
+        raise SystemExit("release_index.py: RELEASE_KEYS is not keys_from_data([...])")
+    value = ast.literal_eval(call.args[0])
     return sorted((k["key_id"], k["rank"], k["public"], k["baseline"]) for k in value)
 
 
@@ -131,6 +141,11 @@ def main(argv: list[str] | None = None) -> int:
     trust = plugin / "src/MQTTBridge/trust.py"
     if integration_keys() != plugin_keys(trust):
         failures.append("PLUGIN_INDEX_KEYS in const.py is not the plugin's EMBEDDED key set")
+    # Written down a second time, so that an acceptance build's test keys - which replace the
+    # set in const.py - are still checked against the release keys. A rotation that updated
+    # only one of the two would otherwise surface as an integration that refuses to load.
+    if reader_release_keys() != plugin_keys(trust):
+        failures.append("RELEASE_KEYS in release_index.py is not the plugin's EMBEDDED key set")
 
     # The limits and the origin, which the vectors carry only in part.
     theirs_values = _assignments(trust)

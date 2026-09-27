@@ -139,8 +139,10 @@ the state on so that the card's own button installs it, or named in `update.inst
 time stays in the attributes as information and orders nothing.
 
 The rule of section 2 holds for the bundle too: a bundled plugin below the floor, or withdrawn in
-the last verified index, is never offered and never installed, and the summary says why. With no
-verified index yet, only this integration's own floor applies.
+the last verified index, is never offered and never installed, and the summary says why. The
+refusal lives in the installer, which every install path goes through - the update card, the
+guided installer's update of an older plugin, the forced reinstall - so no path can forget it. With
+no verified index yet, only this integration's own floor applies.
 
 | Key | Platform | en | pl | de | Enabled by default |
 |---|---|---|---|---|---|
@@ -174,7 +176,16 @@ state cannot hold the card for longer.
 ### 5. A receiver without internet gets both from Home Assistant, and verifies both itself
 
 After every newly accepted index the integration publishes it, retained, on
-`enigma2mqtt/release_index`. To a receiver that asks, it serves the package, already verified, at
+`enigma2mqtt/release_index`, and it repairs that topic from the index it holds once for all
+receivers - when the first is set up, and whenever the broker connection comes back. It reads the
+topic first. The held index goes out only over a retained index that is missing, does not verify
+with the embedded keys, or that the rule ranks below it; never over one of a higher-ranked key, or
+of the same key at an equal or higher serial, because the topic is also the channel for an index
+signed with the spare key when the maintainer's account is itself the emergency. A retained index
+the rule accepts is taken, and announced, like any newly accepted index - which is what lets a
+spare-signed index put on the topic protect Home Assistant as well as the receivers. A broker that
+cannot be read is left alone until the next reconnect. To a receiver that asks, it serves the
+package, already verified, at
 `/api/enigma2_mqtt/relay/<token>`: unauthenticated, 32 random bytes, answering only the receiver's
 own IPv4 address from `info` (no address, or only an IPv6 one, and no token is issued), for ten
 minutes, repeatably - the address crosses the broker, so single use would only let a broker client

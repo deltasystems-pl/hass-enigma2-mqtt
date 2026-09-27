@@ -1024,3 +1024,49 @@ async def test_a_bundle_at_the_floor_is_offered(
     state = hass.states.get(PLUGIN)
     assert state.attributes["latest_version"] == PLUGIN_VERSION
     assert state.state == STATE_ON
+
+
+@pytest.mark.parametrize(
+    ("refusal", "placeholders", "sentence"),
+    [
+        (
+            "BUNDLE_BELOW_FLOOR",
+            {"version": PLUGIN_VERSION, "floor": "0.3.1"},
+            "update_version_below_floor",
+        ),
+        (
+            "BUNDLE_WITHDRAWN",
+            {"version": PLUGIN_VERSION, "reason": "it breaks EPG"},
+            "update_version_withdrawn",
+        ),
+    ],
+    ids=["below the floor", "withdrawn"],
+)
+async def test_the_installer_s_own_refusal_reads_as_the_card_s(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    refusal: str,
+    placeholders: dict[str, str],
+    sentence: str,
+) -> None:
+    """The installer holds every path to the rule, the card's included: an index that changed
+    between the card's check and the install is refused there, in the card's own words."""
+    from custom_components.enigma2_mqtt.installer import InstallerError, InstallerErrorCode
+
+    async def _refused(hass_, request, progress_cb=None, **kwargs):
+        raise InstallerError(InstallerErrorCode[refusal], "ruled out", placeholders)
+
+    await _setup(hass, config_entry, credentials=True)
+    await _report(hass, "0.2.0")
+    with (
+        patch("custom_components.enigma2_mqtt.update.async_install", _refused),
+        pytest.raises(HomeAssistantError) as raised,
+    ):
+        await hass.services.async_call(
+            "update", "install", {ATTR_ENTITY_ID: PLUGIN, ATTR_VERSION: PLUGIN_VERSION},
+            blocking=True,
+        )
+    assert raised.value.translation_key == sentence
+    assert raised.value.translation_placeholders == placeholders

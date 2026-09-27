@@ -82,7 +82,7 @@ async def _install(
     artifact = tmp_path / "plugin.ipk"
     artifact.write_bytes(b"ipk bytes")
     digest = hashlib.sha256(b"ipk bytes").hexdigest()
-    bundle = BundledPlugin(artifact, "0.1.0", digest, "1" * 40)
+    bundle = BundledPlugin(artifact, "0.2.0", digest, "1" * 40)
     original = FakeSession.run
 
     async def hash_aware(self: FakeSession, command: str, **kwargs: Any):

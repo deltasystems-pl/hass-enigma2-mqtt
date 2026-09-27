@@ -163,6 +163,8 @@
       ,"rollback_opkg_overlap": "The installation failed and the receiver was put back as it was, but another run of its package manager (opkg) held the lock for part of the restore and may have changed the package database at the same time. Check the receiver by hand (`opkg status enigma2-plugin-extensions-mqttbridge`); the backup taken before the change is in /home/root/mqttbridge-backups."
       ,"busy": "Another installation is already running on this receiver."
       ,"opkg_busy": "The receiver's package manager (opkg) is busy with another operation — an install or removal from the receiver's own menu, or its update check — so nothing was installed. Try again in a minute."
+      ,"bundle_below_floor": "The plugin bundled with this integration, {version}, is below {floor}, the lowest version the plugin's signed release index allows, so nothing was installed. Update this integration to get a newer plugin."
+      ,"bundle_withdrawn": "The plugin bundled with this integration, {version}, has been withdrawn in the plugin's signed release index: {reason}. Nothing was installed. Update this integration to get a newer plugin."
       ,"identity_mismatch": "The receiver is configured for node ID {box_node_id} and base topic {box_base_topic}, and the form gives {node_id} and {base_topic}. A value in brackets is one the receiver has not stored, and shows the plugin's default where there is one. Nothing was changed."
       ,"unknown": "Installation failed unexpectedly; no entry was created."
     }

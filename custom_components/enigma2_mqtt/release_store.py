@@ -30,12 +30,23 @@ persistent notification naming its serial, its key, the versions it adds and wit
 floor - because the signing key is used in the plugin repository's CI: an index the maintainer did
 not approve must be seen by anybody who looks, not only installed. It is then published, retained,
 on `enigma2mqtt/release_index`, so a receiver with no internet of its own can verify and use it.
+
+**What is already on that topic is read first.** The topic is also the documented channel for an
+index signed with the spare key, when the maintainer's account is itself the emergency and the
+origin cannot be trusted to serve it. So the held index goes out only over a retained index that
+is missing, does not verify with the embedded keys, or that the rule ranks below it - never over
+one of a higher-ranked key or a higher serial. A retained index the rule accepts is taken, as any
+new index is, which is what makes a spare-signed index on the topic protect this Home Assistant
+too, and not only the receivers. The read and the publish run in the background, once for all
+receivers: when the first is set up, after every newly accepted index, and whenever the broker
+connection comes back - which also repairs a broker restarted without persistence.
 """
 
 from __future__ import annotations
 
 import asyncio
 import base64
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 import json
@@ -171,6 +182,45 @@ async def _async_get(
         return status, bytes(body), etag if isinstance(etag, str) else None
 
 
+# How long a read of the retained index waits for the broker to acknowledge the subscription,
+# and then for the retained message itself. A broker sends a retained message right after the
+# acknowledgement, so the grace only decides how long "nothing is retained" takes to conclude.
+# The acknowledgement comes after Home Assistant's own debounce of SUBSCRIBE packets - half a
+# second just after it connects - and one round trip; an acknowledgement that does not come at
+# all leaves the topic alone rather than concluding that it is empty.
+RETAINED_SUBSCRIBE_TIMEOUT = 10.0
+RETAINED_GRACE = 2.0
+_UNREADABLE = object()
+
+
+def _pair(payload: Any) -> tuple[bytes, bytes] | None:
+    """`(index, signature)` from a retained `{"index", "sig"}` payload, or None."""
+    if isinstance(payload, (bytes, bytearray)):
+        payload = bytes(payload).decode("utf-8", "replace")
+    if not isinstance(payload, str) or not payload:
+        return None
+    try:
+        body = json.loads(payload)
+    except ValueError:
+        return None
+    if not isinstance(body, dict):
+        return None
+    index, signature = _unb64(body.get("index")), _unb64(body.get("sig"))
+    if index is None or signature is None:
+        return None
+    return index, signature
+
+
+def _at_or_above(
+    key: release_index.Key, serial: int, held_key: release_index.Key, held_serial: int
+) -> bool:
+    """Whether a verified index is at least as far along as the held one, by the rule: a key of
+    higher rank, or the same rank - one key per rank - at an equal or higher serial."""
+    if key.rank != held_key.rank:
+        return key.rank > held_key.rank
+    return serial >= held_serial
+
+
 def _torn(index_raw: bytes, signature_raw: bytes) -> bool:
     """Whether a pair fails the signature check - the one failure a publication race makes."""
     try:
@@ -235,6 +285,11 @@ class ReleaseIndexCache:
         self.check_error: str | None = None
         self.trust: Any = None
         self.integration_version: str | None = None
+        # The receivers set up now, and what keeps the retained index repaired while any is.
+        self._attached: set[str] = set()
+        self._connection_unsubscribe: Callable[[], None] | None = None
+        self._relay_task: asyncio.Task[None] | None = None
+        self._relay_again = False
 
     # ----------------------------------------------------------------------- storage --
 
@@ -425,7 +480,7 @@ class ReleaseIndexCache:
         self.index, self.key_id, self.etag = accepted.index, accepted.key.key_id, etag
         await self._async_save()
         await self._async_announce(previous, accepted.index)
-        await self._async_publish()
+        self._schedule_relay()
         return CheckResult(RESULT_ACCEPTED)
 
     async def _async_take_back(
@@ -465,29 +520,185 @@ class ReleaseIndexCache:
             "accepted before and no longer held",
             index["serial"],
         )
-        await self._async_publish()
+        self._schedule_relay()
         return True
 
-    async def async_republish(self) -> None:
-        """Put the held index on the broker again, retained - verified first.
+    # ------------------------------------------------------------ the retained topic --
 
-        On every setup and every reconnect to the broker: a broker restarted without
-        persistence, a publish that failed while it was down, or a broker client that
-        overwrote the retained topic would otherwise leave receivers without internet on a
-        wrong or missing index until the next serial. A receiver sees the same serial as
-        nothing new. The bytes are verified again before they go out, because what is
-        published in this integration's name must be what it would accept today.
+    @callback
+    def async_attach(self, entry: Any) -> None:
+        """Keep the retained index repaired while any receiver is set up.
+
+        The index is this Home Assistant's, not a receiver's, so however many receivers there
+        are it is relayed once: when the first of them is set up, and whenever the broker
+        connection comes back. Reloading one receiver while another stays set up is neither.
         """
-        await self.async_load()
+        self._attached.add(entry.entry_id)
+        entry.async_on_unload(lambda: self._detach(entry.entry_id))
+        if self._connection_unsubscribe is None:
+            self._connection_unsubscribe = mqtt.async_subscribe_connection_status(
+                self.hass, self._connection_changed
+            )
+            self._schedule_relay()
+
+    @callback
+    def _detach(self, entry_id: str) -> None:
+        self._attached.discard(entry_id)
+        if not self._attached and self._connection_unsubscribe is not None:
+            self._connection_unsubscribe()
+            self._connection_unsubscribe = None
+
+    @callback
+    def _connection_changed(self, connected: bool) -> None:
+        if connected:
+            self._schedule_relay()
+
+    @callback
+    def _schedule_relay(self) -> None:
+        """Relay in the background, one relay at a time; asked again meanwhile, once more.
+
+        In the background because reading the broker takes up to its grace, and neither a
+        setup nor a press of the check button should wait for it.
+        """
+        self._relay_again = True
+        if self._relay_task is None or self._relay_task.done():
+            self._relay_task = self.hass.async_create_background_task(
+                self._async_relay_while_asked(),
+                f"{DOMAIN} relay the plugin release index",
+                eager_start=False,
+            )
+
+    async def _async_relay_while_asked(self) -> None:
+        while self._relay_again:
+            self._relay_again = False
+            await self.async_republish()
+
+    def _verified_held(self) -> tuple[dict[str, Any], release_index.Key] | None:
+        """The held index and its key, if it verifies today - else None.
+
+        Verified again rather than believed, because what is published in this integration's
+        name must be what it would accept now.
+        """
         if self.index_raw is None or self.signature_raw is None:
-            return
+            return None
         try:
-            release_index.authenticate(
+            return release_index.authenticate(
                 self.index_raw, self.signature_raw, release_index.EMBEDDED
             )
         except release_index.Refused:
+            return None
+
+    async def async_republish(self) -> None:
+        """Put the held index on the broker, retained - unless the broker holds one as good.
+
+        What is retained is read first. The held index is published over a retained index
+        that is missing, does not verify with the embedded keys, or is older by the rule. A
+        retained index of a higher-ranked key, or of the same key at an equal or higher serial,
+        is never replaced: the topic is the documented channel for an index signed with the
+        spare key, and Home Assistant's own, older one must not undo it - not at setup, not at a
+        reconnect, not after a check. When the rule accepts the retained index it is taken, as
+        any newly accepted index is. A broker that cannot be read is left alone; the next
+        reconnect asks again. A receiver sees an index it already holds as nothing new.
+        """
+        await self.async_load()
+        if self._verified_held() is None:
             return
-        await self._async_publish()
+        retained = await self._async_read_retained()
+        if retained is _UNREADABLE:
+            _LOGGER.debug(
+                "Could not read the retained plugin release index; leaving the topic alone"
+            )
+            return
+        async with self._lock:
+            # Read again under the lock: a check may have accepted another index meanwhile.
+            if (held := self._verified_held()) is None:
+                return
+            if (pair := _pair(retained)) is not None:
+                try:
+                    index, key = release_index.authenticate(
+                        pair[0], pair[1], release_index.EMBEDDED
+                    )
+                except release_index.Refused:
+                    pass
+                else:
+                    if await self._async_take_from_broker(pair):
+                        return
+                    if _at_or_above(key, index["serial"], held[1], held[0]["serial"]):
+                        return
+            await self._async_publish()
+
+    async def _async_take_from_broker(self, pair: tuple[bytes, bytes]) -> bool:
+        """Take a retained index the rule accepts, as a newly fetched one is taken.
+
+        Announced like any other newly accepted index, because it is one: an index put on the
+        topic that the maintainer did not publish must be seen. Returns whether it was taken.
+        """
+        keys = release_index.EMBEDDED
+        try:
+            memory = release_index.memory_for(self.trust, keys, acceptance=False)
+            accepted = release_index.accept(pair[0], pair[1], keys, memory)
+        except (release_index.BadMemory, release_index.Refused):
+            return False
+        previous = self.index
+        self.trust = release_index.store(self.trust, keys, accepted.memory, acceptance=False)
+        self.index_raw, self.signature_raw = pair
+        # The ETag stays: it names the origin's file as last judged, so a `304` still means
+        # that the origin has nothing new - not that the held index came from it.
+        self.index, self.key_id = accepted.index, accepted.key.key_id
+        await self._async_save()
+        _LOGGER.info(
+            "Took the plugin release index serial %s from the retained %s topic",
+            accepted.index["serial"],
+            TOPIC_RELEASE_INDEX,
+        )
+        await self._async_announce(previous, accepted.index)
+        async_dispatcher_send(self.hass, SIGNAL_RELEASE_INDEX)
+        return True
+
+    async def _async_read_retained(self) -> Any:
+        """What the broker retains on the index topic: a payload, None, or `_UNREADABLE`.
+
+        Subscribes for the moment, and waits for the broker to acknowledge the subscription and
+        then a short grace for the retained message that follows it.
+        """
+        received: list[Any] = []
+        acknowledged = asyncio.Event()
+        arrived = asyncio.Event()
+
+        @callback
+        def _message(message: Any) -> None:
+            received.append(message.payload)
+            arrived.set()
+
+        # Registered before subscribing, so the acknowledgement of this subscription is the
+        # one waited for.
+        stop = mqtt.async_on_subscribe_done(
+            self.hass, TOPIC_RELEASE_INDEX, 1, acknowledged.set
+        )
+        try:
+            unsubscribe = await mqtt.async_subscribe(
+                self.hass, TOPIC_RELEASE_INDEX, _message, qos=1
+            )
+        except HomeAssistantError:
+            stop()
+            return _UNREADABLE
+        try:
+            if not arrived.is_set():
+                try:
+                    async with asyncio.timeout(RETAINED_SUBSCRIBE_TIMEOUT):
+                        await acknowledged.wait()
+                except TimeoutError:
+                    return _UNREADABLE
+            if not arrived.is_set():
+                try:
+                    async with asyncio.timeout(RETAINED_GRACE):
+                        await arrived.wait()
+                except TimeoutError:
+                    pass
+        finally:
+            unsubscribe()
+            stop()
+        return received[-1] if received else None
 
     async def _async_announce(
         self, previous: dict[str, Any] | None, index: dict[str, Any]

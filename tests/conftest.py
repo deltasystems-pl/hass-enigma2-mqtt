@@ -272,7 +272,12 @@ def quick_restart_rule(monkeypatch: pytest.MonkeyPatch) -> None:
     never, so the bounds only have to be long enough to take a few polls. A test about a
     bound itself sets the one it is about.
     """
-    from custom_components.enigma2_mqtt import installer, installer_helper, restart_rule
+    from custom_components.enigma2_mqtt import (
+        installer,
+        installer_helper,
+        release_store,
+        restart_rule,
+    )
 
     # Not a wait: the stop-and-restore script refuses the machine's own `init` and
     # `pidof` while this is set, in this process and every one it starts.
@@ -288,6 +293,9 @@ def quick_restart_rule(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(restart_rule, "EFFECT_POLL_SECONDS", 0.01)
     monkeypatch.setattr(restart_rule, "BOUQUET_REPLAY_SECONDS", 0.2)
     monkeypatch.setattr(restart_rule, "BOUQUET_ACK_SECONDS", 0.2)
+    # How long "nothing is retained on the release index topic" takes to conclude. The fake
+    # broker delivers a retained message on the next turn of the loop, not seconds later.
+    monkeypatch.setattr(release_store, "RETAINED_GRACE", 0.05)
 
 
 @pytest.fixture

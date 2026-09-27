@@ -74,6 +74,35 @@ def has_credentials(entry: Enigma2MqttConfigEntry) -> bool:
     )
 
 
+def bundle_refusal(
+    version: str, index: dict[str, Any] | None
+) -> tuple[str, dict[str, str]] | None:
+    """Why a bundled plugin of `version` may not be installed at all, or None.
+
+    The one rule of ADR-0008 section 2 holds for the bundle as for anything the index lists: a
+    version the last verified index withdraws, or one below the floor - the higher of this
+    integration's and the index's, this integration's alone while no index is held - is never
+    offered and never installed. The floor exists to keep people off a bad version, and it has
+    to hold most of all for a household that has not updated this integration yet, which is
+    exactly the one still carrying that bundle. The update card asks this to decide what to
+    offer, and the installer asks it again before it connects to anything, because every
+    install path - the card, the guided installer's update of an older plugin, the forced
+    reinstall - goes through the installer.
+    """
+    release = release_index.release_of(index, version)
+    if release is not None and (reason := release.get("withdrawn")) is not None:
+        return "withdrawn", {"version": version, "reason": str(reason)}
+    floor = (
+        PLUGIN_MIN_VERSION
+        if index is None
+        else release_index.effective_floor(index, PLUGIN_MIN_VERSION)
+    )
+    bundle_base = base_version(version)
+    if bundle_base is None or bundle_base < base_version(floor):
+        return "below_floor", {"version": version, "floor": floor}
+    return None
+
+
 def _load_bundle() -> BundledPlugin | None:
     """The bundled plugin, or None when it will not load - which is itself worth showing."""
     try:
@@ -146,38 +175,11 @@ class PluginVersions:
             release_time=release["commit_time"] if release else None,
         )
 
-    def bundle_withdrawn(self) -> str | None:
-        """The index's reason for withdrawing the bundle's version, or None."""
-        if self.bundle is None:
-            return None
-        release = self._release(self.bundle.version)
-        return release.get("withdrawn") if release else None
-
-    def floor(self) -> str:
-        """The lowest version anybody may install: the higher of this integration's floor and
-        the last verified index's - this integration's alone while no index is known."""
-        if self.index is None:
-            return PLUGIN_MIN_VERSION
-        return release_index.effective_floor(self.index, PLUGIN_MIN_VERSION)
-
     def bundle_refusal(self) -> tuple[str, dict[str, str]] | None:
-        """Why the bundle may not be installed at all, or None.
-
-        The one rule of ADR-0008 section 2 holds for the bundle as for anything the index
-        lists: a version below the floor, or one the index has withdrawn, is never offered
-        and never installed. The floor exists to keep people off a bad version, and it has to
-        hold most of all for a household that has not updated this integration yet - which is
-        exactly the one still carrying that bundle.
-        """
+        """Why the bundle may not be installed at all, or None (`bundle_refusal`)."""
         if self.bundle is None:
             return None
-        if (reason := self.bundle_withdrawn()) is not None:
-            return "withdrawn", {"version": self.bundle.version, "reason": reason}
-        floor = self.floor()
-        bundle_base = base_version(self.bundle.version)
-        if bundle_base is None or bundle_base < base_version(floor):
-            return "below_floor", {"version": self.bundle.version, "floor": floor}
-        return None
+        return bundle_refusal(self.bundle.version, self.index)
 
     # ------------------------------------------------------------------ the offers --
 

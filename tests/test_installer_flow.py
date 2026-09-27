@@ -34,6 +34,7 @@ from custom_components.enigma2_mqtt.const import (
     CONF_SSH_PORT,
     CONF_SSH_USERNAME,
     DOMAIN,
+    SUPPORTED_PLUGIN_VERSION,
 )
 from custom_components.enigma2_mqtt.installer import (
     HostKey,
@@ -856,3 +857,162 @@ async def test_changed_host_key_requires_an_explicit_confirmation(
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "reauth_confirm_host_key"
     assert config_entry.data[CONF_SSH_HOST_KEY] == HOST_KEY.public_key
+
+
+# ------------------------------------------- the one rule, on the guided installer's path --
+
+
+async def _hold_index(hass: HomeAssistant, floor: str, releases: list[dict[str, Any]]) -> None:
+    """Make the shared cache hold a verified index with this floor and these releases."""
+    from custom_components.enigma2_mqtt.release_store import async_release_index_cache
+
+    cache = async_release_index_cache(hass)
+    await cache.async_load()
+    cache.index = {
+        "serial": 1,
+        "issued": 1790500000,
+        "key_id": "0" * 16,
+        "floor": floor,
+        "releases": releases,
+    }
+
+
+def _listed(version: str, withdrawn: str | None = None) -> dict[str, Any]:
+    return {
+        "version": version,
+        "contract": 1,
+        "min_integration": None,
+        "withdrawn": withdrawn,
+        "commit": "a" * 40,
+        "commit_time": 1790000000,
+    }
+
+
+def _refusing_connector(connected: list[Any]):
+    async def _connector(credentials):
+        connected.append(credentials)
+        raise InstallerError(InstallerErrorCode.SSH_UNAVAILABLE)
+
+    return _connector
+
+
+@pytest.mark.parametrize(
+    ("floor", "releases", "reason", "placeholders"),
+    [
+        (
+            "9.0.0",
+            [_listed("9.0.0")],
+            "bundle_below_floor",
+            {"version": SUPPORTED_PLUGIN_VERSION, "floor": "9.0.0"},
+        ),
+        (
+            "0.2.0",
+            [_listed(SUPPORTED_PLUGIN_VERSION, "it breaks EPG")],
+            "bundle_withdrawn",
+            {"version": SUPPORTED_PLUGIN_VERSION, "reason": "it breaks EPG"},
+        ),
+    ],
+    ids=["below the floor", "withdrawn"],
+)
+async def test_the_guided_installer_refuses_a_bundle_the_index_rules_out(
+    hass: HomeAssistant,
+    mqtt_mock,
+    floor: str,
+    releases: list[dict[str, Any]],
+    reason: str,
+    placeholders: dict[str, str],
+) -> None:
+    """The rule is in `installer.async_install`, which every install path goes through - the
+    update card, this flow's update of an older plugin, the forced reinstall. The receiver is
+    not even connected to, and the flow says why in words."""
+    from custom_components.enigma2_mqtt import installer
+
+    await _hold_index(hass, floor, releases)
+    connected: list[Any] = []
+
+    async def _install(hass_, request, progress_cb):
+        return await installer.async_install(
+            hass_, request, progress_cb, _connector=_refusing_connector(connected)
+        )
+
+    answers, _ = await _install_watching_the_frontend(hass, _install)
+
+    assert len(answers) == 1
+    assert answers[0]["type"] is FlowResultType.ABORT
+    assert answers[0]["reason"] == reason
+    assert answers[0]["description_placeholders"] == placeholders
+    assert connected == []
+    assert hass.config_entries.async_entries(DOMAIN) == []
+
+
+@pytest.mark.parametrize(
+    ("floor", "releases"),
+    [
+        (None, []),
+        ("0.2.0", [_listed(SUPPORTED_PLUGIN_VERSION)]),
+        (SUPPORTED_PLUGIN_VERSION, [_listed(SUPPORTED_PLUGIN_VERSION)]),
+        # A release the index does not list is held to the floor alone.
+        ("0.2.0", [_listed("0.2.0")]),
+    ],
+    ids=["no index", "listed above the floor", "at the floor", "not listed"],
+)
+async def test_the_guided_installer_goes_on_when_the_rule_allows_the_bundle(
+    hass: HomeAssistant, mqtt_mock, floor: str | None, releases: list[dict[str, Any]]
+) -> None:
+    """With no verified index only this integration's own floor applies, as before."""
+    from custom_components.enigma2_mqtt import installer
+
+    if floor is not None:
+        await _hold_index(hass, floor, releases)
+    connected: list[Any] = []
+
+    async def _install(hass_, request, progress_cb):
+        return await installer.async_install(
+            hass_, request, progress_cb, _connector=_refusing_connector(connected)
+        )
+
+    answers, _ = await _install_watching_the_frontend(hass, _install)
+
+    assert answers[0]["reason"] == InstallerErrorCode.SSH_UNAVAILABLE.value
+    assert len(connected) == 1
+
+
+async def test_the_guided_installer_reads_an_index_an_earlier_run_stored(
+    hass: HomeAssistant,
+    mqtt_mock,
+    hass_storage: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The first receiver of a fresh start is added before anything else has read the stored
+    index; the installer reads it itself rather than judging by the floor alone."""
+    import base64
+
+    from custom_components.enigma2_mqtt import installer, release_index
+    from custom_components.enigma2_mqtt.const import (
+        RELEASE_INDEX_STORAGE_KEY,
+        RELEASE_INDEX_STORAGE_VERSION,
+    )
+
+    from .signed_index import keyset, release, sign
+
+    monkeypatch.setattr(release_index, "EMBEDDED", keyset("test"))
+    index, sig = sign(1, [release("9.0.0")], floor="9.0.0")
+    hass_storage[RELEASE_INDEX_STORAGE_KEY] = {
+        "version": RELEASE_INDEX_STORAGE_VERSION,
+        "data": {"index": base64.b64encode(index).decode(), "sig": base64.b64encode(sig).decode()},
+    }
+    connected: list[Any] = []
+
+    async def _install(hass_, request, progress_cb):
+        return await installer.async_install(
+            hass_, request, progress_cb, _connector=_refusing_connector(connected)
+        )
+
+    answers, _ = await _install_watching_the_frontend(hass, _install)
+
+    assert answers[0]["reason"] == "bundle_below_floor"
+    assert answers[0]["description_placeholders"] == {
+        "version": SUPPORTED_PLUGIN_VERSION,
+        "floor": "9.0.0",
+    }
+    assert connected == []
