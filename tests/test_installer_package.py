@@ -12,13 +12,20 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from homeassistant.core import HomeAssistant
 import pytest
 from pytest_homeassistant_custom_component.common import async_fire_mqtt_message
+from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
+from custom_components.enigma2_mqtt.bundle import BundleError
+from custom_components.enigma2_mqtt.const import PLUGIN_INDEX_ORIGIN, PLUGIN_RELEASE_API
 from custom_components.enigma2_mqtt.installer import (
     CommandResult,
     InstallerError,
@@ -28,11 +35,18 @@ from custom_components.enigma2_mqtt.installer import (
     _async_watch_restart,
     async_install,
 )
-from custom_components.enigma2_mqtt.release_package import ORIGIN_DOWNLOAD, PackageSource
+from custom_components.enigma2_mqtt.release_package import (
+    ORIGIN_DOWNLOAD,
+    PackageSource,
+    async_fetch_release,
+)
 from custom_components.enigma2_mqtt.release_store import async_release_index_cache
 
+from .ipk import plugin_ipk
 from .signed_index import release
 from .test_installer import FakeReceiver, FakeSession
+
+LOAD_BUNDLE = "custom_components.enigma2_mqtt.bundle.load_bundled_plugin"
 
 NODE = "vuuno4kse_005301"
 DATA = b"verified package bytes"
@@ -49,6 +63,29 @@ def credentials() -> SshCredentials:
         password="not-a-real-password",
         host_key="ssh-ed25519 AAAATEST",
     )
+
+
+def _listed(version: str, **changes: Any) -> dict[str, Any]:
+    """A signed entry for `version` whose size and sha256 are the test package's."""
+    return release(version, **{"size": len(DATA), "sha256": SHA, **changes})
+
+
+async def _hold(
+    hass: HomeAssistant, *releases: dict[str, Any], floor: str = "0.2.0"
+) -> None:
+    """Make the cache hold a verified index listing `releases` - the index a newer check
+    accepted between the fetch and the install, when a test says so."""
+    cache = async_release_index_cache(hass)
+    await cache.async_load()
+    cache.index = {"floor": floor, "releases": list(releases)}
+    cache.integration_version = "0.4.0"
+
+
+@pytest.fixture(autouse=True)
+async def held_index(hass: HomeAssistant) -> None:
+    """The index the package was fetched under: a package of the index exists only while an
+    index that lists it is held."""
+    await _hold(hass, _listed("0.3.0"), _listed("0.4.0"))
 
 
 def _package(version: str = "0.4.0", **changes: Any) -> PackageSource:
@@ -107,10 +144,39 @@ async def _completed_watch(*args: Any, **kwargs: Any) -> Any:
     return watch
 
 
+def _run_in_a_shell(shell: tuple[str, ...], opkg_dir: Path, command: str) -> CommandResult:
+    """Run one command line the way the receiver's shell would, with the fake opkg first on
+    PATH, and report its end as asyncssh does: a shell killed by a signal is exit status -1."""
+    done = subprocess.run(
+        [*shell, "-c", command],
+        env={**os.environ, "PATH": f"{opkg_dir}{os.pathsep}{os.environ.get('PATH', '')}"},
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+        # Its own process group, so a fake opkg that kills "its" group kills only the shell.
+        start_new_session=True,
+    )
+    return CommandResult(-1 if done.returncode < 0 else done.returncode, done.stdout, done.stderr)
+
+
 async def _install(
-    hass: HomeAssistant, receiver: FakeReceiver, request: InstallRequest
+    hass: HomeAssistant,
+    receiver: FakeReceiver,
+    request: InstallRequest,
+    *,
+    shell: tuple[str, ...] | None = None,
+    opkg_dir: Path | None = None,
 ) -> Any:
+    """Install through the fake receiver. The dependency question is answered from the
+    receiver's list of packages, or - given a shell and a directory holding a fake opkg - by
+    running the installer's command line exactly as written."""
     original_run = FakeSession.run
+    connects: list[SshCredentials] = []
+
+    async def connect(credentials: SshCredentials) -> Any:
+        connects.append(credentials)
+        return await receiver.connect(credentials)
 
     async def run(self: FakeSession, command: str, **kwargs: Any) -> CommandResult:
         if "sha256sum" in command:
@@ -118,12 +184,17 @@ async def _install(
             return CommandResult(0, SHA + "\n")
         if command.startswith("for p in ") and "opkg status" in command:
             self.receiver.commands.append(command)
+            if shell is not None and opkg_dir is not None:
+                return await hass.async_add_executor_job(
+                    _run_in_a_shell, shell, opkg_dir, command
+                )
             have = getattr(self.receiver, "have", ())
             asked = command.split(";", 1)[0].removeprefix("for p in ").split()
             missing = [name for name in asked if name not in have]
             return CommandResult(0, "".join(f"{name}\n" for name in missing))
         return await original_run(self, command, **kwargs)
 
+    receiver.connects = connects
     with (
         patch(
             "custom_components.enigma2_mqtt.installer._installed_hash_manifest",
@@ -132,7 +203,7 @@ async def _install(
         patch("custom_components.enigma2_mqtt.installer._async_watch_restart", _completed_watch),
         patch.object(FakeSession, "run", run),
     ):
-        return await async_install(hass, request, _connector=receiver.connect)
+        return await async_install(hass, request, _connector=connect)
 
 
 async def test_the_verified_bytes_are_what_is_uploaded(
@@ -162,33 +233,66 @@ async def test_bytes_that_changed_after_verification_are_refused_before_connecti
 
 
 @pytest.mark.parametrize(
-    ("entry", "code", "placeholders"),
+    ("releases", "code", "placeholders"),
     [
         (
-            release("0.4.0", withdrawn="it breaks EPG"),
+            [_listed("0.4.0", withdrawn="it breaks EPG")],
             InstallerErrorCode.VERSION_WITHDRAWN,
             {"version": "0.4.0", "reason": "it breaks EPG"},
         ),
         (
-            release("0.4.0"),
+            [_listed("0.4.0")],
             InstallerErrorCode.VERSION_BELOW_FLOOR,
             {"version": "0.4.0", "floor": "0.5.0"},
         ),
+        (
+            [_listed("0.4.0", contract=2)],
+            InstallerErrorCode.VERSION_NOT_INSTALLABLE,
+            {"version": "0.4.0"},
+        ),
+        (
+            [_listed("0.4.0", min_integration="9.9.9")],
+            InstallerErrorCode.VERSION_NOT_INSTALLABLE,
+            {"version": "0.4.0"},
+        ),
+        (
+            [_listed("0.3.0")],
+            InstallerErrorCode.VERSION_NOT_INSTALLABLE,
+            {"version": "0.4.0"},
+        ),
+        (
+            [_listed("0.4.0", sha256="ab" * 32)],
+            InstallerErrorCode.PACKAGE_INVALID,
+            {"version": "0.4.0"},
+        ),
+        (
+            [_listed("0.4.0", size=len(DATA) + 1)],
+            InstallerErrorCode.PACKAGE_INVALID,
+            {"version": "0.4.0"},
+        ),
     ],
-    ids=["withdrawn since it was fetched", "below a floor raised since"],
+    ids=[
+        "withdrawn since it was fetched",
+        "below a floor raised since",
+        "another contract since",
+        "needs a newer integration since",
+        "no longer listed",
+        "another checksum since",
+        "another size since",
+    ],
 )
 async def test_the_rule_is_asked_again_at_install_time(
     hass: HomeAssistant,
     credentials: SshCredentials,
-    entry: dict[str, Any],
+    releases: list[dict[str, Any]],
     code: InstallerErrorCode,
     placeholders: dict[str, str],
 ) -> None:
-    """An index accepted between the fetch and the install may have withdrawn the version or
-    raised the floor; the install is refused before the receiver is connected to."""
-    cache = async_release_index_cache(hass)
-    await cache.async_load()
-    cache.index = {"floor": placeholders.get("floor", "0.2.0"), "releases": [entry]}
+    """An index accepted between the fetch and the install may have withdrawn the version,
+    raised the floor, moved it to another contract, asked for a newer integration, dropped it
+    or signed other bytes under its number; the whole rule is asked again against the newest
+    index held, and the install is refused before the receiver is connected to."""
+    await _hold(hass, *releases, floor=placeholders.get("floor", "0.2.0"))
     receiver = DependsReceiver()
 
     with pytest.raises(InstallerError) as raised:
@@ -196,6 +300,33 @@ async def test_the_rule_is_asked_again_at_install_time(
 
     assert raised.value.code is code
     assert raised.value.placeholders == placeholders
+    assert receiver.connects == []
+    assert receiver.commands == []
+
+
+async def test_a_release_fetched_as_compatible_is_not_installed_under_a_newer_contract(
+    hass: HomeAssistant, credentials: SshCredentials, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """The review's case, end to end: the package is fetched and verified while the index
+    calls it compatible, a newer index moves that release to another contract before the
+    install, and the install stops before any SSH connection is opened."""
+    package_bytes = plugin_ipk("0.4.0")
+    sha = hashlib.sha256(package_bytes).hexdigest()
+    entry = release("0.4.0", size=len(package_bytes), sha256=sha)
+    await _hold(hass, entry)
+    aioclient_mock.get(PLUGIN_RELEASE_API + "0.4.0", status=404)
+    aioclient_mock.get(PLUGIN_INDEX_ORIGIN + entry["filename"], content=package_bytes)
+    with patch(LOAD_BUNDLE, side_effect=BundleError("none in this test")):
+        fetched = await async_fetch_release(hass, "0.4.0")
+
+    await _hold(hass, {**entry, "contract": 2})
+    receiver = DependsReceiver(installed_version="0.3.0")
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, receiver, _request(credentials, fetched))
+
+    assert raised.value.code is InstallerErrorCode.VERSION_NOT_INSTALLABLE
+    assert receiver.connects == []
     assert receiver.commands == []
 
 
@@ -203,19 +334,129 @@ async def test_a_missing_dependency_refuses_before_anything_changes(
     hass: HomeAssistant, credentials: SshCredentials, caplog: pytest.LogCaptureFixture
 ) -> None:
     receiver = DependsReceiver(installed_version="0.3.0", have=("python3-core",))
-    package = _package(depends=("python3-core", "python3-json"))
+    package = _package(depends=("python3-json", "python3-core", "python3-netclient"))
 
     with pytest.raises(InstallerError) as raised:
         await _install(hass, receiver, _request(credentials, package))
 
     assert raised.value.code is InstallerErrorCode.DEPENDS_MISSING
-    assert raised.value.placeholders == {"version": "0.4.0", "package": "python3-json"}
+    # Every missing package, in the entry's order: one round trip to install them all, not one
+    # refusal per package.
+    assert raised.value.placeholders == {
+        "version": "0.4.0",
+        "package": "python3-json, python3-netclient",
+    }
     joined = "\n".join(receiver.commands)
     assert " claim " not in joined
     assert " snapshot " not in joined
     assert "opkg install" not in joined
     assert receiver.files["plugin"] == "old"
-    assert "needs python3-json" in caplog.text
+    assert "needs python3-json, python3-netclient" in caplog.text
+
+
+# The receiver's shells: OpenViX and OpenPLi run busybox sh; a CI runner has dash and bash.
+SHELLS = [
+    shell
+    for shell in (("sh",), ("dash",), ("bash",), ("busybox", "sh"))
+    if shutil.which(shell[0]) is not None
+]
+
+# An opkg that answers `opkg status <name>` the way opkg 0.6 does: a paragraph per package, a
+# `Status:` line whose last word is the state, nothing at all for a package it has never heard
+# of - and, for one name, a shell that dies under the question, as a dropped session does.
+FAKE_OPKG = r"""#!/bin/sh
+[ "$1" = status ] || exit 1
+case "$2" in
+  python3-core)
+    printf 'Package: python3-core\nVersion: 3.12.3-r0\nDepends: libc6\n'
+    printf 'Status: install ok installed\nArchitecture: cortexa15hf-neon-vfpv4\n\n' ;;
+  python3-json) printf 'Package: python3-json\nStatus: install user installed\n\n' ;;
+  python3-held) printf 'Package: python3-held\nStatus: install hold installed\n\n' ;;
+  python3-threading) printf 'Package: python3-threading\nStatus: install ok not-installed\n\n' ;;
+  python3-netclient) printf 'Package: python3-netclient\nStatus: install ok half-installed\n\n' ;;
+  python3-lost) kill -9 0 ;;
+esac
+exit 0
+"""
+
+
+@pytest.fixture
+def opkg_dir(tmp_path: Path) -> Path:
+    opkg = tmp_path / "opkg"
+    opkg.write_text(FAKE_OPKG, encoding="utf-8")
+    opkg.chmod(0o755)
+    return tmp_path
+
+
+@pytest.mark.skipif(not SHELLS, reason="no POSIX shell to run the command in")
+@pytest.mark.parametrize("shell", SHELLS, ids=[" ".join(shell) for shell in SHELLS])
+async def test_the_dependency_question_is_judged_by_opkg_s_status_line(
+    hass: HomeAssistant, credentials: SshCredentials, opkg_dir: Path, shell: tuple[str, ...]
+) -> None:
+    """The command line itself, run by a real shell against an opkg that answers as opkg does:
+    only `installed` is installed - `not-installed` and `half-installed` end in the same word,
+    and a package opkg has never heard of prints nothing."""
+    receiver = DependsReceiver(installed_version="0.3.0")
+    package = _package(
+        depends=(
+            "python3-core",
+            "python3-json",
+            "python3-held",
+            "python3-threading",
+            "python3-netclient",
+            "python3-missing",
+        )
+    )
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(
+            hass, receiver, _request(credentials, package), shell=shell, opkg_dir=opkg_dir
+        )
+
+    assert raised.value.code is InstallerErrorCode.DEPENDS_MISSING
+    assert raised.value.placeholders["package"] == (
+        "python3-threading, python3-netclient, python3-missing"
+    )
+    assert not any(command.startswith("opkg install") for command in receiver.commands)
+
+
+@pytest.mark.skipif(not SHELLS, reason="no POSIX shell to run the command in")
+@pytest.mark.parametrize("shell", SHELLS, ids=[" ".join(shell) for shell in SHELLS])
+async def test_a_receiver_that_has_every_dependency_is_installed(
+    hass: HomeAssistant, credentials: SshCredentials, opkg_dir: Path, shell: tuple[str, ...]
+) -> None:
+    receiver = DependsReceiver(installed_version="0.3.0")
+    package = _package(depends=("python3-core", "python3-json", "python3-held"))
+
+    with patch(PUBLISH, new_callable=AsyncMock):
+        result = await _install(
+            hass, receiver, _request(credentials, package), shell=shell, opkg_dir=opkg_dir
+        )
+
+    assert result.version == "0.4.0"
+    assert any(command.startswith("opkg install") for command in receiver.commands)
+
+
+@pytest.mark.skipif(not SHELLS, reason="no POSIX shell to run the command in")
+@pytest.mark.parametrize("shell", SHELLS, ids=[" ".join(shell) for shell in SHELLS])
+async def test_a_dependency_question_that_dies_changes_nothing(
+    hass: HomeAssistant, credentials: SshCredentials, opkg_dir: Path, shell: tuple[str, ...]
+) -> None:
+    """A shell that dies under the question has printed no missing package - which is not
+    the same as having none missing."""
+    receiver = DependsReceiver(installed_version="0.3.0")
+    package = _package(depends=("python3-core", "python3-lost"))
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(
+            hass, receiver, _request(credentials, package), shell=shell, opkg_dir=opkg_dir
+        )
+
+    assert raised.value.code is InstallerErrorCode.PREFLIGHT_FAILED
+    joined = "\n".join(receiver.commands)
+    assert " claim " not in joined
+    assert "opkg install" not in joined
+    assert receiver.files["plugin"] == "old"
 
 
 async def test_every_dependency_is_asked_about_and_quoted(

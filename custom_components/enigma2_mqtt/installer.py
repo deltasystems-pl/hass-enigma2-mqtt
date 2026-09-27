@@ -38,7 +38,7 @@ from homeassistant.components.mqtt import ReceiveMessage
 from homeassistant.core import HomeAssistant, callback
 from packaging.version import InvalidVersion, Version
 
-from . import installer_helper, restart_rule
+from . import installer_helper, release_package, restart_rule
 from .box import command_topic, parse_json_payload, same_service, state_topic
 from .bundle import BundledPlugin, BundleError, load_bundled_plugin
 from .const import (
@@ -159,11 +159,15 @@ class InstallerErrorCode(StrEnum):
     BUNDLE_BELOW_FLOOR = "bundle_below_floor"
     BUNDLE_WITHDRAWN = "bundle_withdrawn"
     # The same rule for a release of the index handed to the installer as bytes: checked
-    # when the bytes were fetched, and again here, because an index accepted in between may
-    # have withdrawn the version or raised the floor.
+    # when the bytes were fetched, and again here - the whole rule - because an index
+    # accepted in between may have withdrawn the version or raised the floor.
     VERSION_BELOW_FLOOR = "version_below_floor"
     VERSION_WITHDRAWN = "version_withdrawn"
-    # Verified bytes that are no longer the ones that were verified.
+    # The rest of the rule, asked again the same way: the newest index held no longer lists
+    # the version, has moved it to another contract, or asks for a newer integration.
+    VERSION_NOT_INSTALLABLE = "version_not_installable"
+    # Verified bytes that are no longer the ones that were verified - or no longer the ones
+    # the newest index held signs under that version.
     PACKAGE_INVALID = "package_invalid"
     # A package the release needs is not installed on the receiver.
     DEPENDS_MISSING = "depends_missing"
@@ -1883,48 +1887,92 @@ async def _async_release_after_withdraw(
 
 
 async def _async_refuse_what_the_index_rules_out(
-    hass: HomeAssistant, version: str, *, bundled: bool = True
+    hass: HomeAssistant, version: str
 ) -> dict[str, Any] | None:
-    """Refuse a package below the floor, or withdrawn, in the last verified index.
+    """Refuse a bundle below the floor, or withdrawn, in the last verified index.
 
-    Here rather than in each caller, because every path - the update card, the guided
-    installer's update of an older plugin, the forced reinstall, the options flow's
-    downgrade - installs through this module, and a rule one of them forgot would be a rule
-    that does not hold. With no verified index yet, only this integration's own floor
-    applies. Returns the index the rule was judged by.
+    Here rather than in each caller, because every path that installs the bundle - the
+    update card, the guided installer's update of an older plugin, the forced reinstall -
+    installs through this module, and a rule one of them forgot would be a rule that does
+    not hold. With no verified index yet, only this integration's own floor applies.
+    Returns the index the rule was judged by.
     """
     cache = async_release_index_cache(hass)
     await cache.async_load()
     if (refusal := bundle_refusal(version, cache.index)) is None:
         return cache.index
     code, placeholders = refusal
-    what = "the bundled plugin" if bundled else "plugin"
     _LOGGER.warning(
-        "Receiver install refused before connecting to it: %s %s is %s",
-        what,
+        "Receiver install refused before connecting to it: the bundled plugin %s is %s",
         version,
         f"withdrawn in the signed release index: {placeholders['reason']}"
         if code == "withdrawn"
         else f"below {placeholders['floor']}, the lowest version the signed release index "
         "allows",
     )
-    if bundled:
-        error_code = (
-            InstallerErrorCode.BUNDLE_WITHDRAWN
-            if code == "withdrawn"
-            else InstallerErrorCode.BUNDLE_BELOW_FLOOR
-        )
-    else:
-        error_code = (
-            InstallerErrorCode.VERSION_WITHDRAWN
-            if code == "withdrawn"
-            else InstallerErrorCode.VERSION_BELOW_FLOOR
-        )
     raise InstallerError(
-        error_code,
-        f"{what} {version} is ruled out by the signed release index ({code})",
+        InstallerErrorCode.BUNDLE_WITHDRAWN
+        if code == "withdrawn"
+        else InstallerErrorCode.BUNDLE_BELOW_FLOOR,
+        f"the bundled plugin {version} is ruled out by the signed release index ({code})",
         placeholders,
     )
+
+
+# The fetch's refusals under the rule, as the installer's codes. Anything else the rule says -
+# not listed, another contract, a newer integration needed, no index at all - is one code.
+_PACKAGE_REFUSALS: dict[str, InstallerErrorCode] = {
+    release_package.WITHDRAWN: InstallerErrorCode.VERSION_WITHDRAWN,
+    release_package.BELOW_FLOOR: InstallerErrorCode.VERSION_BELOW_FLOOR,
+}
+
+
+async def _async_refuse_a_package_the_index_no_longer_offers(
+    hass: HomeAssistant, package: PackageSource
+) -> None:
+    """Ask the whole rule again for a release of the index, against the newest index held.
+
+    The bytes were verified when they were fetched, under the index held then. A check in
+    between may have accepted a newer index - one that withdraws the version, raises the
+    floor, moves it to another contract, asks for a newer integration, drops it, or signs
+    other bytes under its number - and the install is the last moment that can still say no
+    without the receiver having been touched. So this is the fetch's own rule
+    (`release_package.eligible_release`), not a part of it, and the entry's sha256 and size
+    are held to the bytes: a package is installed only while the newest index would have
+    let it be fetched.
+    """
+    cache = async_release_index_cache(hass)
+    await cache.async_load()
+    try:
+        entry = release_package.eligible_release(
+            cache.index, package.version, integration_version=cache.integration_version
+        )
+    except release_package.PackageError as error:
+        _LOGGER.warning(
+            "Receiver install refused before connecting to it: plugin %s is no longer "
+            "installable under the newest signed release index held (%s)",
+            package.version,
+            error.detail,
+        )
+        raise InstallerError(
+            _PACKAGE_REFUSALS.get(error.code, InstallerErrorCode.VERSION_NOT_INSTALLABLE),
+            f"plugin {package.version} is ruled out by the signed release index ({error.code})",
+            error.placeholders
+            if error.code in _PACKAGE_REFUSALS
+            else {"version": package.version},
+        ) from error
+    if entry["sha256"] != package.sha256 or entry["size"] != len(package.data):
+        _LOGGER.warning(
+            "Receiver install refused before connecting to it: the newest signed release "
+            "index held names other bytes for plugin %s than the ones that were verified",
+            package.version,
+        )
+        raise InstallerError(
+            InstallerErrorCode.PACKAGE_INVALID,
+            f"the signed release index no longer names these bytes for plugin "
+            f"{package.version}",
+            {"version": package.version},
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1957,7 +2005,7 @@ async def _async_source(hass: HomeAssistant, request: InstallRequest) -> _Source
             tuple(entry.get("depends") or ()) if entry is not None else (),
         )
     package = request.package
-    await _async_refuse_what_the_index_rules_out(hass, package.version, bundled=False)
+    await _async_refuse_a_package_the_index_no_longer_offers(hass, package)
     if hashlib.sha256(package.data).hexdigest() != package.sha256:
         raise InstallerError(
             InstallerErrorCode.PACKAGE_INVALID,
@@ -1978,7 +2026,14 @@ async def _async_check_depends(
     it, which a receiver without internet cannot reach. `opkg status` is a reader and never
     takes opkg's lock, so this asks nothing a running opkg could make wait. The names come
     from the signed entry, whose schema allows nothing a shell would read as syntax; they are
-    quoted anyway.
+    quoted anyway. Every missing package is named, so that one look at the receiver's feeds
+    installs them all.
+
+    `opkg status <name>` sees a package of exactly that name. opkg itself would also accept a
+    dependency that another installed package declares in `Provides:`, so on an image that
+    merges a named package into another one this refuses an install opkg would have done.
+    That is the check the design prescribes, and the direction is the safe one - a refusal
+    changes nothing on the receiver and names what it looked for.
     """
     if not depends:
         return
@@ -1995,11 +2050,13 @@ async def _async_check_depends(
         )
     missing = [line.strip() for line in result.stdout.splitlines() if line.strip() in depends]
     if missing:
+        named = ", ".join(missing)
         raise InstallerError(
             InstallerErrorCode.DEPENDS_MISSING,
-            f"plugin {version} needs {', '.join(missing)}, which the receiver does not have "
-            "installed",
-            {"version": version, "package": missing[0]},
+            f"plugin {version} needs {named}, which the receiver does not have installed",
+            # One placeholder for one sentence however many are missing: the list, in the
+            # signed entry's order.
+            {"version": version, "package": named},
         )
 
 

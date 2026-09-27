@@ -173,7 +173,8 @@
        "version_withdrawn": "Plugin {version} has been withdrawn in the plugin's signed release index: {reason}. Nothing was installed.",
        "version_below_floor": "Plugin {version} is below {floor}, the lowest version the plugin's signed release index allows, so nothing was installed.",
        "package_invalid": "Could not download plugin {version}, or its checksum does not match the plugin's signed release index. Nothing was changed on the receiver.",
-       "depends_missing": "Plugin {version} needs the package {package}, which is not installed on the receiver. Nothing was changed."
+       "depends_missing": "Plugin {version} needs packages that are not installed on the receiver: {package}. Nothing was changed.",
+       "version_not_installable": "Plugin {version} is no longer a release the plugin's signed release index lets this integration install, so nothing was installed."
     }
   },
   "options": {
@@ -722,7 +723,7 @@
     "history_clear_screen_open": {"message": "A menu, the channel list or the EPG is open on the receiver's screen, where 0 would not reach the history. Close it and try again."},
     "zap_history_playback": {"message": "The receiver is playing back a recording, where its zap history is not on screen. Stop the playback and try again."},
     "update_download_failed": {"message": "Could not download plugin {version}, or its checksum does not match the plugin's signed release index. Nothing was changed on the receiver."},
-    "update_depends_missing": {"message": "Plugin {version} needs the package {package}, which is not installed on the receiver. Nothing was changed."},
+    "update_depends_missing": {"message": "Plugin {version} needs packages that are not installed on the receiver: {package}. Nothing was changed."},
     "relay_no_ipv4": {"message": "The receiver did not report an IPv4 address, so Home Assistant cannot share the plugin with it safely."},
     "relay_no_address": {"message": "Home Assistant does not know its address on the local network. Set “Local network” in Home Assistant's network settings."},
     "relay_busy": {"message": "Home Assistant is sending this receiver the plugin right now. Try again when that download has finished."},

@@ -147,7 +147,8 @@
       "version_withdrawn": "Plugin {version} wurde in der signierten Versionsliste des Plugins zurückgezogen: {reason}. Es wurde nichts installiert.",
       "version_below_floor": "Plugin {version} liegt unter {floor}, der niedrigsten Version, die die signierte Versionsliste des Plugins zulässt, daher wurde nichts installiert.",
       "package_invalid": "Plugin {version} konnte nicht heruntergeladen werden, oder seine Prüfsumme stimmt nicht mit der signierten Versionsliste des Plugins überein. Auf dem Receiver wurde nichts geändert.",
-      "depends_missing": "Plugin {version} benötigt das Paket {package}, das auf dem Receiver nicht installiert ist. Es wurde nichts geändert."
+      "depends_missing": "Plugin {version} benötigt Pakete, die auf dem Receiver nicht installiert sind: {package}. Es wurde nichts geändert.",
+      "version_not_installable": "Plugin {version} ist keine Version mehr, die diese Integration laut der signierten Versionsliste des Plugins installieren darf, daher wurde nichts installiert."
     }
   },
   "options": {
@@ -696,7 +697,7 @@
     "history_clear_screen_open": {"message": "Auf dem Bildschirm des Receivers ist ein Menü, die Senderliste oder der EPG geöffnet - schließe es und versuche es erneut."},
     "zap_history_playback": {"message": "Der Receiver spielt eine Aufnahme ab - beende sie und versuche es erneut."},
     "update_download_failed": {"message": "Plugin {version} konnte nicht heruntergeladen werden, oder seine Prüfsumme stimmt nicht mit der signierten Versionsliste des Plugins überein. Auf dem Receiver wurde nichts geändert."},
-    "update_depends_missing": {"message": "Plugin {version} benötigt das Paket {package}, das auf dem Receiver nicht installiert ist. Es wurde nichts geändert."},
+    "update_depends_missing": {"message": "Plugin {version} benötigt Pakete, die auf dem Receiver nicht installiert sind: {package}. Es wurde nichts geändert."},
     "relay_no_ipv4": {"message": "Der Receiver hat keine IPv4-Adresse gemeldet, daher kann Home Assistant ihm das Plugin nicht sicher bereitstellen."},
     "relay_no_address": {"message": "Home Assistant kennt seine Adresse im lokalen Netzwerk nicht. Lege „Lokales Netzwerk“ in den Netzwerkeinstellungen von Home Assistant fest."},
     "relay_busy": {"message": "Home Assistant sendet diesem Receiver gerade das Plugin. Versuche es erneut, wenn dieser Download abgeschlossen ist."},
