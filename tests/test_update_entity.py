@@ -1098,6 +1098,16 @@ async def test_a_bundle_at_the_floor_is_offered(
             {"version": PLUGIN_VERSION},
             "update_download_failed",
         ),
+        (
+            "BUSY_STALLED",
+            {"minutes": "20"},
+            "update_busy_stalled",
+        ),
+        (
+            "RECORDS_MISMATCH",
+            {"recorded": "0.9.0", "running": "0.2.0"},
+            "update_records_mismatch",
+        ),
     ],
     ids=[
         "below the floor",
@@ -1107,6 +1117,8 @@ async def test_a_bundle_at_the_floor_is_offered(
         "a release the newest index no longer offers",
         "missing dependencies",
         "bytes that changed",
+        "a stalled self-update's lock",
+        "opkg's records naming another version",
     ],
 )
 async def test_the_installer_s_own_refusal_reads_as_the_card_s(
@@ -1236,6 +1248,9 @@ async def test_the_bundle_is_installed_without_a_download(
 
     fetch.assert_not_called()
     assert install.await_args.args[1].package is None
+    # What the plugin reports it runs goes with the request: opkg's records are not it.
+    assert install.await_args.args[1].running_version == "0.2.0"
+    assert install.await_args.args[1].force is False
 
 
 @pytest.mark.parametrize(

@@ -153,6 +153,8 @@ _RULED_OUT: dict[InstallerErrorCode, str] = {
     InstallerErrorCode.VERSION_NOT_INSTALLABLE: "update_version_unavailable",
     InstallerErrorCode.DEPENDS_MISSING: "update_depends_missing",
     InstallerErrorCode.PACKAGE_INVALID: "update_download_failed",
+    InstallerErrorCode.BUSY_STALLED: "update_busy_stalled",
+    InstallerErrorCode.RECORDS_MISMATCH: "update_records_mismatch",
 }
 
 # Why a release of the index could not be had, in the card's words. The rule's refusals name
@@ -524,6 +526,9 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
                 node_id=data[CONF_NODE_ID],
                 base_topic=data.get(CONF_BASE_TOPIC, DEFAULT_BASE_TOPIC),
                 package=package,
+                # What the plugin reports it runs - never opkg's records, which after a
+                # restore that did not complete name a version that is not on disk.
+                running_version=installed.version if installed is not None else None,
             )
             await async_install(self.hass, request, self._async_installer_phase)
         except PackageError as err:

@@ -149,7 +149,12 @@
       "version_below_floor": "Plugin {version} liegt unter {floor}, der niedrigsten Version, die die signierte Versionsliste des Plugins zulässt, daher wurde nichts installiert.",
       "package_invalid": "Plugin {version} konnte nicht heruntergeladen werden, oder seine Prüfsumme stimmt nicht mit der signierten Versionsliste des Plugins überein. Auf dem Receiver wurde nichts geändert.",
       "depends_missing": "Plugin {version} benötigt Pakete, die auf dem Receiver nicht installiert sind: {package}. Es wurde nichts geändert.",
-      "version_not_installable": "Plugin {version} ist keine Version mehr, die diese Integration laut der signierten Versionsliste des Plugins installieren darf, daher wurde nichts installiert."
+      "version_not_installable": "Plugin {version} ist keine Version mehr, die diese Integration laut der signierten Versionsliste des Plugins installieren darf, daher wurde nichts installiert.",
+      "busy_stalled": "Ein Plugin-Update auf dem Receiver hat ohne Abschluss angehalten und hält noch seine Sperre. Die Sperre läuft in etwa {minutes} Min. ab; versuche es dann erneut. Es wurde nichts geändert.",
+      "records_mismatch": "Die Paketverwaltung des Receivers verzeichnet Plugin {recorded}, es läuft aber Plugin {running}: Ein früheres Update hat die vorherige Version nicht vollständig wiederhergestellt. Es wurde nichts geändert. Installiere das Plugin mit „Plugin-Neuinstallation erzwingen (SSH)“ auf der Geräteseite neu.",
+      "gui_not_answering": "Die Oberfläche des Receivers antwortet nicht (OpenWebif schweigt), daher lässt sich nicht prüfen, ob er aufnimmt. Die erzwungene Neuinstallation wird zurückgehalten.",
+      "gui_stopped": "Die Oberfläche des Receivers wurde absichtlich angehalten (Runlevel 4). Eine erzwungene Neuinstallation würde sie starten und wird daher zurückgehalten.",
+      "plugin_not_started": "Das neu installierte Plugin ist nicht gestartet: Kein neuer Prozess der Receiver-Oberfläche hat sein Protokoll geöffnet. Der vorherige Zustand wurde wiederhergestellt."
     }
   },
   "options": {
@@ -256,7 +261,12 @@
       "identity_mismatch": "Der Receiver ist für die Knoten-ID {box_node_id} und das Basisthema {box_base_topic} konfiguriert, das Formular nennt {node_id} und {base_topic}. Ein Wert in Klammern ist auf dem Receiver nicht gespeichert; gezeigt wird die Voreinstellung des Plugins, sofern es eine gibt. Es wurde nichts geändert.",
       "downgrade_done": "Plugin {version} ist auf dem Receiver installiert und läuft. Die Update-Karte bietet die neuere Version wieder an, weil sie weiterhin die neueste kompatible ist; überspringe sie dort, um bei {version} zu bleiben.",
       "downgrade_not_offered": "Auf diesem Receiver kann jetzt keine ältere Plugin-Version installiert werden: Nötig sind gespeicherte SSH-Zugangsdaten, eine gemeldete Plugin-Version und eine geprüfte Versionsliste (drücke „Nach Plugin-Updates suchen“), die eine ältere, von dieser Integration zugelassene Version enthält.",
-      "version_not_installable": "Plugin {version} ist keine Version mehr, die diese Integration laut der signierten Versionsliste des Plugins installieren darf, daher wurde nichts installiert."
+      "version_not_installable": "Plugin {version} ist keine Version mehr, die diese Integration laut der signierten Versionsliste des Plugins installieren darf, daher wurde nichts installiert.",
+      "busy_stalled": "Ein Plugin-Update auf dem Receiver hat ohne Abschluss angehalten und hält noch seine Sperre. Die Sperre läuft in etwa {minutes} Min. ab; versuche es dann erneut. Es wurde nichts geändert.",
+      "records_mismatch": "Die Paketverwaltung des Receivers verzeichnet Plugin {recorded}, es läuft aber Plugin {running}: Ein früheres Update hat die vorherige Version nicht vollständig wiederhergestellt. Es wurde nichts geändert. Installiere das Plugin mit „Plugin-Neuinstallation erzwingen (SSH)“ auf der Geräteseite neu.",
+      "gui_not_answering": "Die Oberfläche des Receivers antwortet nicht (OpenWebif schweigt), daher lässt sich nicht prüfen, ob er aufnimmt. Die erzwungene Neuinstallation wird zurückgehalten.",
+      "gui_stopped": "Die Oberfläche des Receivers wurde absichtlich angehalten (Runlevel 4). Eine erzwungene Neuinstallation würde sie starten und wird daher zurückgehalten.",
+      "plugin_not_started": "Das neu installierte Plugin ist nicht gestartet: Kein neuer Prozess der Receiver-Oberfläche hat sein Protokoll geöffnet. Der vorherige Zustand wurde wiederhergestellt."
     },
     "progress": {"uninstalling": "Der Receiver entfernt sein Plugin; es wird gewartet, bis er seine Topics zurückzieht und offline geht", "downgrading": "Das ältere Plugin wird heruntergeladen und geprüft, auf dem Receiver installiert, die Oberfläche neu gestartet und auf seine Anmeldung gewartet"}
   },
@@ -743,6 +753,8 @@
     "relay_no_address": {"message": "Home Assistant kennt seine Adresse im lokalen Netzwerk nicht. Lege „Lokales Netzwerk“ in den Netzwerkeinstellungen von Home Assistant fest."},
     "relay_busy": {"message": "Home Assistant sendet diesem Receiver gerade das Plugin. Versuche es erneut, wenn dieser Download abgeschlossen ist."},
     "relay_unreachable": {"message": "Der Receiver konnte das Plugin nicht von Home Assistant herunterladen ({url}). Lege die Adresse „Lokales Netzwerk“ von Home Assistant auf eine Adresse fest, die der Receiver erreicht."},
-    "relay_not_downloaded": {"message": "Home Assistant hat dem Receiver das Plugin {version} unter {url} angeboten, es wurde aber nicht innerhalb von zehn Minuten heruntergeladen. Falls eine Installation auf dem Receiver fehlgeschlagen ist, prüfe, ob der Receiver diese Adresse erreicht."}
+    "relay_not_downloaded": {"message": "Home Assistant hat dem Receiver das Plugin {version} unter {url} angeboten, es wurde aber nicht innerhalb von zehn Minuten heruntergeladen. Falls eine Installation auf dem Receiver fehlgeschlagen ist, prüfe, ob der Receiver diese Adresse erreicht."},
+    "update_busy_stalled": {"message": "Ein Plugin-Update auf dem Receiver hat ohne Abschluss angehalten und hält noch seine Sperre. Die Sperre läuft in etwa {minutes} Min. ab; versuche es dann erneut. Es wurde nichts geändert."},
+    "update_records_mismatch": {"message": "Die Paketverwaltung des Receivers verzeichnet Plugin {recorded}, es läuft aber Plugin {running}: Ein früheres Update hat die vorherige Version nicht vollständig wiederhergestellt. Es wurde nichts geändert. Installiere das Plugin mit „Plugin-Neuinstallation erzwingen (SSH)“ auf der Geräteseite neu."}
     }
   }

@@ -149,7 +149,12 @@
       "version_below_floor": "Wtyczka {version} jest starsza niż {floor}, najniższa wersja dopuszczona przez podpisaną listę wersji wtyczki, więc niczego nie zainstalowano.",
       "package_invalid": "Nie udało się pobrać wtyczki {version} albo jej suma kontrolna się nie zgadza. Na dekoderze nic nie zmieniono.",
       "depends_missing": "Wtyczka {version} wymaga pakietów, których nie ma na dekoderze: {package}. Nic nie zmieniono.",
-      "version_not_installable": "Wtyczka {version} nie jest już wydaniem, które podpisana lista wersji wtyczki pozwala tej integracji zainstalować, więc niczego nie zainstalowano."
+      "version_not_installable": "Wtyczka {version} nie jest już wydaniem, które podpisana lista wersji wtyczki pozwala tej integracji zainstalować, więc niczego nie zainstalowano.",
+      "busy_stalled": "Aktualizacja wtyczki na dekoderze zatrzymała się przed końcem i nadal trzyma blokadę. Blokada wygaśnie za około {minutes} min — spróbuj wtedy ponownie. Nic nie zostało zmienione.",
+      "records_mismatch": "Rejestr pakietów dekodera podaje wtyczkę {recorded}, a działa wtyczka {running}: wcześniejsza aktualizacja nie dokończyła przywracania poprzedniej wersji. Nic nie zostało zmienione. Zainstaluj wtyczkę od nowa przyciskiem „Wymuś reinstalację wtyczki (SSH)” na stronie urządzenia.",
+      "gui_not_answering": "Interfejs dekodera nie odpowiada (OpenWebif milczy), więc nie można sprawdzić, czy dekoder nagrywa. Wymuszona reinstalacja jest wstrzymana.",
+      "gui_stopped": "Interfejs dekodera został celowo zatrzymany (runlevel 4). Wymuszona reinstalacja by go uruchomiła, więc jest wstrzymana.",
+      "plugin_not_started": "Zainstalowana od nowa wtyczka nie uruchomiła się: żaden nowy proces interfejsu dekodera nie otworzył jej dziennika. Przywrócono poprzedni stan."
     }
   },
   "options": {
@@ -256,7 +261,12 @@
       "identity_mismatch": "Dekoder jest skonfigurowany dla węzła {box_node_id} i tematu bazowego {box_base_topic}, a formularz podaje {node_id} i {base_topic}. Wartość w nawiasie nie jest zapisana w dekoderze — pokazana jest wartość domyślna wtyczki, o ile taka istnieje. Nic nie zostało zmienione.",
       "downgrade_done": "Wtyczka {version} jest zainstalowana i działa na dekoderze. Karta aktualizacji znów zaproponuje nowszą wersję, bo nadal jest najnowszą zgodną; pomiń ją tam, aby zostać przy {version}.",
       "downgrade_not_offered": "Na tym dekoderze nie można teraz zainstalować starszej wersji wtyczki: potrzebne są zapisane dane SSH, zgłoszona wersja wtyczki i sprawdzona lista wersji wtyczki (naciśnij „Sprawdź aktualizacje wtyczki”) zawierająca starszą wersję dopuszczoną przez tę integrację.",
-      "version_not_installable": "Wtyczka {version} nie jest już wydaniem, które podpisana lista wersji wtyczki pozwala tej integracji zainstalować, więc niczego nie zainstalowano."
+      "version_not_installable": "Wtyczka {version} nie jest już wydaniem, które podpisana lista wersji wtyczki pozwala tej integracji zainstalować, więc niczego nie zainstalowano.",
+      "busy_stalled": "Aktualizacja wtyczki na dekoderze zatrzymała się przed końcem i nadal trzyma blokadę. Blokada wygaśnie za około {minutes} min — spróbuj wtedy ponownie. Nic nie zostało zmienione.",
+      "records_mismatch": "Rejestr pakietów dekodera podaje wtyczkę {recorded}, a działa wtyczka {running}: wcześniejsza aktualizacja nie dokończyła przywracania poprzedniej wersji. Nic nie zostało zmienione. Zainstaluj wtyczkę od nowa przyciskiem „Wymuś reinstalację wtyczki (SSH)” na stronie urządzenia.",
+      "gui_not_answering": "Interfejs dekodera nie odpowiada (OpenWebif milczy), więc nie można sprawdzić, czy dekoder nagrywa. Wymuszona reinstalacja jest wstrzymana.",
+      "gui_stopped": "Interfejs dekodera został celowo zatrzymany (runlevel 4). Wymuszona reinstalacja by go uruchomiła, więc jest wstrzymana.",
+      "plugin_not_started": "Zainstalowana od nowa wtyczka nie uruchomiła się: żaden nowy proces interfejsu dekodera nie otworzył jej dziennika. Przywrócono poprzedni stan."
     },
     "progress": {"uninstalling": "Dekoder usuwa wtyczkę; oczekiwanie, aż wycofa swoje tematy i przejdzie w tryb offline", "downgrading": "Pobieranie i sprawdzanie starszej wtyczki, instalacja na dekoderze, ponowne uruchomienie interfejsu i oczekiwanie, aż wtyczka się zgłosi"}
   },
@@ -743,6 +753,8 @@
     "relay_no_address": {"message": "Home Assistant nie zna swojego adresu w sieci lokalnej. Ustaw „Adres lokalny” w ustawieniach sieci Home Assistant."},
     "relay_busy": {"message": "Home Assistant właśnie wysyła wtyczkę do tego dekodera. Spróbuj ponownie, gdy to pobieranie się zakończy."},
     "relay_unreachable": {"message": "Dekoder nie mógł pobrać wtyczki z Home Assistant ({url}). Ustaw „Adres lokalny” w ustawieniach sieci Home Assistant na adres osiągalny z dekodera."},
-    "relay_not_downloaded": {"message": "Home Assistant udostępnił dekoderowi wtyczkę {version} pod adresem {url}, ale nie została pobrana w ciągu dziesięciu minut. Jeśli instalacja na dekoderze się nie powiodła, sprawdź, czy dekoder ma dostęp do tego adresu."}
+    "relay_not_downloaded": {"message": "Home Assistant udostępnił dekoderowi wtyczkę {version} pod adresem {url}, ale nie została pobrana w ciągu dziesięciu minut. Jeśli instalacja na dekoderze się nie powiodła, sprawdź, czy dekoder ma dostęp do tego adresu."},
+    "update_busy_stalled": {"message": "Aktualizacja wtyczki na dekoderze zatrzymała się przed końcem i nadal trzyma blokadę. Blokada wygaśnie za około {minutes} min — spróbuj wtedy ponownie. Nic nie zostało zmienione."},
+    "update_records_mismatch": {"message": "Rejestr pakietów dekodera podaje wtyczkę {recorded}, a działa wtyczka {running}: wcześniejsza aktualizacja nie dokończyła przywracania poprzedniej wersji. Nic nie zostało zmienione. Zainstaluj wtyczkę od nowa przyciskiem „Wymuś reinstalację wtyczki (SSH)” na stronie urządzenia."}
     }
   }

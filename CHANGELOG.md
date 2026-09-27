@@ -100,6 +100,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   integration meets its `min_integration`, and it is not withdrawn. The four named in-major
   exceptions of contract 1 are listed in `const.py`, and CI compares the list with the plugin's
   `contract.json`.
+- **The SSH installer's forced mode**, the recovery path the forced-reinstall button uses
+  (design, section 7a). **Not yet run on a receiver.** It installs only the bundled package, over
+  any version (`--force-downgrade` when opkg's records name a newer or unreadable version, never
+  otherwise), and never waits for the plugin to answer. It reads the state of the receiver's
+  interface over SSH before any guard that needs OpenWebif - `runlevel` and three `pidof enigma2`
+  samples over ten seconds - and decides by it: a running interface gets the update path's guards
+  and its clean restart; a running interface whose OpenWebif is silent is refused, since whether
+  it records cannot be known; a respawn loop (runlevel 3, absent on every sample) is installed
+  without the recording and timer guards, logged, and started with `init 4` and `init 3`; runlevel
+  4 left by an interrupted transaction of this project is recovered - the abandoned snapshot put
+  back with its settings - and started with `init 3` on the channel that transaction recorded;
+  runlevel 4 with nothing of ours is refused. It proves the start by a new enigma2 holding the
+  plugin's log open, and by the announcement only when the plugin is switched on; a plugin that is
+  switched off stays off, and the result says so. It changes no setting.
+- The installer's helper answers four more questions on the receiver: what an interrupted
+  transaction left (`leftovers`), who holds the shared lock and when the stale rule frees it
+  (`lock-info`), which new interface process holds the plugin's log open (`logfd`), and a start of
+  the interface detached from the SSH session (`respawn`).
 
 ### Changed
 
@@ -226,6 +244,18 @@ The version card and the release check:
   once the plugin carries build ids; CI's rebuild of every bundled byte checks it, with the plugin's
   tags fetched. The bundled plugin's build id is read out of the package, and a package that names
   another commit than its source archive is refused.
+- **A refused lock says when a stalled plugin self-update frees it.** Every installer path still
+  takes the shared lock only by the released 30-minute stale rule - a lock whose heartbeat has
+  stopped is never taken back earlier, since its `opkg` may still be running and a stopped helper
+  beats again when continued - but when the holder is a self-update that has not renewed its lock
+  for three minutes, the refusal says in how many minutes the rule frees it.
+- **opkg's records are no longer read as the plugin that runs.** After a restore that did not
+  complete, opkg's records name the version that was being installed while the code on disk is
+  the one before it. The update card now passes the version the plugin reports, and an install
+  over a plugin the records call newer is refused as "a newer plugin is installed" only when the
+  running plugin is newer too; when only the records are, it is refused before anything changes
+  with a sentence naming both versions and the forced reinstall as the repair. Without a reported
+  version the records still decide, and the log says they are the records.
 
 ### Known limits
 
