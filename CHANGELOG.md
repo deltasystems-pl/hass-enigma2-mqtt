@@ -87,15 +87,18 @@ it, and taken out again if that fails.
   interface started again. When the answer to the command that starts it is lost, a missing
   status file is taken for "never started" only after a grace period and only when the receiver
   has neither the script's directory nor a process naming it. A dropped SSH connection or a Home Assistant restart therefore cannot
-  leave the receiver stopped or half restored. A signal to the script on the receiver changes
-  nothing it does, whichever step it lands on: the stop is waited for, the restore completes, and
-  only then is the channel written and the interface started - it can no longer start the
-  interface on the plugin being removed, or lose track of a restore that then overwrites the
-  channel. The restore inside it is limited to 90 seconds, so the
+  leave the receiver stopped or half restored. A hangup, interrupt, terminate or broken-pipe
+  signal to the script on the receiver no longer changes what it does, whichever step it lands
+  on: the stop is waited for, the restore completes, and only then is the channel written and
+  the interface started - it can no longer start the interface on the plugin being removed, or
+  lose track of a restore that then overwrites the channel. The restore reports its own result
+  to the script, and the script's waits are measured in time, so neither can be cut short by a
+  signal. While the receiver is shutting down or rebooting, the script does not ask for the
+  interface back. The restore inside it is limited to 90 seconds, so the
   picture comes back even from one that hangs, and when the interface does not stop within 30
   seconds only the plugin's files are put back - its settings belong to the running interface,
   which writes them out again when it quits; a restore that failed there is reported as that
-  failure, not as files put back.
+  failure, not as files put back, and never as a receiver put back as it was.
 - **The channel is checked after the install has been committed**, so losing the connection
   while the channel is checked can no longer undo an install that proved itself.
 - **Installs and updates are refused while the receiver is in standby or streaming**, before
