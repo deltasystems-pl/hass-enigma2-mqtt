@@ -4,13 +4,15 @@
     "update_summary_older": "Dekoder ma starszą wtyczkę niż ta, którą niesie integracja. Instalacja zastąpi ją dołączoną wersją {version} i nie ruszy ustawień brokera na dekoderze.",
     "update_summary_older_no_install": "Dekoder ma wtyczkę starszą niż dołączona {version}. Nie zapisano danych SSH, więc ta karta nie może jej zainstalować: skonfiguruj dekoder ponownie z opcją „Zachowaj dane SSH do aktualizacji”, albo wgraj plik IPK na dekoder ręcznie.",
     "update_summary_newer": "Dekoder ma wtyczkę nowszą niż dołączona {version}. Nic jej tutaj nie zastąpi — ta karta nigdy nie proponuje cofnięcia wersji.",
-    "update_summary_published": "Podpisana lista wersji wtyczki zawiera {version}. Ta karta nie może jej jeszcze zainstalować: instaluje wyłącznie pakiet dołączony do tej integracji.",
+    "update_summary_published": "Podpisana lista wersji wtyczki zawiera też {version}; wybierz ją w „Wersja wtyczki do instalacji”, aby ją zainstalować.",
     "update_summary_development": "Wersja rozwojowa; dostępne wydanie {version}.",
     "update_summary_withdrawn": "Dołączona wersja {version} została wycofana: {reason}. Ta karta jej nie zainstaluje.",
     "update_summary_below_floor": "Dołączona wersja {version} jest starsza niż {floor}, najniższa wersja dopuszczona przez podpisaną listę wersji wtyczki. Ta karta jej nie zainstaluje.",
     "release_index_notification_title": "Nowa lista wersji wtyczki Enigma2 MQTT Bridge",
     "release_index_notification_message": "Home Assistant przyjął nową podpisaną listę wersji wtyczki: numer {serial}, klucz {key_id}. Dodane: {added}. Wycofane: {withdrawn}. Najniższa wersja, którą wolno zainstalować: {floor}. Jeśli nie spodziewano się nowego wydania ani wycofania wtyczki, niczego nie instaluj i przeczytaj plik SECURITY.md integracji.",
-    "release_index_none": "brak"
+    "release_index_none": "brak",
+    "update_summary_published_no_install": "Podpisana lista wersji wtyczki zawiera {version}. Nie zapisano danych SSH, więc ta karta nie może jej zainstalować: skonfiguruj dekoder ponownie z opcją „Zachowaj dane SSH do aktualizacji”.",
+    "update_summary_older_release": "Dekoder ma starszą wtyczkę. Instalacja zastąpi ją wersją {version} z podpisanej listy wersji wtyczki, pobraną i sprawdzoną, zanim cokolwiek trafi na dekoder, i nie zmieni ustawień brokera na dekoderze."
   },
   "config": {
     "flow_title": "{name}",
@@ -140,7 +142,12 @@
       "bundle_below_floor": "Wtyczka dołączona do tej integracji, {version}, jest starsza niż {floor}, najniższa wersja dopuszczona przez podpisaną listę wersji wtyczki, więc niczego nie zainstalowano. Zaktualizuj integrację, aby otrzymać nowszą wtyczkę.",
       "bundle_withdrawn": "Wtyczka dołączona do tej integracji, {version}, została wycofana w podpisanej liście wersji wtyczki: {reason}. Niczego nie zainstalowano. Zaktualizuj integrację, aby otrzymać nowszą wtyczkę.",
       "identity_mismatch": "Dekoder jest skonfigurowany dla węzła {box_node_id} i tematu bazowego {box_base_topic}, a formularz podaje {node_id} i {base_topic}. Wartość w nawiasie nie jest zapisana w dekoderze — pokazana jest wartość domyślna wtyczki, o ile taka istnieje. Nic nie zostało zmienione.",
-      "unknown": "Instalacja nieoczekiwanie nie powiodła się; wpisu nie utworzono."
+      "unknown": "Instalacja nieoczekiwanie nie powiodła się; wpisu nie utworzono.",
+      "version_withdrawn": "Wtyczka {version} została wycofana w podpisanej liście wersji wtyczki: {reason}. Niczego nie zainstalowano.",
+      "version_below_floor": "Wtyczka {version} jest starsza niż {floor}, najniższa wersja dopuszczona przez podpisaną listę wersji wtyczki, więc niczego nie zainstalowano.",
+      "package_invalid": "Nie udało się pobrać wtyczki {version} albo jej suma kontrolna się nie zgadza. Na dekoderze nic nie zmieniono.",
+      "depends_missing": "Wtyczka {version} wymaga pakietów, których nie ma na dekoderze: {package}. Nic nie zmieniono.",
+      "version_not_installable": "Wtyczka {version} nie jest już wydaniem, które podpisana lista wersji wtyczki pozwala tej integracji zainstalować, więc niczego nie zainstalowano."
     }
   },
   "options": {
@@ -658,8 +665,8 @@
       "message": "Ten dekoder nie zgłosił adresu MAC, więc nie ma dokąd wysłać pakietu budzącego. Ustaw adres w opcjach integracji."
     },
     "update_version_unknown": {"message": "Dekoder nie zgłosił zainstalowanej wersji wtyczki."},
-    "update_downgrade": {"message": "Odmowa zastąpienia nowszej wtyczki starszą wersją z pakietu."},
-    "update_version_unavailable": {"message": "Żądana wersja nie jest dostępna w zweryfikowanym pakiecie integracji."},
+    "update_downgrade": {"message": "Nowszej wtyczki nie zastąpiono starszą wersją: karta aktualizacji nigdy nie instaluje starszej."},
+    "update_version_unavailable": {"message": "Żądanej wersji nie ma ani w pakiecie dołączonym do integracji, ani wśród wydań, które podpisana lista wersji wtyczki pozwala tej integracji zainstalować."},
     "update_version_withdrawn": {"message": "Wersja wtyczki {version} została wycofana: {reason}"},
     "update_version_below_floor": {"message": "Wersja wtyczki {version} jest starsza niż {floor}, najniższa wersja dopuszczona przez podpisaną listę wersji wtyczki."},
     "release_check_unverified": {"message": "Nie udało się zweryfikować listy wersji wtyczki; mogła się właśnie zmieniać. Spróbuj ponownie za kilka minut. Nic nie zmieniono."},
@@ -687,6 +694,8 @@
     "history_clear_playback": {"message": "Dekoder odtwarza nagranie. Zatrzymaj je i spróbuj ponownie."},
     "history_clear_not_cleared": {"message": "Dekoder nie wyczyścił listy ostatnio oglądanych."},
     "history_clear_screen_open": {"message": "Na ekranie dekodera jest otwarte menu, lista kanałów lub EPG - zamknij je i spróbuj ponownie."},
-    "zap_history_playback": {"message": "Dekoder odtwarza nagranie - zatrzymaj je i spróbuj ponownie."}
+    "zap_history_playback": {"message": "Dekoder odtwarza nagranie - zatrzymaj je i spróbuj ponownie."},
+    "update_download_failed": {"message": "Nie udało się pobrać wtyczki {version} albo jej suma kontrolna się nie zgadza. Na dekoderze nic nie zmieniono."},
+    "update_depends_missing": {"message": "Wtyczka {version} wymaga pakietów, których nie ma na dekoderze: {package}. Nic nie zmieniono."}
     }
   }

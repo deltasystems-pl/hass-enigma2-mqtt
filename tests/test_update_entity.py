@@ -34,7 +34,11 @@ from pytest_homeassistant_custom_component.common import (
 )
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
-from custom_components.enigma2_mqtt import bundle as bundle_module, release_index
+from custom_components.enigma2_mqtt import (
+    bundle as bundle_module,
+    release_index,
+    release_package,
+)
 from custom_components.enigma2_mqtt.const import (
     CONF_BOUQUETS,
     CONF_CHECK_GITHUB_RELEASES,
@@ -50,6 +54,11 @@ from custom_components.enigma2_mqtt.const import (
     TARGET_LATEST,
 )
 from custom_components.enigma2_mqtt.plugin_versions import async_plugin_versions
+from custom_components.enigma2_mqtt.release_package import (
+    ORIGIN_DOWNLOAD,
+    PackageError,
+    PackageSource,
+)
 from custom_components.enigma2_mqtt.release_store import async_release_index_cache
 from custom_components.enigma2_mqtt.update import (
     COMPATIBILITY_MATCHED,
@@ -76,6 +85,7 @@ CHECK = "button.dekoder_salon_check_for_plugin_updates"
 INDEX_URL = PLUGIN_INDEX_ORIGIN + "releases.json"
 SIG_URL = PLUGIN_INDEX_ORIGIN + "releases.json.sig"
 NOTIFY = "custom_components.enigma2_mqtt.release_store.persistent_notification.async_create"
+FETCH = "custom_components.enigma2_mqtt.update.async_fetch_release"
 
 DEV_COMMIT = "46ea0e3" + "0" * 33
 CANDIDATE_COMMIT = "abc1234" + "1" * 33
@@ -189,25 +199,45 @@ async def test_an_older_plugin_with_credentials_is_offered_the_bundle(
     assert "Keep SSH credentials" not in summary
 
 
-async def test_versions_the_index_lists_beyond_the_bundle_are_said_not_offered(
+async def test_a_newer_release_the_index_lists_is_offered_with_credentials(
     hass: HomeAssistant,
     mqtt_mock,
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
     aioclient_mock: AiohttpClientMocker,
 ) -> None:
-    """Until this integration can download a package, a newer release is information."""
+    """The card downloads what it installs: a newer compatible release is an offer."""
     await _setup(hass, config_entry, credentials=True)
+    await _accept(hass, aioclient_mock, 1, [release("0.4.0"), release("0.3.0")])
+
+    state = hass.states.get(PLUGIN)
+    assert state.state == STATE_ON
+    assert state.attributes["latest_version"] == "0.4.0"
+    assert state.attributes["published_version"] == "0.4.0"
+    summary = state.attributes["release_summary"]
+    assert "0.4.0" in summary
+    assert "signed release index" in summary
+    assert state.attributes["release_url"].endswith("/releases/tag/v0.4.0")
+    assert state.attributes["index_serial"] == 1
+    assert state.attributes["index_age"] is not None
+
+
+async def test_a_newer_release_without_credentials_is_said_not_offered(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    await async_setup_box(hass, config_entry)
     await _accept(hass, aioclient_mock, 1, [release("0.4.0"), release("0.3.0")])
 
     state = hass.states.get(PLUGIN)
     assert state.state == STATE_OFF
     assert state.attributes["latest_version"] == PLUGIN_VERSION
-    assert state.attributes["published_version"] == "0.4.0"
-    assert "0.4.0" in state.attributes["release_summary"]
-    assert state.attributes["release_url"].endswith("/releases/tag/v0.4.0")
-    assert state.attributes["index_serial"] == 1
-    assert state.attributes["index_age"] is not None
+    summary = state.attributes["release_summary"]
+    assert "0.4.0" in summary
+    assert "Keep SSH credentials for updates" in summary
 
 
 async def test_a_bundle_the_index_withdrew_is_not_offered_or_installed(
@@ -727,7 +757,9 @@ async def test_a_second_sentence_is_kept_whole_or_dropped_whole(
         AsyncMock(
             return_value={
                 "component.enigma2_mqtt.common.update_summary_older_no_install": "A" * first,
-                "component.enigma2_mqtt.common.update_summary_published": "B" * second,
+                "component.enigma2_mqtt.common.update_summary_published_no_install": (
+                    "B" * second
+                ),
             }
         ),
     ):
@@ -768,11 +800,11 @@ async def test_install_refuses_a_version_the_bundle_does_not_hold(
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """There is no download path yet, so a version that is not bundled cannot be installed."""
+    """A version neither bundled nor listed by the verified index cannot be installed."""
     await _setup(hass, config_entry, credentials=True)
     await _report(hass, "0.0.9")
 
-    with pytest.raises(HomeAssistantError, match="verified bundle"):
+    with pytest.raises(HomeAssistantError, match="signed index"):
         await hass.services.async_call(
             "update", "install", {ATTR_ENTITY_ID: PLUGIN, ATTR_VERSION: "0.0.1"}, blocking=True
         )
@@ -925,7 +957,8 @@ async def test_a_bundle_below_the_index_floor_is_not_offered_or_installed(
         hass,
         aioclient_mock,
         1,
-        [release("0.3.1"), release("0.3.0"), release("0.2.0")],
+        # 0.3.1 needs an integration newer than this one, so the index offers nothing either.
+        [release("0.3.1", min_integration="9.9.9"), release("0.3.0"), release("0.2.0")],
         floor="0.3.1",
     )
 
@@ -964,7 +997,8 @@ async def test_a_candidate_bundle_the_index_does_not_list_is_held_to_its_floor(
     with patch.object(bundle_module, "load_bundled_plugin", return_value=candidate):
         await _setup(hass, config_entry, credentials=True)
     await _report(hass, "0.2.0")
-    await _accept(hass, aioclient_mock, 1, [release("0.4.0")], floor="0.4.0")
+    # A contract this integration does not speak: the index offers nothing either.
+    await _accept(hass, aioclient_mock, 1, [release("0.4.0", contract=2)], floor="0.4.0")
 
     state = hass.states.get(PLUGIN)
     assert state.attributes["latest_version"] == "0.2.0"
@@ -1039,8 +1073,41 @@ async def test_a_bundle_at_the_floor_is_offered(
             {"version": PLUGIN_VERSION, "reason": "it breaks EPG"},
             "update_version_withdrawn",
         ),
+        (
+            "VERSION_BELOW_FLOOR",
+            {"version": PLUGIN_VERSION, "floor": "0.3.1"},
+            "update_version_below_floor",
+        ),
+        (
+            "VERSION_WITHDRAWN",
+            {"version": PLUGIN_VERSION, "reason": "it breaks EPG"},
+            "update_version_withdrawn",
+        ),
+        (
+            "VERSION_NOT_INSTALLABLE",
+            {"version": PLUGIN_VERSION},
+            "update_version_unavailable",
+        ),
+        (
+            "DEPENDS_MISSING",
+            {"version": PLUGIN_VERSION, "package": "python3-json, python3-netclient"},
+            "update_depends_missing",
+        ),
+        (
+            "PACKAGE_INVALID",
+            {"version": PLUGIN_VERSION},
+            "update_download_failed",
+        ),
     ],
-    ids=["below the floor", "withdrawn"],
+    ids=[
+        "below the floor",
+        "withdrawn",
+        "a release below the floor",
+        "a withdrawn release",
+        "a release the newest index no longer offers",
+        "missing dependencies",
+        "bytes that changed",
+    ],
 )
 async def test_the_installer_s_own_refusal_reads_as_the_card_s(
     hass: HomeAssistant,
@@ -1070,3 +1137,228 @@ async def test_the_installer_s_own_refusal_reads_as_the_card_s(
         )
     assert raised.value.translation_key == sentence
     assert raised.value.translation_placeholders == placeholders
+
+
+# --------------------------------------------- a release of the index, downloaded --
+
+
+def _fetched(version: str = "0.4.0") -> PackageSource:
+    return PackageSource(
+        version=version,
+        data=b"verified",
+        sha256="ab" * 32,
+        commit=release(version)["commit"],
+        depends=("python3-core",),
+        origin=ORIGIN_DOWNLOAD,
+    )
+
+
+async def test_installing_a_release_of_the_index_downloads_it_first(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Spec section ae.7, "SSH path": the installer takes verified bytes; the card fetches
+    them before the receiver is connected to."""
+    await _setup(hass, config_entry, credentials=True)
+    await _accept(hass, aioclient_mock, 1, [release("0.4.0"), release("0.3.0")])
+    source = _fetched()
+    with (
+        patch(FETCH, AsyncMock(return_value=source)) as fetch,
+        patch("custom_components.enigma2_mqtt.update.async_install") as install,
+    ):
+        await hass.services.async_call(
+            "update", "install", {ATTR_ENTITY_ID: PLUGIN}, blocking=True
+        )
+
+    fetch.assert_awaited_once_with(hass, "0.4.0")
+    request = install.await_args.args[1]
+    assert request.package is source
+    assert request.downgrade is False
+    assert request.provisioning is None
+
+
+async def test_a_release_of_the_index_is_offered_when_the_bundle_does_not_load(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """The index is an install path of its own: a bundle that will not load - damaged,
+    removed by hand - takes the bundle off the card, not the releases the card downloads."""
+    with patch.object(
+        bundle_module, "load_bundled_plugin", side_effect=bundle_module.BundleError("damaged")
+    ):
+        await _setup(hass, config_entry, credentials=True)
+    await _report(hass, "0.3.0")
+    await _accept(hass, aioclient_mock, 1, [release("0.4.0"), release("0.3.0")])
+
+    state = hass.states.get(PLUGIN)
+    assert state.state == STATE_ON
+    assert state.attributes["latest_version"] == "0.4.0"
+    assert state.attributes["update_path"] == "ssh"
+    assert state.attributes["supported_features"] != 0
+
+    source = _fetched()
+    with (
+        patch(FETCH, AsyncMock(return_value=source)) as fetch,
+        patch("custom_components.enigma2_mqtt.update.async_install") as install,
+    ):
+        await hass.services.async_call(
+            "update", "install", {ATTR_ENTITY_ID: PLUGIN}, blocking=True
+        )
+
+    fetch.assert_awaited_once_with(hass, "0.4.0")
+    assert install.await_args.args[1].package is source
+
+
+async def test_the_bundle_is_installed_without_a_download(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """The index lists the bundled release too: the card takes it from the bundle."""
+    await _setup(hass, config_entry, credentials=True)
+    await _report(hass, "0.2.0")
+    await _accept(hass, aioclient_mock, 1, [release(PLUGIN_VERSION), release("0.2.0")])
+    with (
+        patch(FETCH, AsyncMock()) as fetch,
+        patch("custom_components.enigma2_mqtt.update.async_install") as install,
+    ):
+        await hass.services.async_call(
+            "update", "install", {ATTR_ENTITY_ID: PLUGIN}, blocking=True
+        )
+
+    fetch.assert_not_called()
+    assert install.await_args.args[1].package is None
+
+
+@pytest.mark.parametrize(
+    ("code", "placeholders", "sentence"),
+    [
+        (release_package.DOWNLOAD, {"version": "0.4.0"}, "update_download_failed"),
+        (release_package.DIGEST, {"version": "0.4.0"}, "update_download_failed"),
+        (
+            release_package.WITHDRAWN,
+            {"version": "0.4.0", "reason": "it breaks EPG"},
+            "update_version_withdrawn",
+        ),
+        (
+            release_package.BELOW_FLOOR,
+            {"version": "0.4.0", "floor": "0.5.0"},
+            "update_version_below_floor",
+        ),
+        (release_package.INCOMPATIBLE, {"version": "0.4.0"}, "update_version_unavailable"),
+        (release_package.NO_INDEX, {"version": "0.4.0"}, "update_version_unavailable"),
+    ],
+    ids=["download", "digest", "withdrawn", "below the floor", "incompatible", "no index"],
+)
+async def test_a_release_that_cannot_be_had_is_said_and_nothing_is_installed(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    code: str,
+    placeholders: dict[str, str],
+    sentence: str,
+) -> None:
+    await _setup(hass, config_entry, credentials=True)
+    await _accept(hass, aioclient_mock, 1, [release("0.4.0"), release("0.3.0")])
+    with (
+        patch(FETCH, AsyncMock(side_effect=PackageError(code, "refused", placeholders))),
+        patch("custom_components.enigma2_mqtt.update.async_install") as install,
+        pytest.raises(HomeAssistantError) as raised,
+    ):
+        await hass.services.async_call(
+            "update", "install", {ATTR_ENTITY_ID: PLUGIN}, blocking=True
+        )
+
+    assert raised.value.translation_key == sentence
+    assert raised.value.translation_placeholders == placeholders
+    install.assert_not_called()
+    state = hass.states.get(PLUGIN)
+    assert state.attributes["in_progress"] is False
+
+
+async def test_an_older_release_of_the_index_is_never_installed_from_the_card(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """A downgrade is the options flow's confirmed step, never `update.install`."""
+    await _setup(hass, config_entry, credentials=True)
+    await _report(hass, "0.4.0")
+    await _accept(hass, aioclient_mock, 1, [release("0.4.0"), release("0.3.0")])
+    with (
+        patch(FETCH, AsyncMock()) as fetch,
+        patch("custom_components.enigma2_mqtt.update.async_install") as install,
+        pytest.raises(HomeAssistantError) as raised,
+    ):
+        await hass.services.async_call(
+            "update", "install", {ATTR_ENTITY_ID: PLUGIN, ATTR_VERSION: "0.3.0"}, blocking=True
+        )
+
+    assert raised.value.translation_key in ("update_downgrade", "update_version_unavailable")
+    fetch.assert_not_called()
+    install.assert_not_called()
+
+
+async def test_the_newest_compatible_release_is_offered_and_older_ones_chosen(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    await _setup(hass, config_entry, credentials=True)
+    await _accept(
+        hass,
+        aioclient_mock,
+        1,
+        [
+            release("0.6.0", contract=2),
+            release("0.5.0", withdrawn="broken"),
+            release("0.4.0"),
+            release("0.3.0"),
+            release("0.2.0"),
+        ],
+    )
+    await _enable_select(hass, config_entry)
+    # After the reload, which delivered the retained `info` again.
+    await _report(hass, "0.2.0")
+
+    state = hass.states.get(PLUGIN)
+    assert state.attributes["latest_version"] == "0.4.0"
+    assert hass.states.get(SELECT).attributes["options"] == [TARGET_LATEST, "0.4.0", "0.3.0"]
+
+
+async def test_a_release_is_offered_before_a_development_bundle_of_its_number(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Spec section ae.7: "the newest compatible, non-withdrawn release known, else the
+    bundle" - a development build of the same number is a choice, not the offer."""
+    candidate = replace(_candidate_bundle(commit_time_of("0.4.0") + 100), version="0.4.0")
+    with patch.object(bundle_module, "load_bundled_plugin", return_value=candidate):
+        await _setup(hass, config_entry, credentials=True)
+        await _report(hass, "0.3.0")
+        await _accept(hass, aioclient_mock, 1, [release("0.4.0"), release("0.3.0")])
+        await _enable_select(hass, config_entry)
+
+        state = hass.states.get(PLUGIN)
+        options = hass.states.get(SELECT).attributes["options"]
+
+    assert state.attributes["latest_version"] == "0.4.0"
+    assert options[:2] == [TARGET_LATEST, "0.4.0"]
+    assert any(option.startswith("0.4.0+g") for option in options)

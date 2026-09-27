@@ -1,9 +1,11 @@
 """Transactional SSH installer for the receiver plugin.
 
-The installer deliberately has no discovery, release-check, or download path. It
-installs only the IPK bundled with this integration, after the bundle loader verifies
-its provenance and digest. SSH host identity is explicitly confirmed by the config
-flow and pinned on every authenticated connection.
+The installer deliberately has no discovery, release-check, or download path of its own. It
+installs one of two packages: the IPK bundled with this integration, after the bundle loader
+verifies its provenance and digest, or a release the signed index lists, handed to it as bytes
+that `release_package` has already held against the signed entry's size and sha256 - and whose
+checksum it checks once more before a byte reaches the receiver. SSH host identity is
+explicitly confirmed by the config flow and pinned on every authenticated connection.
 """
 
 from __future__ import annotations
@@ -36,8 +38,8 @@ from homeassistant.components.mqtt import ReceiveMessage
 from homeassistant.core import HomeAssistant, callback
 from packaging.version import InvalidVersion, Version
 
-from . import installer_helper, restart_rule
-from .box import parse_json_payload, same_service, state_topic
+from . import installer_helper, release_package, restart_rule
+from .box import command_topic, parse_json_payload, same_service, state_topic
 from .bundle import BundledPlugin, BundleError, load_bundled_plugin
 from .const import (
     DEFAULT_BASE_TOPIC,
@@ -46,6 +48,8 @@ from .const import (
     TOPIC_INFO,
 )
 from .plugin_versions import bundle_refusal
+from .release_index import release_of
+from .release_package import PackageSource
 from .release_store import async_release_index_cache
 
 _LOGGER = logging.getLogger(__name__)
@@ -154,6 +158,19 @@ class InstallerErrorCode(StrEnum):
     # on every install path, before the receiver is connected to.
     BUNDLE_BELOW_FLOOR = "bundle_below_floor"
     BUNDLE_WITHDRAWN = "bundle_withdrawn"
+    # The same rule for a release of the index handed to the installer as bytes: checked
+    # when the bytes were fetched, and again here - the whole rule - because an index
+    # accepted in between may have withdrawn the version or raised the floor.
+    VERSION_BELOW_FLOOR = "version_below_floor"
+    VERSION_WITHDRAWN = "version_withdrawn"
+    # The rest of the rule, asked again the same way: the newest index held no longer lists
+    # the version, has moved it to another contract, or asks for a newer integration.
+    VERSION_NOT_INSTALLABLE = "version_not_installable"
+    # Verified bytes that are no longer the ones that were verified - or no longer the ones
+    # the newest index held signs under that version.
+    PACKAGE_INVALID = "package_invalid"
+    # A package the release needs is not installed on the receiver.
+    DEPENDS_MISSING = "depends_missing"
     IDENTITY_MISMATCH = "identity_mismatch"
 
 
@@ -299,6 +316,12 @@ class InstallRequest:
     expect_running: bool = False
     node_id: str = ""
     base_topic: str = DEFAULT_BASE_TOPIC
+    # What to install: None for the bundle, or a release of the signed index as verified bytes.
+    package: PackageSource | None = None
+    # A downgrade confirmed in the options flow. Only then may the package be older than the
+    # plugin on the receiver - opkg is told so - and the older plugin is asked to retract
+    # what the newer one published (`cmd/reset`) once it has proved itself.
+    downgrade: bool = False
 
     def target(self) -> tuple[str, str]:
         """Return the expected MQTT target for fresh post-restart proof."""
@@ -1023,7 +1046,17 @@ async def _async_watch_restart(
     version: str,
     *,
     require_offline: bool,
+    commit: str | None = None,
 ) -> _RestartWatch:
+    """Follow the receiver's restart to the announcement of the plugin just installed.
+
+    Proof is a fresh (never retained) `online` - after an `offline` when a plugin was running
+    before - and an `info` naming the installed version in `integration` mode. When the plugin
+    reports its build (`info.build`, from the release after 0.3.0) and the package's commit is
+    known, the build has to be that commit too: a same-number build that is not the one
+    installed is not the proof of this install. A plugin that predates build ids proves by its
+    version alone.
+    """
     completed: asyncio.Future[None] = hass.loop.create_future()
     established: asyncio.Future[None] = hass.loop.create_future()
     offline_seen = False
@@ -1061,6 +1094,7 @@ async def _async_watch_restart(
             info is not None
             and info.get("plugin") == version
             and info.get("ha_mode") == "integration"
+            and _same_build(info.get("build"), commit)
         ):
             version_seen = True
         _finish_if_ready()
@@ -1099,6 +1133,16 @@ async def _async_watch_restart(
         armed = True
 
     return _RestartWatch(completed, established, cancel_callbacks, _arm)
+
+
+def _same_build(build: Any, commit: str | None) -> bool:
+    """Whether an `info.build` is the build of `commit` - or says nothing either way."""
+    if not commit or not isinstance(build, dict):
+        return True
+    reported = build.get("commit")
+    if not isinstance(reported, str) or not reported:
+        return True
+    return reported == commit
 
 
 async def _async_load_bundle(hass: HomeAssistant) -> BundledPlugin:
@@ -1842,18 +1886,21 @@ async def _async_release_after_withdraw(
     return True
 
 
-async def _async_refuse_what_the_index_rules_out(hass: HomeAssistant, version: str) -> None:
+async def _async_refuse_what_the_index_rules_out(
+    hass: HomeAssistant, version: str
+) -> dict[str, Any] | None:
     """Refuse a bundle below the floor, or withdrawn, in the last verified index.
 
-    Here rather than in each caller, because every path - the update card, the guided
-    installer's update of an older plugin, the forced reinstall - installs through this
-    module, and a rule one of them forgot would be a rule that does not hold. With no verified
-    index yet, only this integration's own floor applies.
+    Here rather than in each caller, because every path that installs the bundle - the
+    update card, the guided installer's update of an older plugin, the forced reinstall -
+    installs through this module, and a rule one of them forgot would be a rule that does
+    not hold. With no verified index yet, only this integration's own floor applies.
+    Returns the index the rule was judged by.
     """
     cache = async_release_index_cache(hass)
     await cache.async_load()
     if (refusal := bundle_refusal(version, cache.index)) is None:
-        return
+        return cache.index
     code, placeholders = refusal
     _LOGGER.warning(
         "Receiver install refused before connecting to it: the bundled plugin %s is %s",
@@ -1870,6 +1917,170 @@ async def _async_refuse_what_the_index_rules_out(hass: HomeAssistant, version: s
         f"the bundled plugin {version} is ruled out by the signed release index ({code})",
         placeholders,
     )
+
+
+# The fetch's refusals under the rule, as the installer's codes. Anything else the rule says -
+# not listed, another contract, a newer integration needed, no index at all - is one code.
+_PACKAGE_REFUSALS: dict[str, InstallerErrorCode] = {
+    release_package.WITHDRAWN: InstallerErrorCode.VERSION_WITHDRAWN,
+    release_package.BELOW_FLOOR: InstallerErrorCode.VERSION_BELOW_FLOOR,
+}
+
+
+async def _async_refuse_a_package_the_index_no_longer_offers(
+    hass: HomeAssistant, package: PackageSource
+) -> None:
+    """Ask the whole rule again for a release of the index, against the newest index held.
+
+    The bytes were verified when they were fetched, under the index held then. A check in
+    between may have accepted a newer index - one that withdraws the version, raises the
+    floor, moves it to another contract, asks for a newer integration, drops it, or signs
+    other bytes under its number - and the install is the last moment that can still say no
+    without the receiver having been touched. So this is the fetch's own rule
+    (`release_package.eligible_release`), not a part of it, and the entry's sha256 and size
+    are held to the bytes: a package is installed only while the newest index would have
+    let it be fetched.
+    """
+    cache = async_release_index_cache(hass)
+    await cache.async_load()
+    try:
+        entry = release_package.eligible_release(
+            cache.index, package.version, integration_version=cache.integration_version
+        )
+    except release_package.PackageError as error:
+        _LOGGER.warning(
+            "Receiver install refused before connecting to it: plugin %s is no longer "
+            "installable under the newest signed release index held (%s)",
+            package.version,
+            error.detail,
+        )
+        raise InstallerError(
+            _PACKAGE_REFUSALS.get(error.code, InstallerErrorCode.VERSION_NOT_INSTALLABLE),
+            f"plugin {package.version} is ruled out by the signed release index ({error.code})",
+            error.placeholders
+            if error.code in _PACKAGE_REFUSALS
+            else {"version": package.version},
+        ) from error
+    if entry["sha256"] != package.sha256 or entry["size"] != len(package.data):
+        _LOGGER.warning(
+            "Receiver install refused before connecting to it: the newest signed release "
+            "index held names other bytes for plugin %s than the ones that were verified",
+            package.version,
+        )
+        raise InstallerError(
+            InstallerErrorCode.PACKAGE_INVALID,
+            f"the signed release index no longer names these bytes for plugin "
+            f"{package.version}",
+            {"version": package.version},
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _Source:
+    """The package one transaction installs, whichever way it came."""
+
+    version: str
+    data: bytes = field(repr=False)
+    sha256: str
+    # The commit the restart proof holds a receiver that reports `info.build` to.
+    commit: str | None
+    # What the release needs installed on the receiver, from its signed entry.
+    depends: tuple[str, ...]
+
+
+async def _async_source(hass: HomeAssistant, request: InstallRequest) -> _Source:
+    """The bundle, or the verified bytes the request carries - each under the one rule."""
+    if request.package is None:
+        bundle = await _async_load_bundle(hass)
+        index = await _async_refuse_what_the_index_rules_out(hass, bundle.version)
+        data = await hass.async_add_executor_job(Path(bundle.path).read_bytes)
+        if hashlib.sha256(data).hexdigest() != bundle.sha256:
+            raise InstallerError(InstallerErrorCode.BUNDLE_INVALID)
+        entry = release_of(index, bundle.version)
+        return _Source(
+            bundle.version,
+            data,
+            bundle.sha256,
+            (bundle.build or {}).get("commit") or None,
+            tuple(entry.get("depends") or ()) if entry is not None else (),
+        )
+    package = request.package
+    await _async_refuse_a_package_the_index_no_longer_offers(hass, package)
+    if hashlib.sha256(package.data).hexdigest() != package.sha256:
+        raise InstallerError(
+            InstallerErrorCode.PACKAGE_INVALID,
+            f"the package of plugin {package.version} no longer has its verified checksum",
+            {"version": package.version},
+        )
+    return _Source(
+        package.version, package.data, package.sha256, package.commit, package.depends
+    )
+
+
+async def _async_check_depends(
+    session: InstallerSession, depends: tuple[str, ...], version: str
+) -> None:
+    """Refuse, before anything changes, a release that needs a package the receiver lacks.
+
+    opkg would otherwise find out halfway through the install - and try the image's feeds for
+    it, which a receiver without internet cannot reach. `opkg status` is a reader and never
+    takes opkg's lock, so this asks nothing a running opkg could make wait. The names come
+    from the signed entry, whose schema allows nothing a shell would read as syntax; they are
+    quoted anyway. Every missing package is named, so that one look at the receiver's feeds
+    installs them all.
+
+    `opkg status <name>` sees a package of exactly that name. opkg itself would also accept a
+    dependency that another installed package declares in `Provides:`, so on an image that
+    merges a named package into another one this refuses an install opkg would have done.
+    That is the check the design prescribes, and the direction is the safe one - a refusal
+    changes nothing on the receiver and names what it looked for.
+    """
+    if not depends:
+        return
+    names = " ".join(shlex.quote(name) for name in depends)
+    result = await session.run(
+        f'for p in {names}; do opkg status "$p" 2>/dev/null | '
+        f"grep -q '^Status: .* installed$' || echo \"$p\"; done",
+        timeout=60,
+    )
+    if result.exit_status:
+        raise InstallerError(
+            InstallerErrorCode.PREFLIGHT_FAILED,
+            "the receiver would not say which of the release's dependencies it has",
+        )
+    missing = [line.strip() for line in result.stdout.splitlines() if line.strip() in depends]
+    if missing:
+        named = ", ".join(missing)
+        raise InstallerError(
+            InstallerErrorCode.DEPENDS_MISSING,
+            f"plugin {version} needs {named}, which the receiver does not have installed",
+            # One placeholder for one sentence however many are missing: the list, in the
+            # signed entry's order.
+            {"version": version, "package": named},
+        )
+
+
+async def _async_reset_after_downgrade(
+    hass: HomeAssistant, base_topic: str, node_id: str, version: str
+) -> None:
+    """Ask the older plugin, once it has proved itself, to retract what the newer published.
+
+    Its state file was written by the newer plugin and it loads it tolerantly, so it knows
+    every retained topic the newer one left - `update` among them - and `cmd/reset` retracts
+    them all and republishes its own. Best effort: the downgrade is committed, and a topic
+    left retained is a stale entity, not a broken receiver.
+    """
+    try:
+        await mqtt.async_publish(
+            hass, command_topic(base_topic, node_id, "reset"), "PRESS", qos=1, retain=False
+        )
+    except Exception:
+        _LOGGER.warning(
+            "Plugin %s installed over a newer one; asking it to retract the newer plugin's "
+            "topics failed, so some may stay retained until the receiver is reset",
+            version,
+            exc_info=True,
+        )
 
 
 async def async_install(
@@ -1896,13 +2107,10 @@ async def _async_install_locked(
     progress_cb: ProgressCallback | None = None,
     connector: Connector = _async_connect,
 ) -> InstallResult:
-    """Install or update the bundled plugin as a rollback-safe transaction."""
+    """Install or update the plugin as a rollback-safe transaction."""
     request.validate()
-    bundle = await _async_load_bundle(hass)
-    await _async_refuse_what_the_index_rules_out(hass, bundle.version)
-    bundle_bytes = await hass.async_add_executor_job(Path(bundle.path).read_bytes)
-    if hashlib.sha256(bundle_bytes).hexdigest() != bundle.sha256:
-        raise InstallerError(InstallerErrorCode.BUNDLE_INVALID)
+    source = await _async_source(hass, request)
+    bundle_bytes = source.data
     installed_manifest = await hass.async_add_executor_job(_installed_hash_manifest, bundle_bytes)
 
     nonce = secrets.token_hex(6)
@@ -1924,6 +2132,9 @@ async def _async_install_locked(
     backup_created = False
     remote_lock_claimed = False
     committed = False
+    # A confirmed downgrade that found a newer plugin on the receiver: opkg is told to
+    # accept the older one, and the older one retracts what the newer published.
+    force_downgrade = False
     # Set from the restart request until a new enigma2 is seen: no rollback may run.
     no_rollback = False
     record: restart_rule.RestartRecord | None = None
@@ -1944,12 +2155,14 @@ async def _async_install_locked(
             )
             if preflight.installed_version and _package_version(
                 preflight.installed_version
-            ) > _package_version(bundle.version):
-                raise InstallerError(
-                    InstallerErrorCode.NEWER_INSTALLED,
-                    f"the receiver runs plugin {preflight.installed_version} and this "
-                    f"integration ships {bundle.version}",
-                )
+            ) > _package_version(source.version):
+                if not request.downgrade:
+                    raise InstallerError(
+                        InstallerErrorCode.NEWER_INSTALLED,
+                        f"the receiver runs plugin {preflight.installed_version} and this "
+                        f"install would put {source.version} over it",
+                    )
+                force_downgrade = True
 
             await _async_progress(progress_cb, "backup")
             helper_bytes = await hass.async_add_executor_job(
@@ -1965,6 +2178,7 @@ async def _async_install_locked(
             stored_name = await _async_validate_receiver_identity(
                 session, remote_helper, request
             )
+            await _async_check_depends(session, source.depends, source.version)
         except InstallerError as err:
             _log_install_refusal(err)
             raise
@@ -2000,7 +2214,7 @@ async def _async_install_locked(
             f"sha256sum {shlex.quote(remote_ipk)} | awk '{{print $1}}'",
             InstallerErrorCode.UPLOAD_FAILED,
         )
-        if remote_hash.stdout.strip() != bundle.sha256:
+        if remote_hash.stdout.strip() != source.sha256:
             raise InstallerError(InstallerErrorCode.UPLOAD_FAILED)
 
         await _async_measure_preflight(
@@ -2010,7 +2224,9 @@ async def _async_install_locked(
         install_started = True
         await _run_checked(
             session,
-            f"opkg install --force-reinstall {shlex.quote(remote_ipk)}",
+            "opkg install --force-reinstall "
+            + ("--force-downgrade " if force_downgrade else "")
+            + shlex.quote(remote_ipk),
             InstallerErrorCode.INSTALL_FAILED,
             timeout=120,
         )
@@ -2066,8 +2282,9 @@ async def _async_install_locked(
             hass,
             base_topic,
             node_id,
-            bundle.version,
+            source.version,
             require_offline=request.expect_running,
+            commit=source.commit,
         )
         try:
             async with asyncio.timeout(5):
@@ -2229,11 +2446,13 @@ async def _async_install_locked(
                 if not committed:
                     raise
                 _LOGGER.warning("Installed plugin verified; cleanup SSH close failed")
+        if force_downgrade:
+            await _async_reset_after_downgrade(hass, base_topic, node_id, source.version)
         try:
             await _async_progress(progress_cb, "done")
         except BaseException:
             _LOGGER.warning("Installed plugin verified; final progress callback failed")
-        return InstallResult(bundle.version, backup_created, True, provisioned_name)
+        return InstallResult(source.version, backup_created, True, provisioned_name)
     except BaseException as err:
         if committed:
             if isinstance(err, asyncio.CancelledError):
@@ -2241,7 +2460,7 @@ async def _async_install_locked(
                 _LOGGER.warning("Installed plugin verified; stopped before tidying up")
                 raise
             _LOGGER.warning("Installed plugin verified; ignoring post-commit cleanup failure")
-            return InstallResult(bundle.version, backup_created, True, provisioned_name)
+            return InstallResult(source.version, backup_created, True, provisioned_name)
         if no_rollback:
             # A restart was asked for and no new enigma2 has been seen. Whatever
             # happened - withdrawn and released, or not observable at all - a rollback

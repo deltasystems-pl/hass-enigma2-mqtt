@@ -7,9 +7,11 @@ version is what pressing install would put on the receiver - and only while an i
 exists; without one it is the installed version, so there is no update badge on a card that
 could not act on it (ADR-0008 section 3, a behaviour change from 0.3.1, which showed the bundle as
 an update even with no way to install it). The **bundled** version is the package this
-integration ships, today the only one the installer can put on a receiver. The versions the
-plugin's **signed release index** lists are information: they appear in the summary and the
-attributes, never as `latest_version` until this integration can install them.
+integration ships. The releases the plugin's **signed release index** lists are installable
+too: the card downloads the one it installs, holds it to its signed entry and hands the bytes
+to the same SSH installer - so with SSH credentials the newest compatible release is
+`latest_version`, and without them every version is information in the summary and the
+attributes.
 
 The picture is worked out in `plugin_versions.py`, shared with the select that lets a
 household pin a version. Which build is newer than which is `buildid.is_newer`, and it is the
@@ -37,6 +39,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.translation import async_get_translations
 import homeassistant.util.dt as dt_util
 
+from . import release_package
 from .box import Enigma2Box, Enigma2MqttConfigEntry
 from .buildid import Build, base_version, is_newer
 from .const import (
@@ -66,7 +69,8 @@ from .installer import (
     SshCredentials,
     async_install,
 )
-from .plugin_versions import PluginVersions, async_plugin_versions
+from .plugin_versions import SOURCE_BUNDLE, PluginVersions, async_plugin_versions
+from .release_package import PackageError, PackageSource, async_fetch_release
 from .release_store import CheckRateLimited
 
 _LOGGER = logging.getLogger(__name__)
@@ -89,6 +93,8 @@ SUMMARY_OLDER_NO_INSTALL = "update_summary_older_no_install"
 SUMMARY_NEWER = "update_summary_newer"
 SUMMARY_DEVELOPMENT = "update_summary_development"
 SUMMARY_PUBLISHED = "update_summary_published"
+SUMMARY_PUBLISHED_NO_INSTALL = "update_summary_published_no_install"
+SUMMARY_OLDER_RELEASE = "update_summary_older_release"
 SUMMARY_LIMIT = 255
 # Why the bundle may not be installed, in the words the summary uses.
 _REFUSAL_SENTENCES = {
@@ -137,10 +143,25 @@ _UPDATE_SENTENCES: dict[InstallerErrorCode, str] = {
     InstallerErrorCode.WITHDRAW_FAILED: "update_withdraw_failed",
 }
 
-# The installer's refusals under the one rule, said with the card's sentences for the same.
+# The installer's refusals under the one rule, and the others whose sentence names the version
+# or the package - said with the card's sentences, facts included.
 _RULED_OUT: dict[InstallerErrorCode, str] = {
     InstallerErrorCode.BUNDLE_BELOW_FLOOR: "update_version_below_floor",
     InstallerErrorCode.BUNDLE_WITHDRAWN: "update_version_withdrawn",
+    InstallerErrorCode.VERSION_BELOW_FLOOR: "update_version_below_floor",
+    InstallerErrorCode.VERSION_WITHDRAWN: "update_version_withdrawn",
+    InstallerErrorCode.VERSION_NOT_INSTALLABLE: "update_version_unavailable",
+    InstallerErrorCode.DEPENDS_MISSING: "update_depends_missing",
+    InstallerErrorCode.PACKAGE_INVALID: "update_download_failed",
+}
+
+# Why a release of the index could not be had, in the card's words. The rule's refusals name
+# the version; a failed or refused download is the one sentence the design gives it.
+_NOT_FETCHED: dict[str, str] = {
+    release_package.WITHDRAWN: "update_version_withdrawn",
+    release_package.BELOW_FLOOR: "update_version_below_floor",
+    release_package.DOWNLOAD: "update_download_failed",
+    release_package.DIGEST: "update_download_failed",
 }
 
 
@@ -295,8 +316,18 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             # First, because it is the one thing the version strings cannot say: the
             # receiver runs a development build, and the release of its number exists.
             sentences.append(self._text(SUMMARY_DEVELOPMENT, version=release))
+        chosen = self._versions.chosen()
         refusal = self._versions.bundle_refusal()
-        if refusal is not None and compatibility == COMPATIBILITY_OLDER:
+        if (
+            chosen is not None
+            and installed is not None
+            and is_newer(chosen, installed)
+            and self._versions.source_of(chosen) != SOURCE_BUNDLE
+        ):
+            # What the button installs is a release of the index, not the bundle: that is
+            # what the summary names, and where it comes from.
+            sentences.append(self._text(SUMMARY_OLDER_RELEASE, version=chosen.display))
+        elif refusal is not None and compatibility == COMPATIBILITY_OLDER:
             # The bundle is newer than the receiver's plugin, and still may not be installed.
             code, placeholders = refusal
             sentences.append(self._text(_REFUSAL_SENTENCES[code], **placeholders))
@@ -310,7 +341,12 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         elif compatibility == COMPATIBILITY_NEWER:
             sentences.append(self._text(SUMMARY_NEWER, version=offered))
         if (newest := self._versions.newest_beyond()) is not None:
-            sentences.append(self._text(SUMMARY_PUBLISHED, version=newest))
+            sentences.append(
+                self._text(
+                    SUMMARY_PUBLISHED if has_path else SUMMARY_PUBLISHED_NO_INSTALL,
+                    version=newest,
+                )
+            )
 
         # Home Assistant cuts a summary at 255 characters, and where it cuts is where
         # the 255th character happens to fall - mid-word, and in a language with long
@@ -411,29 +447,40 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
     async def async_install(
         self, version: str | None, backup: bool, **kwargs: Any
     ) -> None:
-        """Install the verified bundled plugin while preserving on-box settings."""
+        """Install the bundle or a verified release while preserving on-box settings.
+
+        Never an older version than the one running: that is the options flow's confirmed
+        downgrade, over SSH and with a tick box, and never one button press.
+        """
         del backup, kwargs
         versions = self._versions
         installed = versions.installed()
-        bundled = versions.bundled()
         installed_base = base_version(installed.version) if installed is not None else None
-        bundled_base = base_version(bundled.version) if bundled is not None else None
-        if installed_base is None or bundled_base is None or bundled is None:
+        target = self._target(version)
+        target_base = base_version(target.version) if target is not None else None
+        if installed_base is None or (target is None and version is None):
             raise HomeAssistantError(
                 translation_domain="enigma2_mqtt",
                 translation_key="update_version_unknown",
             )
-        if installed_base > bundled_base:
-            raise HomeAssistantError(
-                translation_domain="enigma2_mqtt",
-                translation_key="update_downgrade",
-            )
-        if version not in (None, bundled.display, bundled.version):
+        if target is None or target_base is None:
             raise HomeAssistantError(
                 translation_domain="enigma2_mqtt",
                 translation_key="update_version_unavailable",
             )
-        if (refusal := versions.bundle_refusal()) is not None:
+        if installed_base > target_base:
+            raise HomeAssistantError(
+                translation_domain="enigma2_mqtt",
+                translation_key="update_downgrade",
+            )
+        source = versions.source_of(target)
+        if source is None:
+            raise HomeAssistantError(
+                translation_domain="enigma2_mqtt",
+                translation_key="update_version_unavailable",
+            )
+        from_bundle = source == SOURCE_BUNDLE
+        if from_bundle and (refusal := versions.bundle_refusal()) is not None:
             code, placeholders = refusal
             raise HomeAssistantError(
                 translation_domain="enigma2_mqtt",
@@ -448,18 +495,12 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
                 translation_domain="enigma2_mqtt",
                 translation_key="update_no_credentials",
             )
-        request = InstallRequest(
-            credentials=SshCredentials(
-                host=data[CONF_SSH_HOST],
-                port=data.get(CONF_SSH_PORT, 22),
-                username=data[CONF_SSH_USERNAME],
-                password=data[CONF_SSH_PASSWORD],
-                host_key=data[CONF_SSH_HOST_KEY],
-            ),
-            provisioning=None,
-            expect_running=True,
-            node_id=data[CONF_NODE_ID],
-            base_topic=data.get(CONF_BASE_TOPIC, DEFAULT_BASE_TOPIC),
+        credentials = SshCredentials(
+            host=data[CONF_SSH_HOST],
+            port=data.get(CONF_SSH_PORT, 22),
+            username=data[CONF_SSH_USERNAME],
+            password=data[CONF_SSH_PASSWORD],
+            host_key=data[CONF_SSH_HOST_KEY],
         )
         # A second `update.install` on the same entity is refused by the installer as
         # busy, and it must not take the first one's spinner down with it on the way
@@ -471,7 +512,26 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             self._attr_update_percentage = None
             self.async_write_ha_state()
         try:
+            package: PackageSource | None = None
+            if not from_bundle:
+                # Before the receiver is connected to: a version that cannot be had, or bytes
+                # that are not the signed ones, leave it exactly as it was.
+                package = await async_fetch_release(self.hass, target.version)
+            request = InstallRequest(
+                credentials=credentials,
+                provisioning=None,
+                expect_running=True,
+                node_id=data[CONF_NODE_ID],
+                base_topic=data.get(CONF_BASE_TOPIC, DEFAULT_BASE_TOPIC),
+                package=package,
+            )
             await async_install(self.hass, request, self._async_installer_phase)
+        except PackageError as err:
+            raise HomeAssistantError(
+                translation_domain="enigma2_mqtt",
+                translation_key=_NOT_FETCHED.get(err.code, "update_version_unavailable"),
+                translation_placeholders=err.placeholders,
+            ) from err
         except InstallerError as err:
             if err.code in (
                 InstallerErrorCode.AUTH_FAILED,
@@ -505,6 +565,28 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
                 self._attr_in_progress = False
                 self._attr_update_percentage = None
                 self.async_write_ha_state()
+
+    def _target(self, version: str | None) -> Build | None:
+        """The build `update.install` asked for: by name, else what the card offers.
+
+        By name it may be any build the card could install - an offer, a choice, the bundle,
+        or a compatible release the index lists - matched by its display string or its plain
+        number; the same number resolves to the release before a development build. Without a
+        name it is the card's own offer, and with none the bundle: a reinstall of what the
+        receiver may already run, as `update.install` without a version has always done.
+        """
+        versions = self._versions
+        bundled = versions.bundled()
+        candidates = [*versions.installable(), *([bundled] if bundled is not None else [])]
+        if version is None:
+            return versions.chosen() or bundled
+        for build in candidates:
+            if build.display == version:
+                return build
+        for build in candidates:
+            if build.version == version:
+                return build
+        return None
 
     @callback
     def _async_installer_phase(self, phase: str) -> None:

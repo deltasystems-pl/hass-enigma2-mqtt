@@ -4,13 +4,15 @@
     "update_summary_older": "Der Receiver hat ein älteres Plugin als das, welches diese Integration mitbringt. Die Installation ersetzt es durch das mitgelieferte {version} und lässt die Broker-Einstellungen des Receivers unberührt.",
     "update_summary_older_no_install": "Der Receiver hat ein älteres Plugin als das mitgelieferte {version}. Es sind keine SSH-Zugangsdaten gespeichert, daher kann diese Karte es nicht installieren: Konfiguriere den Receiver mit „SSH-Zugangsdaten für Updates behalten“ neu, oder spiele das IPK von Hand auf.",
     "update_summary_newer": "Der Receiver hat ein neueres Plugin als das mitgelieferte {version}. Hier ersetzt es nichts — diese Karte bietet nie eine ältere Version an.",
-    "update_summary_published": "Die signierte Versionsliste des Plugins enthält {version}. Diese Karte kann sie noch nicht installieren: Sie installiert nur das mit dieser Integration gelieferte Paket.",
+    "update_summary_published": "Die signierte Versionsliste des Plugins enthält auch {version}; wähle sie unter „Zu installierende Plugin-Version“, um sie zu installieren.",
     "update_summary_development": "Entwicklungsversion; Version {version} verfügbar.",
     "update_summary_withdrawn": "Die mitgelieferte Version {version} wurde zurückgezogen: {reason}. Diese Karte installiert sie nicht.",
     "update_summary_below_floor": "Die mitgelieferte Version {version} liegt unter {floor}, der niedrigsten Version, die die signierte Versionsliste des Plugins zulässt. Diese Karte installiert sie nicht.",
     "release_index_notification_title": "Neue Versionsliste des Plugins Enigma2 MQTT Bridge",
     "release_index_notification_message": "Home Assistant hat eine neue signierte Versionsliste des Plugins angenommen: Nummer {serial}, Schlüssel {key_id}. Hinzugefügt: {added}. Zurückgezogen: {withdrawn}. Niedrigste Version, die installiert werden darf: {floor}. Wurde weder eine neue Plugin-Version noch ein Rückzug erwartet, nichts installieren und die SECURITY.md der Integration lesen.",
-    "release_index_none": "keine"
+    "release_index_none": "keine",
+    "update_summary_published_no_install": "Die signierte Versionsliste des Plugins enthält {version}. Es sind keine SSH-Zugangsdaten gespeichert, daher kann diese Karte sie nicht installieren: Konfiguriere den Receiver mit „SSH-Zugangsdaten für Updates behalten“ neu.",
+    "update_summary_older_release": "Auf dem Receiver läuft ein älteres Plugin. Die Installation ersetzt es durch {version} aus der signierten Versionsliste des Plugins, heruntergeladen und geprüft, bevor etwas den Receiver erreicht, und lässt die Broker-Einstellungen des Receivers unverändert."
   },
   "config": {
     "flow_title": "{name}",
@@ -140,7 +142,12 @@
       "bundle_below_floor": "Das mit dieser Integration gelieferte Plugin {version} liegt unter {floor}, der niedrigsten Version, die die signierte Versionsliste des Plugins zulässt, daher wurde nichts installiert. Aktualisiere diese Integration, um ein neueres Plugin zu erhalten.",
       "bundle_withdrawn": "Das mit dieser Integration gelieferte Plugin {version} wurde in der signierten Versionsliste des Plugins zurückgezogen: {reason}. Es wurde nichts installiert. Aktualisiere diese Integration, um ein neueres Plugin zu erhalten.",
       "identity_mismatch": "Der Receiver ist für die Knoten-ID {box_node_id} und das Basisthema {box_base_topic} konfiguriert, das Formular nennt {node_id} und {base_topic}. Ein Wert in Klammern ist auf dem Receiver nicht gespeichert; gezeigt wird die Voreinstellung des Plugins, sofern es eine gibt. Es wurde nichts geändert.",
-      "unknown": "Installation ist unerwartet fehlgeschlagen; es wurde kein Eintrag erstellt."
+      "unknown": "Installation ist unerwartet fehlgeschlagen; es wurde kein Eintrag erstellt.",
+      "version_withdrawn": "Plugin {version} wurde in der signierten Versionsliste des Plugins zurückgezogen: {reason}. Es wurde nichts installiert.",
+      "version_below_floor": "Plugin {version} liegt unter {floor}, der niedrigsten Version, die die signierte Versionsliste des Plugins zulässt, daher wurde nichts installiert.",
+      "package_invalid": "Plugin {version} konnte nicht heruntergeladen werden, oder seine Prüfsumme stimmt nicht mit der signierten Versionsliste des Plugins überein. Auf dem Receiver wurde nichts geändert.",
+      "depends_missing": "Plugin {version} benötigt Pakete, die auf dem Receiver nicht installiert sind: {package}. Es wurde nichts geändert.",
+      "version_not_installable": "Plugin {version} ist keine Version mehr, die diese Integration laut der signierten Versionsliste des Plugins installieren darf, daher wurde nichts installiert."
     }
   },
   "options": {
@@ -658,8 +665,8 @@
       "message": "Dieser Receiver hat keine MAC-Adresse gemeldet, es gibt also kein Ziel für ein Magic Packet. Trage eine in den Optionen der Integration ein."
     },
     "update_version_unknown": {"message": "Der Receiver hat seine installierte Plugin-Version nicht gemeldet."},
-    "update_downgrade": {"message": "Ein neueres Plugin wird nicht durch eine ältere gebündelte Version ersetzt."},
-    "update_version_unavailable": {"message": "Die angeforderte Version ist nicht im geprüften Integrationspaket verfügbar."},
+    "update_downgrade": {"message": "Ein neueres Plugin wird nicht durch eine ältere Version ersetzt: Diese Karte installiert nie eine ältere Version."},
+    "update_version_unavailable": {"message": "Die angeforderte Version ist weder das mitgelieferte Plugin noch eine Version, die diese Integration laut der signierten Versionsliste des Plugins installieren darf."},
     "update_version_withdrawn": {"message": "Die Plugin-Version {version} wurde zurückgezogen: {reason}"},
     "update_version_below_floor": {"message": "Die Plugin-Version {version} liegt unter {floor}, der niedrigsten Version, die die signierte Versionsliste des Plugins zulässt."},
     "release_check_unverified": {"message": "Die Versionsliste des Plugins konnte nicht geprüft werden; sie wurde möglicherweise gerade geändert. In ein paar Minuten erneut versuchen. Es wurde nichts geändert."},
@@ -687,6 +694,8 @@
     "history_clear_playback": {"message": "Der Receiver spielt eine Aufnahme ab. Beende sie und versuche es erneut."},
     "history_clear_not_cleared": {"message": "Der Receiver hat seinen Verlauf nicht geleert."},
     "history_clear_screen_open": {"message": "Auf dem Bildschirm des Receivers ist ein Menü, die Senderliste oder der EPG geöffnet - schließe es und versuche es erneut."},
-    "zap_history_playback": {"message": "Der Receiver spielt eine Aufnahme ab - beende sie und versuche es erneut."}
+    "zap_history_playback": {"message": "Der Receiver spielt eine Aufnahme ab - beende sie und versuche es erneut."},
+    "update_download_failed": {"message": "Plugin {version} konnte nicht heruntergeladen werden, oder seine Prüfsumme stimmt nicht mit der signierten Versionsliste des Plugins überein. Auf dem Receiver wurde nichts geändert."},
+    "update_depends_missing": {"message": "Plugin {version} benötigt Pakete, die auf dem Receiver nicht installiert sind: {package}. Es wurde nichts geändert."}
     }
   }
