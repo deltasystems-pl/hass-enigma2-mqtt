@@ -150,6 +150,7 @@ _RULED_OUT: dict[InstallerErrorCode, str] = {
     InstallerErrorCode.BUNDLE_WITHDRAWN: "update_version_withdrawn",
     InstallerErrorCode.VERSION_BELOW_FLOOR: "update_version_below_floor",
     InstallerErrorCode.VERSION_WITHDRAWN: "update_version_withdrawn",
+    InstallerErrorCode.VERSION_NOT_INSTALLABLE: "update_version_unavailable",
     InstallerErrorCode.DEPENDS_MISSING: "update_depends_missing",
     InstallerErrorCode.PACKAGE_INVALID: "update_download_failed",
 }

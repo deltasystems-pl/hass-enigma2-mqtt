@@ -43,8 +43,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   API that cannot be reached is noted in the log and does not. The card never installs an older
   version than the one running.
 - **The SSH installer checks a release's `depends`** - every package the signed entry names -
-  with `opkg status` before it takes the lock or a snapshot, and refuses with the missing
-  package's name. `opkg status` never takes opkg's lock.
+  with `opkg status` before it takes the lock or a snapshot, and refuses naming every missing
+  package. `opkg status` never takes opkg's lock; it sees only a package of that exact name, so a
+  dependency another package only `Provides:` is reported missing (refused, nothing changed).
+- **The SSH installer asks the whole rule again before it connects**, against the newest index
+  held: a release fetched as installable is refused, with the receiver untouched, when a newer
+  index has since withdrawn it, raised the floor, moved it to another contract, asked for a newer
+  integration, dropped it, or signed other bytes under its number.
 - **The restart proof holds the receiver's `info.build.commit` to the installed commit** when the
   plugin reports a build id: a same-number build that is not the one installed is not proof. A
   plugin that predates build ids proves by its version, as before.

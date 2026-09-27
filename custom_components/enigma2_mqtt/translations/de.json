@@ -147,7 +147,8 @@
       "version_withdrawn": "Plugin {version} wurde in der signierten Versionsliste des Plugins zurückgezogen: {reason}. Es wurde nichts installiert.",
       "version_below_floor": "Plugin {version} liegt unter {floor}, der niedrigsten Version, die die signierte Versionsliste des Plugins zulässt, daher wurde nichts installiert.",
       "package_invalid": "Plugin {version} konnte nicht heruntergeladen werden, oder seine Prüfsumme stimmt nicht mit der signierten Versionsliste des Plugins überein. Auf dem Receiver wurde nichts geändert.",
-      "depends_missing": "Plugin {version} benötigt das Paket {package}, das auf dem Receiver nicht installiert ist. Es wurde nichts geändert."
+      "depends_missing": "Plugin {version} benötigt Pakete, die auf dem Receiver nicht installiert sind: {package}. Es wurde nichts geändert.",
+      "version_not_installable": "Plugin {version} ist keine Version mehr, die diese Integration laut der signierten Versionsliste des Plugins installieren darf, daher wurde nichts installiert."
     }
   },
   "options": {
@@ -735,6 +736,6 @@
     "history_clear_screen_open": {"message": "Auf dem Bildschirm des Receivers ist ein Menü, die Senderliste oder der EPG geöffnet - schließe es und versuche es erneut."},
     "zap_history_playback": {"message": "Der Receiver spielt eine Aufnahme ab - beende sie und versuche es erneut."},
     "update_download_failed": {"message": "Plugin {version} konnte nicht heruntergeladen werden, oder seine Prüfsumme stimmt nicht mit der signierten Versionsliste des Plugins überein. Auf dem Receiver wurde nichts geändert."},
-    "update_depends_missing": {"message": "Plugin {version} benötigt das Paket {package}, das auf dem Receiver nicht installiert ist. Es wurde nichts geändert."}
+    "update_depends_missing": {"message": "Plugin {version} benötigt Pakete, die auf dem Receiver nicht installiert sind: {package}. Es wurde nichts geändert."}
     }
   }

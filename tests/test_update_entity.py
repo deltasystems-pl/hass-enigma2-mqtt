@@ -1084,8 +1084,13 @@ async def test_a_bundle_at_the_floor_is_offered(
             "update_version_withdrawn",
         ),
         (
+            "VERSION_NOT_INSTALLABLE",
+            {"version": PLUGIN_VERSION},
+            "update_version_unavailable",
+        ),
+        (
             "DEPENDS_MISSING",
-            {"version": PLUGIN_VERSION, "package": "python3-json"},
+            {"version": PLUGIN_VERSION, "package": "python3-json, python3-netclient"},
             "update_depends_missing",
         ),
         (
@@ -1099,7 +1104,8 @@ async def test_a_bundle_at_the_floor_is_offered(
         "withdrawn",
         "a release below the floor",
         "a withdrawn release",
-        "a missing dependency",
+        "a release the newest index no longer offers",
+        "missing dependencies",
         "bytes that changed",
     ],
 )
@@ -1172,6 +1178,41 @@ async def test_installing_a_release_of_the_index_downloads_it_first(
     assert request.package is source
     assert request.downgrade is False
     assert request.provisioning is None
+
+
+async def test_a_release_of_the_index_is_offered_when_the_bundle_does_not_load(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """The index is an install path of its own: a bundle that will not load - damaged,
+    removed by hand - takes the bundle off the card, not the releases the card downloads."""
+    with patch.object(
+        bundle_module, "load_bundled_plugin", side_effect=bundle_module.BundleError("damaged")
+    ):
+        await _setup(hass, config_entry, credentials=True)
+    await _report(hass, "0.3.0")
+    await _accept(hass, aioclient_mock, 1, [release("0.4.0"), release("0.3.0")])
+
+    state = hass.states.get(PLUGIN)
+    assert state.state == STATE_ON
+    assert state.attributes["latest_version"] == "0.4.0"
+    assert state.attributes["update_path"] == "ssh"
+    assert state.attributes["supported_features"] != 0
+
+    source = _fetched()
+    with (
+        patch(FETCH, AsyncMock(return_value=source)) as fetch,
+        patch("custom_components.enigma2_mqtt.update.async_install") as install,
+    ):
+        await hass.services.async_call(
+            "update", "install", {ATTR_ENTITY_ID: PLUGIN}, blocking=True
+        )
+
+    fetch.assert_awaited_once_with(hass, "0.4.0")
+    assert install.await_args.args[1].package is source
 
 
 async def test_the_bundle_is_installed_without_a_download(

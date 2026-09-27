@@ -223,6 +223,47 @@ async def test_github_disagreeing_with_the_signed_checksum_refuses_before_the_do
 
 
 @pytest.mark.parametrize(
+    ("package_digest", "other_digest", "fetched"),
+    [
+        (f"sha256:{SHA}", "sha256:" + "1" * 64, True),
+        ("sha256:" + "0" * 64, f"sha256:{SHA}", False),
+    ],
+    ids=["the package agrees, the files before it do not", "only the files before it agree"],
+)
+async def test_the_second_opinion_is_the_package_asset_s_whatever_comes_first(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    caplog: pytest.LogCaptureFixture,
+    package_digest: str,
+    other_digest: str,
+    fetched: bool,
+) -> None:
+    """A release carries the package's checksum file and the feed's `Packages` beside the
+    package, and GitHub promises no order for them. Their digests are theirs: taking the first
+    asset's would refuse a good release, or accept a bad one."""
+    await _hold(hass, _entry())
+    aioclient_mock.get(
+        API,
+        json={
+            "assets": [
+                {"name": f"{FILENAME}.sha256", "digest": other_digest},
+                {"name": "Packages", "digest": other_digest},
+                {"name": FILENAME, "digest": package_digest},
+            ]
+        },
+    )
+    aioclient_mock.get(URL, content=PACKAGE)
+
+    if fetched:
+        source = await async_fetch_release(hass, VERSION)
+        assert source.data == PACKAGE
+        assert "going on with the signed checksum alone" not in caplog.text
+    else:
+        assert (await _refused(hass)).code == DIGEST
+        assert [str(call[1]) for call in aioclient_mock.mock_calls] == [API]
+
+
+@pytest.mark.parametrize(
     "answer",
     [
         {"status": 403},
