@@ -793,13 +793,26 @@ which then offers it on the card, or with `update.install` and that version. The
 time, flavour and dirtiness are in `installed_build` and `bundled_build`, as information. A
 plugin up to 0.3.x reports no build id and is shown as the version it reports.
 
-**The signed release index is information here, not an offer.** Its versions appear in the
-summary and in the attributes - `available_versions` (newest first, each with whether this
-integration may offer it and why not; not recorded), `published_version`, `index_serial`,
-`index_age` (whole days since it was built), `last_check`, `check_error` and `update_path` - and
-never as `latest_version` until this integration can install a package it downloads. Nothing on
-this card reaches the internet unless somebody asks for a check or the daily check is on - see
-[Options](#options).
+**What the card installs.** With SSH credentials stored, the newest release the signed index
+lists that this integration may install - or the bundle, when nothing newer is listed; a release
+comes before a development build of its own number. Its versions also appear in the summary and in
+the attributes - `available_versions` (newest first, each with whether this integration may offer
+it and why not; not recorded), `published_version`, `index_serial`, `index_age` (whole days since
+it was built), `last_check`, `check_error` and `update_path`. Without SSH credentials they are
+information only. Nothing on this card reaches the internet unless somebody asks for a check, the
+daily check is on, or somebody presses install.
+
+**Installing a release of the index** downloads it from the plugin's fixed origin - the same one
+the index comes from, verified TLS, no redirect, at most its signed size - and believes it only
+at the signed size and sha256, with a control file naming this package and this version. When the
+bundle is those very bytes, nothing is downloaded. Once per version a day, GitHub's own `digest`
+of the release asset is compared with the signed checksum: a disagreement refuses; an API that
+cannot be reached, is rate-limited or has no digest is noted in the log and does not refuse. All
+of that happens before the receiver is connected to, so a refusal - „Nie udało się pobrać wtyczki
+{version} albo jej suma kontrolna się nie zgadza. Na dekoderze nic nie zmieniono." - leaves it as
+it was. Then the SSH installer runs as for the bundle, after asking the receiver with `opkg status`
+for every package the release `depends` on. The card never installs an older version than the
+one running.
 
 **Check for plugin updates** (*Sprawdź aktualizacje wtyczki*, `button.<device>_sprawdz_aktualizacje_wtyczki`
 on a Polish installation) asks for the index now, at most once in ten minutes; inside that it
@@ -807,8 +820,8 @@ says when the list was read and when it can be read again. **Plugin version to i
 (*Wersja wtyczki do instalacji*, a select, **disabled by default**) holds a receiver on one version:
 its first option, *Najnowsza zgodna* (`latest`), is the newest version the card can install, and it
 is what counts while the select is disabled. Its other options are the versions the card can
-install that differ from the one running: a higher release number, or a build of the same number -
-today only the bundle. Choosing a same-number build is the one way the card offers it. A choice is stored in the entry's options
+install that differ from the one running: a higher release number - the bundle's or a release of
+the index - or a build of the same number. Choosing a same-number build is the one way the card offers it. A choice is stored in the entry's options
 and survives a restart; changing it moves `latest_version`, which makes Home Assistant forget a
 skipped version.
 

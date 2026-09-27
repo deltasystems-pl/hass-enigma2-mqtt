@@ -14,11 +14,14 @@ once, here, from four sources:
 exists only while an install path does. Without one there is no badge: `latest_version` is the
 installed version, and anything newer is said in the summary and the attributes, with the way to
 an install path.
-Today the only path is the SSH installer with the bundle, so the only installable version is the
-bundle's - offered when its release number is higher than what the receiver runs, and never when
-it is below the floor or withdrawn; the versions the index lists beyond it are information, not
-offers, until this integration can download a package. A build of the same number as the one
-running is never offered by itself: it is a choice, made in the select or by name.
+The path is the SSH installer, and it installs two kinds of package: the bundle, and any release
+the signed index lists that this integration may install - downloaded and held to its signed
+entry before anything reaches the receiver (`release_package`). So the installable versions are
+the bundle's and the index's compatible releases, each offered when its release number is higher
+than what the receiver runs, and never when it is below the floor or withdrawn; `latest` is the
+newest of them, a release before a development build of the same number. A build of the same
+number as the one running is never offered by itself: it is a choice, made in the select or by
+name. Nothing here offers an older version - that is the options flow's confirmed downgrade.
 
 **The select** is honoured only while it is enabled in the entity registry. Disabled - its
 default - it counts as `latest`, whatever was stored the last time somebody used it, so a
@@ -53,6 +56,10 @@ from .const import (
 from .release_store import ReleaseIndexCache, async_release_index_cache
 
 PATH_SSH = "ssh"
+
+# Where the card would take a build's package from.
+SOURCE_BUNDLE = "bundle"
+SOURCE_INDEX = "index"
 
 # The select's unique id suffix, which is also its translation key.
 KEY_PLUGIN_INSTALL_VERSION = "plugin_install_version"
@@ -133,8 +140,9 @@ class PluginVersions:
 
     @property
     def path(self) -> str | None:
-        """How this card would install: over SSH with the bundle, or not at all."""
-        if self.bundle is not None and has_credentials(self.entry):
+        """How this card would install: over SSH, with the bundle or a release of the index,
+        or not at all."""
+        if has_credentials(self.entry) and (self.bundle is not None or self.index is not None):
             return PATH_SSH
         return None
 
@@ -183,11 +191,54 @@ class PluginVersions:
 
     # ------------------------------------------------------------------ the offers --
 
-    def _installable(self) -> Build | None:
-        """The bundle, when this card has a path and the rule allows it - else None."""
-        if self.path is None or self.bundle_refusal() is not None:
-            return None
-        return self.bundled()
+    def _index_builds(self) -> list[Build]:
+        """The index's releases this integration may install, as release builds."""
+        builds = []
+        for item in self.available():
+            release = self._release(item["version"]) if item["compatible"] else None
+            if release is not None:
+                builds.append(
+                    Build(
+                        version=release["version"],
+                        time=release["commit_time"],
+                        release_commit=release["commit"],
+                    )
+                )
+        return builds
+
+    def installable(self) -> list[Build]:
+        """Every build this card could install, newest first - none without a path.
+
+        The bundle while the rule allows it, and the index's compatible releases. Two of the
+        same number are both kept when they differ (a development bundle beside the release),
+        the release first; the bundle that *is* the release is one build, not two.
+        """
+        if self.path is None:
+            return []
+        found: dict[str, Build] = {}
+        bundled = self.bundled() if self.bundle_refusal() is None else None
+        if bundled is not None:
+            found[bundled.display] = bundled
+        for build in self._index_builds():
+            found.setdefault(build.display, build)
+        return sorted(
+            found.values(),
+            key=lambda build: (base_version(build.version) or (0, 0, 0), build.is_release),
+            reverse=True,
+        )
+
+    def source_of(self, build: Build) -> str | None:
+        """Where the card takes `build`'s package from: the bundle, the index, or nowhere.
+
+        The bundle whenever it is that build - it is on disk and CI reproduced it - and the
+        index for a release it lists.
+        """
+        bundled = self.bundled()
+        if bundled is not None and bundled.display == build.display:
+            return SOURCE_BUNDLE
+        if build.is_release and self._release(build.version) is not None:
+            return SOURCE_INDEX
+        return None
 
     def offers(self) -> list[Build]:
         """What the card offers by itself: a higher release number than the receiver runs.
@@ -198,23 +249,22 @@ class PluginVersions:
         make a downgrade one press away. It is a choice (`choices`).
         """
         installed = self.installed()
-        bundled = self._installable()
-        if installed is None or bundled is None:
+        if installed is None:
             return []
-        return [bundled] if is_newer(bundled, installed) else []
+        return [build for build in self.installable() if is_newer(build, installed)]
 
     def choices(self) -> list[Build]:
         """What somebody may choose in the select: the offers, and a same-number build that
         is not the one running."""
         installed = self.installed()
-        bundled = self._installable()
-        if installed is None or bundled is None:
+        if installed is None:
             return []
-        if is_newer(bundled, installed) or (
-            same_number(bundled, installed) and bundled.display != installed.display
-        ):
-            return [bundled]
-        return []
+        return [
+            build
+            for build in self.installable()
+            if is_newer(build, installed)
+            or (same_number(build, installed) and build.display != installed.display)
+        ]
 
     def select_enabled(self) -> bool:
         """Whether „Wersja wtyczki do instalacji" is enabled in the entity registry."""

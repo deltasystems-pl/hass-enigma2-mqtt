@@ -4,13 +4,15 @@
     "update_summary_older": "The receiver runs an older plugin than this integration carries. Installing replaces it with the bundled {version} and leaves the receiver's own broker settings alone.",
     "update_summary_older_no_install": "The receiver runs an older plugin than the bundled {version}. No SSH credentials are stored, so this card cannot install it: reconfigure the receiver with “Keep SSH credentials for updates”, or install the IPK on the box by hand.",
     "update_summary_newer": "The receiver runs a plugin newer than the bundled {version}. Nothing here replaces it — this card never offers a downgrade.",
-    "update_summary_published": "The plugin's signed release index lists {version}. This card cannot install it yet: it installs only the bundle shipped with this integration.",
+    "update_summary_published": "The plugin's signed release index also lists {version}; choose it in “Plugin version to install” to install it.",
     "update_summary_development": "Development build; release {version} available.",
     "update_summary_withdrawn": "The bundled {version} has been withdrawn: {reason}. This card will not install it.",
     "update_summary_below_floor": "The bundled {version} is below {floor}, the lowest version the plugin's signed index allows. This card will not install it.",
     "release_index_notification_title": "New list of Enigma2 MQTT Bridge plugin versions",
     "release_index_notification_message": "Home Assistant accepted a new signed list of plugin versions: serial {serial}, signed with key {key_id}. Added: {added}. Withdrawn: {withdrawn}. Lowest version that may be installed: {floor}. If no plugin release or withdrawal was expected, install nothing and read the integration's SECURITY.md.",
-    "release_index_none": "none"
+    "release_index_none": "none",
+    "update_summary_published_no_install": "The plugin's signed release index lists {version}. No SSH credentials are stored, so this card cannot install it: reconfigure the receiver with “Keep SSH credentials for updates”.",
+    "update_summary_older_release": "The receiver runs an older plugin. Installing replaces it with {version} from the plugin's signed release index, downloaded and checked before anything reaches the receiver, and leaves the receiver's own broker settings alone."
   },
   "config": {
     "flow_title": "{name}",
@@ -166,7 +168,11 @@
       ,"bundle_below_floor": "The plugin bundled with this integration, {version}, is below {floor}, the lowest version the plugin's signed release index allows, so nothing was installed. Update this integration to get a newer plugin."
       ,"bundle_withdrawn": "The plugin bundled with this integration, {version}, has been withdrawn in the plugin's signed release index: {reason}. Nothing was installed. Update this integration to get a newer plugin."
       ,"identity_mismatch": "The receiver is configured for node ID {box_node_id} and base topic {box_base_topic}, and the form gives {node_id} and {base_topic}. A value in brackets is one the receiver has not stored, and shows the plugin's default where there is one. Nothing was changed."
-      ,"unknown": "Installation failed unexpectedly; no entry was created."
+      ,"unknown": "Installation failed unexpectedly; no entry was created.",
+       "version_withdrawn": "Plugin {version} has been withdrawn in the plugin's signed release index: {reason}. Nothing was installed.",
+       "version_below_floor": "Plugin {version} is below {floor}, the lowest version the plugin's signed release index allows, so nothing was installed.",
+       "package_invalid": "Could not download plugin {version}, or its checksum does not match the plugin's signed release index. Nothing was changed on the receiver.",
+       "depends_missing": "Plugin {version} needs the package {package}, which is not installed on the receiver. Nothing was changed."
     }
   },
   "options": {
@@ -684,8 +690,8 @@
       "message": "This receiver has not reported a MAC address, so there is nowhere to send a magic packet. Set one in the integration's options."
     },
     "update_version_unknown": {"message": "The receiver has not reported its installed plugin version."},
-    "update_downgrade": {"message": "Refusing to replace a newer plugin with an older bundled version."},
-    "update_version_unavailable": {"message": "The requested version is not available from this integration’s verified bundle."},
+    "update_downgrade": {"message": "Refusing to replace a newer plugin with an older version: the update card never installs an older one."},
+    "update_version_unavailable": {"message": "The requested version is neither the bundled plugin nor a release the plugin's signed index lets this integration install."},
     "update_version_withdrawn": {"message": "Plugin version {version} has been withdrawn: {reason}"},
     "update_version_below_floor": {"message": "Plugin version {version} is below {floor}, the lowest version the plugin's signed index allows."},
     "release_check_unverified": {"message": "The list of plugin versions could not be verified; it may have been changing while it was read. Try again in a few minutes. Nothing was changed."},
@@ -713,6 +719,8 @@
     "history_clear_playback": {"message": "A recording is being played back. Stop it and try again."},
     "history_clear_not_cleared": {"message": "The receiver did not clear its zap history."},
     "history_clear_screen_open": {"message": "A menu, the channel list or the EPG is open on the receiver's screen, where 0 would not reach the history. Close it and try again."},
-    "zap_history_playback": {"message": "The receiver is playing back a recording, where its zap history is not on screen. Stop the playback and try again."}
+    "zap_history_playback": {"message": "The receiver is playing back a recording, where its zap history is not on screen. Stop the playback and try again."},
+    "update_download_failed": {"message": "Could not download plugin {version}, or its checksum does not match the plugin's signed release index. Nothing was changed on the receiver."},
+    "update_depends_missing": {"message": "Plugin {version} needs the package {package}, which is not installed on the receiver. Nothing was changed."}
     }
   }
