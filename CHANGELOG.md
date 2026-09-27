@@ -101,17 +101,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exceptions of contract 1 are listed in `const.py`, and CI compares the list with the plugin's
   `contract.json`.
 - **The SSH installer's forced mode**, the recovery path the forced-reinstall button uses
-  (design, section 7a). **Not yet run on a receiver.** It installs only the bundled package, over
+  ([ADR-0008](docs/adr/0008-signed-plugin-index.md), section 8). **Not yet run on a receiver.** It installs only the bundled package, over
   any version (`--force-downgrade` when opkg's records name a newer or unreadable version, never
   otherwise), and never waits for the plugin to answer. It reads the state of the receiver's
   interface over SSH before any guard that needs OpenWebif - `runlevel` and three `pidof enigma2`
   samples over ten seconds - and decides by it: a running interface gets the update path's guards
   and its clean restart; a running interface whose OpenWebif is silent is refused, since whether
   it records cannot be known; a respawn loop (runlevel 3, absent on every sample) is installed
-  without the recording and timer guards, logged, and started with `init 4` and `init 3`; runlevel
-  4 left by an interrupted transaction of this project is recovered - the abandoned snapshot put
-  back with its settings - and started with `init 3` on the channel that transaction recorded;
-  runlevel 4 with nothing of ours is refused. It proves the start by a new enigma2 holding the
+  without the recording and timer guards, logged, and started with `init 4` and `init 3`. Ten
+  seconds is shorter than an interface can take to show a pid, so a box still starting can read
+  as a respawn loop: the interface is looked at once more immediately before it is stopped or
+  started, and one that runs by then gets every guard - recording, timers, standby, streaming -
+  and the clean restart; nothing is sent to init over a running interface. Runlevel 4 counts as
+  ours only when a stop of ours was cut off in this boot - an unfinished stop-and-restore, or a
+  self-update cut off while rolling back; a lock, a marker or a kept transaction directory alone
+  does not. It is recovered - the abandoned snapshot put back, its settings block only when that
+  transaction's own rollback was cut off before its restore, and what was read from the
+  settings read again afterwards - and started with `init 3` on the channel that transaction
+  recorded; a failure after the lock is taken still starts the interface, on the files that are
+  there. Runlevel 4 with no stop of ours is refused, and a live lock there says when it frees
+  itself. It proves the start by a new enigma2 holding the
   plugin's log open, and by the announcement only when the plugin is switched on; a plugin that is
   switched off stays off, and the result says so. It changes no setting.
 - The installer's helper answers four more questions on the receiver: what an interrupted
