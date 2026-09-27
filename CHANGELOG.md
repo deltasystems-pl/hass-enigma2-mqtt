@@ -101,19 +101,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exceptions of contract 1 are listed in `const.py`, and CI compares the list with the plugin's
   `contract.json`.
 - **„Wymuś reinstalację wtyczki (SSH)"** (*Force plugin reinstall (SSH)*), a diagnostic button,
-  disabled by default, that **exists only while SSH credentials are stored** (design, section 7a;
-  ADR-0008, section 8). **Not yet run on a receiver.** It reinstalls the bundled plugin over SSH
+  disabled by default, that **exists only while SSH credentials are stored**
+  ([ADR-0008](docs/adr/0008-signed-plugin-index.md), section 8). **Not yet run on a receiver.** It reinstalls the bundled plugin over SSH
   without needing the plugin to answer - the recovery path for a plugin that is dead, switched off
   or too old to update itself. Home Assistant has no confirmation for a button, so the first press
   by an administrator arms it for 30 seconds and posts the confirmation as a notification (raising
   nothing), and a second press by the same administrator inside the window runs it; a press by
-  anybody else, an automation included, posts a notice and does nothing else. The update card
-  shows it running; a failure is also recorded on „Ostatni błąd", with Home Assistant as its
-  source. Enrolling or forgetting SSH credentials creates or removes it at once, without a reload -
+  anybody else, an automation included, posts a notice and does nothing else. A script started
+  by an administrator runs as that administrator, so two presses in it confirm in one run; an
+  automation never confirms. The confirmation says that while the receiver's interface runs
+  the receiver must be switched on, not in standby, and that only an interface that is not
+  running is started by the reinstall. A press while it runs starts nothing and says so. The
+  update card shows it running; a failure is also recorded on „Ostatni błąd", with Home
+  Assistant as its source, and the receiver's older complaint replayed by the broker at a
+  reload or a restart does not displace it. Enrolling or forgetting SSH credentials creates or removes it at once, without a reload -
   forgetting removes its registry entry, so enrolling again brings a new button, disabled again.
 - **The SSH installer's forced mode**, the recovery path the forced-reinstall button uses
-  ([ADR-0008](docs/adr/0008-signed-plugin-index.md), section 8). **Not yet run on a receiver.** It installs only the bundled package, over
-  any version (`--force-downgrade` when opkg's records name a newer or unreadable version, never
+  ([ADR-0008](docs/adr/0008-signed-plugin-index.md), section 8). **Not yet run on a receiver.**
+  It installs only the bundled package, over any version (`--force-downgrade` when opkg's records name a newer or unreadable version, never
   otherwise), and never waits for the plugin to answer. It reads the state of the receiver's
   interface over SSH before any guard that needs OpenWebif - `runlevel` and three `pidof enigma2`
   samples over ten seconds - and decides by it: a running interface gets the update path's guards

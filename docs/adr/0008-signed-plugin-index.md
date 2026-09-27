@@ -248,7 +248,11 @@ switched off in its own settings is reinstalled and stays off, and the result sa
 - **Two presses, one administrator.** The first press arms it for 30 seconds and posts the
   confirmation as a notice, never an error, so an automation is not aborted; a second press within
   30 seconds by the same Home Assistant administrator starts it. A press by anybody else arms
-  nothing, starts nothing, raises nothing, and posts a notice saying who may.
+  nothing, starts nothing, raises nothing, and posts a notice saying who may. A script started by
+  an administrator runs as that administrator, so its two presses confirm in one run - the same
+  administrator's explicit act; an automation runs without a user and never confirms. While the
+  receiver's interface runs, the standby guard stays: the receiver must be switched on, and the
+  confirmation says so; only an interface that is not running is started by the reinstall.
 - **It reads the receiver, not the topic.** It asks the lock on the receiver, never the retained
   state, so a forged in-progress state cannot block it. It refuses an interface that runs while
   OpenWebif is silent, and one stopped on purpose (runlevel 4 with nothing of ours); it proceeds

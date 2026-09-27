@@ -936,17 +936,28 @@ available while the receiver is offline over MQTT.
   30 seconds and posts the confirmation as a notification, naming the bundled version - and
   saying so when it is older than the plugin installed. The first press raises nothing. A second
   press by the same administrator inside the 30 seconds runs the reinstall. Only administrators:
-  a press by anybody else - and by an automation, which runs without a user - posts a notice and
-  does nothing else, so a forced reinstall is never a one-call automation action.
+  a press by anybody else - and by an automation, which runs without a user even when an
+  administrator triggers it - posts a notice and does nothing else, so an automation can never
+  confirm it. A **script** runs as the user who started it, so a script with two presses, started
+  by an administrator, confirms in one run: that is the same administrator's explicit act.
+  A press while a reinstall runs starts nothing and posts a notice saying so.
+- **Standby.** While the receiver's interface is running, the receiver must be switched on, not
+  in standby: the restart would wake it, and HDMI-CEC may switch the television on with it, so the
+  reinstall is refused before anything changes. Only when the interface is not running - a
+  respawn loop, or runlevel 4 left by an interrupted install of this project - does the reinstall
+  start it; the confirmation says both.
 - **What it does.** Always SSH, never MQTT, and only the bundled package, over any version
   installed (`--force-downgrade` when opkg's records name a newer or unreadable version). It
   reads the interface's state over SSH before any guard that needs OpenWebif: a running
   interface gets the usual recording, timer, standby and streaming guards and the clean restart;
   one whose OpenWebif does not answer is refused, since whether it records cannot be known;
   a respawn loop is installed without those guards (nothing records without enigma2) and started
-  with `init 4` and `init 3` - the new interface then starts any timer that became due; runlevel
-  4 left by an interrupted install of this project is recovered and started; runlevel 4 with
-  nothing of this project's is left alone. It changes no setting - a plugin switched off stays
+  with `init 4` and `init 3` - the new interface then starts any timer that became due. Ten
+  seconds of samples can mistake a box that is still starting for a respawn loop, so the
+  interface is looked at again immediately before it is stopped or started, and one that runs by
+  then gets every guard and the clean restart. Runlevel 4 left by an interrupted install of this
+  project - a stop-and-restore cut off in this boot - is recovered and started, and a failure
+  after that still starts it; runlevel 4 with no such stop of this project's is left alone. It changes no setting - a plugin switched off stays
   off - and its proof is a new interface process holding the plugin's log open, plus the
   announcement when the plugin is switched on.
 - **The shared lock decides, not a topic.** It claims the receiver's install lock like every
@@ -1197,22 +1208,25 @@ are already clear:
 ### The plugin does not start, and Home Assistant cannot help
 
 With SSH credentials stored, „Wymuś reinstalację wtyczki (SSH)" (section 4.5) is the repair. When
-Home Assistant itself is unavailable, install the plugin by hand on the receiver, over SSH. Add
-the plugin's feed once - a file `/etc/opkg/enigma2-mqtt-bridge.conf` containing
+Home Assistant itself is unavailable, install the plugin by hand on the receiver, over SSH.
+**This path has no signature and no compatibility check**: the image's opkg cannot check feed
+signatures, the feed carries no key, and the key that signs the plugin's release index is this
+project's, which opkg does not use. So install the version the update card names, and check the
+package yourself before opkg sees it - which means downloading it first, as its own step:
 
-```text
-src/gz enigma2-mqtt-bridge https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed
-```
+1. Download the package of that version onto the receiver, for example into `/tmp`: the `.ipk`
+   asset of the plugin's GitHub release for that version, or the file the feed
+   (`https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed`) lists for it.
+2. Run `sha256sum` on the downloaded file and compare the result with the `sha256` of that
+   version in the signed index, `releases.json` beside the feed. If they differ, stop and delete
+   the file.
+3. Install that file - `opkg install ./<file>.ipk` from the directory it is in (add
+   `--force-reinstall` when that version is already installed, and `--force-downgrade` for an
+   older one) - and restart the receiver's interface from its menu.
 
-- then run `opkg update && opkg upgrade enigma2-plugin-extensions-mqttbridge` (or
-`opkg install enigma2-plugin-extensions-mqttbridge` when it is not installed) and restart the
-receiver's interface from its menu. **This path has no signature and no compatibility check**: the
-image's opkg cannot check feed signatures, the feed carries no key, and the key that signs the
-plugin's release index is this project's, which opkg does not use. So install the version the
-update card names, and check a package by hand before installing it: its `sha256sum` must equal
-the `sha256` of that version in the signed index (`releases.json` beside the feed). A single
-version can also be installed straight from its release asset with
-`opkg install <release asset URL>`.
+Adding the feed to opkg (`opkg update && opkg upgrade enigma2-plugin-extensions-mqttbridge`)
+downloads and installs in one step, with no moment to check the package: use it only if you accept
+that.
 
 ### Removing a receiver
 

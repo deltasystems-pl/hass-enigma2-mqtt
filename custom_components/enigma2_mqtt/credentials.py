@@ -3,7 +3,7 @@
 SSH credentials are what makes the update card an install path and what the forced
 reinstall needs, so two entities follow them: the update card's install feature and the
 „Wymuś reinstalację wtyczki (SSH)" button, which exists only while they are stored
-(design, section 7a). Neither can learn of a change by the usual means. The options flow is
+(ADR-0008, section 8). Neither can learn of a change by the usual means. The options flow is
 an `OptionsFlowWithReload`, and Home Assistant refuses an update listener on an entry that
 uses one; it reloads the entry only when the *options* changed, and credentials are kept in
 the entry's *data*. Enrolling or forgetting them on their own therefore reloads nothing.
