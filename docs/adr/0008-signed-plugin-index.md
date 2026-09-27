@@ -282,7 +282,9 @@ this integration writes, and the only one.
 
 The retraction of `enigma2mqtt/integration/<node_id>` and the existing `cmd/ha_mode` = `discovery`.
 Still no SSH, and still nothing is removed from the receiver. The retained `enigma2mqtt/release_index`
-stays: a signed index is harmless to anybody who reads it.
+stays: a signed index is harmless to anybody who reads it. Nor is it published again once the last
+receiver is gone: a repair waiting for the broker at that moment is stopped, none is started while
+no receiver is set up, and one already past its read publishes nothing.
 
 ## Consequences
 
