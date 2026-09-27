@@ -119,7 +119,10 @@ holding nothing but spaces counts as empty.
 the install writes the plugin's `update_allowed` permission into its provisioning file, so the
 plugin obeys `cmd/update` over MQTT - from the release that can update itself; an older plugin
 ignores the key. Unticked, nothing is written and the receiver keeps what it holds (off as
-shipped). Any device that can publish on the broker can then ask for an update to a newer, signed
+shipped). **The tick box takes effect only with a plugin that knows `update_allowed`: 0.4.0
+and later.** Plugin 0.2.0 and 0.3.0 import the rest of the provisioning file, log one line about
+an unknown key and delete the file, so the tick is dropped harmlessly and not remembered - on such
+a receiver, set the permission on its own setup screen once it runs 0.4.0. Any device that can publish on the broker can then ask for an update to a newer, signed
 release - never a downgrade - and the Home Assistant Mosquitto add-on enforces no ACL (below). The
 permission can be changed later only on the receiver's own setup screen or its OpenWebif page,
 never from Home Assistant.
