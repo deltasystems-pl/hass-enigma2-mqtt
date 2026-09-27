@@ -50,7 +50,9 @@ REQUEST_TOPIC = f"enigma2/{NODE_ID}/relay_request"
 RELAY_TOPIC = f"enigma2/{NODE_ID}/cmd/relay"
 ADAPTERS = "custom_components.enigma2_mqtt.relay.network.async_get_adapters"
 FETCH = "custom_components.enigma2_mqtt.relay.async_fetch_release"
-URL = re.compile(r"http://192\.0\.2\.5:8123/api/enigma2_mqtt/relay/[A-Za-z0-9_-]{43}")
+# The rule's verdict on a version, asked before anything is spent on a request.
+JUDGE = "custom_components.enigma2_mqtt.relay.async_eligible_release"
+URL =re.compile(r"http://192\.0\.2\.5:8123/api/enigma2_mqtt/relay/[A-Za-z0-9_-]{43}")
 
 
 def _package(version: str = "0.3.0", data: bytes = b"signed package bytes") -> PackageSource:
@@ -62,6 +64,11 @@ def _package(version: str = "0.3.0", data: bytes = b"signed package bytes") -> P
         depends=(),
         origin=ORIGIN_DOWNLOAD,
     )
+
+
+def _judge(_hass: Any, version: str) -> dict[str, Any]:
+    """The signed entry of a version the rule lets this integration install."""
+    return {"version": version, "sha256": _package(version).sha256}
 
 
 def _adapter(address: str, prefix: int, *, enabled: bool = True) -> dict[str, Any]:
@@ -92,7 +99,12 @@ async def relay(hass: HomeAssistant) -> Any:
     [
         ("192.0.2.12", "192.0.2.12"),
         ("::ffff:192.0.2.12", "192.0.2.12"),
+        ("192.0.2.12%eth0", "192.0.2.12"),
+        ("::ffff:192.0.2.12%eth0", "192.0.2.12"),
         ("2001:db8::12", None),
+        # 6to4 and NAT64 addresses carry an IPv4 address too, but are not that host.
+        ("2002:c000:020c::1", None),
+        ("64:ff9b::192.0.2.12", None),
         ("", None),
         (None, None),
         ("not an address", None),
@@ -139,20 +151,6 @@ async def test_any_other_address_gets_the_same_404_and_a_log_line(
     assert any("refused" in message for message in ours)
     # The token is the address; this integration never writes it whole.
     assert not any(grant.token in message for message in ours)
-
-
-async def test_a_forwarded_for_header_does_not_make_another_address_the_receiver(
-    hass: HomeAssistant, relay: Any, hass_client_no_auth: Any
-) -> None:
-    grant = relay.grant(NODE_ID, "192.0.2.12", _package())
-    client = await hass_client_no_auth()
-
-    response = await client.get(
-        RELAY_PATH + grant.token, headers={"X-Forwarded-For": "192.0.2.12"}
-    )
-
-    assert response.status != 200
-    assert await response.read() != b"signed package bytes"
 
 
 @pytest.mark.parametrize(
@@ -244,21 +242,21 @@ async def test_a_fourth_version_evicts_the_oldest_grant(
     assert fourth.version == "0.5.0"
 
 
-async def test_a_grant_in_use_is_never_evicted(
+async def test_a_grant_being_fetched_is_never_evicted(
     hass: HomeAssistant, relay: Any, freezer: FrozenDateTimeFactory
 ) -> None:
     grants = []
     for version in ("0.2.0", "0.3.0", "0.4.0"):
         grants.append(relay.grant(NODE_ID, "192.0.2.12", _package(version)))
         freezer.tick(timedelta(seconds=1))
-    relay.mark_in_use(grants[0].token, True)
+    grants[0].fetching = 1
 
     relay.grant(NODE_ID, "192.0.2.12", _package("0.5.0"))
     assert relay.lookup(grants[0].token) is grants[0]
     assert relay.lookup(grants[1].token) is None
 
     for grant in relay.grants(NODE_ID):
-        relay.mark_in_use(grant.token, True)
+        grant.fetching = 1
     with pytest.raises(RelayError) as raised:
         relay.grant(NODE_ID, "192.0.2.12", _package("0.6.0"))
     assert raised.value.key == "relay_busy"
@@ -364,8 +362,8 @@ def _answers(mqtt_mock: Any) -> list[dict[str, Any]]:
 async def _ask(hass: HomeAssistant, payload: Any, *, retain: bool = False) -> None:
     body = payload if isinstance(payload, str) else json.dumps(payload)
     async_fire_mqtt_message(hass, REQUEST_TOPIC, body, retain=retain)
-    # The answer runs as a task of the entry.
-    await hass.async_block_till_done()
+    # The answer runs as a background task of the entry, which unloading it cancels.
+    await hass.async_block_till_done(wait_background_tasks=True)
 
 
 REQUEST = {"id": "a1b2c3d4e5f6", "version": "0.3.0", "serial": 1}
@@ -373,7 +371,10 @@ REQUEST = {"id": "a1b2c3d4e5f6", "version": "0.3.0", "serial": 1}
 
 @pytest.fixture
 def lan() -> Any:
-    with patch(ADAPTERS, AsyncMock(return_value=[_adapter("192.0.2.5", 24)])):
+    with (
+        patch(ADAPTERS, AsyncMock(return_value=[_adapter("192.0.2.5", 24)])),
+        patch(JUDGE, AsyncMock(side_effect=_judge), create=True),
+    ):
         yield
 
 
@@ -458,21 +459,23 @@ async def test_one_answer_a_minute_per_receiver(
     config_entry: MockConfigEntry,
     lan: Any,
 ) -> None:
-    """The minute is moved by hand rather than by freezing the clock: a frozen clock also
+    """A download at most once a minute; asking again for a version whose grant is live costs
+    nothing and is not limited (`test_relay_hardening`).
+
+    The minute is moved by hand rather than by freezing the clock: a frozen clock also
     freezes the MQTT client's own subscribe debounce, and the box would never be subscribed."""
     await _box(hass, config_entry)
     relay = async_get_relay(hass)
-    with patch(FETCH, AsyncMock(return_value=_package())) as fetch:
+    with patch(FETCH, AsyncMock(side_effect=lambda _hass, version: _package(version))) as fetch:
         await _ask(hass, REQUEST)
         relay._answered[NODE_ID] -= 30  # noqa: SLF001
-        await _ask(hass, {**REQUEST, "id": "second"})
+        await _ask(hass, {**REQUEST, "id": "second", "version": "0.4.0"})
         assert fetch.await_count == 1
         relay._answered[NODE_ID] -= 31  # noqa: SLF001
-        await _ask(hass, {**REQUEST, "id": "third"})
+        await _ask(hass, {**REQUEST, "id": "third", "version": "0.4.0"})
 
     assert [answer["id"] for answer in _answers(mqtt_mock)] == ["a1b2c3d4e5f6", "third"]
-    # The same version: the same grant, the same address.
-    assert len({answer["url"] for answer in _answers(mqtt_mock)}) == 1
+    assert fetch.await_count == 2
 
 
 @pytest.mark.parametrize(

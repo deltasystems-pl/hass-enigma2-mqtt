@@ -126,10 +126,12 @@ async def async_setup_entry(
     # address on this Home Assistant, bound to that receiver, which goes with the entry.
     @callback
     def _relay_request(payload: Any) -> None:
-        # On the entry, so that unloading the receiver cancels an answer still being made.
-        entry.async_create_task(
+        # A background task of the entry: unloading the entry cancels it (Home Assistant waits
+        # up to ten seconds for an entry's ordinary tasks and cancels only its background
+        # ones), and the answer asks after every wait whether the entry is still loaded.
+        entry.async_create_background_task(
             hass,
-            async_answer_relay_request(hass, box, payload),
+            async_answer_relay_request(hass, entry, box, payload),
             f"{DOMAIN} relay_request {entry.entry_id}",
         )
 

@@ -10,6 +10,7 @@
     "update_summary_below_floor": "Die mitgelieferte Version {version} liegt unter {floor}, der niedrigsten Version, die die signierte Versionsliste des Plugins zulässt. Diese Karte installiert sie nicht.",
     "release_index_notification_title": "Neue Versionsliste des Plugins Enigma2 MQTT Bridge",
     "release_index_notification_message": "Home Assistant hat eine neue signierte Versionsliste des Plugins angenommen: Nummer {serial}, Schlüssel {key_id}. Hinzugefügt: {added}. Zurückgezogen: {withdrawn}. Niedrigste Version, die installiert werden darf: {floor}. Wurde weder eine neue Plugin-Version noch ein Rückzug erwartet, nichts installieren und die SECURITY.md der Integration lesen.",
+    "relay_notification_title": "{receiver}: Das Plugin konnte nicht bereitgestellt werden",
     "release_index_none": "keine",
     "update_summary_published_no_install": "Die signierte Versionsliste des Plugins enthält {version}. Es sind keine SSH-Zugangsdaten gespeichert, daher kann diese Karte sie nicht installieren: Konfiguriere den Receiver mit „SSH-Zugangsdaten für Updates behalten“ neu.",
     "update_summary_older_release": "Auf dem Receiver läuft ein älteres Plugin. Die Installation ersetzt es durch {version} aus der signierten Versionsliste des Plugins, heruntergeladen und geprüft, bevor etwas den Receiver erreicht, und lässt die Broker-Einstellungen des Receivers unverändert."
@@ -698,7 +699,7 @@
     "update_depends_missing": {"message": "Plugin {version} benötigt das Paket {package}, das auf dem Receiver nicht installiert ist. Es wurde nichts geändert."},
     "relay_no_ipv4": {"message": "Der Receiver hat keine IPv4-Adresse gemeldet, daher kann Home Assistant ihm das Plugin nicht sicher bereitstellen."},
     "relay_no_address": {"message": "Home Assistant kennt seine Adresse im lokalen Netzwerk nicht. Lege „Lokales Netzwerk“ in den Netzwerkeinstellungen von Home Assistant fest."},
-    "relay_busy": {"message": "Home Assistant stellt diesem Receiver bereits drei Plugin-Versionen bereit, und alle werden gerade heruntergeladen. Versuche es erneut, wenn ein Download beendet ist."},
+    "relay_busy": {"message": "Home Assistant sendet diesem Receiver gerade das Plugin. Versuche es erneut, wenn dieser Download abgeschlossen ist."},
     "relay_unreachable": {"message": "Der Receiver konnte das Plugin nicht von Home Assistant herunterladen ({url}). Lege die Adresse „Lokales Netzwerk“ von Home Assistant auf eine Adresse fest, die der Receiver erreicht."}
     }
   }

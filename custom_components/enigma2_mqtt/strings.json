@@ -10,6 +10,7 @@
     "update_summary_below_floor": "The bundled {version} is below {floor}, the lowest version the plugin's signed index allows. This card will not install it.",
     "release_index_notification_title": "New list of Enigma2 MQTT Bridge plugin versions",
     "release_index_notification_message": "Home Assistant accepted a new signed list of plugin versions: serial {serial}, signed with key {key_id}. Added: {added}. Withdrawn: {withdrawn}. Lowest version that may be installed: {floor}. If no plugin release or withdrawal was expected, install nothing and read the integration's SECURITY.md.",
+    "relay_notification_title": "{receiver}: the plugin could not be shared",
     "release_index_none": "none",
     "update_summary_published_no_install": "The plugin's signed release index lists {version}. No SSH credentials are stored, so this card cannot install it: reconfigure the receiver with “Keep SSH credentials for updates”.",
     "update_summary_older_release": "The receiver runs an older plugin. Installing replaces it with {version} from the plugin's signed release index, downloaded and checked before anything reaches the receiver, and leaves the receiver's own broker settings alone."
@@ -724,7 +725,7 @@
     "update_depends_missing": {"message": "Plugin {version} needs the package {package}, which is not installed on the receiver. Nothing was changed."},
     "relay_no_ipv4": {"message": "The receiver did not report an IPv4 address, so Home Assistant cannot share the plugin with it safely."},
     "relay_no_address": {"message": "Home Assistant does not know its address on the local network. Set “Local network” in Home Assistant's network settings."},
-    "relay_busy": {"message": "Home Assistant is already sharing three plugin versions with this receiver, all of them for downloads in progress. Try again when one has finished."},
+    "relay_busy": {"message": "Home Assistant is sending this receiver the plugin right now. Try again when that download has finished."},
     "relay_unreachable": {"message": "The receiver could not download the plugin from Home Assistant ({url}). Set Home Assistant's “Local network” address to one the receiver can reach."}
     }
   }
