@@ -810,9 +810,16 @@ of the release asset is compared with the signed checksum: a disagreement refuse
 cannot be reached, is rate-limited or has no digest is noted in the log and does not refuse. All
 of that happens before the receiver is connected to, so a refusal - „Nie udało się pobrać wtyczki
 {version} albo jej suma kontrolna się nie zgadza. Na dekoderze nic nie zmieniono." - leaves it as
-it was. Then the SSH installer runs as for the bundle, after asking the receiver with `opkg status`
-for every package the release `depends` on. The card never installs an older version than the
-one running.
+it was. Then the SSH installer runs as for the bundle. Before it connects, it asks the whole rule
+again against the newest index held - withdrawn, floor, contract, `min_integration`, and the same
+size and sha256 as the bytes it holds - because a check in between may have accepted a newer
+index; a version that no longer passes is refused with the receiver untouched. Once connected, and
+before it takes the lock or a snapshot, it asks the receiver with `opkg status` for every package
+the release `depends` on, and a refusal names every missing one. `opkg status <name>` sees only a
+package of exactly that name: a dependency that another installed package merely `Provides:` is
+reported missing, although opkg itself would accept it - the check the design prescribes, and the
+safe direction, since nothing on the receiver changes. The card never installs an older version
+than the one running.
 
 **Check for plugin updates** (*Sprawdź aktualizacje wtyczki*, `button.<device>_sprawdz_aktualizacje_wtyczki`
 on a Polish installation) asks for the index now, at most once in ten minutes; inside that it

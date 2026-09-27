@@ -146,7 +146,8 @@
       "version_withdrawn": "Wtyczka {version} została wycofana w podpisanej liście wersji wtyczki: {reason}. Niczego nie zainstalowano.",
       "version_below_floor": "Wtyczka {version} jest starsza niż {floor}, najniższa wersja dopuszczona przez podpisaną listę wersji wtyczki, więc niczego nie zainstalowano.",
       "package_invalid": "Nie udało się pobrać wtyczki {version} albo jej suma kontrolna się nie zgadza. Na dekoderze nic nie zmieniono.",
-      "depends_missing": "Wtyczka {version} wymaga pakietu {package}, którego nie ma na dekoderze. Nic nie zmieniono."
+      "depends_missing": "Wtyczka {version} wymaga pakietów, których nie ma na dekoderze: {package}. Nic nie zmieniono.",
+      "version_not_installable": "Wtyczka {version} nie jest już wydaniem, które podpisana lista wersji wtyczki pozwala tej integracji zainstalować, więc niczego nie zainstalowano."
     }
   },
   "options": {
@@ -695,6 +696,6 @@
     "history_clear_screen_open": {"message": "Na ekranie dekodera jest otwarte menu, lista kanałów lub EPG - zamknij je i spróbuj ponownie."},
     "zap_history_playback": {"message": "Dekoder odtwarza nagranie - zatrzymaj je i spróbuj ponownie."},
     "update_download_failed": {"message": "Nie udało się pobrać wtyczki {version} albo jej suma kontrolna się nie zgadza. Na dekoderze nic nie zmieniono."},
-    "update_depends_missing": {"message": "Wtyczka {version} wymaga pakietu {package}, którego nie ma na dekoderze. Nic nie zmieniono."}
+    "update_depends_missing": {"message": "Wtyczka {version} wymaga pakietów, których nie ma na dekoderze: {package}. Nic nie zmieniono."}
     }
   }
