@@ -814,6 +814,17 @@ it was. Then the SSH installer runs as for the bundle, after asking the receiver
 for every package the release `depends` on. The card never installs an older version than the
 one running.
 
+**A receiver without internet** can still install a release from its own screen: it asks this
+Home Assistant on `relay_request`, and Home Assistant - holding a verified index that lists the
+version, under the same rule as the card - downloads and verifies the package and answers on
+`cmd/relay` with an address on itself, `/api/enigma2_mqtt/relay/<token>`. That address serves
+nothing but those bytes, to nobody but that receiver (by the IPv4 address it reports on `info.ip`),
+for ten minutes; the receiver verifies them again against its own signed index before installing.
+The address is Home Assistant's own on the receiver's subnet, else its *Local network* URL
+(Settings -> System -> Network), never the external URL; the log says which at INFO. **Behind a
+reverse proxy the binding sees the proxy, not the receiver**, and refuses it: give the receiver
+Home Assistant's direct LAN address. A receiver that reports no IPv4 address is not answered.
+
 **Check for plugin updates** (*Sprawdź aktualizacje wtyczki*, `button.<device>_sprawdz_aktualizacje_wtyczki`
 on a Polish installation) asks for the index now, at most once in ten minutes; inside that it
 says when the list was read and when it can be read again. **Plugin version to install**

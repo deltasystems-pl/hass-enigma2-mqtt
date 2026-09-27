@@ -695,6 +695,10 @@
     "history_clear_screen_open": {"message": "Auf dem Bildschirm des Receivers ist ein Menü, die Senderliste oder der EPG geöffnet - schließe es und versuche es erneut."},
     "zap_history_playback": {"message": "Der Receiver spielt eine Aufnahme ab - beende sie und versuche es erneut."},
     "update_download_failed": {"message": "Plugin {version} konnte nicht heruntergeladen werden, oder seine Prüfsumme stimmt nicht mit der signierten Versionsliste des Plugins überein. Auf dem Receiver wurde nichts geändert."},
-    "update_depends_missing": {"message": "Plugin {version} benötigt das Paket {package}, das auf dem Receiver nicht installiert ist. Es wurde nichts geändert."}
+    "update_depends_missing": {"message": "Plugin {version} benötigt das Paket {package}, das auf dem Receiver nicht installiert ist. Es wurde nichts geändert."},
+    "relay_no_ipv4": {"message": "Der Receiver hat keine IPv4-Adresse gemeldet, daher kann Home Assistant ihm das Plugin nicht sicher bereitstellen."},
+    "relay_no_address": {"message": "Home Assistant kennt seine Adresse im lokalen Netzwerk nicht. Lege „Lokales Netzwerk“ in den Netzwerkeinstellungen von Home Assistant fest."},
+    "relay_busy": {"message": "Home Assistant stellt diesem Receiver bereits drei Plugin-Versionen bereit, und alle werden gerade heruntergeladen. Versuche es erneut, wenn ein Download beendet ist."},
+    "relay_unreachable": {"message": "Der Receiver konnte das Plugin nicht von Home Assistant herunterladen ({url}). Lege die Adresse „Lokales Netzwerk“ von Home Assistant auf eine Adresse fest, die der Receiver erreicht."}
     }
   }

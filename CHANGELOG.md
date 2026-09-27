@@ -42,6 +42,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   own digest of the release asset is compared with the signed checksum: a disagreement refuses, an
   API that cannot be reached is noted in the log and does not. The card never installs an older
   version than the one running.
+- **The relay for a receiver without internet.** When a receiver installs a release from its own
+  screen and cannot reach the plugin's origin, it publishes `relay_request`; Home Assistant answers
+  on `cmd/relay` with an address on itself - `/api/enigma2_mqtt/relay/<token>` - from which that
+  receiver alone may download the package, verified by Home Assistant first and by the receiver
+  again. No authentication, so the grant is bound instead: a 43-character random token, the
+  receiver's IPv4 address from `info.ip` (any other address gets `404` and a warning; a receiver
+  without an IPv4 address gets no answer), ten minutes, fetchable repeatedly until then. One grant
+  per receiver and version, at most three per receiver; a request at most once a minute per
+  receiver, and never a retained one. The address is Home Assistant's own on the receiver's
+  subnet, else its internal URL - never the external one. Requests are answered only for versions
+  this integration would install itself.
 - **The SSH installer checks a release's `depends`** - every package the signed entry names -
   with `opkg status` before it takes the lock or a snapshot, and refuses with the missing
   package's name. `opkg status` never takes opkg's lock.
