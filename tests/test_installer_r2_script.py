@@ -816,7 +816,9 @@ def test_a_restore_that_hangs_is_cut_off_and_the_picture_comes_back(
 
     box.wait_for(box.finished, timeout=20)
 
-    assert time.monotonic() - started < 20
+    # The limit is one second: the end is seen when the restore is gone - a zombie is gone
+    # too - not when a later bound runs out.
+    assert time.monotonic() - started < 8
     steps = box.status.read_text().split("\n")
     restored = next(step for step in steps if step.startswith("restored "))
     # Killed, so it wrote no status of its own - and none is made up for it.
@@ -831,17 +833,21 @@ def test_a_restore_that_ignores_the_watchdog_is_killed(
 ) -> None:
     """The finishing step does not wait for ever on a restore the watchdog's TERM missed.
 
-    Ten seconds after the limit it sends KILL, and the interface starts.
+    Ten seconds after the limit it sends KILL, and the interface starts. The restore here
+    would get to work after 14 seconds; killed at 11, it never does - left alone, it would
+    rename the settings under the running interface.
     """
-    box = Box(tmp_path, shell, restore_seconds=60, restore_limit=1, restore_ignores_term=True)
+    box = Box(tmp_path, shell, restore_seconds=14, restore_limit=1, restore_ignores_term=True)
     started = time.monotonic()
     box.start(monkeypatch)
 
     box.wait_for(box.finished, timeout=30)
-
-    assert time.monotonic() - started < 25
-    assert "restored lost" in box.status.read_text().split("\n")
     box.wait_for(lambda: "init 3" in box.events_list())
+
+    assert time.monotonic() - started < 14
+    assert "restored lost" in box.status.read_text().split("\n")
+    time.sleep(max(0.0, started + 16 - time.monotonic()))
+    assert not any(e.startswith("restore done") for e in box.events_list())
     assert box.events_list().count("init 3") == 1
 
 
