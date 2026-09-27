@@ -8,6 +8,7 @@ same functions against a temporary root.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 from contextlib import contextmanager, suppress
 import errno
 import fcntl
@@ -25,7 +26,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Callable, NamedTuple
+from typing import NamedTuple
 from urllib import error as urllib_error, parse as urllib_parse, request as urllib_request
 
 PACKAGE = "enigma2-plugin-extensions-mqttbridge"
