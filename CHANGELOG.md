@@ -61,6 +61,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The package is downloaded and verified as for the card; the installer puts it over the newer
   plugin with `--force-downgrade` and, once the older plugin has proved itself, asks it to retract
   what the newer one published (`cmd/reset`). A failed downgrade rolls back to the newer version.
+  Like every install it is refused while the receiver is in standby. Afterwards the update card
+  offers the newer release again; the flow's end says so - skip it on the card to stay.
   The options menu appears whenever this or the removal is on offer.
 - The update entity's attributes `available_versions` (not recorded), `last_check`,
   `check_error`, `index_serial`, `index_age` and `update_path`.

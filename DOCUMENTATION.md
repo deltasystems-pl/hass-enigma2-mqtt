@@ -293,9 +293,15 @@ once its box is ticked. The package is downloaded and verified as for the update
 SSH installer puts it over the newer plugin (opkg's `--force-downgrade`), restarts the interface
 by the restart rule and, once the older plugin has announced itself, asks it to retract every
 retained topic the newer one left (`cmd/reset`). A failed install rolls back to the newer
-version. The flow ends with a message and saves nothing: the entry and its options are unchanged.
-Settings the older plugin does not know stay on the receiver and come back with their values on
-the next upgrade.
+version. The receiver has to be switched on: in standby the install is refused, as on the update
+card, because the restart would wake it; it keeps its channel. When the older version is the
+plugin bundled with this integration, its bytes are used and nothing is downloaded. The flow ends
+with a message and saves nothing: the entry and its options are unchanged. Settings the older
+plugin does not know stay on the receiver and come back with their values on the next upgrade.
+**After a downgrade the update card offers the newer release again** - it is still the newest
+compatible one, and the card never offers anything below the version running. Skip it on the
+card to stay on the older version; a skip lasts until a newer release than the skipped one
+appears.
 
 | Option | Default | What it does |
 |---|---|---|

@@ -215,6 +215,23 @@ async def test_a_target_that_has_a_capability_loses_nothing_of_it(
     assert result["description_placeholders"]["lost"] == "-"
 
 
+async def test_a_target_that_updates_itself_keeps_the_updates_over_mqtt(
+    hass: HomeAssistant, mqtt_mock: Any, box_on_the_broker: Any, config_entry: MockConfigEntry
+) -> None:
+    """Going down to a release that can itself update over MQTT loses no MQTT updates: the
+    line is the target's to earn, not the running plugin's."""
+    await _setup(
+        hass,
+        config_entry,
+        installed="0.5.0",
+        capabilities=[*CAPABILITIES, "zap_history", "self_update"],
+    )
+
+    result = await _choose(hass, await _open(hass, config_entry), "0.4.0")
+
+    assert result["description_placeholders"]["lost"] == "-"
+
+
 def test_every_capability_newer_than_the_floor_is_in_the_table() -> None:
     """The 0.2.0 -> 0.3.0 row of the plugin's TOPICS.md: capabilities with entities."""
     assert set(CAPABILITY_SINCE) == {
@@ -345,6 +362,45 @@ async def test_a_version_withdrawn_while_the_form_was_open_is_not_installed(
     assert result["reason"] == "downgrade_not_offered"
     fetch.assert_not_called()
     install.assert_not_called()
+
+
+def _texts() -> dict[str, dict[str, Any]]:
+    """strings.json and every translation, by file name."""
+    from pathlib import Path
+
+    root = Path(__file__).parent.parent / "custom_components" / "enigma2_mqtt"
+    return {
+        path.name: json.loads(path.read_text(encoding="utf-8"))
+        for path in (root / "strings.json", *sorted((root / "translations").glob("*.json")))
+    }
+
+
+# What each language calls the refusal in standby, and the update card offering the newer
+# release again.
+_REFUSED_IN_STANDBY = {"en": "refused", "pl": "odrzucona", "de": "abgelehnt"}
+_OFFERED_AGAIN = {"en": "update card", "pl": "Karta aktualizacji", "de": "Update-Karte"}
+
+
+def test_the_confirmation_promises_only_what_the_install_does() -> None:
+    """The installer refuses a receiver in standby - the restart would wake it and may turn the
+    television on - so the confirmation cannot promise that the receiver keeps its standby
+    state; it says the receiver has to be on."""
+    promises = ("standby state", "tryb czuwania", "Standby-Zustand")
+    for name, texts in _texts().items():
+        language = "en" if name == "strings.json" else name.removesuffix(".json")
+        text = texts["options"]["step"]["downgrade_confirm"]["description"]
+        assert not any(promise in text for promise in promises), name
+        assert _REFUSED_IN_STANDBY[language] in text, name
+
+
+def test_the_end_says_the_card_offers_the_newer_release_again() -> None:
+    """Right after a downgrade the newer release is the newest compatible one again, so the
+    update card badges it; the end of the flow says so, and how to stay."""
+    for name, texts in _texts().items():
+        language = "en" if name == "strings.json" else name.removesuffix(".json")
+        text = texts["options"]["abort"]["downgrade_done"]
+        assert _OFFERED_AGAIN[language] in text, name
+        assert text.count("{version}") == 2, name
 
 
 def test_every_installer_failure_has_an_options_abort_string() -> None:
