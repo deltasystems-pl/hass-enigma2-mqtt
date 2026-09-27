@@ -41,6 +41,9 @@ CONF_KEEP_SSH_CREDENTIALS: Final = "keep_ssh_credentials"
 # The options flow's downgrade: the older version chosen, and the tick box that confirms it.
 CONF_DOWNGRADE_VERSION: Final = "version"
 CONF_CONFIRM_DOWNGRADE: Final = "confirm_downgrade"
+# The guided installer's tick box: the plugin's box-only permission to obey `cmd/update`, written
+# into the provisioning file only when ticked.
+CONF_UPDATE_ALLOWED: Final = "update_allowed"
 CONF_CHECK_GITHUB_RELEASES: Final = "check_github_releases"
 CONF_SOURCE_LIST_SCOPE: Final = "source_list_scope"
 CONF_SOFTCAM_AUTOHEAL: Final = "softcam_autoheal"

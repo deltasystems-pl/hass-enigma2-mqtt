@@ -64,6 +64,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Like every install it is refused while the receiver is in standby. Afterwards the update card
   offers the newer release again; the flow's end says so - skip it on the card to stay.
   The options menu appears whenever this or the removal is on offer.
+- **„Zezwalaj na zdalną aktualizację wtyczki"** (*Allow remote plugin updates*), a tick box in the
+  guided installer, off by default. Ticked, it writes the plugin's `update_allowed` permission into
+  the provisioning file, so a plugin that can update itself obeys `cmd/update` over MQTT; unticked,
+  nothing is written and the receiver keeps what it holds. Its help text says that any device that
+  can publish on the broker could then ask for an update, and that the Mosquitto add-on enforces no
+  ACL. The one permission the installer writes. It takes effect only with plugin 0.4.0 or later;
+  0.2.0 and 0.3.0 ignore the key and import the rest of the file.
 - The update entity's attributes `available_versions` (not recorded), `last_check`,
   `check_error`, `index_serial`, `index_age` and `update_path`.
 - The retained topic `enigma2mqtt/integration/<node_id>` - this integration's version, the
