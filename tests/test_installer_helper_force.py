@@ -180,6 +180,17 @@ def test_a_lock_the_released_rule_calls_stale_has_nothing_left(tmp_path: Path) -
     assert lock_info(lock)["remaining"] == 0
 
 
+def test_a_lock_the_rule_calls_stale_for_its_record_alone_has_nothing_left(
+    tmp_path: Path,
+) -> None:
+    """A record that is not an object is stale at once, with no age to count down from."""
+    lock = tmp_path / "lock"
+    lock.mkdir()
+    (lock / "owner.json").write_text("[1]", encoding="ascii")
+
+    assert lock_info(lock)["remaining"] == 0
+
+
 def test_lock_info_agrees_with_the_claim(tmp_path: Path) -> None:
     """What `lock-info` calls live the claim refuses, and what it calls free the claim takes."""
     lock = tmp_path / "lock"
@@ -199,6 +210,30 @@ def test_lock_info_agrees_with_the_claim(tmp_path: Path) -> None:
     )
     assert lock_info(lock)["remaining"] == 0
     claim_transaction(lock)
+
+
+def test_a_self_update_lock_whose_heartbeat_stopped_is_not_taken_back_early(
+    tmp_path: Path,
+) -> None:
+    """Ten minutes of silence is not death: a stopped helper beats again when continued,
+    and its `opkg` may still be writing. Only the released rule frees the lock."""
+    lock = tmp_path / "lock"
+    now = uptime()
+    assert now is not None
+    _owner(
+        lock,
+        pid=1,
+        started=int(time.time()) - 600,
+        boot_id=boot_id(),
+        uptime=now - 600,
+        origin="mqtt",
+        id="0123456789ab",
+    )
+
+    with pytest.raises(FileExistsError):
+        claim_transaction(lock, "ba9876543210")
+
+    assert json.loads((lock / "owner.json").read_text(encoding="ascii"))["id"] == "0123456789ab"
 
 
 def test_the_log_is_found_open_in_the_process_that_holds_it(tmp_path: Path) -> None:
