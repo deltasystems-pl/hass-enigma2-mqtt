@@ -66,6 +66,7 @@ class Box:
         restore_limit: int = 60,
         shutdown: str | None = None,
         record_exit: bool = False,
+        restore_ignores_term: bool = False,
     ) -> None:
         self.base = base
         self.root = base / "root"
@@ -182,7 +183,8 @@ class Box:
             "#!/bin/sh\n"
             + signal_here.replace("{point}", "$2")
             + f'if [ "$2" = restore ]; then echo "restore pid $$" >> {self.events}; '
-            f"sleep {restore_seconds}; fi\n"
+            + ("trap '' TERM; " if restore_ignores_term else "")
+            + f"sleep {restore_seconds}; fi\n"
             f'"{sys.executable}" "$@"\n'
             "rc=$?\n"
             f'if [ "$2" = restore ]; then echo "restore done $rc" >> {self.events}; fi\n'
@@ -817,10 +819,62 @@ def test_a_restore_that_hangs_is_cut_off_and_the_picture_comes_back(
     assert time.monotonic() - started < 20
     steps = box.status.read_text().split("\n")
     restored = next(step for step in steps if step.startswith("restored "))
-    assert restored != "restored 0"
+    # Killed, so it wrote no status of its own - and none is made up for it.
+    assert restored == "restored lost"
     box.wait_for(lambda: "init 3" in box.events_list())
     assert box.runlevel.read_text().strip() == "3"
     assert box.events_list().count("init 3") == 1
+
+
+def test_a_restore_that_ignores_the_watchdog_is_killed(
+    shell: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The finishing step does not wait for ever on a restore the watchdog's TERM missed.
+
+    Ten seconds after the limit it sends KILL, and the interface starts.
+    """
+    box = Box(tmp_path, shell, restore_seconds=60, restore_limit=1, restore_ignores_term=True)
+    started = time.monotonic()
+    box.start(monkeypatch)
+
+    box.wait_for(box.finished, timeout=30)
+
+    assert time.monotonic() - started < 25
+    assert "restored lost" in box.status.read_text().split("\n")
+    box.wait_for(lambda: "init 3" in box.events_list())
+    assert box.events_list().count("init 3") == 1
+
+
+@pytest.mark.parametrize(
+    ("arguments", "code"),
+    [
+        (["identity"], 0),
+        (["restore", "{missing}"], 1),
+        (["restore"], 2),
+    ],
+    ids=["returns", "raises", "exits"],
+)
+def test_the_helper_writes_its_own_exit_status_when_asked(
+    tmp_path: Path, arguments: list[str], code: int
+) -> None:
+    """Whatever ends the operation inside Python, the file says what the process exits with."""
+    rc_file = tmp_path / "restore-rc"
+    root = tmp_path / "root"
+    root.mkdir()
+    helper = tmp_path / "helper.py"
+    shutil.copyfile(installer_helper.__file__, helper)
+    argv = [a.replace("{missing}", str(tmp_path / "no-such-backup")) for a in arguments]
+
+    finished = subprocess.run(
+        [sys.executable, str(helper), *argv, "--root", str(root), "--rc-file", str(rc_file)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert finished.returncode == code
+    assert rc_file.read_text() == f"{code}\n"
+    assert not (tmp_path / "restore-rc.tmp").exists()
 
 
 @pytest.mark.parametrize("init", ["init", "/sbin/init", "/usr/sbin/init"])
