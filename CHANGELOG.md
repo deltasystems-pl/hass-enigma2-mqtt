@@ -31,6 +31,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by default: „Najnowsza zgodna" (`latest`) or a version the card can install above the one
   running. The choice is stored in the entry's options and counts only while the select is
   enabled. Today the card installs only the bundled plugin, so that is the only version listed.
+- **„Zezwalaj na zdalną aktualizację wtyczki"** (*Allow remote plugin updates*), a tick box in the
+  guided installer, off by default. Ticked, it writes the plugin's `update_allowed` permission into
+  the provisioning file, so a plugin that can update itself obeys `cmd/update` over MQTT; unticked,
+  nothing is written and the receiver keeps what it holds. Its help text says that any device that
+  can publish on the broker could then ask for an update, and that the Mosquitto add-on enforces no
+  ACL. The one permission the installer writes.
 - The update entity's attributes `available_versions` (not recorded), `last_check`,
   `check_error`, `index_serial`, `index_age` and `update_path`.
 - The retained topic `enigma2mqtt/integration/<node_id>` - this integration's version, the

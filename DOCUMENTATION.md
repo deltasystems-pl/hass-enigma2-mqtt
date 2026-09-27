@@ -115,6 +115,15 @@ plugin, as on a first start. The Home Assistant entry is then **titled with the 
 already has** rather than with the node ID. A name that was typed is written and wins; a field
 holding nothing but spaces counts as empty.
 
+**Allow remote plugin updates** („Zezwalaj na zdalną aktualizację wtyczki") is off by default. Ticked,
+the install writes the plugin's `update_allowed` permission into its provisioning file, so the
+plugin obeys `cmd/update` over MQTT - from the release that can update itself; an older plugin
+ignores the key. Unticked, nothing is written and the receiver keeps what it holds (off as
+shipped). Any device that can publish on the broker can then ask for an update to a newer, signed
+release - never a downgrade - and the Home Assistant Mosquitto add-on enforces no ACL (below). The
+permission can be changed later only on the receiver's own setup screen or its OpenWebif page,
+never from Home Assistant.
+
 🔴 **Give the receiver a broker login of its own.** The broker password ends up in a file on the
 receiver's own flash, and most Enigma2 images answer SSH with the image's default root password
 - so a login shared with Home Assistant is the whole broker, one box away. On a standalone

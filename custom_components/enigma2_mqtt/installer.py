@@ -258,6 +258,8 @@ class Provisioning:
     node_id: str
     base_topic: str = DEFAULT_BASE_TOPIC
     friendly_name: str | None = None
+    # The plugin's permission to obey `cmd/update` over MQTT (the guided installer's tick box).
+    update_allowed: bool = False
 
     def display_name(self) -> str:
         """Return the name this document would set, or an empty string for none.
@@ -286,6 +288,14 @@ class Provisioning:
         # the plugin after its box type, as it is on a first start.
         if self.display_name():
             values["friendly_name"] = self.display_name()
+        # A permission is written only when it is given. The document is applied key by key, so
+        # an unticked box leaves whatever the receiver holds - off as shipped - and an older
+        # plugin that does not know the key logs it and ignores it. This is the one permission
+        # the installer writes (it supersedes "the installer never writes a permission" for
+        # this key alone): whoever ticks it is setting the receiver up, only through Home
+        # Assistant rather than at the television.
+        if self.update_allowed:
+            values["update_allowed"] = True
         return (json.dumps(values, separators=(",", ":")) + "\n").encode()
 
 

@@ -78,6 +78,7 @@ from .const import (
     CONF_SSH_PASSWORD,
     CONF_SSH_PORT,
     CONF_SSH_USERNAME,
+    CONF_UPDATE_ALLOWED,
     CONF_WOL_MAC,
     DEFAULT_BASE_TOPIC,
     DEFAULT_CAM_TELEMETRY,
@@ -368,6 +369,7 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
                 node_id=node_id,
                 base_topic=base_topic,
                 friendly_name=(user_input.get(CONF_NAME) or "").strip() or None,
+                update_allowed=user_input.get(CONF_UPDATE_ALLOWED) is True,
             )
             self._install_request = InstallRequest(
                 credentials=credentials,
@@ -415,6 +417,7 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_BASE_TOPIC, default=DEFAULT_BASE_TOPIC): str,
                 vol.Optional(CONF_NAME): str,
                 vol.Required(CONF_KEEP_SSH_CREDENTIALS, default=False): bool,
+                vol.Required(CONF_UPDATE_ALLOWED, default=False): bool,
             }
         )
         suggested = {
