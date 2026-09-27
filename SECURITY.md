@@ -41,7 +41,7 @@ broker credential.
 over SSH to your receiver when you ask it to install or update the plugin. The optional check
 for a newer plugin release on GitHub is **off by default**. Nothing is reported anywhere.
 
-> **Superseded in part by [ADR-0008](docs/adr/0008-signed-plugin-index.md) (proposed):** an
+> **Superseded in part by [ADR-0008](docs/adr/0008-signed-plugin-index.md) (accepted):** an
 > integration that implements it fetches the plugin's signed release index and plugin packages from
 > the plugin's fixed HTTPS origin - only when you ask for a check, an install or a downgrade, or
 > when the daily check is on - asks GitHub's API once per install to cross-check a package's
@@ -66,7 +66,7 @@ tagged release; a published release pins an immutable public commit of
 [enigma2-mqtt-bridge](https://github.com/deltasystems-pl/enigma2-mqtt-bridge). CI reproduces both
 archives before publishing, and the installer verifies the IPK again before uploading it.
 
-> **Superseded in part by [ADR-0008](docs/adr/0008-signed-plugin-index.md) (proposed):** the bundle
+> **Superseded in part by [ADR-0008](docs/adr/0008-signed-plugin-index.md) (accepted):** the bundle
 > stays, but it is to stop being the only package the installer uploads. A package downloaded at
 > runtime is one the plugin's signed release index lists, verified by signature, size and sha256 -
 > not rebuilt by this repository's CI. Not built yet; rewritten with the rest of this policy when

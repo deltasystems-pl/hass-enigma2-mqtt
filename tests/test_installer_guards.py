@@ -40,7 +40,8 @@ def _bundle(tmp_path: Path) -> BundledPlugin:
     artifact = tmp_path / "plugin.ipk"
     artifact.write_bytes(b"ipk bytes")
     digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
-    return BundledPlugin(artifact, "0.1.0", digest, "1" * 40)
+    # At this integration's own floor: the installer refuses a bundle below it, index or not.
+    return BundledPlugin(artifact, "0.2.0", digest, "1" * 40)
 
 
 async def _install(

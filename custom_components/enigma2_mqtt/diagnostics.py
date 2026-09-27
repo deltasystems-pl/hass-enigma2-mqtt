@@ -35,6 +35,7 @@ from homeassistant.helpers import device_registry as dr
 from .box import Enigma2MqttConfigEntry
 from .bundle import BundleError, load_bundled_plugin
 from .const import DOMAIN, SUPPORTED_PLUGIN_VERSION
+from .release_store import async_release_index_cache
 from .update import plugin_compatibility
 
 TO_REDACT = {
@@ -80,6 +81,8 @@ async def async_get_config_entry_diagnostics(
         bundled_version = None
 
     installed_plugin = state.info.get("plugin")
+    cache = async_release_index_cache(hass)
+    await cache.async_load()
     data: dict[str, Any] = {
         "entry": {
             "data": dict(entry.data),
@@ -109,6 +112,20 @@ async def async_get_config_entry_diagnostics(
                 installed_plugin if isinstance(installed_plugin, str) else None,
                 bundled_version or SUPPORTED_PLUGIN_VERSION,
             ),
+        },
+        # The signed release index as this Home Assistant knows it: which one, from which
+        # key, and what went wrong with the last check. The index itself is public and
+        # signed; its serial and key are what a report about an unexpected index needs.
+        "release_index": {
+            "serial": cache.serial,
+            "key_id": cache.key_id,
+            "issued": cache.issued,
+            "floor": cache.index["floor"] if cache.index else None,
+            "versions": [item["version"] for item in cache.index["releases"]]
+            if cache.index
+            else [],
+            "last_check": cache.checked.isoformat() if cache.checked else None,
+            "check_error": cache.check_error,
         },
         "topics": {
             "power": state.power,

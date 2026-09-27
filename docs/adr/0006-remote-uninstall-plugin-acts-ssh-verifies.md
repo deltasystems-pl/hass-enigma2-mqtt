@@ -1,6 +1,6 @@
 # ADR-0006: Remote uninstall - the plugin acts, SSH verifies, and the confirmation is a flow step
 
-**Status:** accepted 2026-09-23; §5 superseded in part by [ADR-0008](0008-signed-plugin-index.md) (proposed)
+**Status:** accepted 2026-09-23; §5 superseded in part by [ADR-0008](0008-signed-plugin-index.md) (accepted)
 **Date:** 2026-09-23
 **Supersedes:** [ADR-0004](0004-remote-uninstall.md) §3 and its first consequence, in part - they
 were written before the mechanism had been read out of code, and both turned out to be wrong.
@@ -146,7 +146,7 @@ ADR-0004 §4 unchanged, and now enforced under every combination of credentials,
 availability: the complete list of MQTT publishes is one `cmd/ha_mode = discovery`, and no SSH
 connection is attempted.
 
-> **Superseded in part by [ADR-0008](0008-signed-plugin-index.md) (proposed, 2026-09-26):** the
+> **Superseded in part by [ADR-0008](0008-signed-plugin-index.md) (accepted 2026-09-26):** the
 > complete list is to become two publishes - the retraction of the retained
 > `enigma2mqtt/integration/<node_id>` and `cmd/ha_mode = discovery` - and the test with it. Still no
 > SSH connection, and the retained `enigma2mqtt/release_index` is left alone. Until ADR-0008 is

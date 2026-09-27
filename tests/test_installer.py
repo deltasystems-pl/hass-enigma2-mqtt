@@ -482,7 +482,7 @@ async def test_install_streams_bundle_and_provisioning_then_cleans_up(
 ) -> None:
     artifact = tmp_path / "plugin.ipk"
     artifact.write_bytes(b"ipk bytes")
-    bundle = BundledPlugin(artifact, "0.1.0", "a" * 64, "1" * 40)
+    bundle = BundledPlugin(artifact, "0.2.0", "a" * 64, "1" * 40)
     receiver = FakeReceiver(close_raises_on={2})
     steps: list[str] = []
 
@@ -499,7 +499,7 @@ async def test_install_streams_bundle_and_provisioning_then_cleans_up(
         return watch
 
     real_hash = __import__("hashlib").sha256(b"ipk bytes").hexdigest()
-    bundle = BundledPlugin(artifact, "0.1.0", real_hash, "1" * 40)
+    bundle = BundledPlugin(artifact, "0.2.0", real_hash, "1" * 40)
     original_run = FakeSession.run
 
     async def hash_aware_run(self: FakeSession, command: str, **kwargs: Any):
@@ -521,7 +521,7 @@ async def test_install_streams_bundle_and_provisioning_then_cleans_up(
             hass, install_request, steps.append, _connector=receiver.connect
         )
 
-    assert result.version == "0.1.0"
+    assert result.version == "0.2.0"
     assert receiver.installed is True
     assert b"ipk bytes" in receiver.inputs
     provision = next(json.loads(value) for value in receiver.inputs if value.startswith(b"{"))
@@ -552,7 +552,7 @@ async def _async_committed_install(
     artifact = tmp_path / "plugin.ipk"
     artifact.write_bytes(b"ipk bytes")
     digest = hashlib.sha256(b"ipk bytes").hexdigest()
-    bundle = BundledPlugin(artifact, "0.1.0", digest, "1" * 40)
+    bundle = BundledPlugin(artifact, "0.2.0", digest, "1" * 40)
     original_run = FakeSession.run
 
     async def hash_aware_run(self: FakeSession, command: str, **kwargs: Any):
@@ -797,7 +797,7 @@ async def test_a_prune_that_fails_does_not_fail_a_committed_install(
 
     result = await _async_committed_install(hass, install_request, tmp_path, receiver)
 
-    assert result.version == "0.1.0"
+    assert result.version == "0.2.0"
     assert receiver.installed is True
     assert "superseded installer snapshots" in caplog.text
 
@@ -810,7 +810,7 @@ async def test_install_failure_restores_preexisting_plugin(
     artifact = tmp_path / "plugin.ipk"
     artifact.write_bytes(b"ipk bytes")
     digest = __import__("hashlib").sha256(artifact.read_bytes()).hexdigest()
-    bundle = BundledPlugin(artifact, "0.1.0", digest, "1" * 40)
+    bundle = BundledPlugin(artifact, "0.2.0", digest, "1" * 40)
     receiver = FakeReceiver(
         fail_on="cat > /etc/enigma2/mqttbridge.json.ha-", close_raises_on={1}
     )
@@ -847,7 +847,7 @@ async def test_cancellation_runs_rollback_and_remains_cancelled(
     artifact = tmp_path / "plugin.ipk"
     artifact.write_bytes(b"ipk bytes")
     digest = __import__("hashlib").sha256(artifact.read_bytes()).hexdigest()
-    bundle = BundledPlugin(artifact, "0.1.0", digest, "1" * 40)
+    bundle = BundledPlugin(artifact, "0.2.0", digest, "1" * 40)
     receiver = FakeReceiver()
     original_run = FakeSession.run
 
@@ -890,7 +890,7 @@ async def test_rollback_restores_a_receiver_whose_openwebif_died_at_the_restart(
     artifact = tmp_path / "plugin.ipk"
     artifact.write_bytes(b"ipk bytes")
     digest = __import__("hashlib").sha256(artifact.read_bytes()).hexdigest()
-    bundle = BundledPlugin(artifact, "0.1.0", digest, "1" * 40)
+    bundle = BundledPlugin(artifact, "0.2.0", digest, "1" * 40)
     receiver = FakeReceiver(webif_dies_at_restart=True)
     original_run = FakeSession.run
 
@@ -988,7 +988,7 @@ async def test_a_rollback_waits_for_the_interface_it_restarted(
     artifact = tmp_path / "plugin.ipk"
     artifact.write_bytes(b"ipk bytes")
     digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
-    bundle = BundledPlugin(artifact, "0.1.0", digest, "1" * 40)
+    bundle = BundledPlugin(artifact, "0.2.0", digest, "1" * 40)
     receiver = FakeReceiver(webif_dies_at_restart=True)
 
     async def never_announced(*args: Any, **kwargs: Any):
@@ -1038,7 +1038,7 @@ async def test_a_rollback_whose_interface_never_returns_says_so_and_still_unlock
     artifact = tmp_path / "plugin.ipk"
     artifact.write_bytes(b"ipk bytes")
     digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
-    bundle = BundledPlugin(artifact, "0.1.0", digest, "1" * 40)
+    bundle = BundledPlugin(artifact, "0.2.0", digest, "1" * 40)
     receiver = FakeReceiver(webif_dies_at_restart=True)
 
     async def never_announced(*args: Any, **kwargs: Any):
@@ -1354,7 +1354,7 @@ async def _install_with_the_bundle(
     artifact = tmp_path / "plugin.ipk"
     artifact.write_bytes(b"ipk bytes")
     digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
-    bundle = BundledPlugin(artifact, "0.1.0", digest, "1" * 40)
+    bundle = BundledPlugin(artifact, "0.2.0", digest, "1" * 40)
     original_run = FakeSession.run
 
     async def hash_aware_run(self: FakeSession, command: str, **kwargs: Any):

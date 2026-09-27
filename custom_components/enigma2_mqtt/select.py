@@ -37,23 +37,37 @@ import json
 from typing import Any
 
 from homeassistant.components.select import SelectEntity
-from homeassistant.const import Platform
+from homeassistant.const import EntityCategory, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers.dispatcher import (
+    async_dispatcher_connect,
+    async_dispatcher_send,
+)
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .box import Enigma2Box, Enigma2MqttConfigEntry, same_service, service_identity
 from .const import (
     CAPABILITY_ZAP_HISTORY,
+    CONF_PLUGIN_TARGET_VERSION,
     DOMAIN,
+    SIGNAL_RELEASE_INDEX,
+    SIGNAL_TARGET_VERSION,
+    TARGET_LATEST,
     TOPIC_BOUQUET,
     TOPIC_CHANNELS,
+    TOPIC_INFO,
     TOPIC_SERVICE,
     TOPIC_ZAP_HISTORY,
     ZAP_HISTORY_REASONS,
 )
 from .entity import Enigma2Entity, OptionalEntities
+from .plugin_versions import (
+    KEY_PLUGIN_INSTALL_VERSION,
+    PluginVersions,
+    async_plugin_versions,
+)
 from .services import async_select_bouquet
 
 PARALLEL_UPDATES = 0
@@ -149,6 +163,8 @@ async def async_setup_entry(
     `bouquet_context` in it takes them away.
     """
     box = entry.runtime_data
+    versions = await async_plugin_versions(hass, entry)
+    async_add_entities([Enigma2PluginVersionSelect(box, entry, versions)])
 
     def _create(key: str) -> Entity:
         if key == KEY_ZAP_HISTORY:
@@ -190,6 +206,69 @@ async def async_setup_entry(
             async_add_entities,
         ).start()
     )
+
+
+class Enigma2PluginVersionSelect(Enigma2Entity, SelectEntity):
+    """„Wersja wtyczki do instalacji": which plugin version the update card installs.
+
+    Disabled by default, and while it is disabled it counts as its first option, `latest` -
+    the newest version the card can install - whatever was stored the last time somebody
+    used it. Enabled, a version chosen here is what the update card offers and installs, so
+    a household can hold a receiver on one version while a newer one is out.
+
+    The options are `latest` and the versions the card can install over what the receiver
+    runs, newest first - never the one it runs, and never an older one: a reinstall is the
+    installer's business, and a downgrade is a confirmed step in the options flow. The choice
+    is stored in the entry's options, so it survives a restart; storing it reloads nothing.
+    Changing it changes the card's `latest_version`, and Home Assistant forgets a skipped
+    version when that moves - which is what a new choice should do.
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(
+        self, box: Enigma2Box, entry: Enigma2MqttConfigEntry, versions: PluginVersions
+    ) -> None:
+        """Set up the select from the shared version picture."""
+        super().__init__(box, KEY_PLUGIN_INSTALL_VERSION, topics=(TOPIC_INFO,), requires=None)
+        self._entry = entry
+        self._versions = versions
+        self._attr_options = [TARGET_LATEST]
+        self._attr_current_option = TARGET_LATEST
+
+    async def async_added_to_hass(self) -> None:
+        """Follow the index as well as the receiver."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            async_dispatcher_connect(self.hass, SIGNAL_RELEASE_INDEX, self._handle_box_update)
+        )
+
+    @callback
+    def _async_read_state(self) -> None:
+        """Offer what the card can install, and show what was chosen - if it still is."""
+        options = self._versions.select_options()
+        stored = self._versions.stored_target()
+        self._attr_options = options
+        self._attr_current_option = stored if stored in options else TARGET_LATEST
+
+    async def async_select_option(self, option: str) -> None:
+        """Store the choice in the entry and tell the update card."""
+        if option not in self._versions.select_options():
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="option_no_longer_offered",
+                translation_placeholders={"option": option},
+            )
+        options = dict(self._entry.options)
+        if option == TARGET_LATEST:
+            options.pop(CONF_PLUGIN_TARGET_VERSION, None)
+        else:
+            options[CONF_PLUGIN_TARGET_VERSION] = option
+        self.hass.config_entries.async_update_entry(self._entry, options=options)
+        async_dispatcher_send(self.hass, f"{SIGNAL_TARGET_VERSION}_{self._entry.entry_id}")
+        self._async_read_state()
+        self.async_write_ha_state()
 
 
 class Enigma2Select(Enigma2Entity, SelectEntity):

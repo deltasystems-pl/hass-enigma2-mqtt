@@ -64,6 +64,7 @@ from .const import (
     CONF_NAME,
     CONF_NODE_ID,
     CONF_OSCAM_TELEMETRY,
+    CONF_PLUGIN_TARGET_VERSION,
     CONF_PUBLISH_KEYS,
     CONF_RECEIVER_HOST,
     CONF_SCREENSHOT,
@@ -885,6 +886,11 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
             }
             if requested is not None:
                 local_data.update(requested)
+            # Kept, not asked: the version chosen in „Wersja wtyczki do instalacji" lives in the
+            # options too, but the select sets it, not this form - a save of the form must carry
+            # it over rather than drop it.
+            if (target := self.config_entry.options.get(CONF_PLUGIN_TARGET_VERSION)) is not None:
+                local_data[CONF_PLUGIN_TARGET_VERSION] = target
             # Nothing is sent to the receiver and no other step is entered while a field
             # on this form is wrong: a user correcting the address would otherwise have
             # already changed the box's privacy settings, or be three steps into an SSH

@@ -472,41 +472,107 @@ TOAST_MAX_TIMEOUT: Final = 30
 # What `cmd/record` accepts.
 RECORD_ACTIONS: Final = ("start", "stop")
 
-# The plugin release this version of the integration is written against. The update
-# entity compares it with `info.plugin`. M4 replaces the constant with the version of
-# the IPK the integration bundles, and grows an install step to go with it.
+# The plugin release this version of the integration is written against: the version
+# the update entity shows as the one to install when no bundle loads. With a bundle, the
+# bundle's own version decides.
 SUPPORTED_PLUGIN_VERSION: Final = "0.3.0"
 PLUGIN_RELEASES_URL: Final = (
     "https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases"
 )
 
-# The one request this integration can make to anything that is not the user's own
-# broker, and it is off unless somebody turns it on. It informs; it never downloads, and
-# it can never raise `latest_version` above the bundle the installer is able to install.
-PLUGIN_LATEST_RELEASE_URL: Final = (
-    "https://api.github.com/repos/deltasystems-pl/enigma2-mqtt-bridge/releases/latest"
-)
-# GitHub's unauthenticated rate limit is sixty requests an hour per address, shared by
-# everything else on that address. One request a day per receiver keeps this invisible
-# inside it, and a plugin release is not news that goes stale in an afternoon.
+# ---------------------------------------------------------------------------------------
+# Which plugin releases this integration may offer (ADR-0008 section 2). The rule is shared with
+# the plugin, which applies it to the same signed index: the same contract major, at or
+# above the higher of this floor and the index's, this integration at or above a
+# release's `min_integration`, and not withdrawn. The manifest cannot carry these -
+# hassfest refuses keys it does not know - so they live here, and the integration
+# publishes them for the receiver on `enigma2mqtt/integration/<node_id>`.
 #
-# "A day" is measured against a stamp in Home Assistant's own storage, not against the
-# life of an entity. A reload, an options save and a restart each build a new entity,
-# and a limit that any of those resets is not a limit - six reloads were six requests.
-# Between checks the entity shows the stored answer, so the tag survives a restart
-# without anybody being asked for it again.
-RELEASE_CHECK_INTERVAL: Final = timedelta(hours=24)
-RELEASE_CHECK_TIMEOUT: Final = 10
-RELEASE_CHECK_STORAGE_KEY: Final = f"{DOMAIN}.release_check"
-RELEASE_CHECK_STORAGE_VERSION: Final = 1
+# Contract 0 is 0.1.0 alone, which is also why the floor is 0.2.0: nothing in this
+# project offers a plugin below the contract this integration speaks.
+PLUGIN_CONTRACT: Final = 1
+PLUGIN_MIN_VERSION: Final = "0.2.0"
+# The named in-major exceptions of contract 1 that this integration has been checked
+# against (the plugin's TOPICS.md, "Named in-major exceptions", and `contract.json`). A
+# change of meaning stays inside a major only as one of these, decided in the plugin's
+# pull request that makes it after checking it against this integration's code; CI
+# compares this list with the plugin's `contract.json` at the pinned commit, so a new one
+# cannot arrive without somebody reading it here.
+PLUGIN_CONTRACT_EXCEPTIONS: Final = (
+    "zap-moves-channel-list",
+    "epg-grid-generated-means-changed",
+    "timers-lists-finished",
+    "zap-under-popup-recorded",
+)
 
-# The most of an answer this will read. A GitHub release document is a few kilobytes;
-# anything past this is not the endpoint that was asked for, and pulling it into memory
-# to discover that would be the bug rather than the check.
-RELEASE_BODY_LIMIT: Final = 64 * 1024
-# The longest tag it will believe. A version is a handful of characters, and everything
-# here is somebody else's text arriving on a device page.
-RELEASE_TAG_MAX: Final = 64
+# The plugin's signed release index: a fixed origin, not a setting. Fetched with verified
+# TLS and no redirects, and believed only when an embedded key signed it.
+PLUGIN_INDEX_ORIGIN: Final = "https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/"
+PLUGIN_INDEX_FILE: Final = "releases.json"
+PLUGIN_INDEX_SIGNATURE_FILE: Final = "releases.json.sig"
+# The keys the index is signed with, as the plugin embeds them (its `trust.py`): the main
+# key signs every index in the plugin repository's CI after the maintainer approves the
+# job; the spare, of higher rank, is sealed offline and signs nothing unless the main key
+# is leaked or lost - and one index it signs silences the main key for good. A `key_id` is
+# the first 16 hex digits of sha256 over the raw public key; `baseline` is the serial
+# published when this set was embedded, from which a key seen for the first time may be at
+# most 1000 ahead. A test pins every value, and compares them with the shared vectors.
+PLUGIN_INDEX_KEYS: Final[tuple[dict[str, object], ...]] = (
+    {
+        "key_id": "5de3b24c97e88660",
+        "rank": 1,
+        "public": "39Ndn8vAkeWAhYIYWvNubezKuF5F/5aY5E1uo+hSnqQ=",
+        "baseline": 0,
+    },
+    {
+        "key_id": "c72fd83e3e514a25",
+        "rank": 2,
+        "public": "1F2ajhsDoTuqAGdV2QOHdRl8hV4B0kNE0xwVGrpHdfs=",
+        "baseline": 0,
+    },
+)
+
+# The check makes no request unless somebody asked for one: the daily check is opt-in, on
+# the existing option, and a press of „Sprawdź aktualizacje wtyczki" or Home Assistant's
+# own "Check for updates" is a request for one. One verified index serves every receiver.
+#
+# "A day" and "ten minutes" are measured against stamps in Home Assistant's storage, not
+# against the life of an entity: a reload, an options save and a restart each build new
+# entities, and a limit that any of those resets is not a limit. Ten minutes is the time
+# GitHub Pages caches the file for anyway (`max-age=600`), so a second look inside it
+# could only ever see the same bytes.
+RELEASE_CHECK_INTERVAL: Final = timedelta(hours=24)
+RELEASE_MANUAL_INTERVAL: Final = timedelta(minutes=10)
+# How much short of a day the daily check may run: the timer fires a day after it was set, and
+# the stamp it is judged by was taken a moment later.
+RELEASE_CHECK_SLACK: Final = timedelta(minutes=10)
+RELEASE_CHECK_TIMEOUT: Final = 10
+# The second layout of the release check's storage. The first lived under
+# `enigma2_mqtt.release_check`, one record per receiver; it is removed the first time
+# this one loads.
+RELEASE_INDEX_STORAGE_KEY: Final = f"{DOMAIN}.release_index"
+RELEASE_INDEX_STORAGE_VERSION: Final = 2
+LEGACY_RELEASE_CHECK_STORAGE_KEY: Final = f"{DOMAIN}.release_check"
+# Sent after every newly accepted index and whenever a check ends, so every receiver's
+# entities read the cache again.
+SIGNAL_RELEASE_INDEX: Final = f"{DOMAIN}_release_index"
+
+# The two retained topics this integration publishes for the receiver, outside any
+# box's base topic because they are about this integration rather than about a box.
+# `integration/<node_id>` says which integration manages that receiver and which plugin
+# releases it can work with; it is retracted when the entry is removed. `release_index`
+# carries the newest index this integration accepted, so a receiver with no internet of
+# its own can verify and use it - it is signed, so it is harmless to anybody who reads it,
+# and it is never retracted.
+TOPIC_INTEGRATION_PREFIX: Final = "enigma2mqtt/integration"
+TOPIC_RELEASE_INDEX: Final = "enigma2mqtt/release_index"
+
+# The plugin version the household chose in „Wersja wtyczki do instalacji", stored in the
+# entry's options so it survives a restart. Absent means the select's first option,
+# `latest`: the newest compatible release this card can install.
+CONF_PLUGIN_TARGET_VERSION: Final = "plugin_target_version"
+TARGET_LATEST: Final = "latest"
+SIGNAL_TARGET_VERSION: Final = f"{DOMAIN}_target_version"
 
 # Manufacturer names keyed by the prefix of the box type enigma2 reports. Longest
 # prefix wins. A box type nobody has mapped yet is still a perfectly good device, so

@@ -89,3 +89,24 @@ def test_every_language_leaves_the_same_placeholders() -> None:
             assert set(PLACEHOLDER.findall(flat[key])) == expected, (
                 f"{language}.json:{key} does not use the same placeholders"
             )
+
+
+def test_no_entity_name_of_the_last_release_changes() -> None:
+    """ADR-0007: the name in the installation's language is the entity id.
+
+    On a Polish installation `pl.json`'s name is what the id was built from, so changing any
+    language's name of an existing entity renames it somewhere, and takes its history,
+    dashboards and automations with it. `tests/data/entity-names-0.3.1.json` holds every
+    entity name the released 0.3.1 shipped, in every language; each must still be there,
+    unchanged. New entities may be added.
+    """
+    released = json.loads(
+        (Path(__file__).parent / "data" / "entity-names-0.3.1.json").read_text(encoding="utf-8")
+    )
+    for language, names in released.items():
+        entity = json.loads(
+            (TRANSLATIONS / f"{language}.json").read_text(encoding="utf-8")
+        )["entity"]
+        for dotted, name in names.items():
+            platform, key = dotted.split(".", 1)
+            assert entity[platform][key]["name"] == name, f"{language}.json renames {dotted}"

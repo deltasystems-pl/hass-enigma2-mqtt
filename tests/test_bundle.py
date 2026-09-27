@@ -12,6 +12,8 @@ import pytest
 from custom_components.enigma2_mqtt import bundle
 from custom_components.enigma2_mqtt.const import SUPPORTED_PLUGIN_VERSION
 
+from .ipk import buildinfo, make_ipk
+
 COMMIT = "a" * 40
 VERSION = "1.2.3"
 PREFIX = f"enigma2-mqtt-bridge-{COMMIT}/"
@@ -139,7 +141,7 @@ def _source_archive(path: Path, staging: Path, *, license_file: bool = True, ext
 def _install_bundle(monkeypatch, tmp_path: Path, **overrides) -> None:
     """Point the loader at a freshly built bundle, with fields optionally broken."""
     package = tmp_path / f"enigma2-plugin-extensions-mqttbridge_{VERSION}_all.ipk"
-    package.write_bytes(b"a plausible ipk")
+    package.write_bytes(overrides.pop("_package", make_ipk(overrides.pop("_buildinfo", None))))
     source = tmp_path / f"enigma2-mqtt-bridge-{COMMIT}.tar.gz"
     if "_raw_source" in overrides:
         source.write_bytes(overrides.pop("_raw_source"))
@@ -171,6 +173,52 @@ def test_a_bundle_built_to_the_contract_loads(monkeypatch, tmp_path):
     found = bundle.load_bundled_plugin()
     assert found.version == VERSION
     assert found.source_commit == COMMIT
+    # A plugin from before build ids carries none, and that is not a fault.
+    assert found.build is None
+
+
+def test_the_package_s_own_build_id_is_read(monkeypatch, tmp_path):
+    """The build id comes out of the package, which is what the receiver will report."""
+    _install_bundle(
+        monkeypatch, tmp_path, _buildinfo=buildinfo(commit=COMMIT, flavour="release")
+    )
+    found = bundle.load_bundled_plugin()
+    assert found.build == {
+        "commit": COMMIT,
+        "time": 1790400000,
+        "dirty": False,
+        "flavour": "release",
+    }
+
+
+def test_a_package_built_from_another_commit_is_refused(monkeypatch, tmp_path):
+    """A package that names another commit than its source archive is not this bundle."""
+    _install_bundle(monkeypatch, tmp_path, _buildinfo=buildinfo(commit="d" * 40))
+    with pytest.raises(bundle.BundleError, match="missing or invalid"):
+        bundle.load_bundled_plugin()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "COMMIT = open('/etc/passwd').read()\n",
+        'COMMIT = "' + "c" * 40 + '"\n',
+        "this is not python",
+    ],
+    ids=["not a literal", "members missing", "not python"],
+)
+def test_a_build_id_that_is_not_one_is_refused(monkeypatch, tmp_path, text):
+    """A `buildinfo.py` the plugin's builder would never write is a package it did not make."""
+    _install_bundle(monkeypatch, tmp_path, _buildinfo=text)
+    with pytest.raises(bundle.BundleError, match="missing or invalid"):
+        bundle.load_bundled_plugin()
+
+
+def test_a_package_that_is_not_an_ipk_is_refused(monkeypatch, tmp_path):
+    """Checksums that match prove the bytes are the ones described, not that they install."""
+    _install_bundle(monkeypatch, tmp_path, _package=b"a plausible ipk")
+    with pytest.raises(bundle.BundleError, match="missing or invalid"):
+        bundle.load_bundled_plugin()
 
 
 @pytest.mark.parametrize(

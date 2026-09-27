@@ -45,6 +45,8 @@ from .const import (
     PLUGIN_SETTING_DEFAULTS,
     TOPIC_INFO,
 )
+from .plugin_versions import bundle_refusal
+from .release_store import async_release_index_cache
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -148,6 +150,10 @@ class InstallerErrorCode(StrEnum):
     ROLLBACK_OPKG_OVERLAP = "rollback_opkg_overlap"
     BUSY = "busy"
     OPKG_BUSY = "opkg_busy"
+    # The last verified signed index rules the bundle out - below its floor, or withdrawn -
+    # on every install path, before the receiver is connected to.
+    BUNDLE_BELOW_FLOOR = "bundle_below_floor"
+    BUNDLE_WITHDRAWN = "bundle_withdrawn"
     IDENTITY_MISMATCH = "identity_mismatch"
 
 
@@ -1836,6 +1842,36 @@ async def _async_release_after_withdraw(
     return True
 
 
+async def _async_refuse_what_the_index_rules_out(hass: HomeAssistant, version: str) -> None:
+    """Refuse a bundle below the floor, or withdrawn, in the last verified index.
+
+    Here rather than in each caller, because every path - the update card, the guided
+    installer's update of an older plugin, the forced reinstall - installs through this
+    module, and a rule one of them forgot would be a rule that does not hold. With no verified
+    index yet, only this integration's own floor applies.
+    """
+    cache = async_release_index_cache(hass)
+    await cache.async_load()
+    if (refusal := bundle_refusal(version, cache.index)) is None:
+        return
+    code, placeholders = refusal
+    _LOGGER.warning(
+        "Receiver install refused before connecting to it: the bundled plugin %s is %s",
+        version,
+        f"withdrawn in the signed release index: {placeholders['reason']}"
+        if code == "withdrawn"
+        else f"below {placeholders['floor']}, the lowest version the signed release index "
+        "allows",
+    )
+    raise InstallerError(
+        InstallerErrorCode.BUNDLE_WITHDRAWN
+        if code == "withdrawn"
+        else InstallerErrorCode.BUNDLE_BELOW_FLOOR,
+        f"the bundled plugin {version} is ruled out by the signed release index ({code})",
+        placeholders,
+    )
+
+
 async def async_install(
     hass: HomeAssistant,
     request: InstallRequest,
@@ -1863,6 +1899,7 @@ async def _async_install_locked(
     """Install or update the bundled plugin as a rollback-safe transaction."""
     request.validate()
     bundle = await _async_load_bundle(hass)
+    await _async_refuse_what_the_index_rules_out(hass, bundle.version)
     bundle_bytes = await hass.async_add_executor_job(Path(bundle.path).read_bytes)
     if hashlib.sha256(bundle_bytes).hexdigest() != bundle.sha256:
         raise InstallerError(InstallerErrorCode.BUNDLE_INVALID)
