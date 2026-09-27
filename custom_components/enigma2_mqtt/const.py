@@ -574,6 +574,18 @@ CONF_PLUGIN_TARGET_VERSION: Final = "plugin_target_version"
 TARGET_LATEST: Final = "latest"
 SIGNAL_TARGET_VERSION: Final = f"{DOMAIN}_target_version"
 
+# A release package the index lists is downloaded from the same origin as the index, beside
+# it - the feed serves the packages directly - with the same verified TLS, no redirects and
+# the same timeout, and believed only when its size and sha256 are the signed entry's.
+# The defence-in-depth cross-check of a release package: the release asset's own `digest`,
+# as GitHub's API reports it for the release tag. One request per version a day at most,
+# whoever asks - a request from the broker must not be able to spend the shared 60 an hour.
+PLUGIN_RELEASE_API: Final = (
+    "https://api.github.com/repos/deltasystems-pl/enigma2-mqtt-bridge/releases/tags/v"
+)
+PLUGIN_RELEASE_API_LIMIT: Final = 256 * 1024
+PLUGIN_DIGEST_CACHE: Final = timedelta(hours=24)
+
 # Manufacturer names keyed by the prefix of the box type enigma2 reports. Longest
 # prefix wins. A box type nobody has mapped yet is still a perfectly good device, so
 # the fallback is the platform rather than "unknown".
