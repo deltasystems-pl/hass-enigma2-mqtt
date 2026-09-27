@@ -426,7 +426,7 @@ async def async_setup_entry(
     )
 
     # „Wymuś reinstalację wtyczki (SSH)" exists exactly while SSH credentials are stored
-    # (design, section 7a): never a present-but-refusing button. The gate is a fact Home
+    # (ADR-0008, section 8): never a present-but-refusing button. The gate is a fact Home
     # Assistant holds, not something the box says, so it is "declared" at once and followed
     # on the credentials signal - the only way to hear of an enrolment or a forgetting,
     # neither of which reloads the entry. Forgetting removes the registry entry for good,
@@ -600,7 +600,7 @@ class Enigma2CheckPluginUpdateButton(Enigma2Entity, ButtonEntity):
 class Enigma2ForceReinstallButton(Enigma2Entity, ButtonEntity):
     """„Wymuś reinstalację wtyczki (SSH)": the bundled plugin, reinstalled over SSH.
 
-    The recovery and bootstrap path (design, section 7a). Every other way of changing the
+    The recovery and bootstrap path (ADR-0008, section 8). Every other way of changing the
     plugin needs a plugin that answers; this needs SSH and the bytes this integration ships,
     and nothing else - so it works on a receiver whose plugin is dead, switched off, or too
     old to update itself, and it is available while the receiver is unreachable over MQTT,
@@ -613,7 +613,15 @@ class Enigma2ForceReinstallButton(Enigma2Entity, ButtonEntity):
     and a second press by the same administrator inside the window runs the reinstall.
     `button.press` is not admin-only in core the way `update.install` is, so both presses
     are checked, and a press by anybody else - an automation included, which runs without
-    a user - is answered with a notice and does nothing else.
+    a user - is answered with a notice and does nothing else. A script started by an
+    administrator runs with that administrator's user, so two presses in one script
+    confirm in one run: the same administrator, and an explicit act of theirs. An
+    automation - even one an administrator triggers by hand - runs without a user and
+    never confirms.
+
+    While a reinstall runs, a press starts nothing and says so in a notice, which goes
+    when the reinstall ends: the call blocks for minutes, and a second administrator - or
+    the same one on another screen - would otherwise see nothing happen.
     """
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -688,6 +696,12 @@ class Enigma2ForceReinstallButton(Enigma2Entity, ButtonEntity):
             return
         if self._running:
             _LOGGER.info("Forced plugin reinstall already running; the press changes nothing")
+            persistent_notification.async_create(
+                self.hass,
+                await self._async_common("force_reinstall_running_message"),
+                await self._async_common("force_reinstall_title"),
+                f"{self._notice_id}_running",
+            )
             return
         armed = self._armed
         if armed is not None and armed[0] == user.id and time.monotonic() < armed[1]:
@@ -765,6 +779,7 @@ class Enigma2ForceReinstallButton(Enigma2Entity, ButtonEntity):
             ) from err
         finally:
             self._running = False
+            persistent_notification.async_dismiss(self.hass, f"{self._notice_id}_running")
             async_dispatcher_send(self.hass, signal, None)
         persistent_notification.async_create(
             self.hass,

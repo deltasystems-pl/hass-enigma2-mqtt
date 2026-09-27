@@ -17,9 +17,10 @@
     "downgrade_loses_mqtt_updates": "Aktualizacje wtyczki przez MQTT (aktualizacje będą wtedy znów możliwe przez SSH)",
     "force_reinstall_title": "Wymuszona reinstalacja wtyczki",
     "force_reinstall_confirm_title": "Wymuszona reinstalacja wtyczki {version} (SSH)",
-    "force_reinstall_confirm_message": "Naciśnij ponownie w ciągu 30 sekund, aby potwierdzić. Wtyczka zostanie zainstalowana od nowa przez SSH z pakietu dołączonego do integracji, a interfejs dekodera uruchomi się ponownie. Dekoder wyjdzie z trybu czuwania, a przez HDMI-CEC może włączyć się także telewizor.",
+    "force_reinstall_confirm_message": "Naciśnij ponownie w ciągu 30 sekund, aby potwierdzić. Wtyczka zostanie zainstalowana od nowa przez SSH z pakietu dołączonego do integracji, a interfejs dekodera uruchomi się ponownie. Gdy interfejs dekodera działa, dekoder musi być włączony, a nie w trybie czuwania; inaczej nic nie zostanie zainstalowane. Tylko gdy interfejs nie działa, reinstalacja go uruchomi, a przez HDMI-CEC może wtedy włączyć się także telewizor.",
     "force_reinstall_older": "To starsza wersja niż zainstalowana ({installed}).",
     "force_reinstall_admin_message": "Wymuszoną reinstalację wtyczki może potwierdzić tylko administrator Home Assistant.",
+    "force_reinstall_running_message": "Wymuszona reinstalacja wtyczki na tym dekoderze już trwa. To naciśnięcie niczego nie uruchomiło; wynik pojawi się tutaj po jej zakończeniu.",
     "force_reinstall_done_message": "Wtyczka {version} została zainstalowana od nowa przez SSH.",
     "force_reinstall_disabled_message": "Wtyczka została zainstalowana, ale jest wyłączona w swoich ustawieniach na dekoderze."
   },

@@ -17,9 +17,10 @@
     "downgrade_loses_mqtt_updates": "Plugin updates over MQTT (updates are then possible over SSH again)",
     "force_reinstall_title": "Forced plugin reinstall",
     "force_reinstall_confirm_title": "Forced reinstall of plugin {version} (SSH)",
-    "force_reinstall_confirm_message": "Press again within 30 seconds to confirm. The plugin will be reinstalled over SSH from the package bundled with the integration, and the receiver's interface will restart. The receiver will leave standby, and HDMI-CEC may switch the television on too.",
+    "force_reinstall_confirm_message": "Press again within 30 seconds to confirm. The plugin will be reinstalled over SSH from the package bundled with the integration, and the receiver's interface will restart. While the receiver's interface is running, the receiver must be switched on, not in standby; otherwise nothing is installed. Only when the interface is not running does the reinstall start it, and HDMI-CEC may then switch the television on too.",
     "force_reinstall_older": "This is an older version than the one installed ({installed}).",
     "force_reinstall_admin_message": "Only a Home Assistant administrator can confirm a forced plugin reinstall.",
+    "force_reinstall_running_message": "A forced plugin reinstall is already running on this receiver. This press started nothing; the result will appear here when it ends.",
     "force_reinstall_done_message": "Plugin {version} was reinstalled over SSH.",
     "force_reinstall_disabled_message": "The plugin was installed, but it is switched off in its settings on the receiver."
   },

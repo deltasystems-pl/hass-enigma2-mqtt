@@ -134,6 +134,18 @@ def _next_timer(state: Enigma2State) -> datetime | None:
     return dt_util.utc_from_timestamp(begin)
 
 
+def _as_utc(value: Any) -> datetime | None:
+    """Read an ISO 8601 time this sensor wrote, as an aware UTC datetime, or None."""
+    if not isinstance(value, str) or not value:
+        return None
+    parsed = dt_util.parse_datetime(value)
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt_util.UTC)
+    return dt_util.as_utc(parsed)
+
+
 def _refused_at(ts: Any) -> str | None:
     """Return when the receiver says it refused, or None when it does not say.
 
@@ -845,7 +857,12 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
     **Home Assistant is a source too.** A forced reinstall over SSH fails on this side,
     often for a receiver whose plugin will never publish again, so its failure is
     recorded by the box object and taken here as the newest complaint. `source` says
-    whose it is: `receiver` or `home_assistant`.
+    whose it is: `receiver` or `home_assistant`. Such a record is not displaced by the
+    receiver's old news: the broker replays the receiver's retained complaint on every
+    reload and at every start-up - and a dead plugin's complaint stays there for good - so
+    while this shows Home Assistant's record, a replayed complaint replaces it only when
+    the receiver's own time for it is later. A complaint the receiver publishes now is
+    news whatever its clock says, and replaces it.
     """
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -930,6 +947,10 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
             # made while Home Assistant was down, is byte-identical to the first except
             # for the moment it happened.
             return
+        if self._attr_extra_state_attributes.get(
+            "source"
+        ) == SOURCE_HOME_ASSISTANT and not self._replaces_local_record(when):
+            return
         self._attr_native_value = command
         self._attr_extra_state_attributes = {
             "error": error,
@@ -939,6 +960,23 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
             "time": when or dt_util.utcnow().isoformat(),
             "source": SOURCE_RECEIVER,
         }
+
+    def _replaces_local_record(self, when: str | None) -> bool:
+        """Whether a receiver complaint may replace the failure Home Assistant recorded.
+
+        One published now - not a retained replay - is news, and does. A replay does only
+        when the receiver dated it later than the record shown: the retained complaint
+        arrives again at every reload and every start-up, after the record was restored,
+        and it would otherwise put a months-old refusal over the failure the household
+        is looking for. A replay with no date of its own cannot be placed, so it does not.
+        """
+        if not self.box.state.last_error_retained:
+            return True
+        received = _as_utc(when)
+        if received is None:
+            return False
+        shown = _as_utc(self._attr_extra_state_attributes.get("time"))
+        return shown is None or received > shown
 
 
 class OscamSourceSensor(Enigma2Entity, SensorEntity):

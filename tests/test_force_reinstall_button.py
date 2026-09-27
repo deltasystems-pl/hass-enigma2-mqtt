@@ -1,6 +1,6 @@
 """„Wymuś reinstalację wtyczki (SSH)": exists only with SSH credentials, and confirms itself.
 
-Design, section 7a. The button follows a decision taken in Home Assistant - credentials
+ADR-0008, section 8. The button follows a decision taken in Home Assistant - credentials
 stored or forgotten - so its existence is asserted on the entity registry's own events,
 never only on the end state, which cannot tell "never created" from "created then
 removed". Enrolling or forgetting credentials changes the entry's data and not its
@@ -15,15 +15,18 @@ reinstall. What the reinstall does on the receiver is `test_installer_force.py`.
 from __future__ import annotations
 
 import ast
+import asyncio
 from datetime import timedelta
 import json
 from pathlib import Path
+import types
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from homeassistant.components import persistent_notification
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import ATTR_ENTITY_ID, STATE_UNAVAILABLE
-from homeassistant.core import Context, Event, HomeAssistant, callback
+from homeassistant.core import Context, Event, HomeAssistant, State, callback
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
@@ -35,9 +38,10 @@ from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_fire_mqtt_message,
     async_fire_time_changed,
+    mock_restore_cache,
 )
 
-from custom_components.enigma2_mqtt import button as button_module
+from custom_components.enigma2_mqtt import button as button_module, entity as entity_module
 from custom_components.enigma2_mqtt.const import (
     CONF_KEEP_SSH_CREDENTIALS,
     CONF_SSH_HOST,
@@ -253,7 +257,7 @@ async def test_a_stale_registry_entry_goes_at_setup_without_credentials(
 async def test_enrolling_again_brings_a_new_button_disabled_again(
     hass: HomeAssistant, mqtt_mock, box_on_the_broker, config_entry: MockConfigEntry
 ) -> None:
-    """OD D: whatever was done to the old one - enabled here - does not come back."""
+    """Whatever was done to the old one - enabled here - does not come back."""
     await _setup(hass, config_entry, box_on_the_broker, credentials=True)
     registry = er.async_get(hass)
     old = _button_entry(hass)
@@ -693,21 +697,6 @@ async def test_it_always_uses_ssh_even_when_the_box_updates_itself(
     assert not any(topic.endswith("/cmd/update") for topic in topics)
 
 
-async def test_it_is_available_while_the_box_is_not(
-    hass: HomeAssistant,
-    mqtt_mock,
-    box_on_the_broker,
-    config_entry: MockConfigEntry,
-    enabled: None,
-) -> None:
-    await _ready(hass, config_entry, box_on_the_broker)
-
-    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/{NODE_ID}/availability", "offline", retain=True)
-    await hass.async_block_till_done()
-
-    assert hass.states.get(_button_entry(hass).entity_id).state != STATE_UNAVAILABLE
-
-
 async def test_a_withdrawn_bundle_is_refused_at_the_first_press(
     hass: HomeAssistant,
     mqtt_mock,
@@ -842,3 +831,357 @@ async def test_the_update_card_shows_the_forced_reinstall_running(
 
     assert seen == [True, 50]
     assert hass.states.get(PLUGIN).attributes["in_progress"] is False
+
+
+# ------------------------------------------------- „Ostatni błąd" across reloads and restarts
+
+OLD_COMPLAINT = json.dumps({"cmd": "zap", "error": "no such channel", "ts": 1_700_000_000})
+
+
+async def _fail_forced_reinstall(hass: HomeAssistant, admin_id: str) -> None:
+    with (
+        patch(INSTALL, AsyncMock(side_effect=InstallerError(InstallerErrorCode.GUI_STOPPED))),
+        pytest.raises(HomeAssistantError),
+    ):
+        await _press(hass, admin_id)
+        await _press(hass, admin_id)
+
+
+async def test_a_home_assistant_failure_outlives_a_reload_and_the_old_complaint_replayed(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+    hass_admin_user,
+) -> None:
+    """A dead plugin's retained complaint stays on the broker for good, and the broker
+    replays it to every new subscription: after a reload it must not put a months-old
+    refusal over the failure the household is looking for."""
+    box_on_the_broker[f"{BASE_TOPIC}/{NODE_ID}/last_error"] = OLD_COMPLAINT
+    await _ready(hass, config_entry, box_on_the_broker)
+    await _fail_forced_reinstall(hass, hass_admin_user.id)
+    assert hass.states.get(LAST_ERROR).state == "force_reinstall"
+
+    assert await hass.config_entries.async_reload(config_entry.entry_id)
+    await hass.async_block_till_done()
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/{NODE_ID}/last_error", OLD_COMPLAINT, retain=True
+    )
+    await hass.async_block_till_done()
+
+    state = hass.states.get(LAST_ERROR)
+    assert state.state == "force_reinstall"
+    assert state.attributes["source"] == "home_assistant"
+
+
+async def test_a_home_assistant_failure_outlives_a_restart_and_the_old_complaint_replayed(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker, config_entry: MockConfigEntry
+) -> None:
+    """A restart: the record is restored first, then the broker replays the receiver's
+    older complaint to the entity that now exists."""
+    registry = er.async_get(hass)
+    config_entry.add_to_hass(hass)
+    config_entry.add_to_hass = lambda _hass: None  # already added
+    registry.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        f"{NODE_ID}_last_error",
+        config_entry=config_entry,
+        suggested_object_id="dekoder_salon_last_error",
+    )
+    mock_restore_cache(
+        hass,
+        [
+            State(
+                LAST_ERROR,
+                "force_reinstall",
+                {
+                    "error": "The receiver's interface was stopped on purpose (runlevel 4).",
+                    "time": "2026-09-27T10:00:00+00:00",
+                    "source": "home_assistant",
+                },
+            )
+        ],
+    )
+    box_on_the_broker[f"{BASE_TOPIC}/{NODE_ID}/last_error"] = OLD_COMPLAINT
+
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    state = hass.states.get(LAST_ERROR)
+    assert state.state == "force_reinstall"
+    assert state.attributes["source"] == "home_assistant"
+    assert state.attributes["time"] == "2026-09-27T10:00:00+00:00"
+
+
+async def test_a_later_or_live_receiver_complaint_replaces_the_home_assistant_record(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+    hass_admin_user,
+) -> None:
+    """Newer news does replace it: a replay the receiver dated later, and anything it
+    publishes now, whatever its clock says."""
+    await _ready(hass, config_entry, box_on_the_broker)
+    await _fail_forced_reinstall(hass, hass_admin_user.id)
+    later = int(dt_util.utcnow().timestamp()) + 3600
+    async_fire_mqtt_message(
+        hass,
+        f"{BASE_TOPIC}/{NODE_ID}/last_error",
+        json.dumps({"cmd": "restart_gui", "error": "later", "ts": later}),
+        retain=True,
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(LAST_ERROR).state == "restart_gui"
+
+    await _fail_forced_reinstall(hass, hass_admin_user.id)
+    assert hass.states.get(LAST_ERROR).state == "force_reinstall"
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/{NODE_ID}/last_error", OLD_COMPLAINT)
+    await hass.async_block_till_done()
+    state = hass.states.get(LAST_ERROR)
+    assert state.state == "zap"
+    assert state.attributes["source"] == "receiver"
+
+
+# ------------------------------------------ a registry internal that changed under us
+
+
+class _Registry:
+    """The entity registry, with its `deleted_entities` missing, renamed or retyped."""
+
+    def __init__(self, inner: er.EntityRegistry, shape: str) -> None:
+        self._inner = inner
+        self._shape = shape
+
+    def __getattr__(self, name: str) -> Any:
+        if name == "deleted_entities":
+            if self._shape == "list":
+                return []
+            raise AttributeError(name)
+        if name == "deleted_entity_records" and self._shape == "renamed":
+            return self._inner.deleted_entities
+        return getattr(self._inner, name)
+
+
+@pytest.mark.parametrize("shape", ["missing", "renamed", "list"])
+async def test_a_changed_registry_internal_never_breaks_the_button_platform(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+    shape: str,
+) -> None:
+    """Every receiver without stored credentials reaches the forgetting at setup and on
+    every `info`. A core without `deleted_entities` in this shape must cost only the
+    forgetting - logged once - never the buttons registered after it."""
+    real = er.async_get
+    fake = types.SimpleNamespace(async_get=lambda hass_: _Registry(real(hass_), shape))
+
+    with patch.object(entity_module, "er", fake):
+        await _setup(hass, config_entry, box_on_the_broker, credentials=False)
+        logged = caplog.text.count("keeps no deleted-entity records")
+        for _ in range(3):
+            async_fire_mqtt_message(hass, INFO_TOPIC, json.dumps(INFO))
+            await hass.async_block_till_done()
+
+    assert config_entry.state is ConfigEntryState.LOADED
+    registry = er.async_get(hass)
+    assert registry.async_get_entity_id("button", DOMAIN, f"{NODE_ID}_check_plugin_update")
+    assert "Error while setting up" not in caplog.text
+    assert "failed on" not in caplog.text
+    # Once per setup of the platform, never once per `info`.
+    assert logged >= 1
+    assert caplog.text.count("keeps no deleted-entity records") == logged
+
+
+# ------------------------------------------------------------ the presses, again
+
+
+async def test_a_non_admin_press_leaves_an_admin_s_confirmation_pending(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+    hass_admin_user,
+    hass_user,
+) -> None:
+    """A household member pressing in between neither confirms nor cancels: the
+    administrator's own second press still runs it."""
+    await _ready(hass, config_entry, box_on_the_broker)
+
+    with patch(INSTALL, AsyncMock(return_value=_result())) as install:
+        await _press(hass, hass_admin_user.id)
+        await _press(hass, hass_user.id)
+        assert f"{DOMAIN}_force_reinstall_{config_entry.entry_id}" in _notices(hass)
+        await _press(hass, hass_admin_user.id)
+
+    install.assert_awaited_once()
+
+
+async def test_a_press_while_it_runs_starts_nothing_and_says_so(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+    hass_admin_user,
+) -> None:
+    """The call blocks for minutes. Presses meanwhile - even a whole new arming and
+    confirmation - start no second install, and get a notice that goes when it ends."""
+    await _ready(hass, config_entry, box_on_the_broker)
+    gate = asyncio.Event()
+    running = f"{DOMAIN}_force_reinstall_{config_entry.entry_id}_running"
+
+    async def _slow(*_args: Any, **_kwargs: Any) -> InstallResult:
+        await gate.wait()
+        return _result()
+
+    with patch(INSTALL, AsyncMock(side_effect=_slow)) as install:
+        await _press(hass, hass_admin_user.id)
+        task = hass.async_create_task(_press(hass, hass_admin_user.id))
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        await _press(hass, hass_admin_user.id)
+        await _press(hass, hass_admin_user.id)
+        assert running in _notices(hass)
+        assert "already running" in _notices(hass)[running]["message"]
+        gate.set()
+        await task
+        await hass.async_block_till_done()
+
+    install.assert_awaited_once()
+    assert running not in _notices(hass)
+
+
+@pytest.mark.parametrize("how", ["forget", "reload"])
+async def test_the_confirmation_goes_with_the_button(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+    hass_admin_user,
+    how: str,
+) -> None:
+    """A notice asking for a second press of a button that is gone would be a lie."""
+    await _ready(hass, config_entry, box_on_the_broker)
+    notice = f"{DOMAIN}_force_reinstall_{config_entry.entry_id}"
+
+    await _press(hass, hass_admin_user.id)
+    assert notice in _notices(hass)
+    if how == "forget":
+        async_set_ssh_credentials(hass, config_entry, None)
+    else:
+        assert await hass.config_entries.async_reload(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert notice not in _notices(hass)
+
+
+async def test_it_stays_available_while_the_receiver_is_really_offline(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+) -> None:
+    """A last will as the broker delivers it, live: the box is unavailable - and the
+    button, which needs only SSH, is not."""
+    await _ready(hass, config_entry, box_on_the_broker)
+
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/{NODE_ID}/availability", "offline")
+    await hass.async_block_till_done()
+
+    assert config_entry.runtime_data.available is False
+    assert hass.states.get(LAST_ERROR).state is not None
+    assert hass.states.get(_button_entry(hass).entity_id).state != STATE_UNAVAILABLE
+
+
+async def test_a_script_started_by_an_administrator_confirms_in_one_run(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+    hass_admin_user,
+) -> None:
+    """Decided: a script runs as the administrator who started it, so its two presses are
+    that administrator's explicit act, and confirm."""
+    await _ready(hass, config_entry, box_on_the_broker)
+    entity_id = _button_entry(hass).entity_id
+    press = {"action": "button.press", "target": {"entity_id": entity_id}}
+    assert await async_setup_component(
+        hass, "script", {"script": {"reinstall": {"sequence": [press, press]}}}
+    )
+
+    with patch(INSTALL, AsyncMock(return_value=_result())) as install:
+        await hass.services.async_call(
+            "script", "reinstall", blocking=True, context=Context(user_id=hass_admin_user.id)
+        )
+        await hass.async_block_till_done()
+
+    install.assert_awaited_once()
+
+
+async def test_an_automation_an_administrator_triggers_never_confirms(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+    hass_admin_user,
+) -> None:
+    """An automation runs without a user even when an administrator triggers it."""
+    await _ready(hass, config_entry, box_on_the_broker)
+    entity_id = _button_entry(hass).entity_id
+    press = {"action": "button.press", "target": {"entity_id": entity_id}}
+    assert await async_setup_component(
+        hass,
+        "automation",
+        {
+            "automation": {
+                "id": "reinstall",
+                "alias": "reinstall",
+                "trigger": {"platform": "event", "event_type": "never_fired"},
+                "action": [press, press],
+            }
+        },
+    )
+
+    with patch(INSTALL, AsyncMock(return_value=_result())) as install:
+        await hass.services.async_call(
+            "automation",
+            "trigger",
+            {ATTR_ENTITY_ID: "automation.reinstall"},
+            blocking=True,
+            context=Context(user_id=hass_admin_user.id),
+        )
+        await hass.async_block_till_done()
+
+    install.assert_not_awaited()
+
+
+def test_the_confirmation_says_standby_refuses_while_the_interface_runs() -> None:
+    """Decided: the forced mode keeps the standby guard while the interface runs, so the
+    confirmation may not promise to leave standby - only an interface that is not running
+    is started by it."""
+    translations = Path(button_module.__file__).parent / "translations"
+    for language, words in (
+        ("en", ("must be switched on, not in standby", "Only when the interface is not running")),
+        ("pl", ("musi być włączony, a nie w trybie czuwania", "Tylko gdy interfejs nie działa")),
+        ("de", ("muss der Receiver eingeschaltet sein", "Nur wenn die Oberfläche nicht läuft")),
+    ):
+        common = json.loads((translations / f"{language}.json").read_text(encoding="utf-8"))[
+            "common"
+        ]
+        message = common["force_reinstall_confirm_message"]
+        for phrase in words:
+            assert phrase in message, (language, phrase)
+        assert common["force_reinstall_running_message"]
+    assert "will leave standby" not in json.loads(
+        (translations / "en.json").read_text(encoding="utf-8")
+    )["common"]["force_reinstall_confirm_message"]

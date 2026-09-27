@@ -16,10 +16,11 @@
     "update_summary_older_release": "Auf dem Receiver läuft ein älteres Plugin. Die Installation ersetzt es durch {version} aus der signierten Versionsliste des Plugins, heruntergeladen und geprüft, bevor etwas den Receiver erreicht, und lässt die Broker-Einstellungen des Receivers unverändert.",
     "downgrade_loses_mqtt_updates": "Plugin-Updates per MQTT (Updates sind dann wieder per SSH möglich)",
     "force_reinstall_title": "Erzwungene Plugin-Neuinstallation",
-    "force_reinstall_confirm_title": "Erzwungene Neuinstallation von Plugin {version} (SSH)",
-    "force_reinstall_confirm_message": "Innerhalb von 30 Sekunden erneut drücken, um zu bestätigen. Das Plugin wird per SSH aus dem mit der Integration gelieferten Paket neu installiert, und die Oberfläche des Receivers startet neu. Der Receiver verlässt den Standby, und über HDMI-CEC kann sich auch der Fernseher einschalten.",
+    "force_reinstall_confirm_title": "Erzwungene Neuinstallation des Plugins {version} (SSH)",
+    "force_reinstall_confirm_message": "Innerhalb von 30 Sekunden erneut drücken, um zu bestätigen. Das Plugin wird per SSH aus dem mit der Integration gelieferten Paket neu installiert, und die Oberfläche des Receivers startet neu. Solange die Oberfläche des Receivers läuft, muss der Receiver eingeschaltet sein, nicht im Standby; sonst wird nichts installiert. Nur wenn die Oberfläche nicht läuft, startet die Neuinstallation sie, und über HDMI-CEC kann sich dann auch der Fernseher einschalten.",
     "force_reinstall_older": "Das ist eine ältere Version als die installierte ({installed}).",
     "force_reinstall_admin_message": "Nur ein Home-Assistant-Administrator kann eine erzwungene Plugin-Neuinstallation bestätigen.",
+    "force_reinstall_running_message": "Auf diesem Receiver läuft bereits eine erzwungene Plugin-Neuinstallation. Dieses Drücken hat nichts gestartet; das Ergebnis erscheint hier, wenn sie abgeschlossen ist.",
     "force_reinstall_done_message": "Plugin {version} wurde per SSH neu installiert.",
     "force_reinstall_disabled_message": "Das Plugin wurde installiert, ist aber in seinen Einstellungen auf dem Receiver ausgeschaltet."
   },

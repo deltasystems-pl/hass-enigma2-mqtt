@@ -22,6 +22,7 @@ moment the topic appears.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
+import logging
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
@@ -31,6 +32,8 @@ from homeassistant.helpers.entity import Entity
 
 from .box import Enigma2Box
 from .const import DOMAIN, TOPIC_INFO
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class Enigma2Entity(Entity):
@@ -134,7 +137,7 @@ class OptionalEntities:
         again. For an entity that follows a decision taken in Home Assistant - credentials
         forgotten, then enrolled again - that would bring back whatever was done to the
         old one; with `forget` it comes back new, and disabled by default as it was the
-        first time (design, section 7a, OD D).
+        first time (ADR-0008, section 8).
         """
         self.hass = hass
         self.box = box
@@ -147,6 +150,8 @@ class OptionalEntities:
         self.signal = signal
         self.forget = forget
         self.live = False
+        # Whether the missing or changed registry internal below was logged already.
+        self._forget_unsupported_logged = False
 
     def start(self):
         """Reconcile once, then on every `info` (and signal), and return the unsubscribe."""
@@ -187,9 +192,33 @@ class OptionalEntities:
             unique_id = f"{self.box.node_id}_{key}"
             if entity_id := registry.async_get_entity_id(self.platform, DOMAIN, unique_id):
                 registry.async_remove(entity_id)
-            if self.forget and registry.deleted_entities.pop(
-                (self.platform, DOMAIN, unique_id), None
-            ):
-                # There is no public way to forget a removed entity's record, and nothing
-                # else of it may come back; the registry is saved like after any removal.
-                registry.async_schedule_save()
+            if self.forget:
+                self._forget_deleted(registry, unique_id)
+
+    @callback
+    def _forget_deleted(self, registry: er.EntityRegistry, unique_id: str) -> None:
+        """Drop the registry's record of a removed entity, when core still keeps it so.
+
+        There is no public way to forget a removed entity's record, so this reads core's
+        `deleted_entities`, a dict keyed by (domain, platform, unique id). That is an
+        internal: a Home Assistant that renames it or changes its type must not break the
+        button platform, which runs this at every setup for every receiver without stored
+        credentials. Anything but a dict is logged once and left alone - the cost is what
+        it was before this existed: an entity enrolled again comes back with its old id
+        and disabled flag.
+        """
+        deleted = getattr(registry, "deleted_entities", None)
+        if not isinstance(deleted, dict):
+            if not self._forget_unsupported_logged:
+                self._forget_unsupported_logged = True
+                _LOGGER.warning(
+                    "This Home Assistant keeps no deleted-entity records in the form this "
+                    "integration knows; a removed %s entity of %s may come back with its "
+                    "old entity id and settings when it is created again",
+                    self.platform,
+                    self.box.node_id,
+                )
+            return
+        if deleted.pop((self.platform, DOMAIN, unique_id), None):
+            # Nothing else of it may come back; the registry is saved like after any removal.
+            registry.async_schedule_save()
