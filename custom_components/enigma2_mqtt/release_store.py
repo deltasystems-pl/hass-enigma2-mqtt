@@ -290,6 +290,8 @@ class ReleaseIndexCache:
         self._connection_unsubscribe: Callable[[], None] | None = None
         self._relay_task: asyncio.Task[None] | None = None
         self._relay_again = False
+        # The relay while it waits for the broker, the one place where it may be stopped.
+        self._relay_reading: asyncio.Task[Any] | None = None
 
     # ----------------------------------------------------------------------- storage --
 
@@ -543,10 +545,27 @@ class ReleaseIndexCache:
 
     @callback
     def _detach(self, entry_id: str) -> None:
+        """Stop relaying when the last receiver goes.
+
+        A relay started for a receiver that is then removed would otherwise go on reading the
+        broker for up to its timeout and its grace, and publish in the name of an integration
+        that has no receiver left. So a relay still waiting for the broker is stopped there;
+        one past its read is not - it may be taking an index from the broker, which is saved
+        and announced, and cutting that short could lose the announcement - and publishes
+        nothing, because it looks for a receiver once more before it publishes.
+        """
         self._attached.discard(entry_id)
-        if not self._attached and self._connection_unsubscribe is not None:
+        if self._attached:
+            return
+        if self._connection_unsubscribe is not None:
             self._connection_unsubscribe()
             self._connection_unsubscribe = None
+        self._relay_again = False
+        if self._relay_task is not None and self._relay_reading is self._relay_task:
+            self._relay_task.cancel()
+            # A setup that follows - a reload - starts a relay of its own rather than
+            # leaving its request to the one that is being stopped.
+            self._relay_task = None
 
     @callback
     def _connection_changed(self, connected: bool) -> None:
@@ -603,7 +622,12 @@ class ReleaseIndexCache:
         await self.async_load()
         if self._verified_held() is None:
             return
-        retained = await self._async_read_retained()
+        self._relay_reading = asyncio.current_task()
+        try:
+            retained = await self._async_read_retained()
+        finally:
+            if self._relay_reading is asyncio.current_task():
+                self._relay_reading = None
         if retained is _UNREADABLE:
             _LOGGER.debug(
                 "Could not read the retained plugin release index; leaving the topic alone"
@@ -625,6 +649,10 @@ class ReleaseIndexCache:
                         return
                     if _at_or_above(key, index["serial"], held[1], held[0]["serial"]):
                         return
+            # The last receiver may have been removed after the read, while a check held the
+            # lock: with no receiver left, nothing is published.
+            if not self._attached:
+                return
             await self._async_publish()
 
     async def _async_take_from_broker(self, pair: tuple[bytes, bytes]) -> bool:

@@ -8,8 +8,9 @@ the vectors' throwaway test keys, which replace the embedded release keys for th
 
 from __future__ import annotations
 
+import asyncio
 import base64
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from datetime import timedelta
 import json
 import logging
@@ -22,6 +23,7 @@ from homeassistant.components.mqtt.const import (
     MQTT_CONNECTION_STATE,
     MQTT_PROCESSED_SUBSCRIPTIONS,
 )
+from homeassistant.components.mqtt.models import DATA_MQTT
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.core import HomeAssistant, callback
@@ -1410,3 +1412,244 @@ async def test_two_receivers_repair_the_index_once(
         assert len(_published(mqtt_mock)) == 2
         await _reconnect(hass)
         assert len(_published(mqtt_mock)) == 3
+
+
+# ------------------------------------------------ the relay ends with the last receiver --
+
+
+def _listening(hass: HomeAssistant) -> bool:
+    """Whether anything still subscribes to the retained index topic."""
+    return hass.data[DATA_MQTT].client.is_active_subscription(TOPIC_RELEASE_INDEX)
+
+
+class _HeldAcknowledgement:
+    """The acknowledgement of the relay's first subscription, kept back until the test gives it.
+
+    Every later acknowledgement comes from the broker as usual. So the first relay is known to
+    be waiting for the broker, and no timing decides where it is.
+    """
+
+    def __init__(self) -> None:
+        self.held: list[Callable[[], None]] = []
+        # Home Assistant has sent the SUBSCRIBE: the index broker delivers what it retains now.
+        self.processed = asyncio.Event()
+
+    @property
+    def waiting(self) -> bool:
+        return bool(self.held)
+
+    async def give(self) -> None:
+        """Acknowledge, in the order a broker does: after the subscription went out."""
+        async with asyncio.timeout(10):
+            await self.processed.wait()
+        self.held[0]()
+
+
+@pytest.fixture
+def acknowledgement(
+    hass: HomeAssistant, mqtt_mock, monkeypatch: pytest.MonkeyPatch
+) -> Generator[_HeldAcknowledgement]:
+    held = _HeldAcknowledgement()
+    original = release_store.mqtt.async_on_subscribe_done
+
+    def _on_subscribe_done(
+        hass: HomeAssistant, topic: str, qos: int, on_done: Callable[[], None]
+    ) -> Callable[[], None]:
+        if topic == TOPIC_RELEASE_INDEX and not held.held:
+            held.held.append(on_done)
+            return lambda: None
+        return original(hass, topic, qos, on_done)
+
+    @callback
+    def _processed(subscriptions: list[tuple[str, int]]) -> None:
+        if any(topic == TOPIC_RELEASE_INDEX for topic, _ in subscriptions):
+            held.processed.set()
+
+    monkeypatch.setattr(release_store.mqtt, "async_on_subscribe_done", _on_subscribe_done)
+    stop = async_dispatcher_connect(hass, MQTT_PROCESSED_SUBSCRIPTIONS, _processed)
+    yield held
+    stop()
+
+
+def _order_of_reads(monkeypatch: pytest.MonkeyPatch, order: list[str]) -> asyncio.Event:
+    """Write "read" into `order` each time a relay has finished reading the broker."""
+    read = asyncio.Event()
+    original = release_store.ReleaseIndexCache._async_read_retained
+
+    async def _read(self: release_store.ReleaseIndexCache) -> Any:
+        try:
+            return await original(self)
+        finally:
+            order.append("read")
+            read.set()
+
+    monkeypatch.setattr(release_store.ReleaseIndexCache, "_async_read_retained", _read)
+    return read
+
+
+async def test_removing_the_last_receiver_before_the_broker_acknowledges_publishes_nothing(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    index_broker: _IndexBroker,
+    config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+    acknowledgement: _HeldAcknowledgement,
+) -> None:
+    """The review's D-S1: a relay is not tied to any receiver, so it could publish after the
+    last of them was removed. Removing the last one stops the relay where it waits, and it
+    stops listening on the topic at once."""
+    _hold(hass_storage, sign(3, RELEASES), _trust({"t1": 3}))
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    assert acknowledgement.waiting
+
+    assert await hass.config_entries.async_remove(config_entry.entry_id)
+    await hass.async_block_till_done()
+    listening = _listening(hass)
+    # The acknowledgement comes after all, and the broker retains nothing.
+    acknowledgement.held[0]()
+    await _settled(hass)
+
+    assert (_published(mqtt_mock), listening) == ([], False)
+
+
+async def test_removing_the_last_receiver_during_the_grace_publishes_nothing(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    index_broker: _IndexBroker,
+    config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same after the acknowledgement, while the relay waits for a retained message: one
+    that arrives after the removal - here one that is no index at all, which a relay would
+    answer by publishing - is not answered."""
+    monkeypatch.setattr(release_store, "RETAINED_GRACE", 60)
+    acknowledged = asyncio.Event()
+
+    @callback
+    def _processed(subscriptions: list[tuple[str, int]]) -> None:
+        if any(topic == TOPIC_RELEASE_INDEX for topic, _ in subscriptions):
+            acknowledged.set()
+
+    stop = async_dispatcher_connect(hass, MQTT_PROCESSED_SUBSCRIPTIONS, _processed)
+    _hold(hass_storage, sign(3, RELEASES), _trust({"t1": 3}))
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    async with asyncio.timeout(10):
+        await acknowledged.wait()
+    await hass.async_block_till_done()
+
+    assert await hass.config_entries.async_remove(config_entry.entry_id)
+    await hass.async_block_till_done()
+    listening = _listening(hass)
+    async_fire_mqtt_message(hass, TOPIC_RELEASE_INDEX, "not json", 1, True)
+    await _settled(hass)
+    stop()
+
+    assert (_published(mqtt_mock), listening) == ([], False)
+
+
+@pytest.mark.parametrize(
+    ("on_the_broker", "serial", "announced"),
+    [(None, 3, 0), (_on_the_broker(sign(4, RELEASES)), 4, 1)],
+    ids=["nothing retained", "a newer index retained"],
+)
+async def test_a_relay_that_read_the_broker_publishes_nothing_once_the_last_receiver_is_gone(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    index_broker: _IndexBroker,
+    config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    acknowledgement: _HeldAcknowledgement,
+    on_the_broker: str | None,
+    serial: int,
+    announced: int,
+) -> None:
+    """A relay past its read is not stopped: it may be taking an index from the broker, which
+    is kept and announced like any other. But it no longer publishes once no receiver is set
+    up. Here it has read the broker and waits behind a check when the last receiver goes, and
+    a reconnect meanwhile has asked for another pass, which the removal withdraws."""
+    order: list[str] = []
+    read = _order_of_reads(monkeypatch, order)
+    _hold(hass_storage, sign(3, RELEASES), _trust({"t1": 3}))
+    index_broker.payload = on_the_broker
+    with patch(NOTIFY) as notify:
+        await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+        cache = _cache(hass)
+        # A check is running.
+        await cache._lock.acquire()
+        await acknowledgement.give()
+        async with asyncio.timeout(10):
+            await read.wait()
+        async_dispatcher_send(hass, MQTT_CONNECTION_STATE, True)
+        await hass.async_block_till_done()
+
+        assert await hass.config_entries.async_remove(config_entry.entry_id)
+        await hass.async_block_till_done()
+        cache._lock.release()
+        await _settled(hass)
+
+    assert order == ["read"]
+    assert _published(mqtt_mock) == []
+    assert cache.serial == serial
+    assert notify.call_count == announced
+
+
+async def test_reloading_the_only_receiver_while_the_relay_reads_relays_once(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    index_broker: _IndexBroker,
+    config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+    acknowledgement: _HeldAcknowledgement,
+) -> None:
+    """A reload is an unload and a setup: the relay the unload stopped is replaced by the
+    setup's own, and the index goes out once - not once for each."""
+    held = sign(3, RELEASES)
+    _hold(hass_storage, held, _trust({"t1": 3}))
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    assert acknowledgement.waiting
+
+    assert await hass.config_entries.async_reload(config_entry.entry_id)
+    await hass.async_block_till_done()
+    await acknowledgement.give()
+    await _settled(hass)
+
+    assert len(_published(mqtt_mock)) == 1
+    assert _relayed(mqtt_mock) == [held[0]]
+
+
+async def test_the_check_button_does_not_wait_for_a_relay_reading_the_broker(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    index_broker: _IndexBroker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    hass_storage: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    acknowledgement: _HeldAcknowledgement,
+) -> None:
+    """The review's D-S3: a relay reads the broker outside the check's lock, so a press is
+    answered while a relay still waits for the broker - which may take its full timeout."""
+    order: list[str] = []
+    _order_of_reads(monkeypatch, order)
+    _hold(hass_storage, sign(3, RELEASES), _trust({"t1": 3}))
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    assert acknowledgement.waiting
+
+    _serve(aioclient_mock, sign(4, RELEASES))
+    _cache(hass).checked = None
+    with patch(NOTIFY) as notify:
+        await hass.services.async_call("button", "press", {ATTR_ENTITY_ID: CHECK}, blocking=True)
+        order.append("pressed")
+        await acknowledgement.give()
+        await _settled(hass)
+
+    assert order[:2] == ["pressed", "read"]
+    assert notify.call_count == 1
+    assert hass.states.get(PLUGIN).attributes["index_serial"] == 4

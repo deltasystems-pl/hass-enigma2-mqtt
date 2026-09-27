@@ -475,6 +475,49 @@ async def test_preflight_fails_closed_on_recording_timer_or_unknown_guard(
     assert raised.value.code is code
 
 
+@pytest.mark.parametrize(
+    ("version", "refused"),
+    [("0.1.0", True), ("0.2.0", False)],
+    ids=["below the integration's floor", "at the integration's floor"],
+)
+async def test_with_no_index_the_bundle_is_held_to_the_integrations_own_floor(
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+    version: str,
+    refused: bool,
+) -> None:
+    """The review's D-S2. Before this Home Assistant has verified any index, the integration's
+    own floor - 0.2.0 - is the rule, and it holds for the bundle as well: a bundle below it is
+    refused before the receiver is connected to, and one at the floor goes on to connect."""
+    artifact = tmp_path / "plugin.ipk"
+    artifact.write_bytes(b"ipk bytes")
+    bundle = BundledPlugin(artifact, version, hashlib.sha256(b"ipk bytes").hexdigest(), "1" * 40)
+    connected: list[SshCredentials] = []
+
+    async def _connector(credentials: SshCredentials) -> Any:
+        connected.append(credentials)
+        raise InstallerError(InstallerErrorCode.SSH_UNAVAILABLE)
+
+    with (
+        patch("custom_components.enigma2_mqtt.installer.load_bundled_plugin", return_value=bundle),
+        patch(
+            "custom_components.enigma2_mqtt.installer._installed_hash_manifest",
+            return_value=b"hash  /file\n",
+        ),
+        pytest.raises(InstallerError) as raised,
+    ):
+        await async_install(hass, install_request, None, _connector=_connector)
+
+    if refused:
+        assert raised.value.code is InstallerErrorCode.BUNDLE_BELOW_FLOOR
+        assert raised.value.placeholders == {"version": "0.1.0", "floor": "0.2.0"}
+        assert connected == []
+    else:
+        assert raised.value.code is InstallerErrorCode.SSH_UNAVAILABLE
+        assert len(connected) == 1
+
+
 async def test_install_streams_bundle_and_provisioning_then_cleans_up(
     hass: HomeAssistant,
     install_request: InstallRequest,

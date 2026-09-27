@@ -132,7 +132,8 @@ The version card and the release check:
   retained index of a higher-ranked key, or a newer one of the same key - an index signed with the
   spare key in an emergency, above all - is never overwritten, and when the rule accepts it this
   Home Assistant takes it and announces it like any new index. Once for all receivers, not once
-  per receiver.
+  per receiver, and never after the last receiver is removed: a relay still reading the broker
+  then is stopped, and one past its read publishes nothing.
 - An index and a signature that do not match are read once more before they are judged - a
   publication can land between the two requests - and a pair that still does not verify is
   reported as "could not be verified, try again later", not as a forgery. The log keeps the
