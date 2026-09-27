@@ -275,11 +275,33 @@ box already correct: the node ID, the base topic, that the plugin is enabled, an
 end of the link rather than about the box; saving them reloads the entry, so a change takes
 effect without a restart.
 
-On a receiver that permits its own removal, *Configure* opens on a menu of two entries instead:
-**Options**, which is this form, and **Remove the plugin from the receiver** („Usuń wtyczkę z
-dekodera"), described in [§8](#removing-the-plugin-from-the-receiver). Every other receiver -
-and that is every receiver as shipped, because the permission is off by default - opens straight
-on the form, as before.
+When there is more to offer than this form, *Configure* opens on a menu instead: **Options**,
+which is this form; **Install an older plugin version** („Zainstaluj starszą wersję wtyczki"),
+described below; and, on a receiver that permits its own removal, **Remove the plugin from the
+receiver** („Usuń wtyczkę z dekodera"), described in [§8](#removing-the-plugin-from-the-receiver).
+With neither on offer - the usual case - it opens straight on the form, as before.
+
+**Install an older plugin version** is the only way back to an older plugin: never over MQTT and
+never from the update card. It is offered only with SSH credentials stored, once the receiver has
+reported its plugin version, and while the verified signed index lists an older version this
+integration may install - at or above the floor (the higher of 0.2.0 and the index's), not
+withdrawn, the same contract. Press *Check for plugin updates* first if no index has been read
+yet. The first step chooses the version; the second names what it takes away - the entities
+whose capability the older plugin predates (they stay in Home Assistant, but nothing updates
+them) and, going below a release that can update itself, updates over MQTT - and installs only
+once its box is ticked. The package is downloaded and verified as for the update card, then the
+SSH installer puts it over the newer plugin (opkg's `--force-downgrade`), restarts the interface
+by the restart rule and, once the older plugin has announced itself, asks it to retract every
+retained topic the newer one left (`cmd/reset`). A failed install rolls back to the newer
+version. The receiver has to be switched on: in standby the install is refused, as on the update
+card, because the restart would wake it; it keeps its channel. When the older version is the
+plugin bundled with this integration, its bytes are used and nothing is downloaded. The flow ends
+with a message and saves nothing: the entry and its options are unchanged. Settings the older
+plugin does not know stay on the receiver and come back with their values on the next upgrade.
+**After a downgrade the update card offers the newer release again** - it is still the newest
+compatible one, and the card never offers anything below the version running. Skip it on the
+card to stay on the older version; a skip lasts until a newer release than the skipped one
+appears.
 
 | Option | Default | What it does |
 |---|---|---|

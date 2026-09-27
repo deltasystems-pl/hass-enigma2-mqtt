@@ -12,7 +12,8 @@
     "release_index_notification_message": "Home Assistant accepted a new signed list of plugin versions: serial {serial}, signed with key {key_id}. Added: {added}. Withdrawn: {withdrawn}. Lowest version that may be installed: {floor}. If no plugin release or withdrawal was expected, install nothing and read the integration's SECURITY.md.",
     "release_index_none": "none",
     "update_summary_published_no_install": "The plugin's signed release index lists {version}. No SSH credentials are stored, so this card cannot install it: reconfigure the receiver with “Keep SSH credentials for updates”.",
-    "update_summary_older_release": "The receiver runs an older plugin. Installing replaces it with {version} from the plugin's signed release index, downloaded and checked before anything reaches the receiver, and leaves the receiver's own broker settings alone."
+    "update_summary_older_release": "The receiver runs an older plugin. Installing replaces it with {version} from the plugin's signed release index, downloaded and checked before anything reaches the receiver, and leaves the receiver's own broker settings alone.",
+    "downgrade_loses_mqtt_updates": "Plugin updates over MQTT (updates are then possible over SSH again)"
   },
   "config": {
     "flow_title": "{name}",
@@ -178,7 +179,7 @@
   },
   "options": {
     "step": {
-      "init": {"title": "Receiver options", "description": "Change the options for this end of the link, or remove the plugin from the receiver. This receiver permits its removal; that permission is set on the box itself.", "menu_options": {"settings": "Options", "uninstall": "Remove the plugin from the receiver"}},
+      "init": {"title": "Receiver options", "description": "Change the options for this end of the link, or act on the plugin on the receiver over SSH. Removing the plugin is offered only while the receiver permits it; that permission is set on the box itself.", "menu_options": {"settings": "Options", "uninstall": "Remove the plugin from the receiver", "downgrade": "Install an older plugin version"}},
       "settings": {
         "title": "Receiver options",
         "description": "The receiver reports the MAC address {mac}. Magic packets go there unless another one is given below.",
@@ -219,13 +220,16 @@
       }
       ,"ssh_host": {"title": "Connect to the receiver", "data": {"ssh_host": "Receiver host", "ssh_port": "SSH port"}}
       ,"ssh_confirm": {"title": "Confirm SSH identity", "description": "Confirm receiver fingerprint `{fingerprint}` before sending credentials.", "data": {"ssh_username": "SSH username", "ssh_password": "SSH password"}}
-      ,"uninstall": {"title": "Remove the plugin from the receiver", "description": "This removes the MQTT Bridge plugin from {name}. It is a one-way door: once the plugin is gone nothing here can bring it back — only SSH or the receiver's own package manager (Menu → Plugins → download → Extensions) can. The receiver keeps its plugin settings, so a reinstall starts on the same broker, node ID and mode, and this entry picks it up again with every entity as it was. Until then the device looks exactly like a switched-off receiver: every entity unavailable. The receiver restarts its interface at the end, and it refuses while it is recording or a recording is about to start.", "data": {"confirm_uninstall": "I understand that only SSH or the receiver's package manager can bring the plugin back"}}
+      ,"uninstall": {"title": "Remove the plugin from the receiver", "description": "This removes the MQTT Bridge plugin from {name}. It is a one-way door: once the plugin is gone nothing here can bring it back — only SSH or the receiver's own package manager (Menu → Plugins → download → Extensions) can. The receiver keeps its plugin settings, so a reinstall starts on the same broker, node ID and mode, and this entry picks it up again with every entity as it was. Until then the device looks exactly like a switched-off receiver: every entity unavailable. The receiver restarts its interface at the end, and it refuses while it is recording or a recording is about to start.", "data": {"confirm_uninstall": "I understand that only SSH or the receiver's package manager can bring the plugin back"}},
+      "downgrade": {"title": "Install an older plugin version", "description": "The receiver runs plugin {installed}. Choose the older version to install over SSH. Only versions the plugin's signed release index lists, at or above its lowest allowed version and not withdrawn, are offered. The next step says what the older version takes away, and nothing happens until it is confirmed.", "data": {"version": "Version"}},
+      "downgrade_confirm": {"title": "Install plugin {version} instead of {installed}", "description": "Plugin {version} is downloaded from the plugin's release site - unless it is the plugin bundled with this integration - checked against its signed release index and installed over SSH in place of {installed}. The receiver has to be switched on: in standby the install is refused, because the restart would wake it. Its interface restarts; it keeps its channel, and the receiver's own settings stay as they are - settings the older version does not know come back with their values after the next upgrade.\n\n**What stops working** until the plugin is upgraded again - the entities stay in Home Assistant, but nothing updates them:\n\n{lost}\n\nA failed install puts {installed} back.", "data": {"confirm_downgrade": "Install the older version"}}
     },
     "error": {
       "plugin_unavailable": "The receiver is not connected, so its privacy settings were not changed. Try again when it is online.",
       "plugin_config_failed": "The receiver did not confirm the new privacy settings. Its previous settings and these Home Assistant options were kept.",
       "invalid_mac": "That is not a MAC address. Write it as `00:00:5e:00:53:01`, `00-00-5e-00-53-01`, `0000.5e00.5301` or `00005e005301`, or leave the field empty to use the address the receiver reports.",
-      "uninstall_not_confirmed": "Tick the box to remove the plugin. Nothing has been sent to the receiver."
+      "uninstall_not_confirmed": "Tick the box to remove the plugin. Nothing has been sent to the receiver.",
+      "downgrade_not_confirmed": "Tick the box to install the older version."
     },
     "abort": {
       "uninstall_not_offered": "The receiver no longer permits removing its plugin, or it is not connected. Nothing was sent."
@@ -240,9 +244,46 @@
       ,"recording": "The receiver is recording. Nothing was sent; try again when the recording has finished."
       ,"timer_due": "A recording is about to start on the receiver. Nothing was sent; try again later."
       ,"mqtt_unavailable": "The MQTT integration is not available, so nothing was sent to the receiver."
-      ,"unknown": "Removing the plugin failed unexpectedly; the log has the details."
+      ,"unknown": "Removing the plugin failed unexpectedly; the log has the details.",
+      "host_key_changed": "The receiver's SSH host key changed and was not accepted.",
+      "ssh_unavailable": "The receiver's SSH service could not be reached, so nothing was installed.",
+      "auth_failed": "SSH authentication failed, so nothing was installed.",
+      "preflight_failed": "The receiver's checks could not be completed, so nothing was installed.",
+      "unsupported_python": "The receiver's Python version is too old for this plugin. Nothing was installed.",
+      "no_space": "The receiver does not have enough free space. Nothing was installed.",
+      "standby": "The receiver is in standby. Installing restarts the receiver's interface, which would wake it and may switch the television on. Nothing was installed; switch the receiver on and try again.",
+      "streaming": "The receiver is streaming to another device. Installing restarts its interface and would cut the stream off. Nothing was installed; try again when the stream has ended.",
+      "bundle_missing": "The plugin bundle shipped with this integration is missing. Reinstall the integration.",
+      "bundle_invalid": "The plugin bundle shipped with this integration failed verification. Reinstall the integration.",
+      "upload_failed": "The plugin could not be transferred to the receiver. Nothing was changed.",
+      "install_failed": "The plugin could not be installed. The receiver was put back as it was.",
+      "newer_installed": "The receiver already runs a newer plugin than this integration ships. Nothing was changed.",
+      "provision_failed": "The receiver's MQTT settings could not be written. The receiver was put back as it was.",
+      "restart_failed": "The receiver's interface did not restart safely. The receiver was put back as it was.",
+      "announcement_timeout": "The plugin did not announce itself after the restart. The receiver was put back as it was.",
+      "restart_withdrawn": "The receiver asked on screen whether to restart its interface, so the installation was withdrawn: the plugin files on the receiver are as they were before, and nothing was restarted. The question may still be visible on the television - answering \"yes\" or \"no\" is safe.",
+      "restart_unobserved": "The receiver was asked to restart its interface, and the connection to it was lost before the outcome could be seen. Nothing was undone: the new plugin files are on the receiver, and the installer's lock stays on it. Once the lock is thirty minutes old, installing again first puts the previous version back and then installs.",
+      "restart_unconfirmed": "The receiver did not confirm the request to restart its interface, and its interface did not restart within 60 seconds, so the installation was withdrawn: the plugin files on the receiver are as they were before, and nothing was restarted.",
+      "withdraw_failed": "The receiver's interface did not restart within 60 seconds - usually because the receiver is asking on the television whether to - and the previous plugin files could not be put back, so the new ones are still on the receiver. Nothing was restarted. A question may still be visible on the television: answering \"no\" keeps the plugin that is running; answering \"yes\" starts the new version without it having been checked. Install again afterwards.",
+      "rollback_unobserved": "The installation failed, and the receiver is putting itself back with a script of its own, but the connection to it was lost before that could be seen finishing. The installer's lock stays on the receiver for thirty minutes. If the receiver shows no picture by then, switch it off and on again.",
+      "rollback_failed": "The installation failed and the receiver could not be put back as it was. Check the receiver by hand: the backup taken before the change is in /home/root/mqttbridge-backups.",
+      "rollback_restart_failed": "The installation failed and the receiver was put back as it was, but its interface did not start again. Restart the receiver by hand; nothing else needs undoing.",
+      "rollback_lock_failed": "The receiver was put back as it was, but the installer's transaction lock could not be released. Delete /home/root/mqttbridge-backups/.ha-installer.lock on the receiver, or wait thirty minutes, before installing again.",
+      "rollback_opkg_busy": "The installation failed, and the receiver could not be put back as it was because its package manager (opkg) stayed busy with another operation — an install or removal from the receiver's own menu, most likely. Nothing was restored. Check the receiver by hand: the backup taken before the change is in /home/root/mqttbridge-backups.",
+      "rollback_opkg_overlap": "The installation failed and the receiver was put back as it was, but another run of its package manager (opkg) held the lock for part of the restore and may have changed the package database at the same time. Check the receiver by hand (`opkg status enigma2-plugin-extensions-mqttbridge`); the backup taken before the change is in /home/root/mqttbridge-backups.",
+      "opkg_busy": "The receiver's package manager (opkg) is busy with another operation — an install or removal from the receiver's own menu, or its update check — so nothing was installed. Try again in a minute.",
+      "bundle_below_floor": "The plugin bundled with this integration, {version}, is below {floor}, the lowest version the plugin's signed release index allows, so nothing was installed. Update this integration to get a newer plugin.",
+      "bundle_withdrawn": "The plugin bundled with this integration, {version}, has been withdrawn in the plugin's signed release index: {reason}. Nothing was installed. Update this integration to get a newer plugin.",
+      "version_below_floor": "Plugin {version} is below {floor}, the lowest version the plugin's signed release index allows, so nothing was installed.",
+      "version_withdrawn": "Plugin {version} has been withdrawn in the plugin's signed release index: {reason}. Nothing was installed.",
+      "package_invalid": "Could not download plugin {version}, or its checksum does not match the plugin's signed release index. Nothing was changed on the receiver.",
+      "depends_missing": "Plugin {version} needs packages that are not installed on the receiver: {package}. Nothing was changed.",
+      "identity_mismatch": "The receiver is configured for node ID {box_node_id} and base topic {box_base_topic}, and the form gives {node_id} and {base_topic}. A value in brackets is one the receiver has not stored, and shows the plugin's default where there is one. Nothing was changed.",
+      "downgrade_done": "Plugin {version} is installed and running on the receiver. The update card offers the newer release again, because it is still the newest compatible one; skip it there to stay on {version}.",
+      "downgrade_not_offered": "No older plugin version can be installed on this receiver now: it needs stored SSH credentials, a reported plugin version and a checked list of plugin versions (press “Check for plugin updates”) that lists an older version this integration allows.",
+      "version_not_installable": "Plugin {version} is no longer a release the plugin's signed release index lets this integration install, so nothing was installed."
     },
-    "progress": {"uninstalling": "Asking the receiver to remove its plugin, and waiting for it to retract its topics and go offline"}
+    "progress": {"uninstalling": "Asking the receiver to remove its plugin, and waiting for it to retract its topics and go offline", "downgrading": "Downloading and checking the older plugin, installing it on the receiver, restarting its interface and waiting for it to announce itself"}
   },
   "entity": {
     "binary_sensor": {
