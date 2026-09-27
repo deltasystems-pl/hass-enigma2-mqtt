@@ -44,7 +44,17 @@ offered: an internal URL that carries a user name and password never reaches the
 minutes and repeated at debug level, so that no broker client and no holder of a token can fill
 the log. The token is never written whole. A refusal after a request has been accepted - no
 address for the receiver, none for Home Assistant, the download - is also a persistent
-notification, as is an answer the receiver never fetched before it expired.
+notification. So is an answer nobody fetched before it expired, worded as exactly what Home
+Assistant knows - offered, not downloaded - because the request may have been forged by any
+broker client, or the receiver may have declined for a reason of its own. A refusal by the
+version rule is only logged: any broker client can ask for a refused version for free.
+
+**Starvation, the residual.** A new download is made once a minute per receiver; a broker
+client that asks first for another eligible version each minute - four of them, since a live
+grant answers again for free and a fourth version evicts the oldest - takes every minute. It
+could deny the install more cheaply anyway, by answering the receiver's request id on
+`cmd/relay` before Home Assistant does; what it costs Home Assistant is one verified download a
+minute per receiver.
 """
 
 from __future__ import annotations
@@ -313,8 +323,8 @@ class Relay:
                     self.hass,
                     grant.node_id,
                     grant.receiver,
-                    "relay_unreachable",
-                    {"url": f"{grant.base}{RELAY_PATH}..."},
+                    "relay_not_downloaded",
+                    {"version": grant.version, "url": f"{grant.base}{RELAY_PATH}..."},
                 ),
                 f"{DOMAIN} relay notification {grant.node_id}",
             )
@@ -426,8 +436,20 @@ class RelayView(HomeAssistantView):
             grant.served,
         )
         persistent_notification.async_dismiss(self._relay.hass, notification_id(grant.node_id))
+        # Prepared here, so Home Assistant's header middleware never sees this response: the
+        # headers it would add are set explicitly, and an empty Server header keeps aiohttp
+        # from announcing itself. The version in the file name passed `is_version`.
         response = web.StreamResponse(
-            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Disposition": (
+                    f'attachment; filename="{release_index.PACKAGE}_{grant.version}_all.ipk"'
+                ),
+                "Referrer-Policy": "no-referrer",
+                "Server": "",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "SAMEORIGIN",
+            }
         )
         response.content_type = "application/octet-stream"
         response.content_length = len(grant.data)
@@ -575,7 +597,7 @@ async def async_notify(
     common = await async_get_translations(hass, language, "common", {DOMAIN})
     template = exceptions.get(f"component.{DOMAIN}.exceptions.{key}.message") or key
     title = common.get(f"component.{DOMAIN}.common.relay_notification_title") or (
-        "{receiver}: the plugin could not be shared"
+        "{receiver}: plugin download from Home Assistant"
     )
     try:
         message = template.format(**placeholders)

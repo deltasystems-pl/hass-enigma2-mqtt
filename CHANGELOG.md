@@ -55,9 +55,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per receiver; never a retained request. The address is Home Assistant's own on the receiver's
   subnet, else its internal URL - never the external one - and only in the shape the receiver
   accepts: no IPv6 address, no user name and password. Requests are answered only for versions
-  this integration would install itself. A refusal after a request was accepted, and an answer
-  never fetched, are said in a notification; repeatable warnings are logged once per receiver in
-  ten minutes. The binding is as strong as Home Assistant's `trusted_proxies` (DOCUMENTATION.md).
+  this integration would install itself. A refusal after a request was accepted is said in a
+  notification, and so is an answer offered and not downloaded within ten minutes; repeatable
+  warnings are logged once per receiver in ten minutes. The response carries its own headers (no
+  server banner). The binding is as strong as Home Assistant's `trusted_proxies`, and a broker
+  client cycling eligible versions can take a receiver's once-a-minute download
+  (DOCUMENTATION.md).
 - **The SSH installer checks a release's `depends`** - every package the signed entry names -
   with `opkg status` before it takes the lock or a snapshot, and refuses naming every missing
   package. `opkg status` never takes opkg's lock; it sees only a package of that exact name, so a

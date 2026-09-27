@@ -879,9 +879,18 @@ package and nothing else.
 
 A receiver that reports no usable IPv4 address is not answered. When Home Assistant has accepted a
 request and cannot answer it - no IPv4 address for the receiver, no address of its own the receiver
-can use, the download failed - it says why in a notification, one per receiver, and again when an
-answer expires without the receiver ever fetching it. The receiver's own screen only says that
-Home Assistant did not answer. Anything a broker client can repeat is logged as a warning once per
+can use, the download failed - it says why in a notification, one per receiver. When an answer
+expires without a single download, the notification says only that: the plugin was offered and not
+downloaded within ten minutes. Home Assistant cannot tell a receiver that could not reach the
+address from one that declined for a reason of its own, or from a request any broker client
+forged. A version the rule refuses is only logged. The receiver's own screen only says that
+Home Assistant did not answer.
+
+A new download is made at most once a minute per receiver, so a broker client that asks first for
+another eligible version every minute can take that minute each time and keep the receiver from
+being answered. Such a client can deny the install more cheaply anyway - by answering the
+receiver's request on `cmd/relay` itself before Home Assistant does - and the cost to Home
+Assistant is one verified download a minute per receiver. Anything a broker client can repeat is logged as a warning once per
 receiver in ten minutes and at debug level after that. The full address, token included, appears
 in no line this integration writes; Home Assistant's own MQTT debug log shows every message it
 carries, this one too.

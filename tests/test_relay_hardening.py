@@ -670,11 +670,43 @@ async def test_a_refusal_is_said_where_the_household_looks(
     assert message.startswith(sentence)
     assert notification_id == f"enigma2_mqtt_relay_{NODE_ID}"
     assert create.call_args.kwargs["title"] == (
-        f"{config_entry.title}: the plugin could not be shared"
+        f"{config_entry.title}: plugin download from Home Assistant"
     )
 
 
-async def test_an_answer_the_receiver_never_fetched_says_so_when_it_expires(
+@pytest.mark.parametrize(
+    "code",
+    [
+        release_package.WITHDRAWN,
+        release_package.BELOW_FLOOR,
+        release_package.INCOMPATIBLE,
+        release_package.UNKNOWN_VERSION,
+        release_package.NO_INDEX,
+    ],
+)
+async def test_a_version_the_rule_refuses_is_logged_and_never_notified(
+    hass: HomeAssistant,
+    mqtt_mock: Any,
+    box_on_the_broker: Any,
+    config_entry: MockConfigEntry,
+    lan: Any,  # noqa: F811
+    code: str,
+) -> None:
+    """Any broker client can ask for a version the rule refuses, for free: no notice."""
+    await _box(hass, config_entry)
+    with (
+        patch(JUDGE, AsyncMock(side_effect=PackageError(code, "no", {"version": "0.3.0"}))),
+        patch(FETCH, AsyncMock(return_value=_package())) as fetch,
+        patch(NOTIFY) as create,
+    ):
+        await _ask(hass, REQUEST)
+
+    assert _answers(mqtt_mock) == []
+    fetch.assert_not_called()
+    create.assert_not_called()
+
+
+async def test_an_answer_never_fetched_says_what_home_assistant_knows(
     hass: HomeAssistant,
     mqtt_mock: Any,
     box_on_the_broker: Any,
@@ -689,12 +721,63 @@ async def test_an_answer_the_receiver_never_fetched_says_so_when_it_expires(
         async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=RELAY_LIFETIME + 1))
         await hass.async_block_till_done()
 
+    # Offered and not fetched is all Home Assistant knows: the request may have been forged, or
+    # the receiver may have declined for a reason of its own.
     ((message, _),) = _notified(create)
     assert message.startswith(
-        "The receiver could not download the plugin from Home Assistant (http://192.0.2.5:8123"
+        "Home Assistant offered plugin 0.3.0 to the receiver at "
+        "http://192.0.2.5:8123/api/enigma2_mqtt/relay/..., but it was not downloaded within "
+        "ten minutes."
     )
+    assert "could not" not in message
     token = answer["url"].rsplit("/", 1)[1]
     assert token not in message
+
+
+async def test_expiry_ends_a_grant_even_while_it_is_being_sent(
+    hass: HomeAssistant,
+    relay: Any,  # noqa: F811
+) -> None:
+    """A reader that never finishes pins a grant for at most its ten minutes."""
+    first = relay.grant(NODE_ID, RECEIVER, _package())
+    first.fetching = 1
+    first.expires = dt_util.utcnow().timestamp() - 1
+    assert relay.lookup(first.token) is None
+    again = relay.grant(NODE_ID, RECEIVER, _package())
+    assert again.token != first.token
+
+    # The timer, too, drops a grant that is being sent.
+    again.fetching = 1
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=RELAY_LIFETIME + 1))
+    await hass.async_block_till_done()
+    assert again.token not in relay._grants  # noqa: SLF001
+
+
+async def test_the_package_goes_out_with_the_headers_home_assistant_would_set(
+    hass: HomeAssistant,
+    relay: Any,  # noqa: F811
+    hass_client_no_auth: Any,
+) -> None:
+    """The view sends the response itself, so Home Assistant's header middleware never sees
+    it: the headers are the view's own, and no server banner goes out."""
+    grant = relay.grant(NODE_ID, "127.0.0.1", _package())
+    client = await hass_client_no_auth()
+
+    response = await client.get(RELAY_PATH + grant.token)
+
+    assert response.status == 200
+    assert await response.read() == b"signed package bytes"
+    headers = response.headers
+    assert headers["Content-Type"] == "application/octet-stream"
+    assert headers["Content-Disposition"] == (
+        'attachment; filename="enigma2-plugin-extensions-mqttbridge_0.3.0_all.ipk"'
+    )
+    assert headers["Content-Length"] == str(len(b"signed package bytes"))
+    assert headers["Cache-Control"] == "no-store"
+    assert headers["X-Content-Type-Options"] == "nosniff"
+    assert headers["Referrer-Policy"] == "no-referrer"
+    assert headers["X-Frame-Options"] == "SAMEORIGIN"
+    assert headers.get("Server", "") == ""
 
 
 async def test_an_answer_the_receiver_fetched_says_nothing_and_clears_an_old_notice(

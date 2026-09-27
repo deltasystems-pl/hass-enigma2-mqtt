@@ -10,7 +10,7 @@
     "update_summary_below_floor": "Dołączona wersja {version} jest starsza niż {floor}, najniższa wersja dopuszczona przez podpisaną listę wersji wtyczki. Ta karta jej nie zainstaluje.",
     "release_index_notification_title": "Nowa lista wersji wtyczki Enigma2 MQTT Bridge",
     "release_index_notification_message": "Home Assistant przyjął nową podpisaną listę wersji wtyczki: numer {serial}, klucz {key_id}. Dodane: {added}. Wycofane: {withdrawn}. Najniższa wersja, którą wolno zainstalować: {floor}. Jeśli nie spodziewano się nowego wydania ani wycofania wtyczki, niczego nie instaluj i przeczytaj plik SECURITY.md integracji.",
-    "relay_notification_title": "{receiver}: nie udało się udostępnić wtyczki",
+    "relay_notification_title": "{receiver}: pobieranie wtyczki z Home Assistant",
     "release_index_none": "brak",
     "update_summary_published_no_install": "Podpisana lista wersji wtyczki zawiera {version}. Nie zapisano danych SSH, więc ta karta nie może jej zainstalować: skonfiguruj dekoder ponownie z opcją „Zachowaj dane SSH do aktualizacji”.",
     "update_summary_older_release": "Dekoder ma starszą wtyczkę. Instalacja zastąpi ją wersją {version} z podpisanej listy wersji wtyczki, pobraną i sprawdzoną, zanim cokolwiek trafi na dekoder, i nie zmieni ustawień brokera na dekoderze.",
@@ -742,6 +742,7 @@
     "relay_no_ipv4": {"message": "Dekoder nie podał adresu IPv4, więc Home Assistant nie może mu bezpiecznie udostępnić wtyczki."},
     "relay_no_address": {"message": "Home Assistant nie zna swojego adresu w sieci lokalnej. Ustaw „Adres lokalny” w ustawieniach sieci Home Assistant."},
     "relay_busy": {"message": "Home Assistant właśnie wysyła wtyczkę do tego dekodera. Spróbuj ponownie, gdy to pobieranie się zakończy."},
-    "relay_unreachable": {"message": "Dekoder nie mógł pobrać wtyczki z Home Assistant ({url}). Ustaw „Adres lokalny” w ustawieniach sieci Home Assistant na adres osiągalny z dekodera."}
+    "relay_unreachable": {"message": "Dekoder nie mógł pobrać wtyczki z Home Assistant ({url}). Ustaw „Adres lokalny” w ustawieniach sieci Home Assistant na adres osiągalny z dekodera."},
+    "relay_not_downloaded": {"message": "Home Assistant udostępnił dekoderowi wtyczkę {version} pod adresem {url}, ale nie została pobrana w ciągu dziesięciu minut. Jeśli instalacja na dekoderze się nie powiodła, sprawdź, czy dekoder ma dostęp do tego adresu."}
     }
   }
