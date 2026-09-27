@@ -101,8 +101,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exceptions of contract 1 are listed in `const.py`, and CI compares the list with the plugin's
   `contract.json`.
 - **The SSH installer's forced mode**, the recovery path the forced-reinstall button uses
-  ([ADR-0008](docs/adr/0008-signed-plugin-index.md), section 8). **Not yet run on a receiver.** It installs only the bundled package, over
-  any version (`--force-downgrade` when opkg's records name a newer or unreadable version, never
+  ([ADR-0008](docs/adr/0008-signed-plugin-index.md), section 8). **Not yet run on a receiver.**
+  It installs only the bundled package, over any version (`--force-downgrade` when opkg's records name a newer or unreadable version, never
   otherwise), and never waits for the plugin to answer. It reads the state of the receiver's
   interface over SSH before any guard that needs OpenWebif - `runlevel` and three `pidof enigma2`
   samples over ten seconds - and decides by it: a running interface gets the update path's guards
