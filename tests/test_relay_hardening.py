@@ -163,12 +163,37 @@ async def test_an_entry_that_began_to_unload_during_a_wait_gets_nothing(
     with (
         patch(JUDGE, side_effect=judge, create=True),
         patch(ADAPTERS, side_effect=adapters),
-        patch(FETCH, side_effect=fetch),
+        patch(FETCH, side_effect=fetch) as fetched,
     ):
         await _ask(hass, REQUEST)
 
     assert async_get_relay(hass).grants(NODE_ID) == []
     assert _answers(mqtt_mock) == []
+    # Nothing is downloaded for an entry that is going.
+    assert fetched.call_count == (1 if where == "download" else 0)
+
+
+async def test_a_live_grant_is_not_given_again_by_an_entry_that_began_to_unload(
+    hass: HomeAssistant,
+    mqtt_mock: Any,
+    box_on_the_broker: Any,
+    config_entry: MockConfigEntry,
+    lan: Any,  # noqa: F811
+) -> None:
+    """Answering from a live grant waits only for the judge; the entry is asked after it."""
+    await _box(hass, config_entry)
+    with patch(FETCH, AsyncMock(return_value=_package())):
+        await _ask(hass, REQUEST)
+
+        async def judge(_hass: Any, version: str) -> Any:
+            config_entry.mock_state(hass, ConfigEntryState.UNLOAD_IN_PROGRESS)
+            return _judge(_hass, version)
+
+        with patch(JUDGE, side_effect=judge):
+            await _ask(hass, {**REQUEST, "id": "unloading"})
+
+    assert [answer["id"] for answer in _answers(mqtt_mock)] == [REQUEST["id"]]
+    config_entry.mock_state(hass, ConfigEntryState.LOADED)
     config_entry.mock_state(hass, ConfigEntryState.LOADED)
 
 
@@ -706,12 +731,13 @@ async def test_a_request_over_the_size_limit_gets_no_answer(
     lan: Any,  # noqa: F811
 ) -> None:
     await _box(hass, config_entry)
-    body = json.dumps(REQUEST)
-    with patch(FETCH, AsyncMock(return_value=_package())) as fetch:
-        await _ask(hass, body + " " * (1025 - len(body)))
-        await _ask(hass, body + " " * (1024 - len(body)))
+    over = json.dumps({**REQUEST, "id": "over"})
+    at = json.dumps({**REQUEST, "id": "at"})
+    with patch(FETCH, AsyncMock(return_value=_package())):
+        await _ask(hass, over + " " * (1025 - len(over)))
+        await _ask(hass, at + " " * (1024 - len(at)))
 
-    assert fetch.await_count == 1
+    assert [answer["id"] for answer in _answers(mqtt_mock)] == ["at"]
 
 
 @pytest.mark.parametrize("address", ["0.0.0.0", "224.0.0.1", "255.255.255.255"])
