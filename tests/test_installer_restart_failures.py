@@ -21,7 +21,7 @@ import asyncssh
 from homeassistant.core import HomeAssistant
 import pytest
 
-from custom_components.enigma2_mqtt import installer
+from custom_components.enigma2_mqtt import installer, installer_helper
 from custom_components.enigma2_mqtt.installer import (
     CommandResult,
     InstallerError,
@@ -390,6 +390,36 @@ async def test_an_interface_that_would_not_stop_is_not_reported_put_back(
     assert receiver.files["plugin"] == "old"
     assert receiver.restore_flags == ["--provisioning"]
     assert receiver.zaps == []
+    assert _released(receiver)
+    assert "only the plugin's files were put back" in raised.value.__cause__.detail
+
+
+@pytest.mark.parametrize(
+    ("restore_status", "code"),
+    [
+        (installer_helper.EXIT_OPKG_BUSY, InstallerErrorCode.ROLLBACK_OPKG_BUSY),
+        (installer_helper.EXIT_OPKG_LOCK_LOST, InstallerErrorCode.ROLLBACK_OPKG_OVERLAP),
+        (143, InstallerErrorCode.ROLLBACK_FAILED),
+    ],
+)
+async def test_an_interface_that_would_not_stop_keeps_the_restores_own_verdict(
+    credentials: SshCredentials, restore_status: int, code: InstallerErrorCode
+) -> None:
+    """Only the files went back" is true only of a restore that put the files back.
+
+    A restore opkg kept waiting put nothing back, and one cut off by its watchdog put back
+    an unknown part; the stop that did not happen changes neither.
+    """
+    receiver = FakeReceiver(r2_stop_timeout=True, r2_restore_status=restore_status)
+
+    with pytest.raises(InstallerError) as raised:
+        await _rollback(credentials, receiver.connect)
+
+    assert raised.value.code is code
+    assert "files were put back" not in getattr(raised.value.__cause__, "detail", "")
+    assert any(
+        "did not stop" in note for note in getattr(raised.value.__cause__, "__notes__", [])
+    )
     assert _released(receiver)
 
 

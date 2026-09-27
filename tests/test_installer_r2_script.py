@@ -108,6 +108,20 @@ class Box:
         self.runlevel.write_text("3\n")
         self.enigma.write_text("100\n")
         self.events.write_text("")
+        # Where a stand-in signals the script: "<point> <signal number>", consumed once.
+        # The stand-in runs in the script's foreground (or, for the restore, as its
+        # child), so the script's trap runs right after that command - at exactly the
+        # step named, with no sleep deciding where it lands.
+        self.signal_at = base / "signal-at"
+        # For the one point no stand-in runs at: "<script pid> <signal>", read by the
+        # fork hook right after the script forks the restore.
+        self.fork_arm = base / "fork-arm"
+        downs = base / "pidof-downs"
+        signal_here = (
+            f'if [ -f {self.signal_at} ]; then read point sig < {self.signal_at}; '
+            f'if [ "$point" = "{{point}}" ]; then rm -f {self.signal_at}; '
+            f'echo "signalled $point" >> {self.events}; kill -"$sig" "$PPID"; fi; fi\n'
+        )
         # `init`: change the runlevel, stop or start the interface, write it down. Like
         # the real one it returns before the interface has gone: enigma2 stops a second
         # later - or, for a receiver whose interface will not stop, never.
@@ -118,12 +132,28 @@ class Box:
             f'echo "init $1" >> {self.events}\n'
             f'echo "$1" > {self.runlevel}\n'
             f'if [ "$1" = 4 ]; then\n    {stop}\nfi\n'
-            f'if [ "$1" = 3 ]; then echo 101 > {self.enigma}; fi\n',
+            f'if [ "$1" = 3 ]; then echo 101 > {self.enigma}; fi\n'
+            + signal_here.replace("{point}", "init$1"),
             0o755,
         )
+        # `pidof`: "wait" signals from the first call that still finds enigma2 (the
+        # stop wait); "stopped" and "fork" act on the second call that finds it gone,
+        # which is the script's last look before it records the stop and forks the
+        # restore.
         _write(
             self.bin / "pidof",
-            f"#!/bin/sh\n[ -f {self.enigma} ] && cat {self.enigma}\n",
+            "#!/bin/sh\n"
+            f"if [ -f {self.enigma} ]; then\n"
+            f"    cat {self.enigma}\n"
+            "    " + signal_here.replace("{point}", "wait") + "    exit 0\nfi\n"
+            f"echo x >> {downs}\n"
+            f'if [ "$(wc -l < {downs})" -eq 2 ]; then\n'
+            "    " + signal_here.replace("{point}", "stopped") + ""
+            f"    if [ -f {self.signal_at} ]; then read point sig < {self.signal_at}; "
+            f'if [ "$point" = fork ]; then rm -f {self.signal_at}; '
+            f'echo "$PPID $sig" > {self.fork_arm}; fi; fi\n'
+            "fi\n"
+            "exit 1\n",
             0o755,
         )
         # The interpreter the script runs the helper with: the real one, except that a
@@ -131,7 +161,8 @@ class Box:
         _write(
             self.bin / "python-slow",
             "#!/bin/sh\n"
-            f'if [ "$2" = restore ]; then sleep {restore_seconds}; fi\n'
+            + signal_here.replace("{point}", "$2")
+            + f'if [ "$2" = restore ]; then sleep {restore_seconds}; fi\n'
             f'"{sys.executable}" "$@"\n'
             "rc=$?\n"
             f'if [ "$2" = restore ]; then echo "restore done $rc" >> {self.events}; fi\n'
@@ -261,10 +292,10 @@ def test_the_script_stops_restores_writes_the_channel_and_starts(
 def test_a_signal_while_the_restore_runs_still_ends_with_the_interface_up(
     box: Box, monkeypatch: pytest.MonkeyPatch, signum: signal.Signals
 ) -> None:
-    """The trap waits for the restore, writes the channel after it, and starts once.
+    """The restore is waited for, the channel written after it, and the start runs once.
 
     Measured: a signal to the shell alone runs the trap at once, while the restore child
-    is still working. A trap that did not wait would start the interface - and write the
+    is still working. A script that did not wait would start the interface - and write the
     channel - under a restore that then renames the settings file over the channel.
     Without PIPE in the list, a shell whose output reader went away dies of it and runs
     no trap at all.
@@ -296,6 +327,134 @@ def test_a_second_signal_cannot_cut_the_first_one_short(
     box.wait_for(lambda: "init 3" in box.events_list())
 
     box.assert_put_back()
+
+
+# The fork of the restore and the line that keeps its pid are two steps of the script with
+# no command of its own between them, so no stand-in can signal there. This shim does:
+# preloaded into the script's shell, it sends the armed signal to that shell right after a
+# fork returns in it, once `pidof` has armed it - the next fork after the script's last
+# look for enigma2 is the restore's. A statically linked shell (busybox, often) does not
+# load it, and the test says so instead of passing.
+_FORK_HOOK = r"""
+#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+pid_t fork(void)
+{
+    static pid_t (*real_fork)(void);
+    if (!real_fork)
+        real_fork = (pid_t (*)(void))dlsym(RTLD_NEXT, "fork");
+    pid_t child = real_fork();
+    const char *arm = getenv("R2_TEST_FORK_ARM");
+    const char *events = getenv("R2_TEST_EVENTS");
+    if (child > 0 && arm && events) {
+        FILE *in = fopen(arm, "r");
+        long pid = 0;
+        int sig = 0;
+        if (in) {
+            int fields = fscanf(in, "%ld %d", &pid, &sig);
+            fclose(in);
+            if (fields == 2 && pid == (long)getpid()) {
+                unlink(arm);
+                FILE *out = fopen(events, "a");
+                if (out) {
+                    fputs("signalled fork\n", out);
+                    fclose(out);
+                }
+                kill(getpid(), sig);
+            }
+        }
+    }
+    return child;
+}
+"""
+
+
+@pytest.fixture(scope="session")
+def fork_hook(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    compiler = shutil.which("cc") or shutil.which("gcc")
+    if compiler is None:
+        pytest.skip("no C compiler for the fork hook")
+    directory = tmp_path_factory.mktemp("fork-hook")
+    source = _write(directory / "hook.c", _FORK_HOOK)
+    library = directory / "hook.so"
+    subprocess.run(
+        [compiler, "-shared", "-fPIC", "-o", str(library), str(source), "-ldl"],
+        check=True,
+        capture_output=True,
+    )
+    return library
+
+
+SIGNALLED_POINTS = [
+    # (point, signal) - where the signal lands, and which.
+    *(
+        (point, signum)
+        for point in ("init4", "wait", "stopped", "fork")
+        for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)
+    ),
+    ("restore", signal.SIGTERM),
+    ("lastservice", signal.SIGTERM),
+    ("init3", signal.SIGTERM),
+]
+
+
+@pytest.mark.parametrize(
+    ("point", "signum"),
+    SIGNALLED_POINTS,
+    ids=[f"{point}-{signum.name}" for point, signum in SIGNALLED_POINTS],
+)
+def test_a_signal_anywhere_after_the_trap_changes_nothing_the_script_does(
+    shell: list[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+    point: str,
+    signum: signal.Signals,
+) -> None:
+    """Wherever a signal lands, the restore completes, then the channel, then the start.
+
+    The points are the script's steps in order: `init 4` (the stop requested), the wait
+    for enigma2 to go, its last look before it records the stop, the fork of the restore
+    (before its pid is kept), the restore, the channel and `init 3`. A trap that finished
+    at once from any of the first four started enigma2 on the plugin the rollback exists
+    to remove - or, from the fork, left the restore running on its own to rename the
+    settings over the channel under a running interface, with no `restored` in the status
+    for the installer to read. A signal that arrived before the finishing step began ends
+    the script without `done`; one while it runs is ignored, as before.
+    """
+    box = Box(
+        tmp_path, shell, restore_seconds=0.5, stop_seconds=1 if point == "wait" else 0
+    )
+    box.signal_at.write_text(f"{point} {int(signum)}\n")
+    if point == "fork":
+        monkeypatch.setenv("LD_PRELOAD", str(request.getfixturevalue("fork_hook")))
+        monkeypatch.setenv("R2_TEST_FORK_ARM", str(box.fork_arm))
+        monkeypatch.setenv("R2_TEST_EVENTS", str(box.events))
+    box.start(monkeypatch)
+
+    box.wait_for(box.finished)
+    box.wait_for(lambda: "init 3" in box.events_list())
+    # A restore the script lost track of finishes after the start; wait for it either way.
+    box.wait_for(lambda: any(e.startswith("restore done") for e in box.events_list()))
+
+    if point == "fork" and f"signalled {point}" not in box.events_list():
+        pytest.skip("this shell does not load the fork hook (statically linked)")
+    assert f"signalled {point}" in box.events_list()
+    box.assert_put_back()
+    steps = box.status.read_text().split("\n")[1:]
+    assert steps[:5] == ["stopping 0", "stopped", "restored 0", "written 0", "started 0"]
+    if point in ("init4", "wait", "stopped", "fork"):
+        assert "done" not in steps
+    elif point in ("lastservice", "init3"):
+        assert steps[5] == "done"
+    time.sleep(0.3)
+    assert box.events_list().count("init 3") == 1
+    assert box.events_list().count("restore done 0") == 1
 
 
 class _Server(asyncssh.SSHServer):

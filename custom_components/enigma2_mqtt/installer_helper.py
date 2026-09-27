@@ -1199,13 +1199,22 @@ def power_state(state: int, base: str = WEBIF_URL) -> bool:
 #   (`/tmp/enigma2-mqtt-r2-<id>/`) holding its own copy of this helper, its status and
 #   its output; the installer removes that directory only after it has seen the script
 #   start the interface again, and keeps the transaction lock until then.
-# - The trap is set before `init 4`, on EXIT HUP INT TERM PIPE. Without PIPE a shell
-#   whose output reader went away dies on its next write and never runs the trap. The
-#   trap first ignores further signals, so a second one cannot cut off the first.
-# - The trap waits for a restore that is still running. A signal to the shell alone
-#   runs the trap at once, while the restore child is still working; starting the
-#   interface or writing the channel under it would let the restore rename the
-#   settings file over the channel.
+# - The trap is set before `init 4`, on HUP INT TERM PIPE, and all it does is note the
+#   signal. Without PIPE a shell whose output reader went away dies on its next write.
+#   A trap that finished the script itself did so at whatever step the signal landed
+#   on: during the wait for enigma2 to stop, or before the restore was forked, it
+#   started the interface on the plugin this rollback exists to remove; between the
+#   fork and the line that keeps the restore's pid, it did not know there was a restore
+#   to wait for, and the restore went on to rename the settings over the channel under
+#   a running interface, with no `restored` for the installer to read. So a signal
+#   changes nothing the script does - the stop is waited for, the restore runs to its
+#   end or its limit, the channel is written, the interface started, all within the
+#   bounds of a run without one - and only ends the script without `done`.
+# - Only the finishing step waits for the restore, with signals ignored: a wait a
+#   signal interrupts has no exit status to report, and a second wait for a child
+#   already reaped reports a failure that did not happen. Signals are caught, not
+#   ignored, until then, so the restore and the watchdog start with the default
+#   dispositions and the watchdog's TERM still ends a restore that hangs.
 # - The restore is bounded. A watchdog ends it after its limit, so the picture comes
 #   back even from a restore that hangs; a restore cut off part-way is repeated by the
 #   next install's recovery, which is safe, while a missing picture is not.
@@ -1214,13 +1223,15 @@ def power_state(state: int, base: str = WEBIF_URL) -> bool:
 #   writes them out on its next clean quit, over anything written now; then the script
 #   puts back the files alone, says `stop_timeout`, and leaves the settings to it.
 # - Order: the settings block first, then `lastservice`, then `init 3`, each by a rename.
-# - It ends in `exit`: after a signal trap that does not exit, the shell carries on with
-#   its next step. `finish` is idempotent, because the EXIT trap runs it a second time.
+# - `finish` is idempotent; the EXIT trap, there for an exit nobody planned, would run
+#   it a second time.
 # - It does not keep the transaction lock alive; the installer holds it. What no trap
 #   covers is SIGKILL or power between the stop and the start. Power reboots the
 #   receiver, which frees the lock at once; a killed script leaves the interface stopped
 #   until the receiver is switched off and on again. That residual is stated, not
-#   hidden behind a heartbeat nobody would be left to stop.
+#   hidden behind a heartbeat nobody would be left to stop. A signal to the whole
+#   process group also reaches the restore, which then says it did not finish, and the
+#   interface is started over it; the detached start is what keeps one from being sent.
 R2_SCRIPT = """#!/bin/sh
 # Enigma2 MQTT Bridge installer: stop the receiver's interface, put the plugin and its
 # settings back, write the channel to start on, and start the interface again.
@@ -1235,9 +1246,9 @@ init={init}
 pidof={pidof}
 restore_pid=
 watchdog=
-restored=
 stopped=
 started=
+pending=
 say() {{
     echo "$1" >> "$status"
 }}
@@ -1249,12 +1260,8 @@ finish() {{
     trap '' HUP INT TERM PIPE
     if [ -n "$restore_pid" ]; then
         wait "$restore_pid"
-        rc=$?
+        say "restored $?"
         restore_pid=
-        if [ -z "$restored" ]; then
-            restored=$rc
-            say "restored $rc"
-        fi
     fi
     if [ -n "$watchdog" ]; then
         kill "$watchdog" 2>/dev/null
@@ -1269,7 +1276,7 @@ finish() {{
     "$init" 3
     say "started $?"
 }}
-trap 'finish; exit 1' HUP INT TERM PIPE
+trap 'pending=1' HUP INT TERM PIPE
 trap 'finish' EXIT
 say "begun $$"
 "$init" 4
@@ -1294,13 +1301,11 @@ fi
 restore_pid=$!
 ( sleep {restore_limit}; kill -TERM "$restore_pid" 2>/dev/null ) &
 watchdog=$!
-wait "$restore_pid"
-rc=$?
-restored=$rc
-restore_pid=
-say "restored $rc"
 finish
-trap - EXIT HUP INT TERM PIPE
+trap - EXIT
+if [ -n "$pending" ]; then
+    exit 1
+fi
 say "done"
 exit 0
 """

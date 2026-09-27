@@ -1442,12 +1442,20 @@ async def _async_rollback(
                 elif "stop_timeout" in steps:
                     # enigma2 never stopped. The script put the files back and left the
                     # settings and the channel to the running interface, which writes its
-                    # own over anything written now; nothing restarted.
-                    restore_error = InstallerError(
-                        InstallerErrorCode.ROLLBACK_FAILED,
-                        "the receiver's interface did not stop, so only the plugin's "
-                        "files were put back, not its settings",
-                    )
+                    # own over anything written now; nothing restarted. "The files were
+                    # put back" is only true of a restore that succeeded: one opkg kept
+                    # waiting put nothing back, and its own verdict says so.
+                    if restore_error is None:
+                        restore_error = InstallerError(
+                            InstallerErrorCode.ROLLBACK_FAILED,
+                            "the receiver's interface did not stop, so only the plugin's "
+                            "files were put back, not its settings",
+                        )
+                    else:
+                        restore_error.add_note(
+                            "the receiver's interface did not stop, so its settings were "
+                            "not restored either"
+                        )
                 elif steps["started"] not in ("", "0"):
                     raise InstallerError(InstallerErrorCode.ROLLBACK_RESTART_FAILED)
                 else:
