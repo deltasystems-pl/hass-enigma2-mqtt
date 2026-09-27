@@ -1652,3 +1652,96 @@ async def test_the_check_button_does_not_wait_for_a_relay_reading_the_broker(
     assert order[:2] == ["pressed", "read"]
     assert notify.call_count == 1
     assert hass.states.get(PLUGIN).attributes["index_serial"] == 4
+
+
+async def test_a_check_that_outlives_the_last_receiver_starts_no_relay(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    index_broker: _IndexBroker,
+    config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A press is fetching the origin when the last receiver is removed, and the check then
+    accepts a new index. The check is the person's and finishes - the index is kept and
+    announced - but no relay starts for it: nothing reads the broker for a Home Assistant with
+    no receiver set up."""
+    events: list[str] = []
+    subscribe = release_store.mqtt.async_subscribe
+
+    async def _subscribe(hass_: HomeAssistant, topic: str, *args: Any, **kwargs: Any) -> Any:
+        if topic == TOPIC_RELEASE_INDEX:
+            events.append("subscribe")
+        return await subscribe(hass_, topic, *args, **kwargs)
+
+    monkeypatch.setattr(release_store.mqtt, "async_subscribe", _subscribe)
+    _hold(hass_storage, sign(3, RELEASES), _trust({"t1": 3}))
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    await _settled(hass)
+    relayed_at_setup = len(_published(mqtt_mock))
+
+    fetching = asyncio.Event()
+    answer = asyncio.Event()
+    newer = sign(4, RELEASES)
+
+    async def _get(session: Any, url: str, limit: int, headers: Any) -> Any:
+        fetching.set()
+        await answer.wait()
+        if url.endswith(".sig"):
+            return 200, newer[1], None
+        return 200, newer[0], '"four"'
+
+    monkeypatch.setattr(release_store, "_async_get", _get)
+    _cache(hass).checked = None
+    events.clear()
+    with patch(NOTIFY) as notify:
+        press = hass.async_create_task(
+            hass.services.async_call("button", "press", {ATTR_ENTITY_ID: CHECK}, blocking=True)
+        )
+        async with asyncio.timeout(10):
+            await fetching.wait()
+        assert await hass.config_entries.async_remove(config_entry.entry_id)
+        events.append("removed")
+        answer.set()
+        async with asyncio.timeout(10):
+            await press
+        await _settled(hass)
+
+    assert events == ["removed"]
+    assert len(_published(mqtt_mock)) == relayed_at_setup
+    assert _cache(hass).serial == 4
+    assert notify.call_count == 1
+
+
+async def test_a_receiver_attached_as_the_last_one_leaves_still_gets_its_relay(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    index_broker: _IndexBroker,
+    config_entry: MockConfigEntry,
+    hass_storage: dict[str, Any],
+    acknowledgement: _HeldAcknowledgement,
+) -> None:
+    """The last receiver goes while the relay waits for the broker, and another is attached in
+    the same turn of the loop - before the stopped relay has finished stopping. The new one
+    starts a relay of its own rather than leaving its request to the relay being stopped."""
+    held = sign(3, RELEASES)
+    _hold(hass_storage, held, _trust({"t1": 3}))
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    assert acknowledgement.waiting
+    cache = _cache(hass)
+    other = MockConfigEntry(
+        domain=DOMAIN,
+        title="Dekoder sypialnia",
+        unique_id="vuduo4k_005302",
+        data={CONF_NODE_ID: "vuduo4k_005302", CONF_BASE_TOPIC: BASE_TOPIC, CONF_NAME: "Sypialnia"},
+    )
+
+    cache._detach(config_entry.entry_id)
+    cache.async_attach(other)
+    # The stopped relay's acknowledgement never comes; the new relay's comes from the broker.
+    await _settled(hass)
+
+    assert _relayed(mqtt_mock) == [held[0]]
+    assert len(_published(mqtt_mock)) == 1

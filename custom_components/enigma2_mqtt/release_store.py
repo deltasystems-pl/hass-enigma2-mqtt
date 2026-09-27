@@ -552,7 +552,10 @@ class ReleaseIndexCache:
         that has no receiver left. So a relay still waiting for the broker is stopped there;
         one past its read is not - it may be taking an index from the broker, which is saved
         and announced, and cutting that short could lose the announcement - and publishes
-        nothing, because it looks for a receiver once more before it publishes.
+        nothing, because it looks for a receiver once more before it publishes. "Still waiting"
+        is judged by the turn of the loop: a retained index delivered in the same turn as the
+        removal, before the relay has resumed, goes with it - it stays retained, and the next
+        setup reads it.
         """
         self._attached.discard(entry_id)
         if self._attached:
@@ -577,8 +580,12 @@ class ReleaseIndexCache:
         """Relay in the background, one relay at a time; asked again meanwhile, once more.
 
         In the background because reading the broker takes up to its grace, and neither a
-        setup nor a press of the check button should wait for it.
+        setup nor a press of the check button should wait for it. Never with no receiver set
+        up: a check still running when the last one was removed may yet accept an index, and a
+        relay started then would read the broker, and could take an index from it, for nobody.
         """
+        if not self._attached:
+            return
         self._relay_again = True
         if self._relay_task is None or self._relay_task.done():
             self._relay_task = self.hass.async_create_background_task(
