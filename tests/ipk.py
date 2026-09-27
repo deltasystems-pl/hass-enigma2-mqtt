@@ -53,7 +53,12 @@ def _ar(members: list[tuple[str, bytes]]) -> bytes:
     return bytes(out)
 
 
-def make_ipk(build: str | None = None, *, extra: dict[str, bytes] | None = None) -> bytes:
+def make_ipk(
+    build: str | None = None,
+    *,
+    extra: dict[str, bytes] | None = None,
+    control: bytes = b"Package: x\n",
+) -> bytes:
     """A package whose data carries `build` as its `buildinfo.py`, or no build id at all."""
     files = {"./usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge/plugin.py": b"# plugin\n"}
     if build is not None:
@@ -62,7 +67,18 @@ def make_ipk(build: str | None = None, *, extra: dict[str, bytes] | None = None)
     return _ar(
         [
             ("debian-binary", b"2.0\n"),
-            ("control.tar.gz", _tar_gz({"./control": b"Package: x\n"})),
+            ("control.tar.gz", _tar_gz({"./control": control})),
             ("data.tar.gz", _tar_gz(files)),
         ]
+    )
+
+
+def plugin_ipk(version: str, *, package: str = "enigma2-plugin-extensions-mqttbridge") -> bytes:
+    """A plugin package whose control file names `package` and `version`, as opkg reads it."""
+    return make_ipk(
+        control=(
+            f"Package: {package}\nVersion: {version}\nArchitecture: all\n"
+            "Depends: python3-core\n"
+        ).encode("ascii"),
+        extra={"./usr/lib/enigma2/python/Plugins/Extensions/MQTTBridge/version": version.encode()},
     )

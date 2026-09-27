@@ -4,13 +4,16 @@
     "update_summary_older": "Der Receiver hat ein älteres Plugin als das, welches diese Integration mitbringt. Die Installation ersetzt es durch das mitgelieferte {version} und lässt die Broker-Einstellungen des Receivers unberührt.",
     "update_summary_older_no_install": "Der Receiver hat ein älteres Plugin als das mitgelieferte {version}. Es sind keine SSH-Zugangsdaten gespeichert, daher kann diese Karte es nicht installieren: Konfiguriere den Receiver mit „SSH-Zugangsdaten für Updates behalten“ neu, oder spiele das IPK von Hand auf.",
     "update_summary_newer": "Der Receiver hat ein neueres Plugin als das mitgelieferte {version}. Hier ersetzt es nichts — diese Karte bietet nie eine ältere Version an.",
-    "update_summary_published": "Die signierte Versionsliste des Plugins enthält {version}. Diese Karte kann sie noch nicht installieren: Sie installiert nur das mit dieser Integration gelieferte Paket.",
+    "update_summary_published": "Die signierte Versionsliste des Plugins enthält auch {version}; wähle sie unter „Zu installierende Plugin-Version“, um sie zu installieren.",
     "update_summary_development": "Entwicklungsversion; Version {version} verfügbar.",
     "update_summary_withdrawn": "Die mitgelieferte Version {version} wurde zurückgezogen: {reason}. Diese Karte installiert sie nicht.",
     "update_summary_below_floor": "Die mitgelieferte Version {version} liegt unter {floor}, der niedrigsten Version, die die signierte Versionsliste des Plugins zulässt. Diese Karte installiert sie nicht.",
     "release_index_notification_title": "Neue Versionsliste des Plugins Enigma2 MQTT Bridge",
     "release_index_notification_message": "Home Assistant hat eine neue signierte Versionsliste des Plugins angenommen: Nummer {serial}, Schlüssel {key_id}. Hinzugefügt: {added}. Zurückgezogen: {withdrawn}. Niedrigste Version, die installiert werden darf: {floor}. Wurde weder eine neue Plugin-Version noch ein Rückzug erwartet, nichts installieren und die SECURITY.md der Integration lesen.",
-    "release_index_none": "keine"
+    "release_index_none": "keine",
+    "update_summary_published_no_install": "Die signierte Versionsliste des Plugins enthält {version}. Es sind keine SSH-Zugangsdaten gespeichert, daher kann diese Karte sie nicht installieren: Konfiguriere den Receiver mit „SSH-Zugangsdaten für Updates behalten“ neu.",
+    "update_summary_older_release": "Auf dem Receiver läuft ein älteres Plugin. Die Installation ersetzt es durch {version} aus der signierten Versionsliste des Plugins, heruntergeladen und geprüft, bevor etwas den Receiver erreicht, und lässt die Broker-Einstellungen des Receivers unverändert.",
+    "downgrade_loses_mqtt_updates": "Plugin-Updates per MQTT (Updates sind dann wieder per SSH möglich)"
   },
   "config": {
     "flow_title": "{name}",
@@ -140,12 +143,17 @@
       "bundle_below_floor": "Das mit dieser Integration gelieferte Plugin {version} liegt unter {floor}, der niedrigsten Version, die die signierte Versionsliste des Plugins zulässt, daher wurde nichts installiert. Aktualisiere diese Integration, um ein neueres Plugin zu erhalten.",
       "bundle_withdrawn": "Das mit dieser Integration gelieferte Plugin {version} wurde in der signierten Versionsliste des Plugins zurückgezogen: {reason}. Es wurde nichts installiert. Aktualisiere diese Integration, um ein neueres Plugin zu erhalten.",
       "identity_mismatch": "Der Receiver ist für die Knoten-ID {box_node_id} und das Basisthema {box_base_topic} konfiguriert, das Formular nennt {node_id} und {base_topic}. Ein Wert in Klammern ist auf dem Receiver nicht gespeichert; gezeigt wird die Voreinstellung des Plugins, sofern es eine gibt. Es wurde nichts geändert.",
-      "unknown": "Installation ist unerwartet fehlgeschlagen; es wurde kein Eintrag erstellt."
+      "unknown": "Installation ist unerwartet fehlgeschlagen; es wurde kein Eintrag erstellt.",
+      "version_withdrawn": "Plugin {version} wurde in der signierten Versionsliste des Plugins zurückgezogen: {reason}. Es wurde nichts installiert.",
+      "version_below_floor": "Plugin {version} liegt unter {floor}, der niedrigsten Version, die die signierte Versionsliste des Plugins zulässt, daher wurde nichts installiert.",
+      "package_invalid": "Plugin {version} konnte nicht heruntergeladen werden, oder seine Prüfsumme stimmt nicht mit der signierten Versionsliste des Plugins überein. Auf dem Receiver wurde nichts geändert.",
+      "depends_missing": "Plugin {version} benötigt Pakete, die auf dem Receiver nicht installiert sind: {package}. Es wurde nichts geändert.",
+      "version_not_installable": "Plugin {version} ist keine Version mehr, die diese Integration laut der signierten Versionsliste des Plugins installieren darf, daher wurde nichts installiert."
     }
   },
   "options": {
     "step": {
-      "init": {"title": "Receiver-Optionen", "description": "Die Optionen für diese Seite der Verbindung ändern oder das Plugin vom Receiver entfernen. Dieser Receiver erlaubt seine Entfernung; diese Erlaubnis wird am Receiver selbst eingestellt.", "menu_options": {"settings": "Optionen", "uninstall": "Plugin vom Receiver entfernen"}},
+      "init": {"title": "Receiver-Optionen", "description": "Ändere die Optionen auf dieser Seite der Verbindung, oder ändere das Plugin auf dem Receiver per SSH. Das Entfernen des Plugins wird nur angeboten, solange der Receiver es erlaubt; diese Erlaubnis wird am Receiver selbst gesetzt.", "menu_options": {"settings": "Optionen", "uninstall": "Plugin vom Receiver entfernen", "downgrade": "Ältere Plugin-Version installieren"}},
       "settings": {
         "title": "Receiver-Optionen",
         "description": "Der Receiver meldet die MAC-Adresse {mac}. Magic Packets gehen dorthin, sofern unten keine andere angegeben wird.",
@@ -186,13 +194,16 @@
       },
       "ssh_host": {"title": "Mit dem Receiver verbinden", "data": {"ssh_host": "Receiver-Adresse", "ssh_port": "SSH-Port"}},
       "ssh_confirm": {"title": "SSH-Identität bestätigen", "description": "Bestätige den Receiver-Fingerabdruck `{fingerprint}` vor dem Senden der Zugangsdaten.", "data": {"ssh_username": "SSH-Benutzer", "ssh_password": "SSH-Passwort"}}
-      ,"uninstall": {"title": "Plugin vom Receiver entfernen", "description": "Das MQTT-Bridge-Plugin wird von {name} entfernt. Das ist eine Einbahnstraße: Ist das Plugin weg, kann nichts hier es zurückholen — nur SSH oder die Paketverwaltung des Receivers (Menü → Plugins → herunterladen → Extensions). Der Receiver behält die Einstellungen des Plugins, sodass eine Neuinstallation mit demselben Broker, derselben Node-ID und demselben Modus startet und dieser Eintrag ihn mit allen Entitäten wie bisher wieder aufnimmt. Bis dahin sieht das Gerät genau wie ein ausgeschalteter Receiver aus: alle Entitäten nicht verfügbar. Am Ende startet der Receiver seine Oberfläche neu; er lehnt ab, solange er aufnimmt oder gleich eine Aufnahme beginnt.", "data": {"confirm_uninstall": "Ich weiß, dass nur SSH oder die Paketverwaltung des Receivers das Plugin zurückbringt"}}
+      ,"uninstall": {"title": "Plugin vom Receiver entfernen", "description": "Das MQTT-Bridge-Plugin wird von {name} entfernt. Das ist eine Einbahnstraße: Ist das Plugin weg, kann nichts hier es zurückholen — nur SSH oder die Paketverwaltung des Receivers (Menü → Plugins → herunterladen → Extensions). Der Receiver behält die Einstellungen des Plugins, sodass eine Neuinstallation mit demselben Broker, derselben Node-ID und demselben Modus startet und dieser Eintrag ihn mit allen Entitäten wie bisher wieder aufnimmt. Bis dahin sieht das Gerät genau wie ein ausgeschalteter Receiver aus: alle Entitäten nicht verfügbar. Am Ende startet der Receiver seine Oberfläche neu; er lehnt ab, solange er aufnimmt oder gleich eine Aufnahme beginnt.", "data": {"confirm_uninstall": "Ich weiß, dass nur SSH oder die Paketverwaltung des Receivers das Plugin zurückbringt"}},
+      "downgrade": {"title": "Ältere Plugin-Version installieren", "description": "Auf dem Receiver läuft Plugin {installed}. Wähle die ältere Version, die per SSH installiert werden soll. Angeboten werden nur Versionen aus der signierten Versionsliste des Plugins, nicht unter der niedrigsten zulässigen Version und nicht zurückgezogen. Der nächste Schritt nennt, was die ältere Version wegnimmt; vor der Bestätigung geschieht nichts.", "data": {"version": "Version"}},
+      "downgrade_confirm": {"title": "Plugin {version} statt {installed} installieren", "description": "Plugin {version} wird von der Release-Seite des Plugins heruntergeladen (außer es ist das mit der Integration mitgelieferte Plugin), mit der signierten Versionsliste geprüft und per SSH anstelle von {installed} installiert. Der Receiver muss eingeschaltet sein: im Standby wird die Installation abgelehnt, weil der Neustart ihn aufwecken würde. Die Oberfläche des Receivers startet neu; er behält seinen Sender, und seine eigenen Einstellungen bleiben, wie sie sind - Einstellungen, die die ältere Version nicht kennt, kehren mit ihren Werten nach dem nächsten Update zurück.\n\n**Was nicht mehr funktioniert**, bis das Plugin wieder aktualisiert wird - die Entitäten bleiben in Home Assistant, aber nichts aktualisiert sie:\n\n{lost}\n\nEine fehlgeschlagene Installation stellt {installed} wieder her.", "data": {"confirm_downgrade": "Ältere Version installieren"}}
     },
     "error": {
       "plugin_unavailable": "Der Receiver ist nicht verbunden; seine Datenschutzeinstellungen wurden nicht geändert. Versuche es erneut, wenn er online ist.",
       "plugin_config_failed": "Der Receiver hat die neuen Datenschutzeinstellungen nicht bestätigt. Die bisherigen Receiver-Einstellungen und Home-Assistant-Optionen wurden beibehalten.",
       "invalid_mac": "Das ist keine MAC-Adresse. Schreibe sie als `00:00:5e:00:53:01`, `00-00-5e-00-53-01`, `0000.5e00.5301` oder `00005e005301`, oder lass das Feld leer, um die vom Receiver gemeldete Adresse zu verwenden.",
-      "uninstall_not_confirmed": "Setze das Häkchen, um das Plugin zu entfernen. An den Receiver wurde nichts gesendet."
+      "uninstall_not_confirmed": "Setze das Häkchen, um das Plugin zu entfernen. An den Receiver wurde nichts gesendet.",
+      "downgrade_not_confirmed": "Setze das Häkchen, um die ältere Version zu installieren."
     },
     "abort": {
       "uninstall_not_offered": "Der Receiver erlaubt das Entfernen des Plugins nicht mehr, oder er ist nicht verbunden. Es wurde nichts gesendet."
@@ -207,9 +218,46 @@
       ,"recording": "Der Receiver nimmt auf. Es wurde nichts gesendet; versuche es nach dem Ende der Aufnahme erneut."
       ,"timer_due": "Auf dem Receiver beginnt gleich eine Aufnahme. Es wurde nichts gesendet; versuche es später erneut."
       ,"mqtt_unavailable": "Die MQTT-Integration ist nicht verfügbar, daher wurde nichts an den Receiver gesendet."
-      ,"unknown": "Das Entfernen des Plugins ist unerwartet fehlgeschlagen; Details stehen im Log."
+      ,"unknown": "Das Entfernen des Plugins ist unerwartet fehlgeschlagen; Details stehen im Log.",
+      "host_key_changed": "Der SSH-Hostschlüssel wurde geändert und nicht akzeptiert.",
+      "ssh_unavailable": "Der SSH-Dienst des Receivers war nicht erreichbar, es wurde nichts installiert.",
+      "auth_failed": "Die SSH-Authentifizierung ist fehlgeschlagen, es wurde nichts installiert.",
+      "preflight_failed": "Die Prüfungen des Receivers konnten nicht abgeschlossen werden, es wurde nichts installiert.",
+      "unsupported_python": "Die Python-Version des Receivers ist für dieses Plugin zu alt. Es wurde nichts installiert.",
+      "no_space": "Auf dem Receiver ist zu wenig freier Speicherplatz. Es wurde nichts installiert.",
+      "standby": "Der Receiver ist im Standby. Die Installation startet die Oberfläche des Receivers neu, was ihn aufweckt und den Fernseher einschalten kann. Es wurde nichts installiert; schalte den Receiver ein und versuche es erneut.",
+      "streaming": "Der Receiver streamt gerade an ein anderes Gerät. Die Installation startet seine Oberfläche neu und würde den Stream abbrechen. Es wurde nichts installiert; versuche es erneut, wenn der Stream beendet ist.",
+      "bundle_missing": "Das mitgelieferte Plugin-Paket fehlt. Installiere die Integration neu.",
+      "bundle_invalid": "Das mitgelieferte Plugin-Paket hat die Prüfung nicht bestanden. Installiere die Integration neu.",
+      "upload_failed": "Das Plugin konnte nicht auf den Receiver übertragen werden. Es wurde nichts geändert.",
+      "install_failed": "Das Plugin konnte nicht installiert werden. Der Receiver wurde zurückgesetzt.",
+      "newer_installed": "Auf dem Receiver läuft bereits ein neueres Plugin als das mitgelieferte. Es wurde nichts geändert.",
+      "provision_failed": "Die MQTT-Einstellungen konnten nicht geschrieben werden. Der Receiver wurde zurückgesetzt.",
+      "restart_failed": "Die Oberfläche des Receivers ist nicht sicher neu gestartet. Der Receiver wurde zurückgesetzt.",
+      "announcement_timeout": "Das Plugin hat sich nach dem Neustart nicht angekündigt. Der Receiver wurde zurückgesetzt.",
+      "restart_withdrawn": "Der Receiver hat auf dem Bildschirm gefragt, ob die Oberfläche neu gestartet werden soll, deshalb wurde die Installation zurückgenommen; die Plugin-Dateien auf dem Receiver sind wie zuvor, und nichts wurde neu gestartet. Die Frage kann noch auf dem Fernseher zu sehen sein - „Ja“ und „Nein“ sind beide unbedenklich.",
+      "restart_unobserved": "Der Receiver sollte seine Oberfläche neu starten, aber die Verbindung zu ihm brach ab, bevor das Ergebnis zu sehen war. Nichts wurde rückgängig gemacht: Die neuen Plugin-Dateien liegen auf dem Receiver, und die Sperre des Installers bleibt bestehen. Sobald sie älter als 30 Minuten ist, stellt eine erneute Installation zuerst die vorherige Version wieder her und installiert dann.",
+      "restart_unconfirmed": "Der Receiver hat die Anfrage, seine Oberfläche neu zu starten, nicht bestätigt, und die Oberfläche ist nicht innerhalb von 60 Sekunden neu gestartet; deshalb wurde die Installation zurückgenommen: Die Plugin-Dateien auf dem Receiver sind wie zuvor, und nichts wurde neu gestartet.",
+      "withdraw_failed": "Die Oberfläche des Receivers ist nicht innerhalb von 60 Sekunden neu gestartet - meist, weil der Receiver auf dem Fernseher danach fragt - und die bisherigen Plugin-Dateien konnten nicht wiederhergestellt werden; die neuen liegen noch auf dem Receiver. Nichts wurde neu gestartet. Die Frage kann noch auf dem Fernseher zu sehen sein: „Nein“ behält das laufende Plugin, „Ja“ startet die neue Version, ohne dass sie geprüft wurde. Installiere danach erneut.",
+      "rollback_unobserved": "Die Installation ist fehlgeschlagen, und der Receiver stellt sich mit einem eigenen Skript wieder her, aber die Verbindung zu ihm brach ab, bevor das Ende zu sehen war. Die Sperre des Installers bleibt 30 Minuten auf dem Receiver. Zeigt er bis dahin kein Bild, schalte ihn aus und wieder ein.",
+      "rollback_failed": "Die Installation ist fehlgeschlagen und der Receiver konnte nicht zurückgesetzt werden. Prüfe den Receiver von Hand: Die Sicherung von vor der Änderung liegt in /home/root/mqttbridge-backups.",
+      "rollback_restart_failed": "Die Installation ist fehlgeschlagen. Der Receiver wurde zurückgesetzt, aber seine Oberfläche ist nicht wieder gestartet — starte den Receiver von Hand neu; sonst ist nichts rückgängig zu machen.",
+      "rollback_lock_failed": "Der Receiver wurde zurückgesetzt, aber die Sperre des Installers konnte nicht freigegeben werden — lösche /home/root/mqttbridge-backups/.ha-installer.lock von Hand oder warte 30 Minuten, bevor du erneut installierst.",
+      "rollback_opkg_busy": "Die Installation ist fehlgeschlagen, und der Receiver konnte nicht zurückgesetzt werden, weil seine Paketverwaltung (opkg) mit einem anderen Vorgang beschäftigt war — höchstwahrscheinlich einer Installation oder Entfernung aus dem Menü des Receivers. Es wurde nichts wiederhergestellt. Prüfe den Receiver von Hand: Die Sicherung von vor der Änderung liegt in /home/root/mqttbridge-backups.",
+      "rollback_opkg_overlap": "Die Installation ist fehlgeschlagen, und der Receiver wurde zurückgesetzt, aber ein anderer Lauf seiner Paketverwaltung (opkg) hat während der Wiederherstellung die Sperre übernommen und kann gleichzeitig die Paketdatenbank geändert haben. Prüfe den Receiver von Hand (`opkg status enigma2-plugin-extensions-mqttbridge`); die Sicherung von vor der Änderung liegt in /home/root/mqttbridge-backups.",
+      "opkg_busy": "Die Paketverwaltung des Receivers (opkg) ist mit einem anderen Vorgang beschäftigt — einer Installation oder Entfernung aus dem Menü des Receivers oder ihrer Aktualisierungsprüfung —, daher wurde nichts installiert. Versuche es in einer Minute erneut.",
+      "bundle_below_floor": "Das mit dieser Integration gelieferte Plugin {version} liegt unter {floor}, der niedrigsten Version, die die signierte Versionsliste des Plugins zulässt, daher wurde nichts installiert. Aktualisiere diese Integration, um ein neueres Plugin zu erhalten.",
+      "bundle_withdrawn": "Das mit dieser Integration gelieferte Plugin {version} wurde in der signierten Versionsliste des Plugins zurückgezogen: {reason}. Es wurde nichts installiert. Aktualisiere diese Integration, um ein neueres Plugin zu erhalten.",
+      "version_below_floor": "Plugin {version} liegt unter {floor}, der niedrigsten Version, die die signierte Versionsliste des Plugins zulässt, daher wurde nichts installiert.",
+      "version_withdrawn": "Plugin {version} wurde in der signierten Versionsliste des Plugins zurückgezogen: {reason}. Es wurde nichts installiert.",
+      "package_invalid": "Plugin {version} konnte nicht heruntergeladen werden, oder seine Prüfsumme stimmt nicht mit der signierten Versionsliste des Plugins überein. Auf dem Receiver wurde nichts geändert.",
+      "depends_missing": "Plugin {version} benötigt Pakete, die auf dem Receiver nicht installiert sind: {package}. Es wurde nichts geändert.",
+      "identity_mismatch": "Der Receiver ist für die Knoten-ID {box_node_id} und das Basisthema {box_base_topic} konfiguriert, das Formular nennt {node_id} und {base_topic}. Ein Wert in Klammern ist auf dem Receiver nicht gespeichert; gezeigt wird die Voreinstellung des Plugins, sofern es eine gibt. Es wurde nichts geändert.",
+      "downgrade_done": "Plugin {version} ist auf dem Receiver installiert und läuft. Die Update-Karte bietet die neuere Version wieder an, weil sie weiterhin die neueste kompatible ist; überspringe sie dort, um bei {version} zu bleiben.",
+      "downgrade_not_offered": "Auf diesem Receiver kann jetzt keine ältere Plugin-Version installiert werden: Nötig sind gespeicherte SSH-Zugangsdaten, eine gemeldete Plugin-Version und eine geprüfte Versionsliste (drücke „Nach Plugin-Updates suchen“), die eine ältere, von dieser Integration zugelassene Version enthält.",
+      "version_not_installable": "Plugin {version} ist keine Version mehr, die diese Integration laut der signierten Versionsliste des Plugins installieren darf, daher wurde nichts installiert."
     },
-    "progress": {"uninstalling": "Der Receiver entfernt sein Plugin; es wird gewartet, bis er seine Topics zurückzieht und offline geht"}
+    "progress": {"uninstalling": "Der Receiver entfernt sein Plugin; es wird gewartet, bis er seine Topics zurückzieht und offline geht", "downgrading": "Das ältere Plugin wird heruntergeladen und geprüft, auf dem Receiver installiert, die Oberfläche neu gestartet und auf seine Anmeldung gewartet"}
   },
   "entity": {
     "binary_sensor": {
@@ -658,8 +706,8 @@
       "message": "Dieser Receiver hat keine MAC-Adresse gemeldet, es gibt also kein Ziel für ein Magic Packet. Trage eine in den Optionen der Integration ein."
     },
     "update_version_unknown": {"message": "Der Receiver hat seine installierte Plugin-Version nicht gemeldet."},
-    "update_downgrade": {"message": "Ein neueres Plugin wird nicht durch eine ältere gebündelte Version ersetzt."},
-    "update_version_unavailable": {"message": "Die angeforderte Version ist nicht im geprüften Integrationspaket verfügbar."},
+    "update_downgrade": {"message": "Ein neueres Plugin wird nicht durch eine ältere Version ersetzt: Diese Karte installiert nie eine ältere Version."},
+    "update_version_unavailable": {"message": "Die angeforderte Version ist weder das mitgelieferte Plugin noch eine Version, die diese Integration laut der signierten Versionsliste des Plugins installieren darf."},
     "update_version_withdrawn": {"message": "Die Plugin-Version {version} wurde zurückgezogen: {reason}"},
     "update_version_below_floor": {"message": "Die Plugin-Version {version} liegt unter {floor}, der niedrigsten Version, die die signierte Versionsliste des Plugins zulässt."},
     "release_check_unverified": {"message": "Die Versionsliste des Plugins konnte nicht geprüft werden; sie wurde möglicherweise gerade geändert. In ein paar Minuten erneut versuchen. Es wurde nichts geändert."},
@@ -687,6 +735,8 @@
     "history_clear_playback": {"message": "Der Receiver spielt eine Aufnahme ab. Beende sie und versuche es erneut."},
     "history_clear_not_cleared": {"message": "Der Receiver hat seinen Verlauf nicht geleert."},
     "history_clear_screen_open": {"message": "Auf dem Bildschirm des Receivers ist ein Menü, die Senderliste oder der EPG geöffnet - schließe es und versuche es erneut."},
-    "zap_history_playback": {"message": "Der Receiver spielt eine Aufnahme ab - beende sie und versuche es erneut."}
+    "zap_history_playback": {"message": "Der Receiver spielt eine Aufnahme ab - beende sie und versuche es erneut."},
+    "update_download_failed": {"message": "Plugin {version} konnte nicht heruntergeladen werden, oder seine Prüfsumme stimmt nicht mit der signierten Versionsliste des Plugins überein. Auf dem Receiver wurde nichts geändert."},
+    "update_depends_missing": {"message": "Plugin {version} benötigt Pakete, die auf dem Receiver nicht installiert sind: {package}. Es wurde nichts geändert."}
     }
   }

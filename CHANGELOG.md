@@ -30,7 +30,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **„Wersja wtyczki do instalacji"** (*Plugin version to install*), a diagnostic select, disabled
   by default: „Najnowsza zgodna" (`latest`) or a version the card can install above the one
   running. The choice is stored in the entry's options and counts only while the select is
-  enabled. Today the card installs only the bundled plugin, so that is the only version listed.
+  enabled. It lists the bundle and the releases of the index the card can install.
+- **The update card installs releases of the signed index, not only the bundle.** With SSH
+  credentials stored, `latest_version` is the newest release the index lists that this
+  integration may install - a release before a development build of the same number - or the
+  bundle. Pressing install downloads that release from the plugin's fixed origin (verified TLS, no
+  redirect, capped at its signed size), holds it to the signed size and sha256 and checks that its
+  control file names the package and the version, all before the receiver is connected to; a
+  failed or refused download is said on the card and changes nothing. When the bundle is the
+  release asked for, its bytes are used and nothing is downloaded. Once per version a day, GitHub's
+  own digest of the release asset is compared with the signed checksum: a disagreement refuses, an
+  API that cannot be reached is noted in the log and does not. The card never installs an older
+  version than the one running.
+- **The SSH installer checks a release's `depends`** - every package the signed entry names -
+  with `opkg status` before it takes the lock or a snapshot, and refuses naming every missing
+  package. `opkg status` never takes opkg's lock; it sees only a package of that exact name, so a
+  dependency another package only `Provides:` is reported missing (refused, nothing changed).
+- **The SSH installer asks the whole rule again before it connects**, against the newest index
+  held: a release fetched as installable is refused, with the receiver untouched, when a newer
+  index has since withdrawn it, raised the floor, moved it to another contract, asked for a newer
+  integration, dropped it, or signed other bytes under its number.
+- **The restart proof holds the receiver's `info.build.commit` to the installed commit** when the
+  plugin reports a build id: a same-number build that is not the one installed is not proof. A
+  plugin that predates build ids proves by its version, as before.
+- **„Zainstaluj starszą wersję wtyczki"** (*Install an older plugin version*), a new entry in the
+  options menu: the only way back to an older plugin, over SSH, never over MQTT and never from the
+  update card. It offers the versions the verified index lists from the floor up to below the one
+  running, names what the chosen version takes away - the entities whose capability it predates,
+  and updates over MQTT when it cannot update itself - and installs only once its box is ticked.
+  The package is downloaded and verified as for the card; the installer puts it over the newer
+  plugin with `--force-downgrade` and, once the older plugin has proved itself, asks it to retract
+  what the newer one published (`cmd/reset`). A failed downgrade rolls back to the newer version.
+  Like every install it is refused while the receiver is in standby. Afterwards the update card
+  offers the newer release again; the flow's end says so - skip it on the card to stay.
+  The options menu appears whenever this or the removal is on offer.
 - **„Zezwalaj na zdalną aktualizację wtyczki"** (*Allow remote plugin updates*), a tick box in the
   guided installer, off by default. Ticked, it writes the plugin's `update_allowed` permission into
   the provisioning file, so a plugin that can update itself obeys `cmd/update` over MQTT; unticked,

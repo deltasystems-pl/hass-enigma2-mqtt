@@ -287,11 +287,33 @@ box already correct: the node ID, the base topic, that the plugin is enabled, an
 end of the link rather than about the box; saving them reloads the entry, so a change takes
 effect without a restart.
 
-On a receiver that permits its own removal, *Configure* opens on a menu of two entries instead:
-**Options**, which is this form, and **Remove the plugin from the receiver** („Usuń wtyczkę z
-dekodera"), described in [§8](#removing-the-plugin-from-the-receiver). Every other receiver -
-and that is every receiver as shipped, because the permission is off by default - opens straight
-on the form, as before.
+When there is more to offer than this form, *Configure* opens on a menu instead: **Options**,
+which is this form; **Install an older plugin version** („Zainstaluj starszą wersję wtyczki"),
+described below; and, on a receiver that permits its own removal, **Remove the plugin from the
+receiver** („Usuń wtyczkę z dekodera"), described in [§8](#removing-the-plugin-from-the-receiver).
+With neither on offer - the usual case - it opens straight on the form, as before.
+
+**Install an older plugin version** is the only way back to an older plugin: never over MQTT and
+never from the update card. It is offered only with SSH credentials stored, once the receiver has
+reported its plugin version, and while the verified signed index lists an older version this
+integration may install - at or above the floor (the higher of 0.2.0 and the index's), not
+withdrawn, the same contract. Press *Check for plugin updates* first if no index has been read
+yet. The first step chooses the version; the second names what it takes away - the entities
+whose capability the older plugin predates (they stay in Home Assistant, but nothing updates
+them) and, going below a release that can update itself, updates over MQTT - and installs only
+once its box is ticked. The package is downloaded and verified as for the update card, then the
+SSH installer puts it over the newer plugin (opkg's `--force-downgrade`), restarts the interface
+by the restart rule and, once the older plugin has announced itself, asks it to retract every
+retained topic the newer one left (`cmd/reset`). A failed install rolls back to the newer
+version. The receiver has to be switched on: in standby the install is refused, as on the update
+card, because the restart would wake it; it keeps its channel. When the older version is the
+plugin bundled with this integration, its bytes are used and nothing is downloaded. The flow ends
+with a message and saves nothing: the entry and its options are unchanged. Settings the older
+plugin does not know stay on the receiver and come back with their values on the next upgrade.
+**After a downgrade the update card offers the newer release again** - it is still the newest
+compatible one, and the card never offers anything below the version running. Skip it on the
+card to stay on the older version; a skip lasts until a newer release than the skipped one
+appears.
 
 | Option | Default | What it does |
 |---|---|---|
@@ -300,7 +322,7 @@ on the form, as before.
 | **Bouquets to offer** | every bouquet the box publishes | Which bouquets feed the media player's channel list and the media browser. The choices are the bouquets on the `channels` topic, and a name can be typed for one the box has not published yet. This narrows the plugin's own `bouquets_for_select`; it cannot widen it. |
 | **Channels in the media player's source list** | every bouquet on offer | What `media_player.source_list` holds, and nothing else. **Every bouquet on offer** is what this integration has always done and stays the default, so an existing installation does not change under an automation that names a channel; on a receiver with about a thousand channels it is a dropdown of about a thousand rows. **The active bouquet** is the short list the receiver's own channel ± is walking, which is also what the „Kanał" select shows. `select_source` follows this setting; the `zap` action takes a service reference and does not. Three cases keep the long list whatever is chosen, because there is nothing to shorten it to and an empty source list would leave no way to change channel: a receiver that publishes no channel-list context (an older plugin without `bouquet_context`), a context naming a bouquet the **Bouquets to offer** option excludes, and a context naming a bouquet with no playable channel in it. The last two are logged as a warning, once per bouquet. 🔴 This setting is **not** about the recorder: Home Assistant declares `source_list` an unrecorded attribute and the recorder removes it before it measures a state against its size limit, so the long list never reached the database in the first place. |
 | **Bouquets hidden from "Recently watched"** („Bukiety ukryte w „Ostatnio oglądane"") | none | Which bouquets' channels [„Ostatnio oglądane"](#46-selects) leaves out - and that one entity only: „Ostatnio oglądane (wszystkie)", „Kanał", „Bukiet" and the media player are untouched. The choices are the bouquets on the `channels` topic, and a name can be typed. With it empty every entry shows. With a bouquet chosen, an entry shows only when its bouquet is a published bouquet that is not hidden **and** its channel is not a member of any hidden bouquet, so a channel of a hidden bouquet reached through another one stays hidden. While anything is chosen, an entry that cannot be checked - no bouquet path, a radio bouquet, a bouquet the plugin does not publish - is hidden too. A hidden name that is no longer on the `channels` topic is logged once. 🔴 **This is a filter in Home Assistant, not privacy on the network**: the receiver publishes every entry of its history on `zap_history` and every channel of every bouquet on `channels`, retained, to any broker login; its own History Zap screen, the plugin's OpenWebif page and „Ostatnio oglądane (wszystkie)" show everything. See [§4.6](#46-selects) for what the recorder keeps. |
-| **Check daily for available plugin versions** | off | Off means this integration asks nothing on its own. The plugin's **signed release index** - `releases.json` and its signature from the plugin's fixed HTTPS origin, `https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/` - is fetched only when somebody presses **Check for plugin updates** (*Sprawdź aktualizacje wtyczki*), or uses Home Assistant's own "Check for updates" while this option is on. On, it is also fetched **at most once every 24 hours**, one index for every receiver. It is fetched with a verified TLS context and no redirects, at most 64 KiB, and it is accepted only when its Ed25519 signature verifies with a key built into this integration and its serial rises by the rule in [ADR-0008](docs/adr/0008-signed-plugin-index.md) - the same rule the receiver applies. Manual checks share a ten-minute limit. The index, its signature, the stamps and the record of accepted serials are kept in `.storage/enigma2_mqtt.release_index`, so a reload or a restart asks nothing again; the old `.storage/enigma2_mqtt.release_check` is removed. **Every newly accepted index is announced**: a warning in the log and a persistent notification with its serial, its key, the versions it adds and withdraws, and its floor - the index is signed in the plugin repository's CI, so an index nobody expected must be visible. It is then published, retained, on `enigma2mqtt/release_index`, for receivers with no internet of their own - and put back, verified first, when the first receiver is set up and at every reconnect to the broker, if the broker lost it. What the broker retains there is read first: an index of a higher-ranked key, or a newer one of the same key - such as an index signed with the plugin's spare key in an emergency - is never overwritten, and when the rule accepts it, Home Assistant takes it and announces it like any new index. An index and a signature that do not match are read once more before they are judged, because a publication can land between the two requests; a pair that still does not verify is reported as "could not be verified", and the log keeps a warning. Nothing but the index is downloaded: installing still uses only the bundle shipped here. |
+| **Check daily for available plugin versions** | off | Off means this integration asks nothing on its own. The plugin's **signed release index** - `releases.json` and its signature from the plugin's fixed HTTPS origin, `https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/` - is fetched only when somebody presses **Check for plugin updates** (*Sprawdź aktualizacje wtyczki*), or uses Home Assistant's own "Check for updates" while this option is on. On, it is also fetched **at most once every 24 hours**, one index for every receiver. It is fetched with a verified TLS context and no redirects, at most 64 KiB, and it is accepted only when its Ed25519 signature verifies with a key built into this integration and its serial rises by the rule in [ADR-0008](docs/adr/0008-signed-plugin-index.md) - the same rule the receiver applies. Manual checks share a ten-minute limit. The index, its signature, the stamps and the record of accepted serials are kept in `.storage/enigma2_mqtt.release_index`, so a reload or a restart asks nothing again; the old `.storage/enigma2_mqtt.release_check` is removed. **Every newly accepted index is announced**: a warning in the log and a persistent notification with its serial, its key, the versions it adds and withdraws, and its floor - the index is signed in the plugin repository's CI, so an index nobody expected must be visible. It is then published, retained, on `enigma2mqtt/release_index`, for receivers with no internet of their own - and put back, verified first, when the first receiver is set up and at every reconnect to the broker, if the broker lost it. What the broker retains there is read first: an index of a higher-ranked key, or a newer one of the same key - such as an index signed with the plugin's spare key in an emergency - is never overwritten, and when the rule accepts it, Home Assistant takes it and announces it like any new index. An index and a signature that do not match are read once more before they are judged, because a publication can land between the two requests; a pair that still does not verify is reported as "could not be verified", and the log keeps a warning. Nothing else is downloaded on a check; a release package is downloaded only when somebody installs it (see [Buttons and update](#45-buttons-and-update)). |
 
 When a recent plugin advertises its configurable publishers, the same form also controls key
 events, screenshot mode and interval, and the delay before an on-zap screenshot. Older plugins
@@ -805,13 +827,33 @@ which then offers it on the card, or with `update.install` and that version. The
 time, flavour and dirtiness are in `installed_build` and `bundled_build`, as information. A
 plugin up to 0.3.x reports no build id and is shown as the version it reports.
 
-**The signed release index is information here, not an offer.** Its versions appear in the
-summary and in the attributes - `available_versions` (newest first, each with whether this
-integration may offer it and why not; not recorded), `published_version`, `index_serial`,
-`index_age` (whole days since it was built), `last_check`, `check_error` and `update_path` - and
-never as `latest_version` until this integration can install a package it downloads. Nothing on
-this card reaches the internet unless somebody asks for a check or the daily check is on - see
-[Options](#options).
+**What the card installs.** With SSH credentials stored, the newest release the signed index
+lists that this integration may install - or the bundle, when nothing newer is listed; a release
+comes before a development build of its own number. Its versions also appear in the summary and in
+the attributes - `available_versions` (newest first, each with whether this integration may offer
+it and why not; not recorded), `published_version`, `index_serial`, `index_age` (whole days since
+it was built), `last_check`, `check_error` and `update_path`. Without SSH credentials they are
+information only. Nothing on this card reaches the internet unless somebody asks for a check, the
+daily check is on, or somebody presses install.
+
+**Installing a release of the index** downloads it from the plugin's fixed origin - the same one
+the index comes from, verified TLS, no redirect, at most its signed size - and believes it only
+at the signed size and sha256, with a control file naming this package and this version. When the
+bundle is those very bytes, nothing is downloaded. Once per version a day, GitHub's own `digest`
+of the release asset is compared with the signed checksum: a disagreement refuses; an API that
+cannot be reached, is rate-limited or has no digest is noted in the log and does not refuse. All
+of that happens before the receiver is connected to, so a refusal - „Nie udało się pobrać wtyczki
+{version} albo jej suma kontrolna się nie zgadza. Na dekoderze nic nie zmieniono." - leaves it as
+it was. Then the SSH installer runs as for the bundle. Before it connects, it asks the whole rule
+again against the newest index held - withdrawn, floor, contract, `min_integration`, and the same
+size and sha256 as the bytes it holds - because a check in between may have accepted a newer
+index; a version that no longer passes is refused with the receiver untouched. Once connected, and
+before it takes the lock or a snapshot, it asks the receiver with `opkg status` for every package
+the release `depends` on, and a refusal names every missing one. `opkg status <name>` sees only a
+package of exactly that name: a dependency that another installed package merely `Provides:` is
+reported missing, although opkg itself would accept it - the check the design prescribes, and the
+safe direction, since nothing on the receiver changes. The card never installs an older version
+than the one running.
 
 **Check for plugin updates** (*Sprawdź aktualizacje wtyczki*, `button.<device>_sprawdz_aktualizacje_wtyczki`
 on a Polish installation) asks for the index now, at most once in ten minutes; inside that it
@@ -819,8 +861,8 @@ says when the list was read and when it can be read again. **Plugin version to i
 (*Wersja wtyczki do instalacji*, a select, **disabled by default**) holds a receiver on one version:
 its first option, *Najnowsza zgodna* (`latest`), is the newest version the card can install, and it
 is what counts while the select is disabled. Its other options are the versions the card can
-install that differ from the one running: a higher release number, or a build of the same number -
-today only the bundle. Choosing a same-number build is the one way the card offers it. A choice is stored in the entry's options
+install that differ from the one running: a higher release number - the bundle's or a release of
+the index - or a build of the same number. Choosing a same-number build is the one way the card offers it. A choice is stored in the entry's options
 and survives a restart; changing it moves `latest_version`, which makes Home Assistant forget a
 skipped version.
 
