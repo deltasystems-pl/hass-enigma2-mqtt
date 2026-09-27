@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -61,37 +62,147 @@ def test_a_receiver_with_nothing_of_ours_has_no_leftovers(tmp_path: Path) -> Non
     assert found["service"] is None
 
 
-def test_every_kind_of_leftover_counts_as_ours(tmp_path: Path) -> None:
-    """A lock, an unfinished R2, the self-update's marker or its transaction directory."""
-    lock = tmp_path / BACKUPS / ".ha-installer.lock"
-    lock.mkdir(parents=True)
-    assert leftovers(tmp_path)["ours"] is True
-    lock.rmdir()
+def _lock(root: Path, **record: object) -> Path:
+    """The shared lock with an owner record, as a claim writes it."""
+    lock = root / BACKUPS / ".ha-installer.lock"
+    lock.mkdir(parents=True, exist_ok=True)
+    (lock / "owner.json").write_text(json.dumps(record), encoding="ascii")
+    return lock
 
-    marker = tmp_path / "etc/enigma2/mqttbridge-update.json"
-    marker.parent.mkdir(parents=True)
-    marker.write_text("{}", encoding="ascii")
-    assert leftovers(tmp_path)["ours"] is True
-    marker.unlink()
+
+def _marker(root: Path, **record: object) -> Path:
+    marker = root / "etc/enigma2/mqttbridge-update.json"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(json.dumps(record), encoding="ascii")
+    return marker
+
+
+def _update_status(root: Path, transaction: str, **record: object) -> Path:
+    directory = root / BACKUPS / f"update-{transaction}"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "status.json").write_text(json.dumps(record), encoding="ascii")
+    return directory
+
+
+def test_only_an_interrupted_stop_of_ours_counts_as_ours(tmp_path: Path) -> None:
+    """Only R2 ever sends `init 4`, so runlevel 4 is ours only when an R2 of ours was cut
+    off: an unfinished stop-and-restore of this boot. A lock alone, a marker alone, a kept
+    self-update directory alone are ordinary residue - any receiver that ever had a
+    refused or rolled-back update carries them - and prove nothing about who stopped it."""
+    _lock(tmp_path, id="0123456789ab")
+    assert leftovers(tmp_path)["ours"] is False
+    shutil.rmtree(tmp_path / BACKUPS / ".ha-installer.lock")
+
+    _marker(tmp_path)
+    assert leftovers(tmp_path)["ours"] is False
+    (tmp_path / "etc/enigma2/mqttbridge-update.json").unlink()
 
     (tmp_path / BACKUPS / "update-0123456789ab").mkdir()
-    assert leftovers(tmp_path)["ours"] is True
+    found = leftovers(tmp_path)
+    assert found["ours"] is False
+    assert found["transactions"] == ["update-0123456789ab"]
     (tmp_path / BACKUPS / "update-0123456789ab").rmdir()
 
     _r2_dir(tmp_path, "0123456789ab", service=WATCHED, steps="begun 1\nstopping 0\n")
     assert leftovers(tmp_path)["ours"] is True
 
 
+def test_a_kept_finished_self_update_directory_is_not_ours(tmp_path: Path) -> None:
+    """A self-update that ended keeps its directory (TRANSACTION.md section 1). Somebody
+    who later stops the interface to edit its settings by hand must still be refused."""
+    _update_status(
+        tmp_path, "0123456789ab", id="0123456789ab", phase="finished", result="failed"
+    )
+    assert leftovers(tmp_path)["ours"] is False
+
+
+def test_a_marker_of_another_boot_without_its_lock_is_not_ours(tmp_path: Path) -> None:
+    """The plugin ignores such a marker (TRANSACTION.md section 4); the runlevel of this
+    boot cannot be its doing, whatever phase it names."""
+    _marker(tmp_path, id="0123456789ab", boot_id="another-boot", phase="rolling_back")
+    assert leftovers(tmp_path)["ours"] is False
+
+
+def test_a_self_update_cut_off_while_rolling_back_in_this_boot_is_ours(tmp_path: Path) -> None:
+    """The self-update's own R2: its marker of this boot says it was rolling back and never
+    ended - or its transaction directory says so and the lock of this boot names it."""
+    _marker(tmp_path, id="0123456789ab", boot_id=boot_id(), phase="rolling_back")
+    found = leftovers(tmp_path)
+    assert found["ours"] is True
+    assert found["rolling_back"] == ["0123456789ab"]
+    (tmp_path / "etc/enigma2/mqttbridge-update.json").unlink()
+
+    _update_status(tmp_path, "0123456789ab", id="0123456789ab", phase="rolling_back")
+    assert leftovers(tmp_path)["ours"] is False
+    _lock(tmp_path, id="0123456789ab", boot_id=boot_id(), origin="mqtt")
+    assert leftovers(tmp_path)["ours"] is True
+
+
+def test_a_self_update_record_that_ended_or_belongs_elsewhere_is_not_ours(
+    tmp_path: Path,
+) -> None:
+    """Rolling back and then finished; a lock of another boot; a lock naming another id."""
+    _update_status(
+        tmp_path,
+        "0123456789ab",
+        id="0123456789ab",
+        phase="rolling_back",
+        result="rolled_back",
+        finished=1790410100,
+    )
+    _lock(tmp_path, id="0123456789ab", boot_id=boot_id(), origin="mqtt")
+    assert leftovers(tmp_path)["ours"] is False
+
+    _update_status(tmp_path, "0123456789ab", id="0123456789ab", phase="rolling_back")
+    _lock(tmp_path, id="0123456789ab", boot_id="another-boot", origin="mqtt")
+    assert leftovers(tmp_path)["ours"] is False
+
+    _lock(tmp_path, id="ba9876543210", boot_id=boot_id(), origin="mqtt")
+    assert leftovers(tmp_path)["ours"] is False
+
+    # A marker of this boot whose id is not a transaction id names nothing.
+    _marker(tmp_path, id="../../etc", boot_id=boot_id(), phase="rolling_back")
+    assert leftovers(tmp_path)["ours"] is False
+
+
 def test_the_channel_an_interrupted_r2_was_keeping_is_read_from_its_script(
     tmp_path: Path,
 ) -> None:
-    """R3 after the recovery puts back the channel the interrupted rollback recorded."""
+    """R3 after the recovery puts back the channel the interrupted rollback recorded - the
+    rollback whose transaction the lock names."""
     _r2_dir(tmp_path, "0123456789ab", service=WATCHED, steps="begun 1\nstopped\n")
+    _lock(tmp_path, id="0123456789ab")
 
     found = leftovers(tmp_path)
 
     assert found["ours"] is True
     assert found["service"] == WATCHED
+
+
+def test_the_channel_is_never_taken_from_another_transaction(tmp_path: Path) -> None:
+    """The lock names X; the only unfinished R2 is Y's. Y's channel is not X's: R3 would
+    zap the household's screen to a stale channel. With no lock there is no match either."""
+    _r2_dir(tmp_path, "ba9876543210", service=WATCHED, steps="begun 1\nstopped\n")
+    assert leftovers(tmp_path)["service"] is None
+
+    _lock(tmp_path, id="0123456789ab")
+    found = leftovers(tmp_path)
+    assert found["ours"] is True
+    assert found["service"] is None
+
+
+def test_only_an_r2_that_never_recorded_its_restore_is_unrestored(tmp_path: Path) -> None:
+    """The settings block goes back only for a rollback cut off before its restore: one
+    that wrote `restored` - whatever its status - reached its restore, and writing that
+    snapshot's settings again is not what it was stopped in the middle of."""
+    _r2_dir(tmp_path, "0123456789ab", service=WATCHED, steps="begun 1\nstopped\n")
+    _r2_dir(tmp_path, "ba9876543210", service=WATCHED, steps="stopped\nrestored 0\n")
+    _r2_dir(tmp_path, "aaaaaaaaaaaa", service=WATCHED, steps="stopped\nrestored 1\n")
+
+    found = leftovers(tmp_path)
+
+    assert found["r2"] == ["0123456789ab", "aaaaaaaaaaaa", "ba9876543210"]
+    assert found["unrestored"] == ["0123456789ab"]
 
 
 def test_a_finished_r2_is_not_an_interrupted_one(tmp_path: Path) -> None:
@@ -111,9 +222,7 @@ def test_two_interrupted_r2s_name_no_channel_unless_the_lock_says_which(
     _r2_dir(tmp_path, "ba9876543210", service="1:0:1:1:1:1:C00000:0:0:0:", steps="stopped\n")
     assert leftovers(tmp_path)["service"] is None
 
-    lock = tmp_path / BACKUPS / ".ha-installer.lock"
-    lock.mkdir(parents=True)
-    (lock / "owner.json").write_text(json.dumps({"id": "0123456789ab"}), encoding="ascii")
+    _lock(tmp_path, id="0123456789ab")
 
     assert leftovers(tmp_path)["service"] == WATCHED
 
@@ -309,6 +418,36 @@ def test_a_respawn_stops_then_starts_detached(tmp_path: Path) -> None:
     assert os.getsid(pid) == pid
 
 
+def test_a_respawn_waits_for_the_old_interface_to_go_before_starting(tmp_path: Path) -> None:
+    """`init 4` only asks init to stop enigma2, and the process takes a while to go. The
+    start waits for it: `init 3` over an interface still stopping is not a restart."""
+    events = tmp_path / "events"
+    running = tmp_path / "enigma2.running"
+    running.write_text("100\n", encoding="ascii")
+    init = tmp_path / "bin" / "init"
+    init.parent.mkdir()
+    init.write_text(
+        "#!/bin/sh\n"
+        f'if [ "$1" = 4 ]; then (sleep 2; rm -f {shlex.quote(str(running))}) '
+        "</dev/null >/dev/null 2>&1 & fi\n"
+        f'if [ "$1" = 3 ] && [ -f {shlex.quote(str(running))} ]; then '
+        f"echo 3-over-a-running-interface >> {shlex.quote(str(events))}; exit 0; fi\n"
+        f'echo "$1" >> {shlex.quote(str(events))}\n',
+        encoding="ascii",
+    )
+    init.chmod(0o755)
+    pidof = tmp_path / "bin" / "pidof"
+    pidof.write_text(
+        f"#!/bin/sh\ntest -f {shlex.quote(str(running))} || exit 1\necho 100\n",
+        encoding="ascii",
+    )
+    pidof.chmod(0o755)
+
+    start_respawn(stop=True, init=str(init), pidof=str(pidof), stop_wait=10)
+
+    assert _wait_for(events, "4\n3\n", seconds=15) == "4\n3\n"
+
+
 def test_a_start_only_respawn_never_stops_anything(tmp_path: Path) -> None:
     """Runlevel 4 already: only `init 3` is asked for."""
     init, pidof, events = _stand_ins(tmp_path)
@@ -341,11 +480,14 @@ def test_the_new_verbs_answer_on_the_command_line(tmp_path: Path) -> None:
         )
         return json.loads(answer.stdout)
 
+    _lock(tmp_path, id="0123456789ab")
     assert run("leftovers") == {
         "ours": True,
-        "lock": False,
+        "lock": True,
         "marker": False,
         "r2": ["0123456789ab"],
+        "unrestored": ["0123456789ab"],
+        "rolling_back": [],
         "transactions": [],
         "service": WATCHED,
     }

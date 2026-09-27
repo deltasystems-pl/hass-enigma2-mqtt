@@ -6,7 +6,7 @@ SSH says about the interface (runlevel and `pidof` over three samples), installs
 bundled package, and proves the start by a new enigma2 holding the plugin's log open - and
 by the announcement only when the plugin is switched on.
 
-The rows of the GUI-state table (design, section 7a) are one test each. What only a real
+The rows of the GUI-state table (ADR-0008, section 8) are one test each. What only a real
 receiver can show - that `init 4; init 3` really resets init's respawn throttle, that the
 plugin opens its log before it reads `enabled` on every image - is joint acceptance.
 """
@@ -25,7 +25,7 @@ from unittest.mock import patch
 from homeassistant.core import HomeAssistant
 import pytest
 
-from custom_components.enigma2_mqtt import installer
+from custom_components.enigma2_mqtt import installer, installer_helper
 from custom_components.enigma2_mqtt.bundle import BundledPlugin
 from custom_components.enigma2_mqtt.installer import (
     CommandResult,
@@ -70,6 +70,33 @@ class ForceReceiver(FakeReceiver):
     claim_busy: bool = False
     lock: dict[str, Any] = field(default_factory=lambda: {"held": False})
     respawns: list[str] = field(default_factory=list)
+    # A recording that begins when a command containing this is sent - the install
+    # itself, say - so that only a guard measured after it can see it.
+    recording_from: str | None = None
+    # The interface, down on the three samples, runs from this command on: a box that
+    # was slower to show a pid than the samples waited, or a person's `init 3`. Whether
+    # its OpenWebif answers is `webif_ok`, which nothing reads while it is down.
+    interface_from: str | None = None
+    # What the settings block of the snapshot a recovery puts back says, as identity
+    # fields; applied when a restore with `--settings` runs.
+    restored_settings: dict[str, Any] | None = None
+
+
+def _ours(**overrides: Any) -> dict[str, Any]:
+    """What the helper reports for runlevel 4 left by our own interrupted rollback: the
+    lock names its transaction, and its script was cut off before it wrote `restored`."""
+    values: dict[str, Any] = {
+        "ours": True,
+        "lock": True,
+        "marker": False,
+        "r2": ["0123456789ab"],
+        "unrestored": ["0123456789ab"],
+        "rolling_back": [],
+        "transactions": [],
+        "service": RECORDED,
+    }
+    values.update(overrides)
+    return values
 
 
 def _identity(**overrides: Any) -> dict[str, Any]:
@@ -120,6 +147,17 @@ async def _force_run(self: FakeSession, command: str, **kwargs: Any) -> CommandR
     del kwargs
     receiver = self.receiver
     assert isinstance(receiver, ForceReceiver)
+    if receiver.recording_from and receiver.recording_from in command:
+        receiver.recording = True
+    if receiver.interface_from and receiver.interface_from in command:
+        receiver.enigma_running = True
+    if (
+        receiver.restored_settings is not None
+        and " restore " in command
+        and "--settings" in command.split()
+    ):
+        for key, value in receiver.restored_settings.items():
+            setattr(receiver, key, value)
     if command == "runlevel":
         receiver.commands.append(command)
         return CommandResult(0, receiver.runlevel + "\n")
@@ -311,14 +349,7 @@ async def test_our_own_stopped_interface_is_recovered_and_started_on_its_channel
         reclaimed_id="0123456789ab",
         snapshots={"ha-installer-0123456789ab"},
         saved_service=SAVED_EARLIER,
-        leftovers={
-            "ours": True,
-            "lock": True,
-            "marker": False,
-            "r2": ["0123456789ab"],
-            "transactions": [],
-            "service": RECORDED,
-        },
+        leftovers=_ours(),
     )
 
     with caplog.at_level(logging.WARNING):
@@ -681,3 +712,482 @@ def test_every_new_code_is_a_stable_string() -> None:
     assert InstallerErrorCode.RECORDS_MISMATCH.value == "records_mismatch"
     assert InstallerErrorCode.PLUGIN_NOT_STARTED.value == "plugin_not_started"
     assert WATCHED
+
+
+# ------------------------------------------ the last look before the interface is touched
+
+
+async def test_an_interface_that_came_up_during_the_install_is_never_stopped_by_init(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    """Absent on the three samples - a start gap is 11-14 s on a receiver, longer than the
+    ten seconds they cover - and running, and recording, by the time the install reaches
+    the restart. `init 4` would cut the recording: the interface is looked at again, is a
+    running one, and gets every guard of the first row; the recording refuses."""
+    receiver = _receiver(
+        enigma_running=False,
+        samples=[False, False, False],
+        recording=True,
+        interface_from="opkg install",
+    )
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.RECORDING
+    assert receiver.respawns == []
+    assert _init(receiver) == []
+    assert receiver.restarts == []
+    # The install is put back under the running interface, never by stopping it.
+    assert receiver.files["plugin"] == "old"
+
+
+async def test_a_box_that_was_still_starting_is_restarted_cleanly_with_every_guard(
+    hass: HomeAssistant,
+    credentials: SshCredentials,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A booting box reads as a respawn loop on the three samples. By the last look its
+    interface runs: the clean restart, never `init 4`, and OpenWebif asked first."""
+    receiver = _receiver(
+        enigma_running=False, samples=[False, False, False], interface_from="opkg install"
+    )
+
+    with caplog.at_level(logging.WARNING):
+        result = await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert result.restarted is True
+    assert receiver.respawns == []
+    assert receiver.restarts == ["clean"]
+    statusinfo = [
+        index for index, command in enumerate(receiver.commands) if "/api/statusinfo" in command
+    ]
+    opkg = receiver.commands.index(_opkg(receiver)[0])
+    assert statusinfo and statusinfo[0] > opkg
+    assert "now runs" in caplog.text
+
+
+async def test_an_interface_started_by_hand_in_runlevel_4_is_restarted_cleanly(
+    hass: HomeAssistant,
+    credentials: SshCredentials,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Runlevel 4 of ours, and somebody ran `init 3` while the install ran: harmless, and
+    logged - the interface is then a running one, guarded and restarted cleanly."""
+    receiver = _receiver(
+        runlevel="3 4",
+        enigma_running=False,
+        samples=[False, False, False],
+        reclaimed_id="0123456789ab",
+        snapshots={"ha-installer-0123456789ab"},
+        leftovers=_ours(),
+        interface_from="opkg install",
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert receiver.respawns == []
+    assert receiver.restarts == ["clean"]
+    assert "somebody started it" in caplog.text
+
+
+async def test_an_interface_that_came_up_hung_is_refused_at_the_last_look(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    """Running by the last look, and OpenWebif silent: whether it records is unknown, as
+    in the first row - refused, and nothing sent to init."""
+    receiver = _receiver(
+        enigma_running=False,
+        webif_ok=False,
+        samples=[False, False, False],
+        interface_from="opkg install",
+    )
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.GUI_NOT_ANSWERING
+    assert receiver.respawns == []
+    assert _init(receiver) == []
+
+
+async def test_a_recording_that_begins_during_the_install_stops_the_restart(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    """The guard measured again immediately before the only disruptive step is the one
+    that sees a recording begun while opkg ran."""
+    receiver = _receiver(recording_from="opkg install")
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.RECORDING
+    assert _opkg(receiver)
+    assert receiver.restarts == []
+    assert receiver.files["plugin"] == "old"
+
+
+# ------------------------------------------------- what the recovery in runlevel 4 writes
+
+
+async def test_settings_go_back_only_for_the_reclaimed_transactions_own_cut_off_rollback(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    """The reclaimed lock names X, and the rollback cut off before its restore is Y's: X's
+    snapshot is put back as files only. Its settings block is days old - writing it would
+    revert every plugin setting changed since, `enabled` among them."""
+    receiver = _receiver(
+        runlevel="3 4",
+        enigma_running=False,
+        webif_ok=False,
+        samples=[False, False, False],
+        reclaimed_id="0123456789ab",
+        snapshots={"ha-installer-0123456789ab"},
+        leftovers=_ours(r2=["ba9876543210"], unrestored=["ba9876543210"], service=None),
+    )
+
+    await _install(hass, _request(credentials), tmp_path, receiver)
+
+    recovery = [command for command in receiver.commands if "ha-installer-0123456789ab" in command]
+    assert any(" withdraw " in command for command in recovery)
+    assert not any("--settings" in command for command in recovery)
+
+
+async def test_a_rollback_that_recorded_its_restore_gets_no_second_settings_write(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    receiver = _receiver(
+        runlevel="3 4",
+        enigma_running=False,
+        webif_ok=False,
+        samples=[False, False, False],
+        reclaimed_id="0123456789ab",
+        snapshots={"ha-installer-0123456789ab"},
+        leftovers=_ours(unrestored=[]),
+    )
+
+    await _install(hass, _request(credentials), tmp_path, receiver)
+
+    recovery = [command for command in receiver.commands if "ha-installer-0123456789ab" in command]
+    assert not any("--settings" in command for command in recovery)
+
+
+async def test_settings_are_never_written_under_an_interface_that_runs_again(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    """Somebody started the interface between the samples and the recovery: a settings
+    block written now would be overwritten from memory, so only the files go back."""
+    receiver = _receiver(
+        runlevel="3 4",
+        enigma_running=False,
+        samples=[False, False, False],
+        reclaimed_id="0123456789ab",
+        snapshots={"ha-installer-0123456789ab"},
+        leftovers=_ours(),
+        interface_from=" claim ",
+    )
+
+    await _install(hass, _request(credentials), tmp_path, receiver)
+
+    recovery = [command for command in receiver.commands if "ha-installer-0123456789ab" in command]
+    assert not any("--settings" in command for command in recovery)
+    assert receiver.restarts == ["clean"]
+
+
+async def test_what_the_restored_settings_say_is_read_again(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    """The snapshot's settings switch the plugin off: the proof then waits for no
+    announcement, and the result says the plugin is off - not what was read before."""
+    receiver = _receiver(
+        runlevel="3 4",
+        enigma_running=False,
+        webif_ok=False,
+        samples=[False, False, False],
+        reclaimed_id="0123456789ab",
+        snapshots={"ha-installer-0123456789ab"},
+        leftovers=_ours(),
+        restored_settings={"enabled": False},
+    )
+    created: list[bool] = []
+
+    result = await _install(
+        hass, _request(credentials), tmp_path, receiver, announces=False, created=created
+    )
+
+    assert result.plugin_enabled is False
+    assert created == []
+    identity_reads = [command for command in receiver.commands if command.endswith(" identity")]
+    assert len(identity_reads) == 2
+
+
+async def test_restored_settings_of_another_receiver_stop_it_and_bring_the_picture_back(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    receiver = _receiver(
+        runlevel="3 4",
+        enigma_running=False,
+        webif_ok=False,
+        samples=[False, False, False],
+        reclaimed_id="0123456789ab",
+        snapshots={"ha-installer-0123456789ab"},
+        leftovers=_ours(),
+        restored_settings={"node_id": "another_receiver"},
+    )
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.IDENTITY_MISMATCH
+    assert _opkg(receiver) == []
+    assert receiver.respawns == ["start"]
+
+
+# ------------------------------------------------ a failure in runlevel 4 of ours
+
+
+def _ours_stopped(**extra: Any) -> ForceReceiver:
+    values: dict[str, Any] = {
+        "runlevel": "3 4",
+        "enigma_running": False,
+        "webif_ok": False,
+        "samples": [False, False, False],
+        "reclaimed_id": "0123456789ab",
+        "snapshots": {"ha-installer-0123456789ab"},
+        "saved_service": SAVED_EARLIER,
+        "leftovers": _ours(),
+    }
+    values.update(extra)
+    return _receiver(**values)
+
+
+async def test_a_failed_recovery_in_runlevel_4_still_brings_the_picture_back(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    """The interrupted transaction's snapshot cannot be put back. The picture comes first
+    (TRANSACTION.md section 5.2): the interface is started on what is there, and the
+    verdict says the receiver could not be put back - not "put back as it was"."""
+    receiver = _ours_stopped(fail_on=" restore /home/root/mqttbridge-backups/ha-installer-")
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.ROLLBACK_FAILED
+    assert _opkg(receiver) == []
+    assert receiver.respawns == ["start"]
+    assert receiver.enigma_running is True
+    # The lock was released before the start; the helper uploaded for it is gone again.
+    assert receiver.helper_removed is True
+
+
+async def test_a_failed_install_in_runlevel_4_is_rolled_back_and_started(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    receiver = _ours_stopped(fail_on="opkg install")
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.INSTALL_FAILED
+    assert receiver.rolled_back is True
+    assert receiver.respawns == ["start"]
+
+
+async def test_a_failed_install_in_a_respawn_loop_sends_nothing_to_init(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    """A respawn loop was not stopped by us, and init is already starting it: a failure
+    before the restart puts the files back and leaves init to it."""
+    receiver = _receiver(
+        enigma_running=False,
+        webif_ok=False,
+        samples=[False, False, False],
+        fail_on="opkg install",
+    )
+
+    with pytest.raises(InstallerError):
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert receiver.respawns == []
+    assert _init(receiver) == []
+
+
+async def test_runlevel_4_of_ours_with_a_live_installer_lock_says_when(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    """No picture, and the lock of the interrupted installer has no heartbeat to judge: the
+    refusal says when the released rule frees it, not a plain "busy" with no end."""
+    receiver = _ours_stopped(
+        claim_busy=True, lock={"held": True, "origin": None, "silent": 300, "remaining": 1501}
+    )
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.BUSY_STALLED
+    assert raised.value.placeholders == {"minutes": "26"}
+    assert receiver.respawns == []
+    assert _opkg(receiver) == []
+
+
+async def test_a_kept_self_update_directory_does_not_make_runlevel_4_ours(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    """End to end with the helper's own answer: a receiver that once had a failed
+    self-update, stopped on purpose, is refused - not started and reinstalled."""
+    root = tmp_path / "root"
+    kept = root / "home/root/mqttbridge-backups/update-0123456789ab"
+    kept.mkdir(parents=True)
+    (kept / "status.json").write_text(
+        json.dumps({"id": "0123456789ab", "phase": "finished", "result": "failed"}),
+        encoding="ascii",
+    )
+    receiver = _receiver(
+        runlevel="3 4",
+        enigma_running=False,
+        webif_ok=False,
+        samples=[False, False, False],
+        leftovers=installer_helper.leftovers(root),
+    )
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.GUI_STOPPED
+    assert receiver.respawns == []
+    assert _init(receiver) == []
+    assert _opkg(receiver) == []
+
+
+# ------------------------------------------------------------- gaps the review closed
+
+
+async def test_an_interface_still_running_in_runlevel_4_is_refused(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    """Runlevel 4 with enigma2 still there: it is being stopped, by somebody else."""
+    receiver = _receiver(runlevel="3 4")
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.PREFLIGHT_FAILED
+    assert not any(" claim " in command for command in receiver.commands)
+    assert _opkg(receiver) == []
+    assert _init(receiver) == []
+
+
+async def test_a_running_interface_in_standby_is_refused_before_anything_changes(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    """The forced mode keeps the standby guard while the interface runs: the restart would
+    wake the receiver, and HDMI-CEC the television with it."""
+    receiver = _receiver(standby=True)
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.STANDBY
+    assert not any(" claim " in command for command in receiver.commands)
+    assert _opkg(receiver) == []
+
+
+def test_the_runlevel_is_the_last_word_of_sysvinits_answer() -> None:
+    assert installer._runlevel("N 3\n") == "3"
+    assert installer._runlevel("3 4\n") == "4"
+    assert installer._runlevel("unknown\n") is None
+    assert installer._runlevel("") is None
+    assert installer._runlevel("N 5") == "5"
+    assert installer._runlevel("4 S") == "S"
+    assert installer._runlevel("N 3 extra") is None
+
+
+async def test_records_equal_to_the_bundle_get_no_force_downgrade(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    receiver = _receiver(installed_version="0.2.0")
+
+    await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert "--force-reinstall" in _opkg(receiver)[0]
+    assert "--force-downgrade" not in _opkg(receiver)[0]
+
+
+async def test_the_forced_mode_still_refuses_a_receiver_not_in_integration_mode(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    receiver = _receiver(ha_mode="off")
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.IDENTITY_MISMATCH
+    assert _opkg(receiver) == []
+
+
+@pytest.mark.parametrize(
+    "lock",
+    [
+        # Silent for exactly three beats is not yet stalled.
+        {"held": True, "origin": "mqtt", "silent": 180, "remaining": 1621},
+        # Nothing left: the rule frees it now, and the claim was what said no.
+        {"held": True, "origin": "mqtt", "silent": 2000, "remaining": 0},
+        {"held": True, "origin": "mqtt", "silent": None, "remaining": None},
+    ],
+)
+async def test_the_edges_of_a_stalled_lock_are_plain_busy(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path, lock: dict[str, Any]
+) -> None:
+    receiver = _receiver(claim_busy=True, lock=lock)
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.BUSY
+
+
+async def test_an_update_over_a_newer_running_plugin_is_refused_whatever_the_records_say(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    """The card knows 0.9.0 runs; opkg's records say 0.0.9; the target is 0.2.0. The
+    records are wrong the other way round, and a newer plugin still runs."""
+    receiver = _receiver(installed_version="0.0.9")
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(
+            hass,
+            _request(credentials, force=False, expect_running=True, running_version="0.9.0"),
+            tmp_path,
+            receiver,
+        )
+
+    assert raised.value.code is InstallerErrorCode.NEWER_INSTALLED
+    assert _opkg(receiver) == []
+
+
+async def test_an_interface_started_by_hand_that_then_records_gets_nothing_from_init(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    """Runlevel 4 of ours, started by a person during the install, and recording by the
+    last look: refused and put back under the running interface - and, since it runs,
+    no start of the interface afterwards either."""
+    receiver = _receiver(
+        runlevel="3 4",
+        enigma_running=False,
+        samples=[False, False, False],
+        reclaimed_id="0123456789ab",
+        snapshots={"ha-installer-0123456789ab"},
+        leftovers=_ours(),
+        interface_from="opkg install",
+        recording_from="opkg install",
+    )
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.RECORDING
+    assert receiver.respawns == []
+    assert _init(receiver) == []

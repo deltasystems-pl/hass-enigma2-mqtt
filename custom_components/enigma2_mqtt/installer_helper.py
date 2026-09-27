@@ -1079,13 +1079,17 @@ def lock_info(lock_dir: Path) -> dict:
 
 # What of this project a receiver whose interface is stopped may still hold, relative to
 # the root: the shared lock, the self-update's marker and transaction directories, and the
-# directory of this installer's stop-and-restore script. A forced reinstall into runlevel 4
-# goes ahead only when one of them says the stop was ours (design, section 7a).
+# directory of this installer's stop-and-restore script. Only a stop-and-restore ever sends
+# `init 4`, so a forced reinstall into runlevel 4 goes ahead only when one of ours was cut
+# off in this boot (ADR-0008, section 8); the rest only helps to say which one.
 BACKUPS = "home/root/mqttbridge-backups"
 LOCK_NAME = ".ha-installer.lock"
 UPDATE_MARKER = "etc/enigma2/mqttbridge-update.json"
-UPDATE_DIR_NAME = re.compile(r"update-[0-9a-f]{12}")
+UPDATE_DIR_NAME = re.compile(r"update-([0-9a-f]{12})")
 R2_DIR_NAME = re.compile(r"enigma2-mqtt-r2-([0-9a-f]{12})")
+# The self-update's phase while its own stop-and-restore runs (the `update` topic's
+# `transaction.phase`, which its marker and `status.json` carry).
+ROLLING_BACK = "rolling_back"
 # The plugin's log, in the order the plugin tries them. Its logging is configured before it
 # reads `enabled`, so a new interface process holding one of these open has loaded the
 # plugin - switched on or off, with or without a broker.
@@ -1111,62 +1115,133 @@ def _recorded_service(script: Path) -> str | None:
     return None
 
 
-def _finished_r2(directory: Path) -> bool:
-    """Whether a stop-and-restore script said it started the interface again."""
+def _r2_steps(directory: Path) -> set[str]:
+    """The steps a stop-and-restore script wrote into its status: the first word of each line."""
     try:
         lines = (directory / "status").read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeDecodeError):
-        return False
-    return any(line.split(" ", 1)[0] == "started" for line in lines if line)
+        return set()
+    return {line.split(" ", 1)[0] for line in lines if line}
+
+
+def _finished_r2(directory: Path) -> bool:
+    """Whether a stop-and-restore script said it started the interface again."""
+    return "started" in _r2_steps(directory)
+
+
+def _read_record(path: Path) -> dict | None:
+    """A JSON object from the receiver's disk, or None for anything else."""
+    try:
+        recorded = json.loads(path.read_text(encoding="ascii"))
+    except (OSError, ValueError):
+        return None
+    return recorded if isinstance(recorded, dict) else None
+
+
+def _rolling_back_in_this_boot(
+    record: dict | None, owner: dict | None, current_boot: str
+) -> str | None:
+    """Return the id of a self-update cut off while rolling back in this boot, or None.
+
+    Its record says `rolling_back` and never says how it ended. And it is of this boot:
+    the record names this boot, or the lock - written under this boot - names its id. A
+    record of another boot is the plugin's to discard (TRANSACTION.md, section 4); it
+    cannot explain the runlevel of this one.
+    """
+    if record is None or not current_boot:
+        return None
+    transaction = record.get("id")
+    if not isinstance(transaction, str) or not TRANSACTION_ID.fullmatch(transaction):
+        return None
+    if record.get("phase") != ROLLING_BACK:
+        return None
+    if record.get("finished") is not None or record.get("result") is not None:
+        return None
+    if record.get("boot_id") == current_boot:
+        return transaction
+    if (
+        owner is not None
+        and owner.get("id") == transaction
+        and owner.get("boot_id") == current_boot
+    ):
+        return transaction
+    return None
 
 
 def leftovers(root: Path) -> dict:
-    """What an interrupted transaction of this project left on the receiver.
+    """What an interrupted stop of this project left on the receiver.
 
-    `ours` is whether anything did. `r2` names the stop-and-restore scripts that never
-    said `started` - one killed between `init 4` and `init 3` leaves the interface
-    stopped until somebody starts it - and `service` is the channel such a script was
-    keeping: the one whose id the lock names, else the only one. With two and no lock to
-    choose between them, none: guessing would be a coin toss over the household's channel.
+    Only a stop-and-restore (R2) sends `init 4`, so runlevel 4 is this project's doing
+    only when an R2 of ours was cut off between `init 4` and `init 3`. `ours` says that
+    and nothing weaker:
+
+    - an unfinished `/tmp/enigma2-mqtt-r2-<id>` - its script never wrote `started`. /tmp
+      does not survive a reboot, so it is of this boot by construction;
+    - a self-update whose marker or transaction status says it reached `rolling_back`
+      and never ended, of this boot (`_rolling_back_in_this_boot`).
+
+    A lock alone, a marker alone, a kept `update-<id>` directory alone are not a stop:
+    an installer that died mid-opkg leaves a lock with the interface running, and a
+    self-update keeps its directory after every end but a commit, so any receiver that
+    once had a refused update carries one for good. Counting them would start an
+    interface somebody stopped on purpose - to edit its settings by hand, say.
+
+    `unrestored` names the unfinished scripts that never wrote `restored`: the only ones
+    whose snapshot's settings block the recovery may put back. `service` is the channel
+    the script of the transaction the lock names was keeping - never another's, whose
+    lock is long gone; with no such script, none.
     """
     backups = _path(root, BACKUPS)
     lock = backups / LOCK_NAME
     lock_present = lock.is_dir() or lock.is_symlink()
     marker = _path(root, UPDATE_MARKER)
     marker_present = marker.exists() or marker.is_symlink()
+    current_boot = boot_id()
+    owner = _read_record(lock / "owner.json") if lock_present else None
+    rolling_back = set()
+    found = _rolling_back_in_this_boot(
+        _read_record(marker) if marker_present else None, owner, current_boot
+    )
+    if found is not None:
+        rolling_back.add(found)
     transactions = []
     if backups.is_dir():
-        transactions = sorted(
-            entry.name
-            for entry in backups.iterdir()
-            if UPDATE_DIR_NAME.fullmatch(entry.name) and entry.is_dir()
-        )
+        for entry in sorted(backups.iterdir()):
+            match = UPDATE_DIR_NAME.fullmatch(entry.name)
+            if match is None or entry.is_symlink() or not entry.is_dir():
+                continue
+            transactions.append(entry.name)
+            found = _rolling_back_in_this_boot(
+                _read_record(entry / "status.json"), owner, current_boot
+            )
+            if found is not None and found == match.group(1):
+                rolling_back.add(found)
     interrupted: dict = {}
+    unrestored = []
     tmp = _path(root, "tmp")
     if tmp.is_dir():
         for entry in sorted(tmp.iterdir()):
             match = R2_DIR_NAME.fullmatch(entry.name)
             if match is None or entry.is_symlink() or not entry.is_dir():
                 continue
-            if _finished_r2(entry):
+            steps = _r2_steps(entry)
+            if "started" in steps:
                 continue
             interrupted[match.group(1)] = _recorded_service(entry / "r2.sh")
-    lock_id = None
-    with suppress(OSError, ValueError, AttributeError):
-        candidate = json.loads((lock / "owner.json").read_text(encoding="ascii")).get("id")
-        if isinstance(candidate, str) and TRANSACTION_ID.fullmatch(candidate):
-            lock_id = candidate
-    if lock_id is not None and lock_id in interrupted:
+            if "restored" not in steps:
+                unrestored.append(match.group(1))
+    lock_id = owner.get("id") if owner is not None else None
+    if isinstance(lock_id, str) and TRANSACTION_ID.fullmatch(lock_id) and lock_id in interrupted:
         service = interrupted[lock_id]
-    elif len(interrupted) == 1:
-        service = next(iter(interrupted.values()))
     else:
         service = None
     return {
-        "ours": bool(lock_present or marker_present or transactions or interrupted),
+        "ours": bool(interrupted or rolling_back),
         "lock": lock_present,
         "marker": marker_present,
         "r2": sorted(interrupted),
+        "unrestored": sorted(unrestored),
+        "rolling_back": sorted(rolling_back),
         "transactions": transactions,
         "service": service,
     }
