@@ -284,7 +284,7 @@ async def test_a_healthy_interface_gets_the_normal_guards_and_a_clean_restart(
 async def test_a_hung_interface_is_refused_before_anything_changes(
     hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
 ) -> None:
-    """Row 2 (OD C): enigma2 runs and OpenWebif is silent - whether it records is unknown."""
+    """Row 2: enigma2 runs and OpenWebif is silent - whether it records is unknown."""
     receiver = _receiver(webif_ok=False)
 
     with pytest.raises(InstallerError) as raised:
@@ -417,7 +417,7 @@ async def test_an_unknown_runlevel_with_a_running_interface_is_runlevel_3(
 async def test_a_forced_reinstall_installs_only_the_bundle(
     hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
 ) -> None:
-    """OD J: the bytes CI reproduced, never a download."""
+    """The bytes CI reproduced, never a download."""
     receiver = _receiver()
     package = PackageSource("0.3.0", b"x", hashlib.sha256(b"x").hexdigest(), None, (), "github")
 

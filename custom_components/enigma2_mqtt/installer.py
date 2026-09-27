@@ -2165,7 +2165,7 @@ async def _async_forced_gui(session: InstallerSession, remote_helper: str) -> _F
     - enigma2 running (on any sample - absent once and present on the next is a respawn
       gap) and OpenWebif answers: the update path's guards and its clean restart;
     - enigma2 running and OpenWebif silent: refused - a hung interface may be recording,
-      and nothing can say it is not (OD C);
+      and nothing can say it is not;
     - runlevel 3 and enigma2 absent on every sample: a respawn loop, in which nothing can
       record; the guards are skipped and the interface is started with `init 4; init 3`;
     - runlevel 4 left by an interrupted stop of ours - the helper's `leftovers` says so
@@ -2705,7 +2705,7 @@ async def _async_install_locked(
     """Install or update the plugin as a rollback-safe transaction."""
     request.validate()
     if request.force and request.package is not None:
-        # OD J: the forced reinstall installs the bytes CI reproduced, and nothing fetched.
+        # The forced reinstall installs the bytes CI reproduced, and nothing fetched.
         raise InstallerError(
             InstallerErrorCode.PREFLIGHT_FAILED,
             "a forced reinstall installs only the package bundled with the integration",
