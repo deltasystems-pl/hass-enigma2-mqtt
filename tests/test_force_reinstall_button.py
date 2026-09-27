@@ -637,8 +637,11 @@ async def test_a_non_admin_second_press_confirms_nothing(
     with patch(INSTALL, AsyncMock(return_value=_result())) as install:
         await _press(hass, hass_admin_user.id)
         await _press(hass, hass_user.id)
+        # Nor does it arm anything of its own: a third press by the same user is refused too.
+        await _press(hass, hass_user.id)
 
     install.assert_not_awaited()
+    assert f"{DOMAIN}_force_reinstall_{config_entry.entry_id}_refused" in _notices(hass)
 
 
 async def test_a_press_with_no_user_is_refused_by_notice(
