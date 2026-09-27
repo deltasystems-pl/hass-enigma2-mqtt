@@ -33,6 +33,7 @@ from custom_components.enigma2_mqtt.const import (
     CONF_SSH_PASSWORD,
     CONF_SSH_PORT,
     CONF_SSH_USERNAME,
+    CONF_UPDATE_ALLOWED,
     DOMAIN,
     SUPPORTED_PLUGIN_VERSION,
 )
@@ -1016,3 +1017,36 @@ async def test_the_guided_installer_reads_an_index_an_earlier_run_stored(
         "floor": "9.0.0",
     }
     assert connected == []
+
+
+# ------------------------------------------------ remote updates (spec ae.7, OD 7) --
+
+
+@pytest.mark.parametrize("ticked", [False, True], ids=["unticked", "ticked"])
+async def test_the_update_permission_is_written_only_when_ticked(
+    hass: HomeAssistant, mqtt_mock, ticked: bool
+) -> None:
+    """„Zezwalaj na zdalną aktualizację wtyczki": off by default, and an unticked box writes
+    nothing - the receiver keeps what it holds, off as shipped."""
+    result = await _install_form(hass)
+    schema = result["data_schema"].schema
+    key = next(key for key in schema if key == CONF_UPDATE_ALLOWED)
+    assert key.default() is False
+    install = AsyncMock(return_value=InstallResult("0.1.0", True, True))
+    with patch("custom_components.enigma2_mqtt.config_flow.async_install", install):
+        await hass.config_entries.flow.async_configure(
+            result["flow_id"], {**_install_input(), CONF_UPDATE_ALLOWED: ticked}
+        )
+        await hass.async_block_till_done()
+
+    provisioning = install.await_args.args[1].provisioning
+    assert provisioning.update_allowed is ticked
+    document = json.loads(provisioning.as_json())
+    if ticked:
+        assert document["update_allowed"] is True
+    else:
+        assert "update_allowed" not in document
+    # A permission, never an entry option: nothing about it is stored in Home Assistant.
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    assert CONF_UPDATE_ALLOWED not in entry.data
+    assert CONF_UPDATE_ALLOWED not in entry.options
