@@ -48,9 +48,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The restart proof holds the receiver's `info.build.commit` to the installed commit** when the
   plugin reports a build id: a same-number build that is not the one installed is not proof. A
   plugin that predates build ids proves by its version, as before.
-- For the options flow's downgrade (next change): the installer can put an older release over a
-  newer plugin when asked to - opkg is told `--force-downgrade` - and asks the older plugin, once
-  it has proved itself, to retract what the newer one published (`cmd/reset`).
+- **„Zainstaluj starszą wersję wtyczki"** (*Install an older plugin version*), a new entry in the
+  options menu: the only way back to an older plugin, over SSH, never over MQTT and never from the
+  update card. It offers the versions the verified index lists from the floor up to below the one
+  running, names what the chosen version takes away - the entities whose capability it predates,
+  and updates over MQTT when it cannot update itself - and installs only once its box is ticked.
+  The package is downloaded and verified as for the card; the installer puts it over the newer
+  plugin with `--force-downgrade` and, once the older plugin has proved itself, asks it to retract
+  what the newer one published (`cmd/reset`). A failed downgrade rolls back to the newer version.
+  The options menu appears whenever this or the removal is on offer.
 - The update entity's attributes `available_versions` (not recorded), `last_check`,
   `check_error`, `index_serial`, `index_age` and `update_path`.
 - The retained topic `enigma2mqtt/integration/<node_id>` - this integration's version, the

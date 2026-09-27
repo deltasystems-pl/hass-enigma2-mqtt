@@ -42,6 +42,7 @@ from homeassistant.core import callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr, selector
 from homeassistant.helpers.service_info.mqtt import MqttServiceInfo
+from homeassistant.helpers.translation import async_get_translations
 import voluptuous as vol
 
 from .box import (
@@ -57,8 +58,10 @@ from .const import (
     CONF_BOUQUETS,
     CONF_CAM_TELEMETRY,
     CONF_CHECK_GITHUB_RELEASES,
+    CONF_CONFIRM_DOWNGRADE,
     CONF_CONFIRM_UNINSTALL,
     CONF_DANGEROUS_BUTTONS,
+    CONF_DOWNGRADE_VERSION,
     CONF_HISTORY_HIDDEN_BOUQUETS,
     CONF_KEEP_SSH_CREDENTIALS,
     CONF_NAME,
@@ -102,6 +105,11 @@ from .const import (
     SCREENSHOT_MODES,
     SOURCE_LIST_SCOPES,
 )
+from .downgrade import (
+    async_lost_names,
+    downgrade_candidates,
+    loses_self_update,
+)
 from .installer import (
     InstallerError,
     InstallerErrorCode,
@@ -112,6 +120,17 @@ from .installer import (
     async_preflight,
     async_probe_host_key,
 )
+from .plugin_versions import has_credentials
+from .release_index import release_of
+from .release_package import (
+    BELOW_FLOOR,
+    DIGEST,
+    DOWNLOAD,
+    WITHDRAWN,
+    PackageError,
+    async_fetch_release,
+)
+from .release_store import async_release_index_cache
 from .uninstall import (
     UninstallOutcome,
     UninstallResult,
@@ -140,6 +159,15 @@ INSTALL_PHASES = (
 # The step a guided install sits on for as long as its transaction runs. A flow of this
 # handler parked there is a receiver already being installed on.
 INSTALL_PROGRESS_STEP = "install_progress"
+
+# Why the older version could not be had, as the downgrade's abort reason: the installer's own
+# sentences for the same refusals.
+_PACKAGE_ABORTS = {
+    DOWNLOAD: "package_invalid",
+    DIGEST: "package_invalid",
+    WITHDRAWN: "version_withdrawn",
+    BELOW_FLOOR: "version_below_floor",
+}
 
 STEP_USER_SCHEMA = vol.Schema(
     {
@@ -812,24 +840,185 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
         self._ssh_host_key = None
         self._uninstall_task: asyncio.Task[UninstallResult] | None = None
         self._uninstall_error: str | None = None
+        self._downgrade_version: str | None = None
+        self._downgrade_task: asyncio.Task[None] | None = None
+        self._downgrade_error: str | None = None
+        self._downgrade_placeholders: dict[str, str] = {}
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Open on the options, or on a menu when the receiver permits its removal.
+        """Open on the options, or on a menu when there is more than the options to offer.
 
-        The menu exists only while removing the plugin is on offer, so for nearly every
-        receiver - the permission is off as shipped - Configure opens straight on the
-        form, as it always has. It is a menu entry rather than a button because Home
-        Assistant has no confirmation for a button or an action: a flow step is the only
-        place the one-way door can be stated before it is opened (ADR-0004).
+        The menu exists only while removing the plugin or installing an older version of it
+        is on offer, so for nearly every receiver Configure opens straight on the form, as it
+        always has. Both are menu entries rather than buttons because Home Assistant has no
+        confirmation for a button or an action: a flow step is the only place a change of
+        this weight can be stated before it is made (ADR-0004, ADR-0008).
         """
         box = self._box()
+        options = ["settings"]
+        if await self._async_downgrade_versions():
+            options.append("downgrade")
         if box is not None and box.uninstall_offered:
-            return self.async_show_menu(
-                step_id="init", menu_options=["settings", "uninstall"]
-            )
+            options.append("uninstall")
+        if len(options) > 1:
+            return self.async_show_menu(step_id="init", menu_options=options)
         return await self.async_step_settings()
+
+    async def _async_downgrade_versions(self) -> list[str]:
+        """The older versions this receiver may be taken to over SSH, newest first.
+
+        Only with SSH credentials kept (the downgrade is SSH only, never MQTT), a loaded
+        receiver that has said which plugin it runs, and a verified index listing an older
+        version the rule allows.
+        """
+        box = self._box()
+        if box is None or not has_credentials(self.config_entry):
+            return []
+        installed = box.info.get("plugin")
+        if not isinstance(installed, str):
+            return []
+        cache = async_release_index_cache(self.hass)
+        await cache.async_load()
+        return downgrade_candidates(cache.index, installed, cache.integration_version)
+
+    async def async_step_downgrade(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Choose the older version. Nothing is fetched or changed here."""
+        versions = await self._async_downgrade_versions()
+        box = self._box()
+        if not versions or box is None:
+            return self.async_abort(reason="downgrade_not_offered")
+        if user_input is not None and user_input.get(CONF_DOWNGRADE_VERSION) in versions:
+            self._downgrade_version = user_input[CONF_DOWNGRADE_VERSION]
+            return await self.async_step_downgrade_confirm()
+        return self.async_show_form(
+            step_id="downgrade",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_DOWNGRADE_VERSION, default=versions[0]): (
+                        selector.SelectSelector(
+                            selector.SelectSelectorConfig(
+                                options=versions, mode=selector.SelectSelectorMode.DROPDOWN
+                            )
+                        )
+                    )
+                }
+            ),
+            description_placeholders={"installed": str(box.info.get("plugin"))},
+        )
+
+    async def async_step_downgrade_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Name what goes, and install only once the box is ticked.
+
+        Asked again at the moment of the click: the index may have withdrawn the version or
+        raised the floor while the form was open. An unticked form fetches nothing and
+        connects to nothing.
+        """
+        version = self._downgrade_version
+        box = self._box()
+        if version is None or box is None or version not in await self._async_downgrade_versions():
+            return self.async_abort(reason="downgrade_not_offered")
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if user_input.get(CONF_CONFIRM_DOWNGRADE) is not True:
+                errors["base"] = "downgrade_not_confirmed"
+            else:
+                self._downgrade_task = self.hass.async_create_task(
+                    self._async_run_downgrade(box, version)
+                )
+                return await self.async_step_downgrade_progress()
+        cache = async_release_index_cache(self.hass)
+        lost = await async_lost_names(self.hass, box.capabilities, version)
+        if loses_self_update(box.capabilities, release_of(cache.index, version)):
+            texts = await async_get_translations(
+                self.hass, self.hass.config.language, "common", {DOMAIN}
+            )
+            lost.append(
+                texts.get(f"component.{DOMAIN}.common.downgrade_loses_mqtt_updates")
+                or "self_update"
+            )
+        return self.async_show_form(
+            step_id="downgrade_confirm",
+            data_schema=vol.Schema(
+                {vol.Required(CONF_CONFIRM_DOWNGRADE, default=False): bool}
+            ),
+            errors=errors,
+            description_placeholders={
+                "version": version,
+                "installed": str(box.info.get("plugin")),
+                "lost": "\n".join(f"- {name}" for name in lost) or "-",
+            },
+        )
+
+    async def _async_run_downgrade(self, box: Enigma2Box, version: str) -> None:
+        """Fetch and verify the older version, then install it over SSH as a downgrade."""
+        credentials = credentials_from_entry(self.config_entry.data)
+        if credentials is None:
+            self._downgrade_error = "downgrade_not_offered"
+            return
+        try:
+            package = await async_fetch_release(self.hass, version)
+            await async_install(
+                self.hass,
+                InstallRequest(
+                    credentials,
+                    provisioning=None,
+                    expect_running=True,
+                    node_id=box.node_id,
+                    base_topic=box.base_topic,
+                    package=package,
+                    downgrade=True,
+                ),
+                self._async_downgrade_progress,
+            )
+        except PackageError as err:
+            self._downgrade_error = _PACKAGE_ABORTS.get(err.code, "downgrade_not_offered")
+            self._downgrade_placeholders = err.placeholders
+        except InstallerError as err:
+            if err.code in (InstallerErrorCode.AUTH_FAILED, InstallerErrorCode.HOST_KEY_CHANGED):
+                self.config_entry.async_start_reauth(self.hass)
+            self._downgrade_error = err.code.value
+            self._downgrade_placeholders = err.placeholders
+        except Exception:
+            _LOGGER.exception("Unexpected failure while installing an older plugin")
+            self._downgrade_error = "unknown"
+        else:
+            self._downgrade_placeholders = {"version": version}
+
+    @callback
+    def _async_downgrade_progress(self, phase: str) -> None:
+        """Move the bar with the installer's phases, as the guided install does."""
+        if phase in INSTALL_PHASES:
+            self.async_update_progress(
+                (INSTALL_PHASES.index(phase) + 1) / len(INSTALL_PHASES)
+            )
+
+    async def async_step_downgrade_progress(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Wait for the fetch and the SSH transaction."""
+        assert self._downgrade_task is not None
+        if self._downgrade_task.done():
+            return self.async_show_progress_done(next_step_id="downgrade_finish")
+        return self.async_show_progress(
+            step_id="downgrade_progress",
+            progress_action="downgrading",
+            progress_task=self._downgrade_task,
+        )
+
+    async def async_step_downgrade_finish(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """End on what happened, as an abort: the receiver changed, never the entry."""
+        return self.async_abort(
+            reason=self._downgrade_error or "downgrade_done",
+            description_placeholders=self._downgrade_placeholders or None,
+        )
 
     async def async_step_settings(
         self, user_input: dict[str, Any] | None = None

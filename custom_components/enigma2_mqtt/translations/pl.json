@@ -12,7 +12,8 @@
     "release_index_notification_message": "Home Assistant przyjął nową podpisaną listę wersji wtyczki: numer {serial}, klucz {key_id}. Dodane: {added}. Wycofane: {withdrawn}. Najniższa wersja, którą wolno zainstalować: {floor}. Jeśli nie spodziewano się nowego wydania ani wycofania wtyczki, niczego nie instaluj i przeczytaj plik SECURITY.md integracji.",
     "release_index_none": "brak",
     "update_summary_published_no_install": "Podpisana lista wersji wtyczki zawiera {version}. Nie zapisano danych SSH, więc ta karta nie może jej zainstalować: skonfiguruj dekoder ponownie z opcją „Zachowaj dane SSH do aktualizacji”.",
-    "update_summary_older_release": "Dekoder ma starszą wtyczkę. Instalacja zastąpi ją wersją {version} z podpisanej listy wersji wtyczki, pobraną i sprawdzoną, zanim cokolwiek trafi na dekoder, i nie zmieni ustawień brokera na dekoderze."
+    "update_summary_older_release": "Dekoder ma starszą wtyczkę. Instalacja zastąpi ją wersją {version} z podpisanej listy wersji wtyczki, pobraną i sprawdzoną, zanim cokolwiek trafi na dekoder, i nie zmieni ustawień brokera na dekoderze.",
+    "downgrade_loses_mqtt_updates": "Aktualizacje wtyczki przez MQTT (aktualizacje będą wtedy znów możliwe przez SSH)"
   },
   "config": {
     "flow_title": "{name}",
@@ -151,7 +152,7 @@
   },
   "options": {
     "step": {
-      "init": {"title": "Opcje dekodera", "description": "Zmień opcje po tej stronie połączenia albo usuń wtyczkę z dekodera. Ten dekoder zezwala na jej usunięcie; to zezwolenie ustawia się na samym dekoderze.", "menu_options": {"settings": "Opcje", "uninstall": "Usuń wtyczkę z dekodera"}},
+      "init": {"title": "Opcje dekodera", "description": "Zmień opcje po tej stronie połączenia albo zmień wtyczkę na dekoderze przez SSH. Usunięcie wtyczki jest dostępne tylko wtedy, gdy dekoder na nie zezwala; to zezwolenie ustawia się na samym dekoderze.", "menu_options": {"settings": "Opcje", "uninstall": "Usuń wtyczkę z dekodera", "downgrade": "Zainstaluj starszą wersję wtyczki"}},
       "settings": {
         "title": "Opcje dekodera",
         "description": "Dekoder zgłasza adres MAC {mac}. Pakiety budzące trafią tam, o ile poniżej nie zostanie podany inny.",
@@ -192,13 +193,16 @@
       },
       "ssh_host": {"title": "Połącz z dekoderem", "data": {"ssh_host": "Adres dekodera", "ssh_port": "Port SSH"}},
       "ssh_confirm": {"title": "Potwierdź tożsamość SSH", "description": "Potwierdź odcisk dekodera `{fingerprint}` przed wysłaniem danych logowania.", "data": {"ssh_username": "Użytkownik SSH", "ssh_password": "Hasło SSH"}}
-      ,"uninstall": {"title": "Usuń wtyczkę z dekodera", "description": "Wtyczka MQTT Bridge zostanie usunięta z dekodera {name}. Tego nie da się cofnąć stąd: gdy wtyczki nie będzie, nic w Home Assistancie jej nie przywróci — tylko SSH albo menedżer pakietów dekodera (Menu → Wtyczki → pobierz → Extensions). Dekoder zachowa ustawienia wtyczki, więc po ponownej instalacji połączy się z tym samym brokerem, z tym samym identyfikatorem węzła i w tym samym trybie, a ten wpis podejmie go ze wszystkimi encjami takimi jak dotąd. Do tego czasu urządzenie wygląda dokładnie jak wyłączony dekoder: wszystkie encje są niedostępne. Na koniec dekoder zrestartuje interfejs; odmówi, jeśli nagrywa albo zaraz zacznie nagrywać.", "data": {"confirm_uninstall": "Rozumiem, że wtyczkę przywróci tylko SSH albo menedżer pakietów dekodera"}}
+      ,"uninstall": {"title": "Usuń wtyczkę z dekodera", "description": "Wtyczka MQTT Bridge zostanie usunięta z dekodera {name}. Tego nie da się cofnąć stąd: gdy wtyczki nie będzie, nic w Home Assistancie jej nie przywróci — tylko SSH albo menedżer pakietów dekodera (Menu → Wtyczki → pobierz → Extensions). Dekoder zachowa ustawienia wtyczki, więc po ponownej instalacji połączy się z tym samym brokerem, z tym samym identyfikatorem węzła i w tym samym trybie, a ten wpis podejmie go ze wszystkimi encjami takimi jak dotąd. Do tego czasu urządzenie wygląda dokładnie jak wyłączony dekoder: wszystkie encje są niedostępne. Na koniec dekoder zrestartuje interfejs; odmówi, jeśli nagrywa albo zaraz zacznie nagrywać.", "data": {"confirm_uninstall": "Rozumiem, że wtyczkę przywróci tylko SSH albo menedżer pakietów dekodera"}},
+      "downgrade": {"title": "Zainstaluj starszą wersję wtyczki", "description": "Dekoder ma wtyczkę {installed}. Wybierz starszą wersję do zainstalowania przez SSH. Dostępne są tylko wersje z podpisanej listy wersji wtyczki, nie starsze niż najniższa dopuszczona i niewycofane. Następny krok powie, co starsza wersja zabierze; nic się nie stanie przed potwierdzeniem.", "data": {"version": "Wersja"}},
+      "downgrade_confirm": {"title": "Zainstaluj wtyczkę {version} zamiast {installed}", "description": "Wtyczka {version} zostanie pobrana ze strony wydań wtyczki, sprawdzona z podpisaną listą wersji i zainstalowana przez SSH w miejsce {installed}. Interfejs dekodera uruchomi się ponownie; dekoder zachowa kanał i tryb czuwania, a jego własne ustawienia pozostaną bez zmian - ustawienia, których starsza wersja nie zna, wrócą ze swoimi wartościami po następnej aktualizacji.\n\n**Co przestanie działać** do czasu ponownej aktualizacji wtyczki - encje pozostaną w Home Assistant, ale nic nie będzie ich aktualizować:\n\n{lost}\n\nNieudana instalacja przywróci {installed}.", "data": {"confirm_downgrade": "Zainstaluj starszą wersję"}}
     },
     "error": {
       "plugin_unavailable": "Dekoder nie jest połączony, więc jego ustawienia prywatności nie zostały zmienione. Spróbuj ponownie, gdy będzie dostępny.",
       "plugin_config_failed": "Dekoder nie potwierdził nowych ustawień prywatności. Zachowano poprzednie ustawienia dekodera i opcje Home Assistanta.",
       "invalid_mac": "To nie jest adres MAC. Wpisz go jako `00:00:5e:00:53:01`, `00-00-5e-00-53-01`, `0000.5e00.5301` albo `00005e005301`, albo zostaw pole puste, żeby użyć adresu zgłaszanego przez dekoder.",
-      "uninstall_not_confirmed": "Zaznacz pole, aby usunąć wtyczkę. Do dekodera nic nie zostało wysłane."
+      "uninstall_not_confirmed": "Zaznacz pole, aby usunąć wtyczkę. Do dekodera nic nie zostało wysłane.",
+      "downgrade_not_confirmed": "Zaznacz pole, aby zainstalować starszą wersję."
     },
     "abort": {
       "uninstall_not_offered": "Dekoder nie zezwala już na usunięcie wtyczki albo nie jest połączony. Nic nie zostało wysłane."
@@ -213,9 +217,45 @@
       ,"recording": "Dekoder nagrywa. Nic nie zostało wysłane — spróbuj ponownie po zakończeniu nagrania."
       ,"timer_due": "Na dekoderze zaraz zacznie się nagranie. Nic nie zostało wysłane — spróbuj ponownie później."
       ,"mqtt_unavailable": "Integracja MQTT jest niedostępna, więc do dekodera nic nie zostało wysłane."
-      ,"unknown": "Usuwanie wtyczki nieoczekiwanie nie powiodło się; szczegóły są w logu."
+      ,"unknown": "Usuwanie wtyczki nieoczekiwanie nie powiodło się; szczegóły są w logu.",
+      "host_key_changed": "Klucz hosta SSH zmienił się i nie został zaakceptowany.",
+      "ssh_unavailable": "Nie udało się połączyć z usługą SSH dekodera, więc nic nie zostało zainstalowane.",
+      "auth_failed": "Uwierzytelnianie SSH nie powiodło się, więc nic nie zostało zainstalowane.",
+      "preflight_failed": "Nie udało się dokończyć sprawdzeń dekodera, więc nic nie zostało zainstalowane.",
+      "unsupported_python": "Wersja Pythona na dekoderze jest za stara dla tej wtyczki. Nic nie zostało zainstalowane.",
+      "no_space": "Na dekoderze brakuje wolnego miejsca. Nic nie zostało zainstalowane.",
+      "standby": "Dekoder jest w trybie czuwania. Instalacja uruchamia ponownie interfejs dekodera, co go wybudzi i może włączyć telewizor. Nic nie zostało zainstalowane — włącz dekoder i spróbuj ponownie.",
+      "streaming": "Dekoder przesyła teraz strumień do innego urządzenia. Instalacja uruchamia ponownie jego interfejs i przerwałaby strumień. Nic nie zostało zainstalowane — spróbuj ponownie po jego zakończeniu.",
+      "bundle_missing": "Brakuje paczki wtyczki dołączonej do integracji. Zainstaluj integrację ponownie.",
+      "bundle_invalid": "Paczka wtyczki dołączona do integracji nie przeszła weryfikacji. Zainstaluj integrację ponownie.",
+      "upload_failed": "Nie udało się przesłać wtyczki na dekoder. Nic nie zostało zmienione.",
+      "install_failed": "Nie udało się zainstalować wtyczki. Dekoder został przywrócony do poprzedniego stanu.",
+      "newer_installed": "Dekoder ma już nowszą wtyczkę niż ta dołączona do integracji. Nic nie zostało zmienione.",
+      "provision_failed": "Nie udało się zapisać ustawień MQTT na dekoderze. Dekoder został przywrócony do poprzedniego stanu.",
+      "restart_failed": "Interfejs dekodera nie uruchomił się ponownie bezpiecznie. Dekoder został przywrócony do poprzedniego stanu.",
+      "announcement_timeout": "Wtyczka nie zgłosiła się po restarcie. Dekoder został przywrócony do poprzedniego stanu.",
+      "restart_withdrawn": "Dekoder zapytał na ekranie, czy uruchomić ponownie interfejs, więc instalację wycofano; pliki wtyczki na dekoderze są takie jak przedtem i nic nie zostało uruchomione ponownie. Pytanie może nadal być widoczne na ekranie telewizora - odpowiedź „tak” albo „nie” jest bezpieczna.",
+      "restart_unobserved": "Dekoder otrzymał polecenie ponownego uruchomienia interfejsu, ale połączenie z nim zostało przerwane, zanim dało się zobaczyć wynik. Niczego nie cofnięto: nowe pliki wtyczki są na dekoderze, a blokada instalatora na nim pozostaje. Gdy blokada będzie starsza niż 30 minut, ponowna instalacja najpierw przywróci poprzednią wersję, a potem zainstaluje nową.",
+      "restart_unconfirmed": "Dekoder nie potwierdził polecenia ponownego uruchomienia interfejsu, a interfejs nie uruchomił się ponownie w ciągu 60 sekund, więc instalację wycofano: pliki wtyczki na dekoderze są takie jak przedtem i nic nie zostało uruchomione ponownie.",
+      "withdraw_failed": "Interfejs dekodera nie uruchomił się ponownie w ciągu 60 sekund - zwykle dlatego, że dekoder pyta o to na ekranie telewizora - a poprzednich plików wtyczki nie udało się przywrócić, więc na dekoderze są nowe. Nic nie zostało uruchomione ponownie. Pytanie może nadal być widoczne na ekranie telewizora: odpowiedź „nie” zostawia działającą wtyczkę, odpowiedź „tak” uruchomi nową wersję, której nie sprawdzono. Potem zainstaluj ponownie.",
+      "rollback_unobserved": "Instalacja nie powiodła się i dekoder przywraca poprzedni stan własnym skryptem, ale połączenie z nim zostało przerwane, zanim dało się zobaczyć koniec. Blokada instalatora pozostaje na dekoderze przez 30 minut. Jeśli do tego czasu nie będzie obrazu, wyłącz dekoder i włącz go ponownie.",
+      "rollback_failed": "Instalacja nie powiodła się i nie udało się przywrócić dekodera do poprzedniego stanu. Sprawdź dekoder ręcznie — kopia zapasowa sprzed zmiany jest w /home/root/mqttbridge-backups.",
+      "rollback_restart_failed": "Instalacja nie powiodła się. Dekoder został przywrócony, ale interfejs nie uruchomił się ponownie — zrestartuj dekoder ręcznie; nic więcej nie wymaga cofnięcia.",
+      "rollback_lock_failed": "Dekoder został przywrócony, ale nie udało się zwolnić blokady instalatora — usuń katalog /home/root/mqttbridge-backups/.ha-installer.lock ręcznie lub odczekaj 30 minut.",
+      "rollback_opkg_busy": "Instalacja się nie powiodła, a dekodera nie udało się przywrócić do poprzedniego stanu, bo jego menedżer pakietów (opkg) był zajęty inną operacją — najpewniej instalacją lub usuwaniem pakietu z menu dekodera. Niczego nie przywrócono. Sprawdź dekoder ręcznie: kopia sprzed zmiany jest w /home/root/mqttbridge-backups.",
+      "rollback_opkg_overlap": "Instalacja się nie powiodła, a dekoder przywrócono do poprzedniego stanu, ale inny przebieg jego menedżera pakietów (opkg) przejął blokadę w trakcie przywracania i mógł w tym samym czasie zmienić bazę pakietów. Sprawdź dekoder ręcznie (`opkg status enigma2-plugin-extensions-mqttbridge`); kopia sprzed zmiany jest w /home/root/mqttbridge-backups.",
+      "opkg_busy": "Menedżer pakietów dekodera (opkg) jest zajęty inną operacją — instalacją lub usuwaniem pakietu z menu dekodera albo sprawdzaniem aktualizacji — więc niczego nie zainstalowano. Spróbuj ponownie za minutę.",
+      "bundle_below_floor": "Wtyczka dołączona do tej integracji, {version}, jest starsza niż {floor}, najniższa wersja dopuszczona przez podpisaną listę wersji wtyczki, więc niczego nie zainstalowano. Zaktualizuj integrację, aby otrzymać nowszą wtyczkę.",
+      "bundle_withdrawn": "Wtyczka dołączona do tej integracji, {version}, została wycofana w podpisanej liście wersji wtyczki: {reason}. Niczego nie zainstalowano. Zaktualizuj integrację, aby otrzymać nowszą wtyczkę.",
+      "version_below_floor": "Wtyczka {version} jest starsza niż {floor}, najniższa wersja dopuszczona przez podpisaną listę wersji wtyczki, więc niczego nie zainstalowano.",
+      "version_withdrawn": "Wtyczka {version} została wycofana w podpisanej liście wersji wtyczki: {reason}. Niczego nie zainstalowano.",
+      "package_invalid": "Nie udało się pobrać wtyczki {version} albo jej suma kontrolna się nie zgadza. Na dekoderze nic nie zmieniono.",
+      "depends_missing": "Wtyczka {version} wymaga pakietu {package}, którego nie ma na dekoderze. Nic nie zmieniono.",
+      "identity_mismatch": "Dekoder jest skonfigurowany dla węzła {box_node_id} i tematu bazowego {box_base_topic}, a formularz podaje {node_id} i {base_topic}. Wartość w nawiasie nie jest zapisana w dekoderze — pokazana jest wartość domyślna wtyczki, o ile taka istnieje. Nic nie zostało zmienione.",
+      "downgrade_done": "Wtyczka {version} jest zainstalowana i działa na dekoderze.",
+      "downgrade_not_offered": "Na tym dekoderze nie można teraz zainstalować starszej wersji wtyczki: potrzebne są zapisane dane SSH, zgłoszona wersja wtyczki i sprawdzona lista wersji wtyczki (naciśnij „Sprawdź aktualizacje wtyczki”) zawierająca starszą wersję dopuszczoną przez tę integrację."
     },
-    "progress": {"uninstalling": "Dekoder usuwa wtyczkę; oczekiwanie, aż wycofa swoje tematy i przejdzie w tryb offline"}
+    "progress": {"uninstalling": "Dekoder usuwa wtyczkę; oczekiwanie, aż wycofa swoje tematy i przejdzie w tryb offline", "downgrading": "Pobieranie i sprawdzanie starszej wtyczki, instalacja na dekoderze, ponowne uruchomienie interfejsu i oczekiwanie, aż wtyczka się zgłosi"}
   },
   "entity": {
     "binary_sensor": {
