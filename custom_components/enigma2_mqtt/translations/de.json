@@ -14,7 +14,14 @@
     "release_index_none": "keine",
     "update_summary_published_no_install": "Die signierte Versionsliste des Plugins enthält {version}. Es sind keine SSH-Zugangsdaten gespeichert, daher kann diese Karte sie nicht installieren: Konfiguriere den Receiver mit „SSH-Zugangsdaten für Updates behalten“ neu.",
     "update_summary_older_release": "Auf dem Receiver läuft ein älteres Plugin. Die Installation ersetzt es durch {version} aus der signierten Versionsliste des Plugins, heruntergeladen und geprüft, bevor etwas den Receiver erreicht, und lässt die Broker-Einstellungen des Receivers unverändert.",
-    "downgrade_loses_mqtt_updates": "Plugin-Updates per MQTT (Updates sind dann wieder per SSH möglich)"
+    "downgrade_loses_mqtt_updates": "Plugin-Updates per MQTT (Updates sind dann wieder per SSH möglich)",
+    "force_reinstall_title": "Erzwungene Plugin-Neuinstallation",
+    "force_reinstall_confirm_title": "Erzwungene Neuinstallation von Plugin {version} (SSH)",
+    "force_reinstall_confirm_message": "Innerhalb von 30 Sekunden erneut drücken, um zu bestätigen. Das Plugin wird per SSH aus dem mit der Integration gelieferten Paket neu installiert, und die Oberfläche des Receivers startet neu. Der Receiver verlässt den Standby, und über HDMI-CEC kann sich auch der Fernseher einschalten.",
+    "force_reinstall_older": "Das ist eine ältere Version als die installierte ({installed}).",
+    "force_reinstall_admin_message": "Nur ein Home-Assistant-Administrator kann eine erzwungene Plugin-Neuinstallation bestätigen.",
+    "force_reinstall_done_message": "Plugin {version} wurde per SSH neu installiert.",
+    "force_reinstall_disabled_message": "Das Plugin wurde installiert, ist aber in seinen Einstellungen auf dem Receiver ausgeschaltet."
   },
   "config": {
     "flow_title": "{name}",
@@ -195,7 +202,9 @@
           "softcam_autoheal_seconds": "Wie lange ein Sender nicht entschlüsseln darf, bevor der Receiver das Softcam neu startet. Ein gesunder verschlüsselter Sender erneuert etwa alle zehn Sekunden, ein kurzes Fenster meldet also einen Fehler auf einem funktionierenden Receiver; die neunzig Sekunden des Plugins sind etwa neun ausgebliebene Erneuerungen. Das Fenster beginnt bei jedem Senderwechsel von vorn. 30 bis 600 Sekunden.",
           "check_github_releases": "Standardmäßig aus, und aus bedeutet, dass diese Integration von sich aus nichts abfragt: Die signierte Versionsliste des Plugins wird nur geholt, wenn jemand „Nach Plugin-Updates suchen“ drückt oder, solange dies eingeschaltet ist, „Nach Updates suchen“ in Home Assistant verwendet. Eingeschaltet wird die Liste außerdem höchstens alle 24 Stunden geholt, eine für alle Receiver. Sie wird nur angenommen, wenn ihre Signatur mit einem in die Integration eingebauten Schlüssel übereinstimmt, und sie wird gespeichert, sodass ein Neuladen des Receivers oder ein Neustart von Home Assistant das bereits Bekannte zeigt, statt erneut zu fragen. Außer der Liste wird nichts heruntergeladen: Installiert wird weiterhin nur aus dem hier mitgelieferten Paket.",
           "source_list_scope": "Alle angebotenen Bouquets ergeben eine Liste aus allen — so hat diese Integration es bisher gehalten — und bei tausend Sendern ist das ein Auswahlfeld mit tausend Zeilen. Das aktive Bouquet ist die kurze Liste, auf der der Receiver selbst steht, dieselbe, die seine Sendertasten auf und ab durchlaufen, und dieselbe, die die Auswahl „Kanal“ zeigt. Ein Receiver, der kein aktives Bouquet veröffentlicht hat, behält die lange Liste, weil es nichts gibt, worauf sie zu kürzen wäre. In beiden Fällen wechselt die Auswahl „Bouquet“ das Bouquet, und die Aktion zap nimmt eine Dienstreferenz und ignoriert diese Einstellung.",
-          "history_hidden_bouquets": "Sender dieser Bouquets erscheinen nicht in „Zuletzt gesehen“ — gleich, ob über dieses Bouquet oder über ein anderes umgeschaltet wurde. Solange hier etwas gewählt ist, wird auch ein Sender ausgelassen, dessen Bouquet sich nicht prüfen lässt — ein Radio-Bouquet oder eines, das der Receiver nicht veröffentlicht. Leer zeigt alles. Das blendet sie nur in dieser einen Entität aus: „Zuletzt gesehen (alle)“, „Kanal“, „Bouquet“ und der Media Player bieten sie weiter an, der Verlaufsbildschirm des Receivers zeigt sie, und der Receiver veröffentlicht jeden Eintrag und jeden Sender auf dem Broker, wo jedes Broker-Login sie lesen kann. Der Zustand von „Zuletzt gesehen (alle)“ ist, sobald diese Entität aktiviert ist, der gerade laufende Sender — auch aus ausgeblendeten Bouquets — und landet wie jeder Zustand im Recorder; soll er das nicht, schließe diese Entität in der Recorder-Konfiguration aus."
+          "history_hidden_bouquets": "Sender dieser Bouquets erscheinen nicht in „Zuletzt gesehen“ — gleich, ob über dieses Bouquet oder über ein anderes umgeschaltet wurde. Solange hier etwas gewählt ist, wird auch ein Sender ausgelassen, dessen Bouquet sich nicht prüfen lässt — ein Radio-Bouquet oder eines, das der Receiver nicht veröffentlicht. Leer zeigt alles. Das blendet sie nur in dieser einen Entität aus: „Zuletzt gesehen (alle)“, „Kanal“, „Bouquet“ und der Media Player bieten sie weiter an, der Verlaufsbildschirm des Receivers zeigt sie, und der Receiver veröffentlicht jeden Eintrag und jeden Sender auf dem Broker, wo jedes Broker-Login sie lesen kann. Der Zustand von „Zuletzt gesehen (alle)“ ist, sobald diese Entität aktiviert ist, der gerade laufende Sender — auch aus ausgeblendeten Bouquets — und landet wie jeder Zustand im Recorder; soll er das nicht, schließe diese Entität in der Recorder-Konfiguration aus.",
+          "configure_ssh": "Die Schaltfläche „Plugin-Neuinstallation erzwingen (SSH)“ erscheint, sobald SSH-Zugangsdaten gespeichert sind. Sie ist standardmäßig deaktiviert; aktiviere sie auf der Geräteseite.",
+          "keep_ssh_credentials": "Abwählen, um die gespeicherten SSH-Zugangsdaten zu vergessen. Die Update-Karte kann dann nicht mehr installieren, und die Schaltfläche „Plugin-Neuinstallation erzwingen (SSH)“ wird entfernt."
         }
       },
       "ssh_host": {"title": "Mit dem Receiver verbinden", "data": {"ssh_host": "Receiver-Adresse", "ssh_port": "SSH-Port"}},
@@ -336,6 +345,9 @@
       },
       "history_clear": {
         "name": "Zuletzt gesehen leeren"
+      },
+      "force_reinstall": {
+        "name": "Plugin-Neuinstallation erzwingen (SSH)"
       }
     },
     "event": {
@@ -755,6 +767,7 @@
     "relay_unreachable": {"message": "Der Receiver konnte das Plugin nicht von Home Assistant herunterladen ({url}). Lege die Adresse „Lokales Netzwerk“ von Home Assistant auf eine Adresse fest, die der Receiver erreicht."},
     "relay_not_downloaded": {"message": "Home Assistant hat dem Receiver das Plugin {version} unter {url} angeboten, es wurde aber nicht innerhalb von zehn Minuten heruntergeladen. Falls eine Installation auf dem Receiver fehlgeschlagen ist, prüfe, ob der Receiver diese Adresse erreicht."},
     "update_busy_stalled": {"message": "Ein Plugin-Update auf dem Receiver hat ohne Abschluss angehalten und hält noch seine Sperre. Die Sperre läuft in etwa {minutes} Min. ab; versuche es dann erneut. Es wurde nichts geändert."},
-    "update_records_mismatch": {"message": "Die Paketverwaltung des Receivers verzeichnet Plugin {recorded}, es läuft aber Plugin {running}: Ein früheres Update hat die vorherige Version nicht vollständig wiederhergestellt. Es wurde nichts geändert. Installiere das Plugin mit „Plugin-Neuinstallation erzwingen (SSH)“ auf der Geräteseite neu."}
+    "update_records_mismatch": {"message": "Die Paketverwaltung des Receivers verzeichnet Plugin {recorded}, es läuft aber Plugin {running}: Ein früheres Update hat die vorherige Version nicht vollständig wiederhergestellt. Es wurde nichts geändert. Installiere das Plugin mit „Plugin-Neuinstallation erzwingen (SSH)“ auf der Geräteseite neu."},
+    "force_reinstall_failed": {"message": "Die erzwungene Plugin-Neuinstallation ist fehlgeschlagen: {reason}"}
     }
   }

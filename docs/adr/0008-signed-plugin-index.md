@@ -255,6 +255,11 @@ switched off in its own settings is reinstalled and stays off, and the result sa
   without the recording guards only when enigma2 is absent on three samples over ten seconds - a
   respawn loop, in which nothing can record; and it recovers runlevel 4 left by an interrupted
   transaction of this project.
+- **It never takes the lock back early** (decided when it was built). It claims the shared lock
+  by the released 30-minute stale rule and nothing else, even when the holder is a plugin
+  self-update whose heartbeat has stopped: a helper that is stopped rather than dead beats again
+  when it is continued, its `opkg` may still be writing, and the owner record's pid is not a
+  liveness test. The wait is bounded by the rule; the refusal says how long it is.
 - **It exists only while SSH credentials are stored.** One helper writes and removes the credentials
   and signals the change; the button is created then, disabled by default, and removed with its
   registry entry when they are forgotten. That is a deliberate exception to "entities are never

@@ -106,6 +106,7 @@ from .const import (
     SCREENSHOT_MODES,
     SOURCE_LIST_SCOPES,
 )
+from .credentials import async_set_ssh_credentials, ssh_entry_data
 from .downgrade import (
     async_lost_names,
     downgrade_candidates,
@@ -559,14 +560,7 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
             CONF_SSH_PORT: self._install_port,
         }
         if self._install_request.keep_credentials:
-            data.update(
-                {
-                    CONF_SSH_USERNAME: self._install_request.credentials.username,
-                    CONF_SSH_PASSWORD: self._install_request.credentials.password,
-                    CONF_SSH_HOST_KEY: self._install_request.credentials.host_key,
-                    CONF_KEEP_SSH_CREDENTIALS: True,
-                }
-            )
+            data.update(ssh_entry_data(self._install_request.credentials))
         self._install_request = None
         return self.async_create_entry(title=self._name, data=data)
 
@@ -734,15 +728,7 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
                 ),
                 errors={"base": err.code.value},
             )
-        self.hass.config_entries.async_update_entry(
-            entry,
-            data={
-                **entry.data,
-                CONF_SSH_USERNAME: credentials.username,
-                CONF_SSH_PASSWORD: credentials.password,
-                CONF_SSH_HOST_KEY: host_key,
-            },
-        )
+        async_set_ssh_credentials(self.hass, entry, credentials)
         return self.async_abort(reason="reauth_successful")
 
     @callback
@@ -1114,17 +1100,7 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                     CONF_SSH_PASSWORD in self.config_entry.data
                     and not user_input.get(CONF_KEEP_SSH_CREDENTIALS, True)
                 ):
-                    entry_data = dict(self.config_entry.data)
-                    for key in (
-                        CONF_SSH_USERNAME,
-                        CONF_SSH_PASSWORD,
-                        CONF_SSH_HOST_KEY,
-                        CONF_KEEP_SSH_CREDENTIALS,
-                    ):
-                        entry_data.pop(key, None)
-                    self.hass.config_entries.async_update_entry(
-                        self.config_entry, data=entry_data
-                    )
+                    async_set_ssh_credentials(self.hass, self.config_entry, None)
                 return self.async_create_entry(data=data)
 
         box = self._box()
@@ -1446,18 +1422,7 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                             errors["base"] = "plugin_config_failed"
                 if errors:
                     return self._show_ssh_confirm(errors)
-                self.hass.config_entries.async_update_entry(
-                    self.config_entry,
-                    data={
-                        **self.config_entry.data,
-                        CONF_SSH_HOST: credentials.host,
-                        CONF_SSH_PORT: credentials.port,
-                        CONF_SSH_USERNAME: credentials.username,
-                        CONF_SSH_PASSWORD: credentials.password,
-                        CONF_SSH_HOST_KEY: credentials.host_key,
-                        CONF_KEEP_SSH_CREDENTIALS: True,
-                    },
-                )
+                async_set_ssh_credentials(self.hass, self.config_entry, credentials)
                 return self.async_create_entry(data=self._pending_options or {})
         return self._show_ssh_confirm(errors)
 

@@ -52,19 +52,25 @@ from __future__ import annotations
 
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
+import logging
 import math
+import time
 from typing import Any
 
+from homeassistant.components import persistent_notification
 from homeassistant.components.button import (
     ButtonDeviceClass,
     ButtonEntity,
     ButtonEntityDescription,
 )
 from homeassistant.const import EntityCategory
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.translation import async_get_translations
 import homeassistant.util.dt as dt_util
 
 from .box import (
@@ -73,20 +79,28 @@ from .box import (
     Enigma2MqttConfigEntry,
     async_send_magic_packet,
 )
+from .buildid import base_version
 from .const import (
     ATTR_WAKE_ON_LAN,
     CAPABILITY_EPG_IMPORT,
     CAPABILITY_HISTORY_CLEAR,
     CAPABILITY_SOFTCAM,
+    CONF_BASE_TOPIC,
     CONF_DANGEROUS_BUTTONS,
+    CONF_NODE_ID,
+    DEFAULT_BASE_TOPIC,
     DOMAIN,
     HISTORY_CLEAR_REASONS,
+    SIGNAL_FORCE_REINSTALL,
     TOPIC_EPG_IMPORT,
     TOPIC_SCREEN,
     TOPIC_ZAP_HISTORY,
     WAKE_ON_LAN_NOT_SUPPORTED,
 )
+from .credentials import signal_ssh_credentials, stored_ssh_credentials
 from .entity import Enigma2Entity, OptionalEntities
+from .installer import InstallerError, InstallerErrorCode, InstallRequest, async_install
+from .plugin_versions import async_plugin_versions, has_credentials
 from .release_store import (
     ERROR_BAD_MEMORY,
     ERROR_BAD_SIGNATURE,
@@ -96,9 +110,14 @@ from .release_store import (
     async_release_index_cache,
 )
 
+_LOGGER = logging.getLogger(__name__)
+
 PARALLEL_UPDATES = 0
 
 KEY_CHECK_PLUGIN_UPDATE = "check_plugin_update"
+KEY_FORCE_REINSTALL = "force_reinstall"
+# How long the first press of „Wymuś reinstalację wtyczki (SSH)" waits for the second.
+FORCE_REINSTALL_WINDOW = 30.0
 
 # The payload the plugin's press-style commands take. Any payload works; this is the
 # one the contract names, and a log on the box reading `PRESS` is easier to follow
@@ -406,6 +425,29 @@ async def async_setup_entry(
         ).start()
     )
 
+    # „Wymuś reinstalację wtyczki (SSH)" exists exactly while SSH credentials are stored
+    # (design, section 7a): never a present-but-refusing button. The gate is a fact Home
+    # Assistant holds, not something the box says, so it is "declared" at once and followed
+    # on the credentials signal - the only way to hear of an enrolment or a forgetting,
+    # neither of which reloads the entry. Forgetting removes the registry entry for good,
+    # so enrolling again brings a new button, disabled as the first one was. This is a
+    # deliberate exception to "never removed when a capability goes quiet": that rule
+    # protects against a box's silence, and this follows a decision taken here.
+    entry.async_on_unload(
+        OptionalEntities(
+            hass,
+            box,
+            "button",
+            [KEY_FORCE_REINSTALL],
+            lambda _key: Enigma2ForceReinstallButton(box, entry),
+            lambda: has_credentials(entry),
+            lambda: True,
+            async_add_entities,
+            signal=signal_ssh_credentials(entry.entry_id),
+            forget=True,
+        ).start()
+    )
+
     entry.async_on_unload(
         OptionalEntities(
             hass,
@@ -553,6 +595,199 @@ class Enigma2CheckPluginUpdateButton(Enigma2Entity, ButtonEntity):
             translation_key=key,
             translation_placeholders={"reason": str(result.error)},
         )
+
+
+class Enigma2ForceReinstallButton(Enigma2Entity, ButtonEntity):
+    """„Wymuś reinstalację wtyczki (SSH)": the bundled plugin, reinstalled over SSH.
+
+    The recovery and bootstrap path (design, section 7a). Every other way of changing the
+    plugin needs a plugin that answers; this needs SSH and the bytes this integration ships,
+    and nothing else - so it works on a receiver whose plugin is dead, switched off, or too
+    old to update itself, and it is available while the receiver is unreachable over MQTT,
+    which is exactly when it is wanted. It asks the receiver's lock, never the retained
+    `update` phase, so a forged or stale phase cannot block it.
+
+    Home Assistant has no confirmation for a button, so the press is made safe instead:
+    the first press by an administrator arms the button for thirty seconds and posts the
+    confirmation as a notice - raising nothing, so an automation is not aborted by it -
+    and a second press by the same administrator inside the window runs the reinstall.
+    `button.press` is not admin-only in core the way `update.install` is, so both presses
+    are checked, and a press by anybody else - an automation included, which runs without
+    a user - is answered with a notice and does nothing else.
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, box: Enigma2Box, entry: Enigma2MqttConfigEntry) -> None:
+        """Set up the button; it reads no topic of the box."""
+        super().__init__(box, KEY_FORCE_REINSTALL, requires=None)
+        self._entry = entry
+        # (the administrator who armed it, when the arming lapses on the monotonic clock)
+        self._armed: tuple[str, float] | None = None
+        self._cancel_expiry: CALLBACK_TYPE | None = None
+        self._running = False
+
+    @property
+    def available(self) -> bool:
+        """Available whatever the receiver says over MQTT: it needs only SSH."""
+        return True
+
+    @property
+    def _notice_id(self) -> str:
+        return f"{DOMAIN}_force_reinstall_{self._entry.entry_id}"
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Forget an arming, and its notice, with the button."""
+        self._disarm()
+
+    async def _async_texts(self, category: str) -> dict[str, str]:
+        return await async_get_translations(
+            self.hass, self.hass.config.language, category, {DOMAIN}
+        )
+
+    async def _async_common(self, slug: str, **placeholders: str) -> str:
+        text = (await self._async_texts("common")).get(f"component.{DOMAIN}.common.{slug}", slug)
+        try:
+            return text.format(**placeholders)
+        except (IndexError, KeyError):
+            return text
+
+    @callback
+    def _disarm(self) -> None:
+        self._armed = None
+        if self._cancel_expiry is not None:
+            self._cancel_expiry()
+            self._cancel_expiry = None
+        persistent_notification.async_dismiss(self.hass, self._notice_id)
+
+    @callback
+    def _expire(self, _now: Any) -> None:
+        """Thirty seconds without the second press: the first one is forgotten."""
+        self._cancel_expiry = None
+        self._disarm()
+
+    async def async_press(self) -> None:
+        """Arm on the first press, reinstall on the second - for an administrator only."""
+        user_id = self._context.user_id if self._context is not None else None
+        user = await self.hass.auth.async_get_user(user_id) if user_id else None
+        if user is None or not user.is_admin:
+            # A notice, not an error: an automation's run is not aborted, and nothing is
+            # armed or started. An administrator's arming is left as it is.
+            _LOGGER.warning(
+                "Forced plugin reinstall pressed by %s, who is not a Home Assistant "
+                "administrator; nothing was armed or started",
+                "no user" if user is None else "a user",
+            )
+            persistent_notification.async_create(
+                self.hass,
+                await self._async_common("force_reinstall_admin_message"),
+                await self._async_common("force_reinstall_title"),
+                f"{self._notice_id}_refused",
+            )
+            return
+        if self._running:
+            _LOGGER.info("Forced plugin reinstall already running; the press changes nothing")
+            return
+        armed = self._armed
+        if armed is not None and armed[0] == user.id and time.monotonic() < armed[1]:
+            self._disarm()
+            await self._async_reinstall()
+            return
+        versions = await async_plugin_versions(self.hass, self._entry)
+        if (refusal := versions.bundle_refusal()) is not None:
+            code, placeholders = refusal
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key=f"update_version_{code}",
+                translation_placeholders=placeholders,
+            )
+        bundled = versions.bundled()
+        installed = versions.installed()
+        version = bundled.version if bundled is not None else "?"
+        message = await self._async_common("force_reinstall_confirm_message")
+        installed_base = base_version(installed.version) if installed is not None else None
+        bundled_base = base_version(bundled.version) if bundled is not None else None
+        if (
+            installed is not None
+            and installed_base is not None
+            and bundled_base is not None
+            and installed_base > bundled_base
+        ):
+            message = (
+                f"{message} "
+                + await self._async_common("force_reinstall_older", installed=installed.display)
+            )
+        self._disarm()
+        self._armed = (user.id, time.monotonic() + FORCE_REINSTALL_WINDOW)
+        self._cancel_expiry = async_call_later(self.hass, FORCE_REINSTALL_WINDOW, self._expire)
+        persistent_notification.async_create(
+            self.hass,
+            message,
+            await self._async_common("force_reinstall_confirm_title", version=version),
+            self._notice_id,
+        )
+
+    async def _async_reinstall(self) -> None:
+        """Run the SSH installer in its forced mode, and say how it ended."""
+        credentials = stored_ssh_credentials(self._entry)
+        if credentials is None:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="update_no_credentials"
+            )
+        data = self._entry.data
+        request = InstallRequest(
+            credentials=credentials,
+            provisioning=None,
+            expect_running=False,
+            node_id=data[CONF_NODE_ID],
+            base_topic=data.get(CONF_BASE_TOPIC, DEFAULT_BASE_TOPIC),
+            force=True,
+        )
+        signal = f"{SIGNAL_FORCE_REINSTALL}_{self._entry.entry_id}"
+        self._running = True
+        _LOGGER.warning("Forced plugin reinstall over SSH confirmed; starting")
+        try:
+            result = await async_install(
+                self.hass, request, lambda phase: async_dispatcher_send(self.hass, signal, phase)
+            )
+        except InstallerError as err:
+            if err.code in (InstallerErrorCode.AUTH_FAILED, InstallerErrorCode.HOST_KEY_CHANGED):
+                self._entry.async_start_reauth(self.hass)
+            reason = await self._async_reason(err)
+            # On „Ostatni błąd" too, as Home Assistant's own: the plugin may never publish
+            # again, and this is the one place the household looks for why.
+            self.box.async_record_local_error(KEY_FORCE_REINSTALL, reason)
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="force_reinstall_failed",
+                translation_placeholders={"reason": reason},
+            ) from err
+        finally:
+            self._running = False
+            async_dispatcher_send(self.hass, signal, None)
+        persistent_notification.async_create(
+            self.hass,
+            await self._async_common(
+                "force_reinstall_done_message"
+                if result.plugin_enabled
+                else "force_reinstall_disabled_message",
+                version=result.version,
+            ),
+            await self._async_common("force_reinstall_title"),
+            f"{self._notice_id}_result",
+        )
+
+    async def _async_reason(self, err: InstallerError) -> str:
+        """The installer's sentence for `err`, in the installation's language."""
+        texts = await self._async_texts("config")
+        text = texts.get(f"component.{DOMAIN}.config.abort.{err.code.value}")
+        if not text:
+            return err.code.value
+        try:
+            return text.format(**err.placeholders)
+        except (IndexError, KeyError):
+            return text
 
 
 class Enigma2Button(Enigma2Entity, ButtonEntity):

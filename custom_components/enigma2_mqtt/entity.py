@@ -26,6 +26,7 @@ from collections.abc import Callable, Iterable, Sequence
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import Entity
 
 from .box import Enigma2Box
@@ -120,8 +121,21 @@ class OptionalEntities:
         enabled: Callable[[], bool],
         declared: Callable[[], bool],
         add_entities: Callable[[list[Entity]], None],
+        *,
+        signal: str | None = None,
+        forget: bool = False,
     ) -> None:
-        """Remember what to create, when, and how to take it away again."""
+        """Remember what to create, when, and how to take it away again.
+
+        `signal` is a dispatcher signal to reconcile on as well as `info`, for a gate that
+        is not the box's but Home Assistant's own - stored SSH credentials. `forget` makes
+        a removal final: Home Assistant keeps a removed entity's registry id, its disabled
+        flag and its entity id, and hands them back when the same unique id is created
+        again. For an entity that follows a decision taken in Home Assistant - credentials
+        forgotten, then enrolled again - that would bring back whatever was done to the
+        old one; with `forget` it comes back new, and disabled by default as it was the
+        first time (design, section 7a, OD D).
+        """
         self.hass = hass
         self.box = box
         self.platform = platform
@@ -130,12 +144,21 @@ class OptionalEntities:
         self.enabled = enabled
         self.declared = declared
         self.add_entities = add_entities
+        self.signal = signal
+        self.forget = forget
         self.live = False
 
     def start(self):
-        """Reconcile once, then on every `info`, and return the unsubscribe."""
-        unsubscribe = self.box.async_add_listener(self._update, (TOPIC_INFO,))
+        """Reconcile once, then on every `info` (and signal), and return the unsubscribe."""
+        unsubscribes = [self.box.async_add_listener(self._update, (TOPIC_INFO,))]
+        if self.signal is not None:
+            unsubscribes.append(async_dispatcher_connect(self.hass, self.signal, self._update))
         self._update()
+
+        def unsubscribe() -> None:
+            for remove in unsubscribes:
+                remove()
+
         return unsubscribe
 
     @callback
@@ -164,3 +187,9 @@ class OptionalEntities:
             unique_id = f"{self.box.node_id}_{key}"
             if entity_id := registry.async_get_entity_id(self.platform, DOMAIN, unique_id):
                 registry.async_remove(entity_id)
+            if self.forget and registry.deleted_entities.pop(
+                (self.platform, DOMAIN, unique_id), None
+            ):
+                # There is no public way to forget a removed entity's record, and nothing
+                # else of it may come back; the registry is saved like after any removal.
+                registry.async_schedule_save()

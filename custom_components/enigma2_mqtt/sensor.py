@@ -72,6 +72,7 @@ from .const import (
     TOPIC_EPG_IMPORT,
     TOPIC_INFO,
     TOPIC_LAST_ERROR,
+    TOPIC_LOCAL_ERROR,
     TOPIC_OSCAM,
     TOPIC_PROCESS,
     TOPIC_RECORDING,
@@ -82,6 +83,10 @@ from .const import (
 from .entity import Enigma2Entity, OptionalEntities
 
 PARALLEL_UPDATES = 0
+
+# Whose complaint „Ostatni błąd" shows: the receiver's, or one Home Assistant recorded itself.
+SOURCE_RECEIVER = "receiver"
+SOURCE_HOME_ASSISTANT = "home_assistant"
 
 
 def _iso(value: Any) -> str | None:
@@ -836,19 +841,31 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
     unavailable with the box would lose the explanation at the moment it was wanted, and
     a restart taken while the box was away would store `unavailable` and lose it for
     good.
+
+    **Home Assistant is a source too.** A forced reinstall over SSH fails on this side,
+    often for a receiver whose plugin will never publish again, so its failure is
+    recorded by the box object and taken here as the newest complaint. `source` says
+    whose it is: `receiver` or `home_assistant`.
     """
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, box: Enigma2Box) -> None:
         """Set up the sensor on the complaint topic, with no state to wait for."""
-        super().__init__(box, "last_error", topics=(TOPIC_LAST_ERROR,), requires=None)
+        super().__init__(
+            box, "last_error", topics=(TOPIC_LAST_ERROR, TOPIC_LOCAL_ERROR), requires=None
+        )
         # How many `last_error` payloads had arrived when this entity last looked. The
         # count rather than the payload, because the same command failing the same way
         # twice is two errors and the second one has its own time.
         self._handled = 0
+        self._handled_local = 0
         self._attr_native_value = None
-        self._attr_extra_state_attributes: dict[str, Any] = {"error": None, "time": None}
+        self._attr_extra_state_attributes: dict[str, Any] = {
+            "error": None,
+            "time": None,
+            "source": None,
+        }
 
     @property
     def available(self) -> bool:
@@ -866,12 +883,24 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
             self._attr_extra_state_attributes = {
                 "error": last_state.attributes.get("error"),
                 "time": last_state.attributes.get("time"),
+                "source": last_state.attributes.get("source"),
             }
         await super().async_added_to_hass()
 
     @callback
     def _async_read_state(self) -> None:
         """Take a new complaint, and only a new one."""
+        recorded = self.box.updates.get(TOPIC_LOCAL_ERROR, 0)
+        if recorded != self._handled_local:
+            self._handled_local = recorded
+            local = self.box.state.local_error
+            if isinstance(local, dict) and local.get("cmd"):
+                self._attr_native_value = str(local["cmd"])[:ERROR_TEXT_MAX]
+                self._attr_extra_state_attributes = {
+                    "error": str(local.get("error") or "")[:ERROR_TEXT_MAX] or None,
+                    "time": local.get("ts") or dt_util.utcnow().isoformat(),
+                    "source": SOURCE_HOME_ASSISTANT,
+                }
         arrived = self.box.updates.get(TOPIC_LAST_ERROR, 0)
         if arrived == self._handled:
             return
@@ -908,6 +937,7 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
             # attributes, which Home Assistant drops: a replay costs nothing and
             # changes nothing, without this having to recognise it.
             "time": when or dt_util.utcnow().isoformat(),
+            "source": SOURCE_RECEIVER,
         }
 
 

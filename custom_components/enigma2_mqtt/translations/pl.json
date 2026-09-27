@@ -14,7 +14,14 @@
     "release_index_none": "brak",
     "update_summary_published_no_install": "Podpisana lista wersji wtyczki zawiera {version}. Nie zapisano danych SSH, więc ta karta nie może jej zainstalować: skonfiguruj dekoder ponownie z opcją „Zachowaj dane SSH do aktualizacji”.",
     "update_summary_older_release": "Dekoder ma starszą wtyczkę. Instalacja zastąpi ją wersją {version} z podpisanej listy wersji wtyczki, pobraną i sprawdzoną, zanim cokolwiek trafi na dekoder, i nie zmieni ustawień brokera na dekoderze.",
-    "downgrade_loses_mqtt_updates": "Aktualizacje wtyczki przez MQTT (aktualizacje będą wtedy znów możliwe przez SSH)"
+    "downgrade_loses_mqtt_updates": "Aktualizacje wtyczki przez MQTT (aktualizacje będą wtedy znów możliwe przez SSH)",
+    "force_reinstall_title": "Wymuszona reinstalacja wtyczki",
+    "force_reinstall_confirm_title": "Wymuszona reinstalacja wtyczki {version} (SSH)",
+    "force_reinstall_confirm_message": "Naciśnij ponownie w ciągu 30 sekund, aby potwierdzić. Wtyczka zostanie zainstalowana od nowa przez SSH z pakietu dołączonego do integracji, a interfejs dekodera uruchomi się ponownie. Dekoder wyjdzie z trybu czuwania, a przez HDMI-CEC może włączyć się także telewizor.",
+    "force_reinstall_older": "To starsza wersja niż zainstalowana ({installed}).",
+    "force_reinstall_admin_message": "Wymuszoną reinstalację wtyczki może potwierdzić tylko administrator Home Assistant.",
+    "force_reinstall_done_message": "Wtyczka {version} została zainstalowana od nowa przez SSH.",
+    "force_reinstall_disabled_message": "Wtyczka została zainstalowana, ale jest wyłączona w swoich ustawieniach na dekoderze."
   },
   "config": {
     "flow_title": "{name}",
@@ -195,7 +202,9 @@
           "softcam_autoheal_seconds": "Jak długo kanał może nie odkodowywać, zanim dekoder zrestartuje softcam. Sprawny zaszyfrowany kanał odnawia się mniej więcej co dziesięć sekund, więc krótkie okno zgłasza awarię na działającym dekoderze; dziewięćdziesiąt sekund wtyczki to około dziewięciu nieodebranych odnowień. Okno zaczyna się od nowa przy każdej zmianie kanału. Od 30 do 600 sekund.",
           "check_github_releases": "Domyślnie wyłączone, a wyłączone znaczy, że ta integracja sama o nic nie pyta: podpisaną listę wersji wtyczki pobiera tylko naciśnięcie „Sprawdź aktualizacje wtyczki” albo, gdy to jest włączone, „Sprawdź aktualizacje” w Home Assistancie. Włączone pobiera tę listę także nie częściej niż raz na 24 godziny, jedną dla wszystkich dekoderów. Lista jest przyjmowana tylko wtedy, gdy jej podpis zgadza się z kluczem wbudowanym w integrację, i jest zapisywana, więc przeładowanie dekodera albo restart Home Assistanta pokazuje to, co już wiadomo, zamiast pytać ponownie. Poza listą nic nie jest pobierane: instalacja nadal korzysta wyłącznie z pakietu dołączonego tutaj.",
           "source_list_scope": "Wszystkie oferowane bukiety to jedna lista ze wszystkich — tak ta integracja działała dotąd — a przy tysiącu kanałów jest to lista rozwijana o tysiącu pozycji. Aktywny bukiet to krótka lista, na której stoi sam dekoder, ta sama, po której chodzą kanał w górę i w dół, i ta sama, którą pokazuje wybór „Kanał”. Dekoder, który nie opublikował aktywnego bukietu, zostaje przy długiej liście, bo nie ma czym jej skrócić. Tak czy inaczej bukiet zmienia się wyborem „Bukiet”, a akcja zap przyjmuje referencję usługi i nie podlega temu ustawieniu.",
-          "history_hidden_bouquets": "Kanały tych bukietów nie pojawiają się w „Ostatnio oglądane” — niezależnie od tego, czy przełączono na nie z tego bukietu, czy z innego. Gdy cokolwiek jest tu wybrane, pomijany jest też kanał, którego bukietu nie da się sprawdzić — bukiet radiowy albo taki, którego dekoder nie publikuje. Puste — widać wszystko. Ukrywa je tylko w tej jednej encji: „Ostatnio oglądane (wszystkie)”, „Kanał”, „Bukiet” i odtwarzacz nadal je oferują, ekran historii na samym dekoderze je pokazuje, a dekoder publikuje każdy wpis i każdy kanał na brokerze, gdzie odczyta je każdy login brokera. Stan „Ostatnio oglądane (wszystkie)”, gdy ta encja jest włączona, to kanał odtwarzany teraz — także z ukrytych bukietów — i trafia on do rejestratora jak każdy stan; jeśli nie powinien, wyklucz tę encję w konfiguracji rejestratora."
+          "history_hidden_bouquets": "Kanały tych bukietów nie pojawiają się w „Ostatnio oglądane” — niezależnie od tego, czy przełączono na nie z tego bukietu, czy z innego. Gdy cokolwiek jest tu wybrane, pomijany jest też kanał, którego bukietu nie da się sprawdzić — bukiet radiowy albo taki, którego dekoder nie publikuje. Puste — widać wszystko. Ukrywa je tylko w tej jednej encji: „Ostatnio oglądane (wszystkie)”, „Kanał”, „Bukiet” i odtwarzacz nadal je oferują, ekran historii na samym dekoderze je pokazuje, a dekoder publikuje każdy wpis i każdy kanał na brokerze, gdzie odczyta je każdy login brokera. Stan „Ostatnio oglądane (wszystkie)”, gdy ta encja jest włączona, to kanał odtwarzany teraz — także z ukrytych bukietów — i trafia on do rejestratora jak każdy stan; jeśli nie powinien, wyklucz tę encję w konfiguracji rejestratora.",
+          "configure_ssh": "Przycisk „Wymuś reinstalację wtyczki (SSH)” pojawia się, gdy zapiszesz dane SSH. Przycisk jest domyślnie wyłączony; włącz go na stronie urządzenia.",
+          "keep_ssh_credentials": "Odznacz, aby zapomnieć zapisane dane SSH. Karta aktualizacji straci wtedy możliwość instalacji, a przycisk „Wymuś reinstalację wtyczki (SSH)” zostanie usunięty."
         }
       },
       "ssh_host": {"title": "Połącz z dekoderem", "data": {"ssh_host": "Adres dekodera", "ssh_port": "Port SSH"}},
@@ -336,6 +345,9 @@
       },
       "history_clear": {
         "name": "Wyczyść ostatnio oglądane"
+      },
+      "force_reinstall": {
+        "name": "Wymuś reinstalację wtyczki (SSH)"
       }
     },
     "event": {
@@ -755,6 +767,7 @@
     "relay_unreachable": {"message": "Dekoder nie mógł pobrać wtyczki z Home Assistant ({url}). Ustaw „Adres lokalny” w ustawieniach sieci Home Assistant na adres osiągalny z dekodera."},
     "relay_not_downloaded": {"message": "Home Assistant udostępnił dekoderowi wtyczkę {version} pod adresem {url}, ale nie została pobrana w ciągu dziesięciu minut. Jeśli instalacja na dekoderze się nie powiodła, sprawdź, czy dekoder ma dostęp do tego adresu."},
     "update_busy_stalled": {"message": "Aktualizacja wtyczki na dekoderze zatrzymała się przed końcem i nadal trzyma blokadę. Blokada wygaśnie za około {minutes} min — spróbuj wtedy ponownie. Nic nie zostało zmienione."},
-    "update_records_mismatch": {"message": "Rejestr pakietów dekodera podaje wtyczkę {recorded}, a działa wtyczka {running}: wcześniejsza aktualizacja nie dokończyła przywracania poprzedniej wersji. Nic nie zostało zmienione. Zainstaluj wtyczkę od nowa przyciskiem „Wymuś reinstalację wtyczki (SSH)” na stronie urządzenia."}
+    "update_records_mismatch": {"message": "Rejestr pakietów dekodera podaje wtyczkę {recorded}, a działa wtyczka {running}: wcześniejsza aktualizacja nie dokończyła przywracania poprzedniej wersji. Nic nie zostało zmienione. Zainstaluj wtyczkę od nowa przyciskiem „Wymuś reinstalację wtyczki (SSH)” na stronie urządzenia."},
+    "force_reinstall_failed": {"message": "Wymuszona reinstalacja wtyczki nie powiodła się: {reason}"}
     }
   }

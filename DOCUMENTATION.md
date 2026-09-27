@@ -517,7 +517,7 @@ while the box is unreachable, because that is precisely when somebody wants to w
 | `epg_active_bouquet` | *EPG &ndash; aktywny bukiet* | `<node_id>_epg_active_bouquet` | `bouquet`, `epg_grid/<bouquet_slug>` | how many channels of the active bouquet have a programme now or next · no unit · attribute `channels` (**not recorded**) · only while the receiver names the `epg_grid` and `bouquet_context` capabilities |
 | `softcam` | *Softcam* | `<node_id>_softcam` | `softcam` | the selected cam binary · diagnostic · only while the receiver names the `softcam` capability |
 | `epg_import` | *Import EPG* | `<node_id>_epg_import` | `epg_import` | `idle`, `running`, `done` or `failed` · diagnostic · attributes `started`, `finished`, `events`, `error` · only while the receiver names the `epg_import` capability |
-| `last_error` | *Ostatni błąd* | `<node_id>_last_error` | `last_error` | the refused command's name · diagnostic · attributes `error` and `time` |
+| `last_error` | *Ostatni błąd* | `<node_id>_last_error` | `last_error` | the refused command's name · diagnostic · attributes `error`, `time` and `source` |
 | `process_memory` | *Pamięć Enigma2* | `<node_id>_process_memory` | `process` | MiB · `data_size` · diagnostic · **on by default** |
 | `process_memory_peak` | *Pamięć Enigma2 (szczyt)* | `<node_id>_process_memory_peak` | `process` | MiB · the high-water mark since the process started · diagnostic · **disabled by default** |
 | `process_threads` | *Wątki Enigma2* | `<node_id>_process_threads` | `process` | count · diagnostic · **disabled by default** |
@@ -534,7 +534,9 @@ its time across a reload and a restart. The state is the failed command - `deep_
 Assistant learned of it when the payload has none. Taking the receiver's timestamp is what
 makes the replay harmless: the retained complaint arrives again on every reconnect and at
 every start-up, and a clock reading would walk the time forward each time. There is no clear
-button in 0.2.0: the next error replaces it.
+button in 0.2.0: the next error replaces it. `source` says whose complaint it is: `receiver`, or
+`home_assistant` for a failure Home Assistant records itself - a forced reinstall over SSH
+(section 4.5), which the plugin may never be able to report.
 
 It is also the one entity of this device that **stays available while the receiver is not**.
 Deep standby is the headline case and it is precisely a box that has left the network; an
@@ -661,6 +663,7 @@ it is the opposite: the answer is coming, and the dashboard should not sit still
 | `epg_import` | *Pobierz EPG* | `<node_id>_epg_import` | `cmd/epg_import` · **both gates below** | a new `epg_import` payload in `running` |
 | `history_clear` | *Wyczyść ostatnio oglądane* | `<node_id>_history_clear` | `cmd/history_clear` · only while the receiver names the `history_clear` capability; unavailable while `zap_history` says `panic_button: false` | a **new** `zap_history` payload with at most one entry |
 | `check_plugin_update` | *Sprawdź aktualizacje wtyczki* · diagnostic | `<node_id>_check_plugin_update` | no MQTT: fetches the plugin's signed release index, at most once in ten minutes, and available while the box is not | the update card's `index_serial`, `last_check` and `check_error` |
+| `force_reinstall` | *Wymuś reinstalację wtyczki (SSH)* · diagnostic, disabled by default, only while SSH credentials are stored | `<node_id>_force_reinstall` | no MQTT: the SSH installer's forced mode, after two presses by an administrator (below) | a new interface process holding the plugin's log open, and the announcement when the plugin is switched on |
 | `plugin` | *Wtyczka MQTT Bridge* | `<node_id>_plugin` | an `update` entity: installed = `info.plugin` with its build (`0.3.0+g1a2b3c4` for a development build), latest = what the card would install, and the installed version when it cannot install anything (below) | - |
 
 **Every button waits for the receiver**, on the same path as the actions below. A refusal
@@ -918,6 +921,51 @@ the index - or a build of the same number. Choosing a same-number build is the o
 and survives a restart; changing it moves `latest_version`, which makes Home Assistant forget a
 skipped version.
 
+**„Wymuś reinstalację wtyczki (SSH)"** (*Force plugin reinstall (SSH)*, `force_reinstall`,
+diagnostic, **disabled by default**; `button.<device>_wymus_reinstalacje_wtyczki_ssh` on a Polish
+installation) is the recovery and bootstrap path: it reinstalls the plugin package bundled with
+this integration over SSH and needs nothing from the plugin - so it works when the plugin is
+dead, switched off, or too old to update itself. **It exists only while SSH credentials are
+stored**: *Configure* -> tick „Skonfiguruj dane SSH do aktualizacji wtyczki" and enter them, then
+enable the button on the device page. Forgetting the credentials (untick „Zachowaj dane SSH do
+aktualizacji") removes it from the entity registry; enrolling again brings a new button, disabled
+again - and on a Polish installation with an area, with the area in front of its entity id. It is
+available while the receiver is offline over MQTT.
+
+- **Two presses.** Home Assistant has no confirmation for a button, so the first press arms it for
+  30 seconds and posts the confirmation as a notification, naming the bundled version - and
+  saying so when it is older than the plugin installed. The first press raises nothing. A second
+  press by the same administrator inside the 30 seconds runs the reinstall. Only administrators:
+  a press by anybody else - and by an automation, which runs without a user - posts a notice and
+  does nothing else, so a forced reinstall is never a one-call automation action.
+- **What it does.** Always SSH, never MQTT, and only the bundled package, over any version
+  installed (`--force-downgrade` when opkg's records name a newer or unreadable version). It
+  reads the interface's state over SSH before any guard that needs OpenWebif: a running
+  interface gets the usual recording, timer, standby and streaming guards and the clean restart;
+  one whose OpenWebif does not answer is refused, since whether it records cannot be known;
+  a respawn loop is installed without those guards (nothing records without enigma2) and started
+  with `init 4` and `init 3` - the new interface then starts any timer that became due; runlevel
+  4 left by an interrupted install of this project is recovered and started; runlevel 4 with
+  nothing of this project's is left alone. It changes no setting - a plugin switched off stays
+  off - and its proof is a new interface process holding the plugin's log open, plus the
+  announcement when the plugin is switched on.
+- **The shared lock decides, not a topic.** It claims the receiver's install lock like every
+  install, by the 30-minute rule every installer and the plugin share: a lock whose holder is
+  alive refuses it, and it never takes a lock back early - a plugin self-update that stopped
+  without finishing holds its lock until 30 minutes after its last heartbeat, and the refusal says
+  in how many minutes. A stale or forged `update` phase on the broker does not block it.
+- **Result.** The update card shows it running. Success posts a notification - or "installed, but
+  switched off in its settings on the receiver". A failure raises its reason and puts it on
+  „Ostatni błąd" with `source: home_assistant`, because the plugin may never publish again.
+- **When a restart is the repair, not a reinstall.** When the plugin says its update could not
+  stop the interface and asks for the receiver's interface to be restarted (`not_stopped`), the
+  files on the receiver are already the right ones: restart the interface („Restart GUI", or from
+  the receiver's menu). Reinstall only when the plugin asks to be installed again
+  (`restore_failed`, `restore_incomplete`), does not start, or does not answer.
+- **Bootstrap for plugin 0.2.0 and 0.3.0**, which cannot update themselves: the update card's SSH
+  path is the way onto the first self-updating release; this button is for when the card cannot
+  act.
+
 ### 4.6 Selects
 
 | Key | Polish name | unique_id | Topics | Command |
@@ -1145,6 +1193,26 @@ are already clear:
   A retained `offline` that never clears is the plugin's last will; the box lost the broker.
 - **Entities appear twice.** The box is in `discovery` mode *and* added here. Re-run the setup
   or send `cmd/ha_mode = integration`; the plugin retracts the discovery payloads.
+
+### The plugin does not start, and Home Assistant cannot help
+
+With SSH credentials stored, „Wymuś reinstalację wtyczki (SSH)" (section 4.5) is the repair. When
+Home Assistant itself is unavailable, install the plugin by hand on the receiver, over SSH. Add
+the plugin's feed once - a file `/etc/opkg/enigma2-mqtt-bridge.conf` containing
+
+```text
+src/gz enigma2-mqtt-bridge https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed
+```
+
+- then run `opkg update && opkg upgrade enigma2-plugin-extensions-mqttbridge` (or
+`opkg install enigma2-plugin-extensions-mqttbridge` when it is not installed) and restart the
+receiver's interface from its menu. **This path has no signature and no compatibility check**: the
+image's opkg cannot check feed signatures, the feed carries no key, and the key that signs the
+plugin's release index is this project's, which opkg does not use. So install the version the
+update card names, and check a package by hand before installing it: its `sha256sum` must equal
+the `sha256` of that version in the signed index (`releases.json` beside the feed). A single
+version can also be installed straight from its release asset with
+`opkg install <release asset URL>`.
 
 ### Removing a receiver
 

@@ -582,6 +582,14 @@ CONF_PLUGIN_TARGET_VERSION: Final = "plugin_target_version"
 TARGET_LATEST: Final = "latest"
 SIGNAL_TARGET_VERSION: Final = f"{DOMAIN}_target_version"
 
+# The forced reinstall's progress, per entry: the installer's phase while it runs and None
+# when it has ended, so that the update card shows it as its own install. Not an MQTT topic.
+SIGNAL_FORCE_REINSTALL: Final = f"{DOMAIN}_force_reinstall"
+# Where Home Assistant records a failure of its own on „Ostatni błąd" - a forced reinstall
+# the plugin cannot report, because it may never publish again. A key in the box's update
+# counters, never an MQTT topic.
+TOPIC_LOCAL_ERROR: Final = "ha_last_error"
+
 # A release package the index lists is downloaded from the same origin as the index, beside
 # it - the feed serves the packages directly - with the same verified TLS, no redirects and
 # the same timeout, and believed only when its size and sha256 are the signed entry's.

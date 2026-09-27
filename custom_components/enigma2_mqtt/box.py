@@ -96,6 +96,7 @@ from .const import (
     TOPIC_INFO,
     TOPIC_KEY,
     TOPIC_LAST_ERROR,
+    TOPIC_LOCAL_ERROR,
     TOPIC_OSCAM,
     TOPIC_POWER,
     TOPIC_PROCESS,
@@ -655,6 +656,8 @@ class Enigma2State:
     # already happened rather than news - which matters to anything that stamps a time
     # on it, because a reconnect replays it again.
     last_error_retained: bool = False
+    # A failure Home Assistant records itself on „Ostatni błąd": `cmd`, `error`, `ts`.
+    local_error: dict[str, Any] | None = None
     screen: bytes | None = None
     screen_updated: datetime | None = None
     epg_grid: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -2013,6 +2016,22 @@ class Enigma2Box:
         )
         for listener in list(self._key_listeners):
             listener(key, press)
+
+    @callback
+    def async_record_local_error(self, command: str, error: str) -> None:
+        """Put a failure of Home Assistant's own on „Ostatni błąd".
+
+        The sensor remembers what the receiver refused. A forced reinstall is refused or
+        fails on this side, often for a receiver whose plugin will never publish again, so
+        its failure is recorded here and the sensor takes it as the newest complaint, with
+        Home Assistant as its source.
+        """
+        self.state.local_error = {
+            "cmd": command,
+            "error": error,
+            "ts": dt_util.utcnow().isoformat(),
+        }
+        self._async_updated(TOPIC_LOCAL_ERROR)
 
     @callback
     def _last_error_received(self, msg: ReceiveMessage) -> None:

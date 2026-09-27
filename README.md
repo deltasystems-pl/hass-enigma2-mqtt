@@ -54,6 +54,14 @@ plugin. You do not have to install it by hand: this integration can put it on th
 
    <img src="docs/images/installer-menu.png" alt="The first screen after adding the integration: use an existing MQTT Bridge plugin, or install MQTT Bridge over SSH" width="400">
 
+A receiver whose plugin stopped working: with SSH credentials stored (*Configure* ->
+„Skonfiguruj dane SSH do aktualizacji wtyczki"), the device gets a diagnostic button, **„Wymuś
+reinstalację wtyczki (SSH)"** (*Force plugin reinstall (SSH)*), disabled by default - enable it on
+the device page. Two presses by an administrator within 30 seconds reinstall the bundled plugin
+over SSH, without needing the plugin to answer. Without Home Assistant, install it by hand from the
+plugin's feed; that path has no signature check
+([how, and what to check](DOCUMENTATION.md#the-plugin-does-not-start-and-home-assistant-cannot-help)).
+
 Manual install: download `enigma2_mqtt.zip` from the
 [latest release](https://github.com/deltasystems-pl/hass-enigma2-mqtt/releases/latest), extract it
 into `config/custom_components/enigma2_mqtt/` and restart. Do not keep a backup copy inside

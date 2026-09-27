@@ -100,6 +100,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   integration meets its `min_integration`, and it is not withdrawn. The four named in-major
   exceptions of contract 1 are listed in `const.py`, and CI compares the list with the plugin's
   `contract.json`.
+- **„Wymuś reinstalację wtyczki (SSH)"** (*Force plugin reinstall (SSH)*), a diagnostic button,
+  disabled by default, that **exists only while SSH credentials are stored** (design, section 7a;
+  ADR-0008, section 8). **Not yet run on a receiver.** It reinstalls the bundled plugin over SSH
+  without needing the plugin to answer - the recovery path for a plugin that is dead, switched off
+  or too old to update itself. Home Assistant has no confirmation for a button, so the first press
+  by an administrator arms it for 30 seconds and posts the confirmation as a notification (raising
+  nothing), and a second press by the same administrator inside the window runs it; a press by
+  anybody else, an automation included, posts a notice and does nothing else. The update card
+  shows it running; a failure is also recorded on „Ostatni błąd", with Home Assistant as its
+  source. Enrolling or forgetting SSH credentials creates or removes it at once, without a reload -
+  forgetting removes its registry entry, so enrolling again brings a new button, disabled again.
 - **The SSH installer's forced mode**, the recovery path the forced-reinstall button uses
   (design, section 7a). **Not yet run on a receiver.** It installs only the bundled package, over
   any version (`--force-downgrade` when opkg's records name a newer or unreadable version, never
@@ -256,6 +267,11 @@ The version card and the release check:
   running plugin is newer too; when only the records are, it is refused before anything changes
   with a sentence naming both versions and the forced reinstall as the repair. Without a reported
   version the records still decide, and the log says they are the records.
+- „Ostatni błąd" has a third attribute, `source`: `receiver` for what the receiver refused, and
+  `home_assistant` for a failure Home Assistant records itself.
+- SSH credentials are written and forgotten in one place, which tells the entities that depend on
+  them; the update card's install feature follows an enrolment or a forgetting at once, where it
+  used to wait for the next reload.
 
 ### Known limits
 
