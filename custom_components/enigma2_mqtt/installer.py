@@ -1254,7 +1254,11 @@ async def _async_follow_r2(
 
 
 def _r2_restore_code(steps: dict[str, str]) -> InstallerErrorCode | None:
-    """Return the verdict on the restore the script ran, or None when it succeeded."""
+    """Return the verdict on the restore the script ran, or None when it succeeded.
+
+    `restored lost` - a restore gone without writing its exit status, killed - is a
+    failure like any other status but the helper's two opkg ones.
+    """
     rc = steps.get("restored")
     if rc == "0":
         return None
@@ -1443,13 +1447,25 @@ async def _async_rollback(
                     # enigma2 never stopped. The script put the files back and left the
                     # settings and the channel to the running interface, which writes its
                     # own over anything written now; nothing restarted. "The files were
-                    # put back" is only true of a restore that succeeded: one opkg kept
-                    # waiting put nothing back, and its own verdict says so.
+                    # put back" is only true of a restore that succeeded: a restore
+                    # refused because opkg was busy put nothing back, and its own verdict
+                    # says so. The overlap's verdict says the receiver was put back as it
+                    # was, which is false without the settings, so it is a failure here.
                     if restore_error is None:
                         restore_error = InstallerError(
                             InstallerErrorCode.ROLLBACK_FAILED,
                             "the receiver's interface did not stop, so only the plugin's "
                             "files were put back, not its settings",
+                        )
+                    elif (
+                        isinstance(restore_error, InstallerError)
+                        and restore_error.code is InstallerErrorCode.ROLLBACK_OPKG_OVERLAP
+                    ):
+                        restore_error = InstallerError(
+                            InstallerErrorCode.ROLLBACK_FAILED,
+                            "the receiver's interface did not stop, so its settings were "
+                            "not restored; the plugin's files were, while another opkg run "
+                            "took opkg's lock",
                         )
                     else:
                         restore_error.add_note(
