@@ -816,14 +816,46 @@ one running.
 
 **A receiver without internet** can still install a release from its own screen: it asks this
 Home Assistant on `relay_request`, and Home Assistant - holding a verified index that lists the
-version, under the same rule as the card - downloads and verifies the package and answers on
-`cmd/relay` with an address on itself, `/api/enigma2_mqtt/relay/<token>`. That address serves
-nothing but those bytes, to nobody but that receiver (by the IPv4 address it reports on `info.ip`),
-for ten minutes; the receiver verifies them again against its own signed index before installing.
+version, under the same rule as the integration's own installs (a downgrade the receiver asks for
+is answered too) - downloads and verifies the package and answers on `cmd/relay` with an address
+on itself, `/api/enigma2_mqtt/relay/<token>`. That address serves nothing but those bytes, to
+nobody but that receiver (by the IPv4 address it reports on `info.ip`), for ten minutes; the
+receiver verifies them again against its own signed index before installing. Asking again for the
+same version while its address is live gets the same address and downloads nothing; a new
+download is made at most once a minute per receiver.
+
 The address is Home Assistant's own on the receiver's subnet, else its *Local network* URL
-(Settings -> System -> Network), never the external URL; the log says which at INFO. **Behind a
-reverse proxy the binding sees the proxy, not the receiver**, and refuses it: give the receiver
-Home Assistant's direct LAN address. A receiver that reports no IPv4 address is not answered.
+(Settings -> System -> Network), never the external URL; the log says which at INFO. It must be an
+address the receiver accepts - `http` or `https`, an IPv4 address or a host name of letters,
+digits, dots and hyphens, a port - so a *Local network* URL with an IPv6 address, an underscore in
+the host name or a user name and password is not offered: Home Assistant uses its own IPv4 address
+instead when it serves plain HTTP, and otherwise says that the receiver could not download the
+plugin. A user name and password never reach the broker.
+
+**Behind a reverse proxy the binding sees the proxy, not the receiver**, and refuses it: give the
+receiver Home Assistant's direct LAN address. The binding is exactly as strong as Home
+Assistant's `http:` settings `use_x_forwarded_for` and `trusted_proxies`, because Home Assistant
+takes the requesting address from `X-Forwarded-For` only for a proxy listed there:
+
+- a trusted proxy that passes a client's `X-Forwarded-For: <receiver's address>` on unchanged
+  makes that client the receiver, and it is served;
+- a trusted proxy that appends the real client, as a correctly configured one does, is judged by
+  the real client, and anybody else gets `404`;
+- without `use_x_forwarded_for`, Home Assistant refuses a request that carries the header with
+  `400` before this integration sees it. `X-Real-IP` and `Forwarded` are never read.
+
+So keep `trusted_proxies` to the proxy itself - a range that also covers other hosts (a whole LAN,
+a Docker network) lets any of them claim to be the receiver. What they get is the public signed
+package and nothing else.
+
+A receiver that reports no usable IPv4 address is not answered. When Home Assistant has accepted a
+request and cannot answer it - no IPv4 address for the receiver, no address of its own the receiver
+can use, the download failed - it says why in a notification, one per receiver, and again when an
+answer expires without the receiver ever fetching it. The receiver's own screen only says that
+Home Assistant did not answer. Anything a broker client can repeat is logged as a warning once per
+receiver in ten minutes and at debug level after that. The full address, token included, appears
+in no line this integration writes; Home Assistant's own MQTT debug log shows every message it
+carries, this one too.
 
 **Check for plugin updates** (*Sprawdź aktualizacje wtyczki*, `button.<device>_sprawdz_aktualizacje_wtyczki`
 on a Polish installation) asks for the index now, at most once in ten minutes; inside that it

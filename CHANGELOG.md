@@ -49,10 +49,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   again. No authentication, so the grant is bound instead: a 43-character random token, the
   receiver's IPv4 address from `info.ip` (any other address gets `404` and a warning; a receiver
   without an IPv4 address gets no answer), ten minutes, fetchable repeatedly until then. One grant
-  per receiver and version, at most three per receiver; a request at most once a minute per
-  receiver, and never a retained one. The address is Home Assistant's own on the receiver's
-  subnet, else its internal URL - never the external one. Requests are answered only for versions
-  this integration would install itself.
+  per receiver and version, at most three per receiver, and a grant being sent is never evicted
+  or replaced. A request is judged against the held index first; asking again for a version whose
+  grant is live gets the same address without a download; a new download at most once a minute
+  per receiver; never a retained request. The address is Home Assistant's own on the receiver's
+  subnet, else its internal URL - never the external one - and only in the shape the receiver
+  accepts: no IPv6 address, no user name and password. Requests are answered only for versions
+  this integration would install itself. A refusal after a request was accepted, and an answer
+  never fetched, are said in a notification; repeatable warnings are logged once per receiver in
+  ten minutes. The binding is as strong as Home Assistant's `trusted_proxies` (DOCUMENTATION.md).
 - **The SSH installer checks a release's `depends`** - every package the signed entry names -
   with `opkg status` before it takes the lock or a snapshot, and refuses with the missing
   package's name. `opkg status` never takes opkg's lock.
