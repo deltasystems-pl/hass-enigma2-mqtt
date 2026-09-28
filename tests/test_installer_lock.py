@@ -415,37 +415,136 @@ def test_only_the_transactions_own_lock_is_handed_back(tmp_path: Path, record: o
     assert (lock_dir / "owner.json").read_text(encoding="ascii") == text
 
 
-@pytest.mark.parametrize("taken", ["replaced", "renamed away"])
+THEIRS = {"pid": 2, "started": 1, "id": "a1b2c3d4e5f6"}
+
+
+def _reclaim_after_the_read(
+    lock_dir: Path, monkeypatch: pytest.MonkeyPatch, taken: str
+) -> None:
+    """A claimer's reclaim of our stale lock, in the moment after our record was read: it
+    renames the directory away, and - unless `taken` is "renamed away" - removes it ("removed
+    and replaced") or not ("replaced"), and makes its own at the name."""
+    reading = installer_helper.json.loads
+
+    def loads(text: str, *args: object, **kwargs: object) -> object:
+        monkeypatch.setattr(installer_helper.json, "loads", reading)
+        retired = lock_dir.with_name(".lock-stale-claimer")
+        os.rename(lock_dir, retired)
+        if taken == "removed and replaced":
+            shutil.rmtree(retired)
+        if taken != "renamed away":
+            lock_dir.mkdir()
+            (lock_dir / "owner.json").write_text(json.dumps(THEIRS), encoding="ascii")
+        return reading(text, *args, **kwargs)
+
+    monkeypatch.setattr(installer_helper.json, "loads", loads)
+
+
+@pytest.mark.parametrize("taken", ["replaced", "renamed away", "removed and replaced"])
 def test_a_lock_taken_while_it_is_handed_back_is_left_to_its_new_owner(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, taken: str
 ) -> None:
     """Our lock is stale by the time a slow recovery has failed, and a claimer may reclaim it
     between the hand-back's read and its write: it renames the directory away and makes a new
     one at its name. Written by path, the handed-back record would land in that new lock and
-    make a live install's lock look handed back, and stale, to the next claimer."""
+    make a live install's lock look handed back, and stale, to the next claimer. A claimer
+    that also removed our directory in between makes the write itself fail - which is still
+    somebody else's lock, never a failure the installer answers with a release by path."""
     lock_dir = tmp_path / "lock"
     claim_transaction(lock_dir, OURS)
-    theirs = {"pid": 2, "started": int(time.time()), "id": "a1b2c3d4e5f6"}
-    reading = installer_helper.json.loads
-
-    def loads(text: str, *args: object, **kwargs: object) -> object:
-        # The claimer's reclaim, in the moment after our record was read.
-        monkeypatch.setattr(installer_helper.json, "loads", reading)
-        os.rename(lock_dir, tmp_path / ".lock-stale-claimer")
-        if taken == "replaced":
-            lock_dir.mkdir()
-            (lock_dir / "owner.json").write_text(json.dumps(theirs), encoding="ascii")
-        return reading(text, *args, **kwargs)
-
-    monkeypatch.setattr(installer_helper.json, "loads", loads)
+    _reclaim_after_the_read(lock_dir, monkeypatch, taken)
 
     with pytest.raises(installer_helper.LockNotOursError):
         installer_helper.hand_back_transaction(lock_dir, OURS, ABANDONED)
 
-    if taken == "replaced":
-        assert owner(lock_dir) == theirs
-    else:
+    if taken == "renamed away":
         assert not lock_dir.exists()
+    else:
+        assert owner(lock_dir) == THEIRS
+        # And the release the installer would run next leaves it alone as well.
+        with pytest.raises(installer_helper.LockNotOursError):
+            release_transaction(lock_dir, OURS)
+        assert owner(lock_dir) == THEIRS
+
+
+def test_a_failed_write_into_our_own_lock_is_our_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Our lock, still at its name, whose record could not be written: a failure of ours -
+    the installer then releases its own lock - not somebody else's lock."""
+    lock_dir = tmp_path / "lock"
+    claim_transaction(lock_dir, OURS)
+
+    def fail(*args: object) -> None:
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(installer_helper, "_write_at", fail)
+
+    with pytest.raises(OSError) as raised:
+        installer_helper.hand_back_transaction(lock_dir, OURS, ABANDONED)
+
+    assert not isinstance(raised.value, installer_helper.LockNotOursError)
+    assert owner(lock_dir)["id"] == OURS
+    release_transaction(lock_dir, OURS)
+    assert not lock_dir.exists()
+
+
+def test_a_release_by_the_owner_removes_its_own_lock(tmp_path: Path) -> None:
+    lock_dir = tmp_path / "lock"
+    claim_transaction(lock_dir, OURS)
+
+    release_transaction(lock_dir, OURS)
+
+    assert not lock_dir.exists()
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        THEIRS,
+        {"pid": 1, "started": 1, "id": OURS, "origin": "mqtt"},
+        {"pid": 1, "started": 1},
+        [],
+        None,
+    ],
+)
+def test_a_release_by_the_owner_leaves_every_other_lock_alone(
+    tmp_path: Path, record: object
+) -> None:
+    lock_dir = tmp_path / "lock"
+    lock_dir.mkdir()
+    if record is not None:
+        (lock_dir / "owner.json").write_text(json.dumps(record), encoding="ascii")
+
+    with pytest.raises(installer_helper.LockNotOursError):
+        release_transaction(lock_dir, OURS)
+
+    assert lock_dir.is_dir()
+    if record is not None:
+        assert json.loads((lock_dir / "owner.json").read_text(encoding="ascii")) == record
+
+
+def test_a_release_by_the_owner_of_a_lock_that_is_gone_is_not_ours(tmp_path: Path) -> None:
+    with pytest.raises(installer_helper.LockNotOursError):
+        release_transaction(tmp_path / "lock", OURS)
+
+
+@pytest.mark.parametrize("taken", ["replaced", "removed and replaced"])
+def test_a_lock_taken_while_it_is_released_is_left_to_its_new_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, taken: str
+) -> None:
+    lock_dir = tmp_path / "lock"
+    claim_transaction(lock_dir, OURS)
+    _reclaim_after_the_read(lock_dir, monkeypatch, taken)
+
+    if taken == "replaced":
+        # Our record goes from the directory that was read, wherever it is now.
+        release_transaction(lock_dir, OURS)
+    else:
+        with pytest.raises(installer_helper.LockNotOursError):
+            release_transaction(lock_dir, OURS)
+
+    assert owner(lock_dir) == THEIRS
 
 
 def test_a_lock_without_an_owner_record_is_not_handed_back(tmp_path: Path) -> None:
@@ -479,8 +578,8 @@ def test_a_refused_hand_back_says_so_by_its_own_exit_status(
     tmp_path: Path, record: dict | None
 ) -> None:
     """The caller releases the lock when a hand-back fails - but never one the hand-back
-    refused as somebody else's: a release checks no owner, and would take a live
-    self-update's or another install's lock away."""
+    refused as somebody else's: that would take a live self-update's or another install's
+    lock away."""
     lock_dir = tmp_path / "lock"
     lock_dir.mkdir()
     if record is not None:
@@ -491,6 +590,25 @@ def test_a_refused_hand_back_says_so_by_its_own_exit_status(
     assert result.returncode == installer_helper.EXIT_LOCK_NOT_OURS
     assert "not this transaction's" in result.stderr
     assert lock_dir.is_dir()
+
+
+def test_a_release_names_its_owner_on_the_command_line(tmp_path: Path) -> None:
+    """End to end with the real helper: a release with `--owner` leaves another's lock alone
+    and says so by the same exit status as a refused hand-back, and removes its own."""
+    theirs = tmp_path / "theirs"
+    theirs.mkdir()
+    (theirs / "owner.json").write_text(json.dumps(THEIRS), encoding="ascii")
+    ours = tmp_path / "ours"
+    claim_transaction(ours, OURS)
+
+    refused = _run_helper(tmp_path, "release", str(theirs), "--owner", OURS)
+    released = _run_helper(tmp_path, "release", str(ours), "--owner", OURS)
+
+    assert refused.returncode == installer_helper.EXIT_LOCK_NOT_OURS
+    assert "not this transaction's" in refused.stderr
+    assert owner(theirs) == THEIRS
+    assert released.returncode == 0
+    assert not ours.exists()
 
 
 def test_the_claim_and_the_hand_back_carry_the_count_on_the_command_line(
