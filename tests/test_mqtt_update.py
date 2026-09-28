@@ -1143,6 +1143,10 @@ def _every_key() -> set[str]:
         "update_mqtt_interrupted_files_manual",
         "update_mqtt_interrupted_unknown_reinstall",
         "update_mqtt_interrupted_unknown_manual",
+        "update_mqtt_interrupted_signal",
+        "update_mqtt_interrupted_lock",
+        "update_mqtt_restore_failed_manual",
+        "update_mqtt_restore_incomplete_manual",
         "update_mqtt_reloaded",
     }
     return keys
@@ -1360,18 +1364,30 @@ async def test_an_interruption_after_the_package_manager_ran_names_the_repair(
         assert "Force plugin reinstall" not in message
 
 
-@pytest.mark.parametrize("phases", [[], ["downloading"], ["downloading", "verifying", "snapshot"]])
+@pytest.mark.parametrize(
+    "phases",
+    [
+        [],
+        ["downloading"],
+        ["downloading", "verifying", "snapshot"],
+        # The old interface polled `installing` in the instant before it went: the helper's
+        # own sentence still says where it was, and wins over the phase.
+        ["downloading", "verifying", "snapshot", "installing"],
+    ],
+)
 @pytest.mark.parametrize(
     ("error", "key"),
     [
         # The one `interrupted` whose own sentence says the package manager never ran: the
         # helper looks for the interface that asked only until it starts the package manager.
         (INTERFACE_RESTARTED, "update_mqtt_interrupted"),
-        # A signal, or the lock taken, can come after the package manager ran as well as
-        # before: the phases seen do not prove which, since the next one can be lost between
-        # two of the plugin's polls.
-        ("the update was interrupted: signal 15", UNKNOWN_REINSTALL),
-        ("the update was interrupted: the lock was taken", UNKNOWN_REINSTALL),
+        # A signal ends `interrupted` only with the files untouched or put back whole - an
+        # incomplete restore ends `failed` - so the previous version stays, whatever phase
+        # was seen.
+        ("the update was interrupted: signal 15", "update_mqtt_interrupted_signal"),
+        # The lock taken is seen only between steps: the files are one version or the other,
+        # whole, and the receiver asks for an interface restart, never a reinstall.
+        ("the update was interrupted: the lock was taken", "update_mqtt_interrupted_lock"),
     ],
     ids=["interface restarted", "signal", "lock taken"],
 )
@@ -1407,10 +1423,99 @@ async def test_nothing_changed_only_when_the_receiver_says_so(
     attributes = hass.states.get(PLUGIN).attributes
     assert attributes["last_refusal"] is None
     message = attributes["receiver_transaction"]["message"]
-    if key == "update_mqtt_interrupted":
-        assert "Nothing was changed" in message
-    else:
-        assert message == UNKNOWN_REINSTALL_EN
+    assert message == _catalogue("en")[key]["message"]
+    assert "mix" not in message
+    assert "Force plugin reinstall" not in message
+
+
+@pytest.mark.parametrize(
+    ("error", "furthest", "said", "key"),
+    [
+        (INTERFACE_RESTARTED, "installing", None, "update_mqtt_interrupted"),
+        (INTERFACE_RESTARTED, "rolling_back", None, "update_mqtt_interrupted"),
+        ("the update was interrupted: signal 9", "installing", None,
+         "update_mqtt_interrupted_signal"),
+        ("the update was interrupted: signal 15", None, None, "update_mqtt_interrupted_signal"),
+        ("the update was interrupted: the lock was taken", "restarting", None,
+         "update_mqtt_interrupted_lock"),
+        # The receiver's own reinstall words win over the helper's sentence.
+        ("the update was interrupted: signal 15", "installing",
+         "the update was interrupted: signal 15; install the plugin again",
+         "update_mqtt_interrupted_files_reinstall"),
+        ("the update was interrupted: the lock was taken", None,
+         "the update was interrupted: the lock was taken; install the plugin again",
+         "update_mqtt_interrupted_files_reinstall"),
+        # Only the helper's sentence exactly: anything added is somebody else's words.
+        ("the update was interrupted: signal 15 after the package manager had started on the "
+         "plugin's files", None, None, "update_mqtt_interrupted_files_reinstall"),
+        ("the update was interrupted: signal 15x", "snapshot", None, UNKNOWN_REINSTALL),
+        ("the update was interrupted: signal ", None, None, UNKNOWN_REINSTALL),
+        ("the update was interrupted: the lock was taken, twice", "installing", None,
+         "update_mqtt_interrupted_files_reinstall"),
+        ("the update was interrupted: the lock was taken, twice", "snapshot", None,
+         UNKNOWN_REINSTALL),
+        # A power loss or a helper gone: its sentence does not say, so the phase decides.
+        ("the update was interrupted: the receiver restarted", "installing", None,
+         "update_mqtt_interrupted_files_reinstall"),
+        ("the update was interrupted: the receiver restarted", "snapshot", None,
+         UNKNOWN_REINSTALL),
+    ],
+)
+def test_an_interruption_is_said_by_the_receiver_s_words_first(
+    error: str, furthest: str | None, said: str | None, key: str
+) -> None:
+    transaction = mqtt_update.parse_update(
+        json.loads(
+            _transaction("finished", result="interrupted", reason="interrupted", error=error)
+        )
+    )
+    assert mqtt_update.end_sentence(transaction, furthest, said=said) == (key, {})
+
+
+@pytest.mark.parametrize("reason", ["restore_failed", "restore_incomplete"])
+@pytest.mark.parametrize("credentials", [True, False])
+def test_a_restore_that_did_not_complete_names_the_repair_there_is(
+    reason: str, credentials: bool
+) -> None:
+    """Both name the forced reinstall, whose button exists only with SSH credentials stored;
+    without them the repair is the manual installation."""
+    transaction = mqtt_update.parse_update(
+        json.loads(_transaction("finished", result="failed", reason=reason, error="x"))
+    )
+    key, _ = mqtt_update.end_sentence(transaction, repair_by_ssh=credentials)
+    assert key == (f"update_mqtt_{reason}" if credentials else f"update_mqtt_{reason}_manual")
+    for language in ("en", "pl", "de"):
+        message = _catalogue(language)[key]["message"]
+        named = "(SSH)" in message
+        assert named is credentials, (language, key)
+
+
+async def test_the_receiver_s_repeat_may_still_contradict_a_whole_files_sentence(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    lan: None,
+    short_bounds: None,
+) -> None:
+    """A signal says the previous version stays; the call still waits a moment for the end's
+    repeat, and reinstall words there - should a plugin ever put them only there - win."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass)
+    await receiver.arm()
+    signalled = "the update was interrupted: signal 15"
+
+    with patch(FETCH, AsyncMock(return_value=_package())):
+        task = _install(hass)
+        await _until(lambda: receiver.requests)
+        receiver.phase("finished", result="interrupted", reason="interrupted", error=signalled)
+        await _settle()
+        assert not task.done()
+        receiver.last_error(signalled + "; install the plugin again", "interrupted")
+        raised = await _refused(task)
+
+    assert raised.translation_key == "update_mqtt_interrupted_files_reinstall"
 
 
 @pytest.mark.parametrize("repeated", [True, False], ids=["with last_error", "update alone"])
@@ -1618,7 +1723,15 @@ async def test_the_end_of_a_transaction_on_last_error_is_not_a_refusal(
     await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
     error = "the receiver's own sentence for this end"
     end = _transaction("finished", result=result, reason=reason, error=error)
-    mirrored = json.dumps({"cmd": "update", "error": error, "reason": reason, "ts": 1790500000})
+    # Stamped as the plugin stamps it: when it says it, after the transaction started.
+    mirrored = json.dumps(
+        {
+            "cmd": "update",
+            "error": error,
+            "reason": reason,
+            "ts": int(dt_util.utcnow().timestamp()),
+        }
+    )
     for topic, payload in (
         [(UPDATE_TOPIC, end), (LAST_ERROR_TOPIC, mirrored)]
         if update_first
@@ -2136,3 +2249,111 @@ async def test_a_request_that_never_went_out_takes_its_address_back(
 
     assert relay.grants(NODE_ID) == []
     assert not _commands(mqtt_mock)
+
+
+# --- the card tells a refusal in an end's words from that end's repeat -------------------
+
+
+async def test_a_refusal_in_the_end_s_words_within_two_minutes_is_a_refusal_on_the_card(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """The end and its repeat came together; half a minute later an install started at the
+    television is refused in the same words. No `update` came with it, so it is not the end
+    again: the card shows the refusal, as the call would."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass)
+    finished = dt_util.utcnow().timestamp() - 30
+    receiver.phase(
+        "finished", started=finished - 30, finished=finished, result="failed",
+        reason="opkg_busy", error=OPKG_BUSY,
+    )
+    receiver.last_error(OPKG_BUSY, "opkg_busy", ts=finished)
+    await hass.async_block_till_done()
+    assert hass.states.get(PLUGIN).attributes["last_refusal"] is None
+
+    receiver.last_error(OPKG_BUSY, "opkg_busy")
+    await hass.async_block_till_done()
+    attributes = hass.states.get(PLUGIN).attributes
+    assert attributes["last_refusal"]["reason"] == "opkg_busy"
+    # The end stays said as it was.
+    assert attributes["receiver_transaction"]["result"] == "failed"
+
+
+async def test_an_end_repeated_late_with_its_update_is_not_a_refusal_on_the_card(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """The broker was away when the transaction ended; the plugin says the end on `update`
+    and repeats it on `last_error` at its reconnect, stamped minutes after `finished`. It
+    came with its `update`, so it is the end again - not a refusal in the end's words."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass)
+    finished = dt_util.utcnow().timestamp() - 200
+    error = "the update helper failed: KeyError"
+    receiver.phase(
+        "finished", started=finished - 30, finished=finished, result="failed",
+        reason="internal_error", error=error,
+    )
+    receiver.last_error(error, "internal_error")
+    await hass.async_block_till_done()
+
+    attributes = hass.states.get(PLUGIN).attributes
+    assert attributes["last_refusal"] is None
+    assert attributes["receiver_transaction"]["result"] == "failed"
+
+
+async def test_a_late_repeat_carries_the_receiver_s_words_to_the_card(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """The repeat that came with its `update` is the end's, whatever its stamp: its reinstall
+    words reach the card's sentence as they would inside the two minutes."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass)
+    finished = dt_util.utcnow().timestamp() - 600
+    ended = "the update was interrupted: the update helper stopped"
+    receiver.phase(
+        "finished", started=finished - 30, finished=finished, result="interrupted",
+        reason="interrupted", error=ended,
+    )
+    receiver.last_error(ended + "; install the plugin again", "interrupted")
+    await hass.async_block_till_done()
+
+    attributes = hass.states.get(PLUGIN).attributes
+    assert attributes["receiver_transaction"]["message"] == FILES_REINSTALL_EN
+    assert attributes["last_refusal"] is None
+
+
+@pytest.mark.parametrize(("offset", "repeated"), [(-1, False), (0, True), (5, True)])
+def test_a_repeat_is_never_stamped_before_its_transaction_started(
+    offset: int, repeated: bool
+) -> None:
+    transaction = mqtt_update.parse_update(
+        json.loads(
+            _transaction(
+                "finished", started=1790000000, finished=1790000060, result="failed",
+                reason="opkg_busy", error=OPKG_BUSY,
+            )
+        )
+    )
+    payload = {
+        "cmd": "update", "error": OPKG_BUSY, "reason": "opkg_busy", "ts": 1790000000 + offset
+    }
+    assert (mqtt_update.end_repeated(payload, transaction) is not None) is repeated
+
+
+def test_polish_says_nothing_was_changed_one_way() -> None:
+    """Two phrasings of one sentence read as two different outcomes; the catalogue uses one."""
+    text = (TRANSLATIONS / "pl.json").read_text(encoding="utf-8")
+    assert "Nic nie zostało zmienione" not in text
+    assert "Nic nie zmieniono" in text

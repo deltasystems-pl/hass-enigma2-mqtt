@@ -39,9 +39,10 @@ the card says the update is still running on the receiver, and keeps showing wha
 Success is `result: installed` **and** the receiver reporting the target on `info`, with the
 signed commit when the entry names one - the transaction's word alone is not the proof. An
 `interrupted` end does not say by its result whether the package manager had run, so it is said by
-the evidence there is: the files may be a mix when the receiver's words say so or a phase from
-`installing` on was seen (`reached`); nothing changed only when the receiver's own sentence says
-the package manager never ran; otherwise Home Assistant says it cannot tell. Silence after the
+the evidence there is: the files may be a mix when the receiver's words say so; nothing changed,
+or the files are whole, when the helper's own sentence says so (the interface restarted before
+the package manager ran, a signal, the lock taken); else a mix when a phase from `installing` on
+was seen (`reached`); otherwise Home Assistant says it cannot tell. Silence after the
 request keeps the relay address for a late start. When the card that asked goes away - its entry
 reloaded - the call ends at once with a sentence that says so, and the grant stays for its ten
 minutes: the receiver goes on regardless.
@@ -106,18 +107,31 @@ _PACKAGE_MANAGER_STARTED = "after the package manager had started"
 # a helper that stopped part-way it is appended to the end's repeat on `last_error`.
 _REINSTALL_WORDS = "install the plugin again"
 # The one `interrupted` whose own sentence says the package manager never ran: the helper checks
-# that the interface which asked still runs only until it starts the package manager. A signal or
-# the lock taken can come after it as well as before, and a helper that stopped or a receiver that
-# lost power is judged by a marker that exists only from `installing` on.
+# that the interface which asked still runs only until it starts the package manager. A helper
+# that stopped or a receiver that lost power is judged by a marker that exists only from
+# `installing` on.
 _NOTHING_CHANGED = (
     "the update was interrupted: the receiver's interface restarted before the update was "
     "installed"
 )
+# Two more `interrupted` ends only the helper itself writes, and neither leaves a mix. A signal
+# ends `interrupted` only with the files untouched or put back whole - a restore that did not
+# complete ends `failed` instead - and the interface that asked still runs. The lock taken is
+# noticed only between steps, so the package manager had not started or had finished: the files
+# are the previous version or the new one, whole, and when the new one is on disk under the old
+# interface the receiver asks for its interface to be restarted, not for a reinstall. A phase
+# seen on the way does not change either, so these are said by their own words - exactly as the
+# helper writes them - unless the receiver itself names the reinstall.
+_SIGNALLED = re.compile(r"the update was interrupted: signal \d{1,3}", re.ASCII)
+_LOCK_TAKEN = "the update was interrupted: the lock was taken"
 # How long after a transaction's `finished` the plugin may still stamp its repeat of that end on
 # `last_error`: at once as a rule, but after a reload only once the fresh session is connected,
 # and after an interface restart only once the new one has read the helper's end. A sentence
 # stamped later is not that end, even in the same words - a refusal shares the helper's sentence
 # for `busy`, `opkg_busy`, `checksum`, `no_space` and others.
+# TODO: measure this on a receiver - the gap between an end's `finished` and its repeat's `ts`
+# after a doors-reopen reload, after an R2 end read by the restarted interface, and for
+# `interface_not_started`. The two minutes are reasoned from the plugin's code, not measured.
 _END_REPEAT_SECONDS = 120
 # The card has one bar. A rollback has no place on it that would not read as progress, so it
 # shows as running without a percentage.
@@ -358,31 +372,55 @@ def reached(
 def _interrupted(
     transaction: dict[str, Any], furthest: str | None, repair_by_ssh: bool, said: str | None
 ) -> str:
-    """How an `interrupted` end is said: the files may be mixed, nothing changed, or unknown.
+    """How an `interrupted` end is said: files mixed, nothing changed, whole, or unknown.
 
     `interrupted` comes before the package manager ran and after it - a signal, the lock taken,
     a helper that stopped, a receiver that lost power - and its result does not say which
-    (TRANSACTION.md section 7). The files may be a mix on any evidence of it: the end's sentence
-    saying the package manager had started, or naming the reinstall; the end's repeat on
-    `last_error` (`said`) naming it; a phase from `installing` on seen on the way. Nothing
-    changed only when the receiver's own sentence says so, since a phase seen before
-    `installing` does not prove that the next one never came. Anything else Home Assistant
-    cannot tell, and says so with the repair to use if the receiver asks for it: the forced
-    reinstall over SSH when SSH credentials are stored - the button exists only then - and the
-    manual installation otherwise.
+    (TRANSACTION.md section 7). The receiver's words come first: the end's sentence saying the
+    package manager had started, or naming the reinstall, or the end's repeat on `last_error`
+    (`said`) naming it, say the files may be a mix. Then the helper's own sentences that say
+    how the files are: nothing changed when the interface restarted before the package manager
+    ran; the previous version in place after a signal; whole, one version or the other, after
+    the lock was taken - each of these whatever phase was seen, since the helper wrote it
+    knowing where it was. Only then the phases: one from `installing` on seen on the way says
+    the files may be a mix, and a phase seen before `installing` proves nothing, since the next
+    one can fall between two of the plugin's polls. Anything else Home Assistant cannot tell,
+    and says so with the repair to use if the receiver asks for it: the forced reinstall over
+    SSH when SSH credentials are stored - the button exists only then - and the manual
+    installation otherwise.
     """
     repair = "reinstall" if repair_by_ssh else "manual"
     error = transaction["error"] or ""
     if (
         _PACKAGE_MANAGER_STARTED in error
         or _REINSTALL_WORDS in error
+        # No end the plugin writes today puts the reinstall on its repeat alone - it is in
+        # the end's own sentence whenever it is on the repeat - so this guards a wording to
+        # come, not one that exists.
         or (said is not None and _REINSTALL_WORDS in said)
-        or furthest in FILES_PHASES
     ):
         return f"update_mqtt_interrupted_files_{repair}"
     if error == _NOTHING_CHANGED:
         return "update_mqtt_interrupted"
+    if _SIGNALLED.fullmatch(error):
+        return "update_mqtt_interrupted_signal"
+    if error == _LOCK_TAKEN:
+        return "update_mqtt_interrupted_lock"
+    if furthest in FILES_PHASES:
+        return f"update_mqtt_interrupted_files_{repair}"
     return f"update_mqtt_interrupted_unknown_{repair}"
+
+
+# The ends of `interrupted` that say the files are whole, and the one that cannot tell: for
+# these the call waits a moment for the end's repeat on `last_error`, whose reinstall words -
+# if the receiver ever says them - win (`_interrupted`).
+_HEAR_THE_REPEAT = (
+    "update_mqtt_interrupted",
+    "update_mqtt_interrupted_signal",
+    "update_mqtt_interrupted_lock",
+    "update_mqtt_interrupted_unknown_reinstall",
+    "update_mqtt_interrupted_unknown_manual",
+)
 
 
 def end_sentence(
@@ -397,7 +435,8 @@ def end_sentence(
     The same `reason` means different things with different results - `time_limit` with
     `failed` changed nothing, with `rolled_back` it was undone - so the result is read first.
     `furthest` is the furthest phase seen of it (`reached`) and `said` the sentence of its repeat
-    on `last_error` (`end_repeated`), which only `interrupted` needs.
+    on `last_error` (`end_repeated`), which only `interrupted` needs. `repair_by_ssh` says
+    whether the forced reinstall is there to name, for the ends that name a reinstall.
     """
     result, reason = transaction["result"], transaction["reason"]
     if result == "installed":
@@ -408,6 +447,10 @@ def end_sentence(
         return _ROLLED_BACK.get(reason or "", "update_mqtt_rolled_back"), {}
     if result == "interrupted":
         return _interrupted(transaction, furthest, repair_by_ssh, said), {}
+    if reason in ("restore_failed", "restore_incomplete") and not repair_by_ssh:
+        # Both name the forced reinstall, whose button exists only with SSH credentials
+        # stored; without them the repair is the manual installation.
+        return f"update_mqtt_{reason}_manual", {}
     if reason in _OWN_SENTENCE or reason in _SHARED:
         return refusal_sentence(reason, transaction["error"])
     return "update_mqtt_failed", {
@@ -415,14 +458,13 @@ def end_sentence(
     }
 
 
-def end_repeated(error: Any, transaction: dict[str, Any] | None) -> str | None:
-    """The sentence of `transaction`'s end as the plugin repeats it on `last_error`, or None.
+def end_words(error: Any, transaction: dict[str, Any] | None) -> str | None:
+    """The `last_error` payload's sentence when it is in the words of `transaction`'s end.
 
-    The plugin repeats every end but `installed` there, with the end's reason and its sentence -
-    the repair appended when its doors stay closed - stamped as it says it, which is soon after
-    the end's `finished` on the same clock. A payload under the end's reason or result, starting
-    with its sentence and stamped no later than `_END_REPEAT_SECONDS` after it, is that repeat;
-    one without a usable stamp is judged by its words alone.
+    Under the end's reason or result, and starting with the end's sentence - the repair the
+    plugin appends when its doors stay closed may follow. The words alone: whether it is that
+    end's repeat, or a refusal that shares them, `end_repeated` decides by its stamp and the
+    card by when it arrived.
     """
     if (
         not isinstance(error, dict)
@@ -440,8 +482,29 @@ def end_repeated(error: Any, transaction: dict[str, Any] | None) -> str | None:
         and text.startswith(said)
     ):
         return None
-    stamped, finished = _whole(error.get("ts")), transaction["finished"]
-    if stamped is not None and finished is not None and stamped > finished + _END_REPEAT_SECONDS:
+    return text
+
+
+def end_repeated(error: Any, transaction: dict[str, Any] | None) -> str | None:
+    """The sentence of `transaction`'s end as the plugin repeats it on `last_error`, or None.
+
+    The plugin repeats every end but `installed` there, with the end's reason and its sentence -
+    the repair appended when its doors stay closed - stamped as it says it, which is soon after
+    the end's `finished` on the same clock. A payload in the end's words (`end_words`) stamped
+    no earlier than the transaction started and no later than `_END_REPEAT_SECONDS` after it
+    finished is that repeat; one without a usable stamp is judged by its words alone.
+    """
+    text = end_words(error, transaction)
+    if text is None:
+        return None
+    assert transaction is not None
+    stamped = _whole(error.get("ts"))
+    if stamped is None:
+        return text
+    finished, started = transaction["finished"], transaction["started"]
+    if finished is not None and stamped > finished + _END_REPEAT_SECONDS:
+        return None
+    if started is not None and stamped < started:
         return None
     return text
 
@@ -699,10 +762,13 @@ async def async_install_over_mqtt(
         transaction = watch.transaction
         assert transaction is not None
         furthest = watch.reached[1] if watch.reached is not None else None
+        # `said` changes the sentence only when the repeat names a reinstall its end does not,
+        # which no current plugin writes (`_interrupted`): the wait below is for a wording to
+        # come, and costs at most `MQTT_UPDATE_END_WAIT` on an end whose repeat never comes.
         end = end_sentence(
             transaction, furthest, repair_by_ssh=repair_by_ssh, said=watch.end_said()
         )
-        if end is not None and end[0].startswith("update_mqtt_interrupted_unknown_"):
+        if end is not None and end[0] in _HEAR_THE_REPEAT:
             # The plugin says the end again on `last_error` right after `update`, with the
             # repair appended when its doors stay closed: wait a moment for what it adds.
             if await watch.wait(lambda: watch.end_said() is not None, MQTT_UPDATE_END_WAIT):
