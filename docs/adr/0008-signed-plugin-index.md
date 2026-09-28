@@ -255,6 +255,21 @@ switched off in its own settings is reinstalled and stays off, and the result sa
   without the recording guards only when enigma2 is absent on three samples over ten seconds - a
   respawn loop, in which nothing can record; and it recovers runlevel 4 left by an interrupted
   transaction of this project.
+- **Ours means a stop of ours, and the last look decides.** Only a stop-and-restore sends
+  `init 4`, so runlevel 4 is ours only when one of ours was cut off in this boot - an unfinished
+  stop-and-restore, or a self-update cut off while rolling back. A lock, a marker or a kept
+  transaction directory alone is residue that any receiver with a refused update carries, and
+  counting it would start an interface somebody stopped on purpose. Ten seconds is shorter than
+  an interface can take to show a pid, so a box still starting can read as a respawn loop; the
+  interface is therefore looked at again immediately before it is stopped or started, and one
+  that runs by then is guarded and restarted like any running interface - nothing is sent to
+  init over it. The recovery writes an old snapshot's settings block only when that
+  transaction's own stop-and-restore was cut off before its restore, and a failure after the
+  lock is taken still starts the interface: the picture comes first. A refusal before the lock
+  starts nothing - without the lock nothing says the interrupted stop-and-restore or rollback
+  has ended, and an `init 3` beside it would race its restore - so the refusal says that the
+  interface stays stopped and how to start it: power the receiver off and on, or remove the
+  cause and run the forced reinstall again.
 - **It exists only while SSH credentials are stored.** One helper writes and removes the credentials
   and signals the change; the button is created then, disabled by default, and removed with its
   registry entry when they are forgotten. That is a deliberate exception to "entities are never

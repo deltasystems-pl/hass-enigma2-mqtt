@@ -1028,6 +1028,246 @@ def release_transaction(lock_dir: Path) -> None:
     lock_dir.rmdir()
 
 
+def lock_info(lock_dir: Path) -> dict:
+    """Say who holds the lock, how long it has been silent, and when the rule frees it.
+
+    Only for the sentence a refused claim ends in. Nothing here takes a lock back: the
+    claim alone decides, by `_is_stale`, and this answers with the same arithmetic so
+    that "in about N minutes" is the moment that claim would succeed. `silent` is the
+    time since the owner record was last written - for the plugin's self-update, whose
+    helper rewrites it every minute, the time since its last heartbeat; for this
+    installer, which writes it once, the time since the claim. `origin` is the self-
+    update's; the installer's record has none.
+    """
+    if not lock_dir.is_dir():
+        return {"held": False, "origin": None, "silent": None, "remaining": None}
+    silent = None
+    try:
+        recorded = json.loads((lock_dir / "owner.json").read_text(encoding="ascii"))
+    except (OSError, ValueError):
+        recorded = None
+        silent = _age_of(lock_dir)
+    if isinstance(recorded, dict):
+        current = boot_id()
+        now_uptime = uptime()
+        recorded_uptime = recorded.get("uptime")
+        started = recorded.get("started")
+        if (
+            current
+            and recorded.get("boot_id") == current
+            and now_uptime is not None
+            and isinstance(recorded_uptime, (int, float))
+            and not isinstance(recorded_uptime, bool)
+        ):
+            silent = now_uptime - recorded_uptime
+        elif isinstance(started, int) and not isinstance(started, bool):
+            silent = time.time() - started
+    origin = recorded.get("origin") if isinstance(recorded, dict) else None
+    if _is_stale(lock_dir):
+        remaining = 0
+    elif silent is None:
+        remaining = None
+    else:
+        remaining = max(0, int(STALE_LOCK_SECONDS - silent) + 1)
+    return {
+        "held": True,
+        "origin": origin if isinstance(origin, str) else None,
+        "silent": None if silent is None else max(0, int(silent)),
+        "remaining": remaining,
+    }
+
+
+# What of this project a receiver whose interface is stopped may still hold, relative to
+# the root: the shared lock, the self-update's marker and transaction directories, and the
+# directory of this installer's stop-and-restore script. Only a stop-and-restore ever sends
+# `init 4`, so a forced reinstall into runlevel 4 goes ahead only when one of ours was cut
+# off in this boot (ADR-0008, section 8); the rest only helps to say which one.
+BACKUPS = "home/root/mqttbridge-backups"
+LOCK_NAME = ".ha-installer.lock"
+UPDATE_MARKER = "etc/enigma2/mqttbridge-update.json"
+UPDATE_DIR_NAME = re.compile(r"update-([0-9a-f]{12})")
+R2_DIR_NAME = re.compile(r"enigma2-mqtt-r2-([0-9a-f]{12})")
+# The self-update's phase while its own stop-and-restore runs (the `update` topic's
+# `transaction.phase`, which its marker and `status.json` carry).
+ROLLING_BACK = "rolling_back"
+# The plugin's log, in the order the plugin tries them. Its logging is configured before it
+# reads `enabled`, so a new interface process holding one of these open has loaded the
+# plugin - switched on or off, with or without a broker.
+LOG_PATHS = ("home/root/mqttbridge.log", "tmp/mqttbridge.log")
+
+
+def _recorded_service(script: Path) -> str | None:
+    """Return the channel an R2 script was started to keep, from its own `service=` line."""
+    try:
+        text = script.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    for line in text.splitlines():
+        if not line.startswith("service="):
+            continue
+        try:
+            words = shlex.split(line[len("service=") :])
+        except ValueError:
+            return None
+        if len(words) == 1 and SERVICE_REF.fullmatch(words[0]):
+            return words[0]
+        return None
+    return None
+
+
+def _r2_steps(directory: Path) -> set[str]:
+    """The steps a stop-and-restore script wrote into its status: the first word of each line."""
+    try:
+        lines = (directory / "status").read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return set()
+    return {line.split(" ", 1)[0] for line in lines if line}
+
+
+def _finished_r2(directory: Path) -> bool:
+    """Whether a stop-and-restore script said it started the interface again."""
+    return "started" in _r2_steps(directory)
+
+
+def _read_record(path: Path) -> dict | None:
+    """A JSON object from the receiver's disk, or None for anything else."""
+    try:
+        recorded = json.loads(path.read_text(encoding="ascii"))
+    except (OSError, ValueError):
+        return None
+    return recorded if isinstance(recorded, dict) else None
+
+
+def _rolling_back_in_this_boot(
+    record: dict | None, owner: dict | None, current_boot: str
+) -> str | None:
+    """Return the id of a self-update cut off while rolling back in this boot, or None.
+
+    Its record says `rolling_back` and never says how it ended. And it is of this boot:
+    the record names this boot, or the lock - written under this boot - names its id. A
+    record of another boot is the plugin's to discard (TRANSACTION.md, section 4); it
+    cannot explain the runlevel of this one.
+    """
+    if record is None or not current_boot:
+        return None
+    transaction = record.get("id")
+    if not isinstance(transaction, str) or not TRANSACTION_ID.fullmatch(transaction):
+        return None
+    if record.get("phase") != ROLLING_BACK:
+        return None
+    if record.get("finished") is not None or record.get("result") is not None:
+        return None
+    if record.get("boot_id") == current_boot:
+        return transaction
+    if (
+        owner is not None
+        and owner.get("id") == transaction
+        and owner.get("boot_id") == current_boot
+    ):
+        return transaction
+    return None
+
+
+def leftovers(root: Path) -> dict:
+    """What an interrupted stop of this project left on the receiver.
+
+    Only a stop-and-restore (R2) sends `init 4`, so runlevel 4 is this project's doing
+    only when an R2 of ours was cut off between `init 4` and `init 3`. `ours` says that
+    and nothing weaker:
+
+    - an unfinished `/tmp/enigma2-mqtt-r2-<id>` - its script never wrote `started`. /tmp
+      does not survive a reboot, so it is of this boot by construction;
+    - a self-update whose marker or transaction status says it reached `rolling_back`
+      and never ended, of this boot (`_rolling_back_in_this_boot`).
+
+    A lock alone, a marker alone, a kept `update-<id>` directory alone are not a stop:
+    an installer that died mid-opkg leaves a lock with the interface running, and a
+    self-update keeps its directory after every end but a commit, so any receiver that
+    once had a refused update carries one for good. Counting them would start an
+    interface somebody stopped on purpose - to edit its settings by hand, say.
+
+    `unrestored` names the unfinished scripts that never wrote `restored`: the only ones
+    whose snapshot's settings block the recovery may put back. `service` is the channel
+    the script of the transaction the lock names was keeping - never another's, whose
+    lock is long gone; with no such script, none.
+    """
+    backups = _path(root, BACKUPS)
+    lock = backups / LOCK_NAME
+    lock_present = lock.is_dir() or lock.is_symlink()
+    marker = _path(root, UPDATE_MARKER)
+    marker_present = marker.exists() or marker.is_symlink()
+    current_boot = boot_id()
+    owner = _read_record(lock / "owner.json") if lock_present else None
+    rolling_back = set()
+    found = _rolling_back_in_this_boot(
+        _read_record(marker) if marker_present else None, owner, current_boot
+    )
+    if found is not None:
+        rolling_back.add(found)
+    transactions = []
+    if backups.is_dir():
+        for entry in sorted(backups.iterdir()):
+            match = UPDATE_DIR_NAME.fullmatch(entry.name)
+            if match is None or entry.is_symlink() or not entry.is_dir():
+                continue
+            transactions.append(entry.name)
+            found = _rolling_back_in_this_boot(
+                _read_record(entry / "status.json"), owner, current_boot
+            )
+            if found is not None and found == match.group(1):
+                rolling_back.add(found)
+    interrupted: dict = {}
+    unrestored = []
+    tmp = _path(root, "tmp")
+    if tmp.is_dir():
+        for entry in sorted(tmp.iterdir()):
+            match = R2_DIR_NAME.fullmatch(entry.name)
+            if match is None or entry.is_symlink() or not entry.is_dir():
+                continue
+            steps = _r2_steps(entry)
+            if "started" in steps:
+                continue
+            interrupted[match.group(1)] = _recorded_service(entry / "r2.sh")
+            if "restored" not in steps:
+                unrestored.append(match.group(1))
+    lock_id = owner.get("id") if owner is not None else None
+    if isinstance(lock_id, str) and TRANSACTION_ID.fullmatch(lock_id) and lock_id in interrupted:
+        service = interrupted[lock_id]
+    else:
+        service = None
+    return {
+        "ours": bool(interrupted or rolling_back),
+        "lock": lock_present,
+        "marker": marker_present,
+        "r2": sorted(interrupted),
+        "unrestored": sorted(unrestored),
+        "rolling_back": sorted(rolling_back),
+        "transactions": transactions,
+        "service": service,
+    }
+
+
+def log_holders(pids: list, root: Path, proc: Path = Path("/proc")) -> list:
+    """Return which of `pids` hold the plugin's log open, read from `/proc/<pid>/fd`."""
+    targets = {str(_path(root, relative)) for relative in LOG_PATHS}
+    holding = []
+    for pid in pids:
+        fd_dir = proc / str(int(pid)) / "fd"
+        try:
+            names = os.listdir(fd_dir)
+        except OSError:
+            continue
+        for name in names:
+            try:
+                target = os.readlink(fd_dir / name)
+            except OSError:
+                continue
+            if target in targets:
+                holding.append(int(pid))
+                break
+    return holding
+
+
 def prune_snapshots(
     backups: Path, keep: int = KEEP_SNAPSHOTS, keep_name: str = ""
 ) -> list[str]:
@@ -1475,6 +1715,59 @@ def start_r2(
     return process.pid
 
 
+# The start of the interface that a forced reinstall asks for when there was no running
+# interface to restart cleanly: a respawn loop (`init 4` first, which also resets init's
+# respawn throttle, then `init 3`) or runlevel 4 left by an interrupted transaction of
+# ours (`init 3` alone). Detached, for the reason the stop-and-restore script is: a
+# connection that drops between the two must not leave the interface stopped. There is
+# nothing to restore and no channel to write in between - the interface was already down
+# - so it is these few lines and not that script.
+RESPAWN_SCRIPT = """init={init}
+pidof={pidof}
+if [ {stop} = 1 ]; then
+  "$init" 4
+  i=0
+  while "$pidof" enigma2 >/dev/null 2>&1 && [ "$i" -lt {stop_wait} ]; do
+    sleep 1
+    i=$((i + 1))
+  done
+fi
+"$init" 3
+"""
+
+
+def start_respawn(
+    *,
+    stop: bool,
+    init: str = "init",
+    pidof: str = "pidof",
+    shell: str = "/bin/sh",
+    stop_wait: int = R2_STOP_WAIT_SECONDS,
+) -> int:
+    """Start the interface - after stopping what is left of it, when `stop` - detached."""
+    if os.environ.get(TEST_GUARD) and not (_stand_in(init) and _stand_in(pidof)):
+        raise RuntimeError(
+            "refusing to run the system's own init or pidof under the test suite; "
+            "name stand-ins by absolute path"
+        )
+    script = RESPAWN_SCRIPT.format(
+        init=shlex.quote(init),
+        pidof=shlex.quote(pidof),
+        stop=1 if stop else 0,
+        stop_wait=int(stop_wait),
+    )
+    process = subprocess.Popen(
+        [shell, "-c", script],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+        start_new_session=True,
+        cwd="/",
+    )
+    return process.pid
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -1494,6 +1787,10 @@ def main() -> int:
             "zap",
             "powerstate",
             "r2-start",
+            "leftovers",
+            "lock-info",
+            "logfd",
+            "respawn",
         ),
     )
     parser.add_argument("path", type=Path, nargs="?")
@@ -1524,6 +1821,11 @@ def main() -> int:
     # Where an operation writes its own exit status as its last act (the stop-and-restore
     # script's restore): the script reads its verdict there, never from `wait`.
     parser.add_argument("--rc-file", type=Path)
+    # `logfd`: the interface processes to look at, and where their `/proc` is.
+    parser.add_argument("--pid", type=int, action="append", default=[])
+    parser.add_argument("--proc", type=Path, default=Path("/proc"))
+    # `respawn`: stop what is left of the interface before starting it.
+    parser.add_argument("--stop", action="store_true")
     args = parser.parse_args()
     if args.rc_file is not None:
         return _recording_exit_status(args.rc_file, lambda: _operate(parser, args))
@@ -1563,6 +1865,19 @@ def _operate(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         write_lastservice(args.root, args.service)
     elif args.operation == "zap":
         return 0 if zap(args.service, args.webif) else 1
+    elif args.operation == "leftovers":
+        print(json.dumps(leftovers(args.root), sort_keys=True))
+    elif args.operation == "logfd":
+        print(json.dumps({"holding": log_holders(args.pid, args.root, args.proc)}))
+    elif args.operation == "respawn":
+        pid = start_respawn(
+            stop=args.stop,
+            init=args.init,
+            pidof=args.pidof,
+            shell=args.shell,
+            stop_wait=args.stop_wait,
+        )
+        print(json.dumps({"pid": pid}))
     elif args.operation == "powerstate":
         # Always 0: whether the receiver restarted is read from its pid, not from here.
         print(json.dumps({"answered": power_state(args.state, args.webif)}))
@@ -1570,6 +1885,8 @@ def _operate(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         parser.error("path is required for this operation")
     elif args.operation == "claim":
         print(json.dumps({"reclaimed": claim_transaction(args.path, args.id)}))
+    elif args.operation == "lock-info":
+        print(json.dumps(lock_info(args.path), sort_keys=True))
     elif args.operation == "release":
         release_transaction(args.path)
     elif args.operation == "prune":

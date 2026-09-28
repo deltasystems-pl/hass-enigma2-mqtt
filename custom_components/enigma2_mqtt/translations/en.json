@@ -1,6 +1,7 @@
 {
   "title": "Enigma2 MQTT",
   "common": {
+    "force_reinstall_interface_stopped": "The receiver's interface stays stopped, as an interrupted update or installation of the plugin left it, so the receiver shows no picture. To start it, switch the receiver off and on again at its power switch or plug, or deal with the cause above and run the forced plugin reinstall again, which starts it.",
     "update_summary_older": "The receiver runs an older plugin than this integration carries. Installing replaces it with the bundled {version} and leaves the receiver's own broker settings alone.",
     "update_summary_older_no_install": "The receiver runs an older plugin than the bundled {version}. No SSH credentials are stored, so this card cannot install it: reconfigure the receiver with “Keep SSH credentials for updates”, or install the IPK on the box by hand.",
     "update_summary_newer": "The receiver runs a plugin newer than the bundled {version}. Nothing here replaces it — this card never offers a downgrade.",
@@ -176,7 +177,12 @@
        "version_below_floor": "Plugin {version} is below {floor}, the lowest version the plugin's signed release index allows, so nothing was installed.",
        "package_invalid": "Could not download plugin {version}, or its checksum does not match the plugin's signed release index. Nothing was changed on the receiver.",
        "depends_missing": "Plugin {version} needs packages that are not installed on the receiver: {package}. Nothing was changed.",
-       "version_not_installable": "Plugin {version} is no longer a release the plugin's signed release index lets this integration install, so nothing was installed."
+       "version_not_installable": "Plugin {version} is no longer a release the plugin's signed release index lets this integration install, so nothing was installed.",
+       "busy_stalled": "A plugin update on the receiver stopped without finishing and still holds its lock. The lock expires in about {minutes} min; try again then. Nothing was changed.",
+       "records_mismatch": "The receiver's package records name plugin {recorded}, but the plugin running is {running}: an earlier update did not finish putting the previous version back. Nothing was changed. Reinstall the plugin with “Force plugin reinstall (SSH)” on the device page.",
+       "gui_not_answering": "The receiver's interface is not answering (OpenWebif is silent), so whether it is recording cannot be checked. The forced reinstall is on hold.",
+       "gui_stopped": "The receiver's interface was stopped on purpose (runlevel 4). A forced reinstall would start it, so it is on hold.",
+       "plugin_not_started": "The reinstalled plugin did not start: no new process of the receiver's interface opened its log. The previous state was put back."
     }
   },
   "options": {
@@ -283,7 +289,12 @@
       "identity_mismatch": "The receiver is configured for node ID {box_node_id} and base topic {box_base_topic}, and the form gives {node_id} and {base_topic}. A value in brackets is one the receiver has not stored, and shows the plugin's default where there is one. Nothing was changed.",
       "downgrade_done": "Plugin {version} is installed and running on the receiver. The update card offers the newer release again, because it is still the newest compatible one; skip it there to stay on {version}.",
       "downgrade_not_offered": "No older plugin version can be installed on this receiver now: it needs stored SSH credentials, a reported plugin version and a checked list of plugin versions (press “Check for plugin updates”) that lists an older version this integration allows.",
-      "version_not_installable": "Plugin {version} is no longer a release the plugin's signed release index lets this integration install, so nothing was installed."
+      "version_not_installable": "Plugin {version} is no longer a release the plugin's signed release index lets this integration install, so nothing was installed.",
+      "busy_stalled": "A plugin update on the receiver stopped without finishing and still holds its lock. The lock expires in about {minutes} min; try again then. Nothing was changed.",
+      "records_mismatch": "The receiver's package records name plugin {recorded}, but the plugin running is {running}: an earlier update did not finish putting the previous version back. Nothing was changed. Reinstall the plugin with “Force plugin reinstall (SSH)” on the device page.",
+      "gui_not_answering": "The receiver's interface is not answering (OpenWebif is silent), so whether it is recording cannot be checked. The forced reinstall is on hold.",
+      "gui_stopped": "The receiver's interface was stopped on purpose (runlevel 4). A forced reinstall would start it, so it is on hold.",
+      "plugin_not_started": "The reinstalled plugin did not start: no new process of the receiver's interface opened its log. The previous state was put back."
     },
     "progress": {"uninstalling": "Asking the receiver to remove its plugin, and waiting for it to retract its topics and go offline", "downgrading": "Downloading and checking the older plugin, installing it on the receiver, restarting its interface and waiting for it to announce itself"}
   },
@@ -770,6 +781,8 @@
     "relay_no_address": {"message": "Home Assistant does not know its address on the local network. Set “Local network” in Home Assistant's network settings."},
     "relay_busy": {"message": "Home Assistant is sending this receiver the plugin right now. Try again when that download has finished."},
     "relay_unreachable": {"message": "The receiver could not download the plugin from Home Assistant ({url}). Set Home Assistant's “Local network” address to one the receiver can reach."},
-    "relay_not_downloaded": {"message": "Home Assistant offered plugin {version} to the receiver at {url}, but it was not downloaded within ten minutes. If an install on the receiver failed, check that the receiver can reach this address."}
+    "relay_not_downloaded": {"message": "Home Assistant offered plugin {version} to the receiver at {url}, but it was not downloaded within ten minutes. If an install on the receiver failed, check that the receiver can reach this address."},
+    "update_busy_stalled": {"message": "A plugin update on the receiver stopped without finishing and still holds its lock. The lock expires in about {minutes} min; try again then. Nothing was changed."},
+    "update_records_mismatch": {"message": "The receiver's package records name plugin {recorded}, but the plugin running is {running}: an earlier update did not finish putting the previous version back. Nothing was changed. Reinstall the plugin with “Force plugin reinstall (SSH)” on the device page."}
     }
   }

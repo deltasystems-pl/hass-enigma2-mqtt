@@ -100,6 +100,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   integration meets its `min_integration`, and it is not withdrawn. The four named in-major
   exceptions of contract 1 are listed in `const.py`, and CI compares the list with the plugin's
   `contract.json`.
+- **The SSH installer's forced mode**, the recovery path the forced-reinstall button uses
+  ([ADR-0008](docs/adr/0008-signed-plugin-index.md), section 8). **Not yet run on a receiver.**
+  It installs only the bundled package, over any version (`--force-downgrade` when opkg's records name a newer or unreadable version, never
+  otherwise), and never waits for the plugin to answer. It reads the state of the receiver's
+  interface over SSH before any guard that needs OpenWebif - `runlevel` and three `pidof enigma2`
+  samples over ten seconds - and decides by it: a running interface gets the update path's guards
+  and its clean restart; a running interface whose OpenWebif is silent is refused, since whether
+  it records cannot be known; a respawn loop (runlevel 3, absent on every sample) is installed
+  without the recording and timer guards, logged, and started with `init 4` and `init 3`. Ten
+  seconds is shorter than an interface can take to show a pid, so a box still starting can read
+  as a respawn loop: the interface is looked at once more immediately before it is stopped or
+  started, and one that runs by then gets every guard - recording, timers, standby, streaming -
+  and the clean restart; nothing is sent to init over a running interface. Runlevel 4 counts as
+  ours only when a stop of ours was cut off in this boot - an unfinished stop-and-restore, or a
+  self-update cut off while rolling back; a lock, a marker or a kept transaction directory alone
+  does not. It is recovered - the abandoned snapshot put back, its settings block only when that
+  transaction's own rollback was cut off before its restore, and what was read from the
+  settings read again afterwards - and started with `init 3` on the channel that transaction
+  recorded; a failure after the lock is taken still starts the interface, on the files that are
+  there. A refusal before the lock - no space, an old Python, another receiver, a lock held -
+  starts nothing, since without the lock nothing says the interrupted transaction has stopped;
+  it is marked so that its message says the interface stays stopped and how to start it. An
+  installer's lock held there says when it frees itself. Runlevel 4 with no stop of ours is
+  refused. It proves the start by a new enigma2 holding the plugin's log open, and by the
+  announcement only when the plugin is switched on; a plugin that is switched off stays off, and
+  the result says so. It writes no setting of its own: the only settings it can write are the
+  snapshot's, put back for a rollback of ours cut off before its restore.
+- The installer's helper answers four more questions on the receiver: what an interrupted
+  transaction left (`leftovers`), who holds the shared lock and when the stale rule frees it
+  (`lock-info`), which new interface process holds the plugin's log open (`logfd`), and a start of
+  the interface detached from the SSH session (`respawn`).
 
 ### Changed
 
@@ -226,6 +257,18 @@ The version card and the release check:
   once the plugin carries build ids; CI's rebuild of every bundled byte checks it, with the plugin's
   tags fetched. The bundled plugin's build id is read out of the package, and a package that names
   another commit than its source archive is refused.
+- **A refused lock says when a stalled plugin self-update frees it.** Every installer path still
+  takes the shared lock only by the released 30-minute stale rule - a lock whose heartbeat has
+  stopped is never taken back earlier, since its `opkg` may still be running and a stopped helper
+  beats again when continued - but when the holder is a self-update that has not renewed its lock
+  for three minutes, the refusal says in how many minutes the rule frees it.
+- **opkg's records are no longer read as the plugin that runs.** After a restore that did not
+  complete, opkg's records name the version that was being installed while the code on disk is
+  the one before it. The update card now passes the version the plugin reports, and an install
+  over a plugin the records call newer is refused as "a newer plugin is installed" only when the
+  running plugin is newer too; when only the records are, it is refused before anything changes
+  with a sentence naming both versions and the forced reinstall as the repair. Without a reported
+  version the records still decide, and the log says they are the records.
 
 ### Known limits
 
