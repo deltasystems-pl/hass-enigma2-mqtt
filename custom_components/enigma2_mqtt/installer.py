@@ -604,6 +604,7 @@ async def _run_checked(
     timeout: float = 30,
     detail: str = "",
     busy: InstallerErrorCode | None = None,
+    lock_lost: InstallerErrorCode | None = None,
 ) -> CommandResult:
     """Run a fixed command and map failures without retaining its output.
 
@@ -616,6 +617,10 @@ async def _run_checked(
     one failure gets its own sentence because it is the one a person can fix by waiting
     - somebody is installing something from the receiver's menu - and the helper's own
     words for it would otherwise be discarded with the rest of its output.
+
+    `lock_lost` is the code for a helper step that did its work and then found opkg's lock
+    file had lost its name under it: not a failure of the work, whose results are in place,
+    but an opkg run that may have overlapped it.
     """
     try:
         result = await session.run(command, input=input, timeout=timeout)
@@ -623,6 +628,12 @@ async def _run_checked(
         raise InstallerError(code, detail) from err
     if busy is not None and result.exit_status == installer_helper.EXIT_OPKG_BUSY:
         raise InstallerError(busy, "the receiver's opkg lock stayed held by another opkg run")
+    if lock_lost is not None and result.exit_status == installer_helper.EXIT_OPKG_LOCK_LOST:
+        raise InstallerError(
+            lock_lost,
+            "the step finished, but another opkg run took opkg's lock for part of it and may "
+            "have changed the package database at the same time",
+        )
     if result.exit_status:
         raise InstallerError(code, detail)
     return result
@@ -1693,7 +1704,10 @@ async def _async_rollback(
                 elif steps["started"] == "shutdown":
                     # sysvinit was halting or rebooting, so the script asked for no start:
                     # an `init 3` then would ask for the interface back mid-shutdown. The
-                    # files and the channel are in place for the next start.
+                    # files and the channel are in place for the next start. The verdict is
+                    # decided below - every `restart_error` is `ROLLBACK_RESTART_FAILED`,
+                    # whatever it carries - so what this raise contributes is its detail, as
+                    # the cause; the code only keeps it an `InstallerError`.
                     raise InstallerError(
                         InstallerErrorCode.ROLLBACK_RESTART_FAILED,
                         "the receiver was shutting down (runlevel 0 or 6), so the script "
@@ -1945,6 +1959,16 @@ async def _async_recover_abandoned(
     a way a later try may get past, the caller hands the lock back to `reclaimed` rather
     than releasing it, so that the next install tries again by the same id - a bounded
     number of times (`RECOVERY_ATTEMPTS`).
+
+    A connection lost or a command that did not answer in time says nothing about the
+    receiver's side: the helper's restore may still be running there when the lock is
+    handed back, stale at once. The next claim can then start a second restore of the same
+    snapshot beside it. The two are serialised only by opkg's lock, which each takes before
+    it touches a file, and each puts back the same snapshot - so the second repeats the
+    first rather than undoing it. A release instead of a hand-back had the same window.
+
+    A restore that finished and then found opkg's lock lost under it (`ROLLBACK_OPKG_OVERLAP`)
+    put the snapshot back: that is no failure of the recovery, and the caller says so.
     """
     if not reclaimed:
         return False
@@ -1987,6 +2011,7 @@ async def _async_recover_abandoned(
         timeout=RESTORE_TIMEOUT,
         detail="the snapshot of an abandoned transaction could not be put back",
         busy=InstallerErrorCode.OPKG_BUSY,
+        lock_lost=InstallerErrorCode.ROLLBACK_OPKG_OVERLAP,
     )
     return settings
 
@@ -2607,10 +2632,17 @@ async def _async_busy_error(
                 f"interface is stopped; the released rule frees it in about {minutes} min",
                 {"minutes": str(minutes)},
             )
-        if interface_stopped and isinstance(info.get("origin"), str) and isinstance(silent, int):
+        if (
+            interface_stopped
+            and isinstance(info.get("origin"), str)
+            and isinstance(silent, int)
+            and silent <= STALLED_SILENCE_SECONDS
+        ):
             # A self-update beating within the stall bound, in runlevel 4 of ours, is one
             # rolling back right now: nothing else of it sends `init 4`. Its restore ends in
             # `init 3`, so the household is told to wait - not to cut the power under it.
+            # One silent past the bound whose lock has no time left turned stale between the
+            # claim and this look: it is not "still running", and is refused as busy.
             error = InstallerError(
                 InstallerErrorCode.BUSY,
                 "a plugin self-update holds the receiver's lock and is still running "
@@ -2746,8 +2778,22 @@ async def _async_prove_forced(
 async def _async_upload_helper(
     hass: HomeAssistant, session: InstallerSession, remote_helper: str
 ) -> None:
-    """Stream the receiver-side helper into the receiver's /tmp."""
-    helper_bytes = await hass.async_add_executor_job(Path(installer_helper.__file__).read_bytes)
+    """Stream the receiver-side helper into the receiver's /tmp.
+
+    The helper is read from this integration's own files first. A failure to read it is
+    local - nothing about the receiver or the connection - so it is said as the upload that
+    could not happen, not as an SSH service that could not be reached.
+    """
+    try:
+        helper_bytes = await hass.async_add_executor_job(
+            Path(installer_helper.__file__).read_bytes
+        )
+    except OSError as err:
+        raise InstallerError(
+            InstallerErrorCode.UPLOAD_FAILED,
+            f"the installer helper could not be read from this integration's files "
+            f"({type(err).__name__})",
+        ) from err
     await _run_checked(
         session,
         f"umask 077; cat > {shlex.quote(remote_helper)}",
@@ -3073,6 +3119,25 @@ async def _async_install_locked(
             abandoned = ""
         except BaseException as caught:
             snapshot = f"{BACKUP_ROOT}/ha-installer-{abandoned}"
+            if (
+                isinstance(caught, InstallerError)
+                and caught.code is InstallerErrorCode.ROLLBACK_OPKG_OVERLAP
+            ):
+                # The restore ran to its end - the snapshot is back, with its settings when
+                # they were asked for - and only opkg's lock was lost under it, so another
+                # opkg run may have written the package database meanwhile. Nothing is left
+                # to put back: the lock is released, not handed back. This install stops all
+                # the same, with the sentence that says so - "could not be put back" would
+                # send somebody to redo a restore that happened.
+                _LOGGER.warning(
+                    "Installer: the snapshot %s of the abandoned transaction %s was put back, "
+                    "but another opkg run took opkg's lock during the restore and may have "
+                    "changed the package database; this install stops",
+                    snapshot,
+                    abandoned,
+                )
+                abandoned = ""
+                raise
             given_up = not _recovery_may_pass(caught) or recoveries + 1 >= RECOVERY_ATTEMPTS
             if given_up:
                 # Handed back, a recovery that will not pass would be tried - and failed -

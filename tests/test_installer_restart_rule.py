@@ -583,6 +583,8 @@ def _recovery(how: str) -> Any:
                 raise TimeoutError
             if how == "busy":
                 return CommandResult(75, "", "opkg is busy")
+            if how == "overlap":
+                return CommandResult(76, "", "opkg's lock file was replaced")
             return CommandResult(1, "", "deliberately failed")
         return None
 
@@ -725,6 +727,57 @@ async def test_a_snapshot_cut_off_before_its_record_is_nothing_to_recover(
 
     assert "ha-installer-0123456789ab" in caplog.text
     assert "snapshot.json" in caplog.text
+
+
+async def test_a_recovery_that_put_the_snapshot_back_under_a_lost_opkg_lock_says_so(
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The helper's restore ran to its end and then found opkg's lock lost under it (76): the
+    snapshot is back, and only the package database is in doubt. That is not "could not be
+    put back" - which would send somebody to redo a restore that happened - and there is
+    nothing left to recover, so the lock is released rather than handed back. The install
+    stops: another opkg run is about."""
+    receiver = FakeReceiver(
+        reclaimed_id="0123456789ab", snapshots={"ha-installer-0123456789ab"}
+    )
+    caplog.set_level(logging.WARNING, logger="custom_components.enigma2_mqtt.installer")
+
+    err = await _recovery_fails_on(hass, install_request, tmp_path, receiver, "overlap")
+
+    assert err.code is InstallerErrorCode.ROLLBACK_OPKG_OVERLAP
+    assert "could not be put back" not in (err.detail or "")
+    assert "could not be put back" not in caplog.text
+    assert "was put back" in caplog.text
+    assert _sent(receiver, "hand-back") == []
+    assert len(_sent(receiver, "release")) == 1
+    assert not any(" snapshot " in command for command in receiver.commands)
+
+    receiver.commands.clear()
+    await _install(hass, install_request, tmp_path, receiver)
+    assert _sent(receiver, "withdraw") == []
+
+
+async def test_a_helper_that_cannot_be_read_here_is_not_an_unreachable_receiver(
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The helper is read from this integration's own files before it is uploaded; a failure
+    there is local, and saying the receiver's SSH service could not be reached would send
+    somebody to check the wrong machine."""
+    receiver = FakeReceiver()
+    monkeypatch.setattr(installer_helper, "__file__", str(tmp_path / "missing" / "helper.py"))
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, install_request, tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.UPLOAD_FAILED
+    assert "this integration's files" in raised.value.detail
+    assert _sent(receiver, "claim") == []
 
 
 async def test_a_hand_back_that_fails_still_frees_the_receiver_and_names_the_snapshot(
