@@ -169,9 +169,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Polish, English and German, and **nothing is retried over SSH**. After 25 minutes the card
   says the update is still running on the receiver instead of calling it failed. The relay grant a
   followed update downloads from is never evicted by requests for other versions. An `interrupted`
-  end is never called "nothing changed" once the card saw `installing` or the receiver's words name
-  the reinstall: it then says the files may be a mix and names the forced reinstall (or the manual
-  installation without SSH credentials), and with nothing seen it says it cannot tell. A receiver
+  end says the files may be a mix - naming the forced reinstall, or the manual installation without
+  SSH credentials - whenever the receiver's words say its package manager had started or name the
+  reinstall (on `update` or on `last_error`), or the card saw `installing` or later; it says
+  "nothing changed" only when the receiver says its interface restarted before the update was
+  installed, and otherwise that it cannot tell. A refusal in the same words as the last end's -
+  the helper and `cmd/update` share sentences such as `opkg_busy` - is told apart by when the
+  receiver said it, and is answered as the refusal it is. A receiver
   that does not answer within a minute keeps its download address for a late start; an entry
   reload in the middle of a follow ends the call at once with a sentence that says so, keeps the
   address, and leaves the new card showing the receiver's progress.

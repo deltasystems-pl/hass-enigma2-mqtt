@@ -193,11 +193,17 @@ silence it stays for its ten minutes, since the receiver may still start late an
 entry reload in the middle of a follow - saving the options does one - ends the call at once with a
 sentence that says so rather than "still running" 25 minutes later; the grant stays held through the
 unload and goes at its own expiry, and the card that replaces the old one shows the receiver's
-transaction from `update`. The transaction does not say whether the package manager had run before an
-`interrupted` end, so the card never calls such an end "nothing changed" unless it saw the
-transaction only before `installing`: from `installing` on, or when the receiver's own sentence names
-the reinstall, it says the files may be a mix and names the forced reinstall (§8) - or the manual
-installation, without SSH credentials - and with no phase seen at all it says it cannot tell.
+transaction from `update`. The result of an `interrupted` end does not say whether the package manager had
+run, so the card says it by the evidence: the files may be a mix - naming the forced reinstall (§8),
+or the manual installation without SSH credentials - when the receiver's sentence says its package
+manager had started or names the reinstall, on `update` or in the end's repeat on `last_error`, or
+when a phase from `installing` on was seen; "nothing changed" only when the receiver's own sentence
+says so; "cannot tell" otherwise. Phases seen only before `installing` prove nothing: the plugin
+polls its helper once a second, and a helper that dies within that second after writing
+`installing` is never published at that phase. A `last_error` is the repeat of an end only when it
+is stamped within two minutes of the end's `finished`, since a refusal can share the end's
+sentence word for word; a request made after a transaction ended never takes that end's words for
+its answer.
 
 ### 5. A receiver without internet gets both from Home Assistant, and verifies both itself
 

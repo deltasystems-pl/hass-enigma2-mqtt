@@ -884,13 +884,16 @@ signed index lists are offered, never the bundle unless it is such a release, an
 version: a downgrade stays in the options flow, over SSH. With no index held there is nothing to
 install and no badge - press *Sprawdź aktualizacje wtyczki* first.
 
-An update the receiver reports as **interrupted** is said by what Home Assistant saw of it, since
-the receiver does not say whether its package manager had already run. Seen only before
-`installing`, it says nothing was changed. From `installing` on - or when the receiver's own words
-say the plugin must be installed again - it says the plugin's files may be a mix of two versions
-and names **„Wymuś reinstalację wtyczki (SSH)"**, or the manual installation when no SSH
-credentials are stored; with nothing seen of it, it says it cannot tell and names the same repair
-for when the receiver asks for it. If the silence after the request lasts a minute, the card says
+An update the receiver reports as **interrupted** is said by the evidence there is, since the
+result alone does not say whether the receiver's package manager had already run. When the
+receiver's words say it had started, or that the plugin must be installed again (on the update
+topic or on *Ostatni błąd*), or Home Assistant saw the phase `installing` or a later one, the card
+says the plugin's files may be a mix of two versions and names **„Wymuś reinstalację wtyczki
+(SSH)"**, or the manual installation when no SSH credentials are stored. It says nothing was
+changed only when the receiver says so - its interface restarted before the update was installed.
+Anything else it cannot tell, and says so, naming the same repair for when *Ostatni błąd* asks for
+it: a phase seen before `installing` proves nothing, because the next one can pass between two of
+the receiver's polls. If the silence after the request lasts a minute, the card says
 so, and the download address stays valid for its ten minutes in case the receiver starts late.
 Saving the integration's options reloads it: an install that was being followed then ends at once
 with „Home Assistant przeładował integrację w trakcie aktualizacji, więc to zlecenie już jej nie
