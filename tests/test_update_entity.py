@@ -105,6 +105,24 @@ def test_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(release_index, "EMBEDDED", keyset("test"))
 
 
+_load_real_bundle = bundle_module.load_bundled_plugin
+
+
+@pytest.fixture(autouse=True)
+def release_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The bundle as a release of its number, as a released integration ships it.
+
+    Between releases the bundle is the plugin's candidate - a development build - and the card
+    rules for one are tested with a candidate each test makes itself (`_candidate_bundle`). The
+    rest of this file describes the card around the bundle a household gets: the plugin's
+    release, shown as its bare number. Its bytes stay the real package's.
+    """
+    real = _load_real_bundle()
+    monkeypatch.setattr(
+        bundle_module, "load_bundled_plugin", lambda: replace(real, build=None)
+    )
+
+
 async def _setup(
     hass: HomeAssistant,
     entry: MockConfigEntry,
@@ -437,7 +455,7 @@ async def test_a_release_flavour_the_index_does_not_know_is_a_development_build(
 
 
 def _candidate_bundle(time: int):
-    real = bundle_module.load_bundled_plugin()
+    real = _load_real_bundle()
     return replace(
         real,
         build={"commit": CANDIDATE_COMMIT, "time": time, "dirty": False,
