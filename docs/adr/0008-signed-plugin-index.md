@@ -248,7 +248,11 @@ switched off in its own settings is reinstalled and stays off, and the result sa
 - **Two presses, one administrator.** The first press arms it for 30 seconds and posts the
   confirmation as a notice, never an error, so an automation is not aborted; a second press within
   30 seconds by the same Home Assistant administrator starts it. A press by anybody else arms
-  nothing, starts nothing, raises nothing, and posts a notice saying who may.
+  nothing, starts nothing, raises nothing, and posts a notice saying who may. A script started by
+  an administrator runs as that administrator, so its two presses confirm in one run - the same
+  administrator's explicit act; an automation runs without a user and never confirms. While the
+  receiver's interface runs, the standby guard stays: the receiver must be switched on, and the
+  confirmation says so; only an interface that is not running is started by the reinstall.
 - **It reads the receiver, not the topic.** It asks the lock on the receiver, never the retained
   state, so a forged in-progress state cannot block it. It refuses an interface that runs while
   OpenWebif is silent, and one stopped on purpose (runlevel 4 with nothing of ours); it proceeds
@@ -270,6 +274,11 @@ switched off in its own settings is reinstalled and stays off, and the result sa
   has ended, and an `init 3` beside it would race its restore - so the refusal says that the
   interface stays stopped and how to start it: power the receiver off and on, or remove the
   cause and run the forced reinstall again.
+- **It never takes the lock back early** (decided when it was built). It claims the shared lock
+  by the released 30-minute stale rule and nothing else, even when the holder is a plugin
+  self-update whose heartbeat has stopped: a helper that is stopped rather than dead beats again
+  when it is continued, its `opkg` may still be writing, and the owner record's pid is not a
+  liveness test. The wait is bounded by the rule; the refusal says how long it is.
 - **It exists only while SSH credentials are stored.** One helper writes and removes the credentials
   and signals the change; the button is created then, disabled by default, and removed with its
   registry entry when they are forgotten. That is a deliberate exception to "entities are never

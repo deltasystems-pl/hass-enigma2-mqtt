@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 from typing import Any
 
@@ -65,6 +65,7 @@ from .const import (
     EPG_IMPORT_STATES,
     EPG_TITLE_MAX,
     ERROR_TEXT_MAX,
+    LOCAL_ERROR_TEXT_MAX,
     TOPIC_BOUQUET,
     TOPIC_CAM,
     TOPIC_EPG,
@@ -72,6 +73,7 @@ from .const import (
     TOPIC_EPG_IMPORT,
     TOPIC_INFO,
     TOPIC_LAST_ERROR,
+    TOPIC_LOCAL_ERROR,
     TOPIC_OSCAM,
     TOPIC_PROCESS,
     TOPIC_RECORDING,
@@ -82,6 +84,14 @@ from .const import (
 from .entity import Enigma2Entity, OptionalEntities
 
 PARALLEL_UPDATES = 0
+
+# Whose complaint „Ostatni błąd" shows: the receiver's, or one Home Assistant recorded itself.
+SOURCE_RECEIVER = "receiver"
+SOURCE_HOME_ASSISTANT = "home_assistant"
+# How far ahead of Home Assistant's own clock a receiver may date a replayed complaint and
+# still be believed. A receiver's clock that is minutes out is ordinary; one that is hours
+# or years ahead dates every complaint "later" than anything Home Assistant records.
+RECEIVER_CLOCK_TOLERANCE = timedelta(minutes=5)
 
 
 def _iso(value: Any) -> str | None:
@@ -127,6 +137,18 @@ def _next_timer(state: Enigma2State) -> datetime | None:
     if not isinstance(begin, (int, float)):
         return None
     return dt_util.utc_from_timestamp(begin)
+
+
+def _as_utc(value: Any) -> datetime | None:
+    """Read an ISO 8601 time this sensor wrote, as an aware UTC datetime, or None."""
+    if not isinstance(value, str) or not value:
+        return None
+    parsed = dt_util.parse_datetime(value)
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt_util.UTC)
+    return dt_util.as_utc(parsed)
 
 
 def _refused_at(ts: Any) -> str | None:
@@ -836,19 +858,36 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
     unavailable with the box would lose the explanation at the moment it was wanted, and
     a restart taken while the box was away would store `unavailable` and lose it for
     good.
+
+    **Home Assistant is a source too.** A forced reinstall over SSH fails on this side,
+    often for a receiver whose plugin will never publish again, so its failure is
+    recorded by the box object and taken here as the newest complaint. `source` says
+    whose it is: `receiver` or `home_assistant`. Such a record is not displaced by the
+    receiver's old news: the broker replays the receiver's retained complaint on every
+    reload and at every start-up - and a dead plugin's complaint stays there for good - so
+    while this shows Home Assistant's record, a replayed complaint replaces it only when
+    the receiver's own time for it is later. A complaint the receiver publishes now is
+    news whatever its clock says, and replaces it.
     """
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, box: Enigma2Box) -> None:
         """Set up the sensor on the complaint topic, with no state to wait for."""
-        super().__init__(box, "last_error", topics=(TOPIC_LAST_ERROR,), requires=None)
+        super().__init__(
+            box, "last_error", topics=(TOPIC_LAST_ERROR, TOPIC_LOCAL_ERROR), requires=None
+        )
         # How many `last_error` payloads had arrived when this entity last looked. The
         # count rather than the payload, because the same command failing the same way
         # twice is two errors and the second one has its own time.
         self._handled = 0
+        self._handled_local = 0
         self._attr_native_value = None
-        self._attr_extra_state_attributes: dict[str, Any] = {"error": None, "time": None}
+        self._attr_extra_state_attributes: dict[str, Any] = {
+            "error": None,
+            "time": None,
+            "source": None,
+        }
 
     @property
     def available(self) -> bool:
@@ -866,12 +905,24 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
             self._attr_extra_state_attributes = {
                 "error": last_state.attributes.get("error"),
                 "time": last_state.attributes.get("time"),
+                "source": last_state.attributes.get("source"),
             }
         await super().async_added_to_hass()
 
     @callback
     def _async_read_state(self) -> None:
         """Take a new complaint, and only a new one."""
+        recorded = self.box.updates.get(TOPIC_LOCAL_ERROR, 0)
+        if recorded != self._handled_local:
+            self._handled_local = recorded
+            local = self.box.state.local_error
+            if isinstance(local, dict) and local.get("cmd"):
+                self._attr_native_value = str(local["cmd"])[:ERROR_TEXT_MAX]
+                self._attr_extra_state_attributes = {
+                    "error": str(local.get("error") or "")[:LOCAL_ERROR_TEXT_MAX] or None,
+                    "time": local.get("ts") or dt_util.utcnow().isoformat(),
+                    "source": SOURCE_HOME_ASSISTANT,
+                }
         arrived = self.box.updates.get(TOPIC_LAST_ERROR, 0)
         if arrived == self._handled:
             return
@@ -901,6 +952,10 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
             # made while Home Assistant was down, is byte-identical to the first except
             # for the moment it happened.
             return
+        if self._attr_extra_state_attributes.get(
+            "source"
+        ) == SOURCE_HOME_ASSISTANT and not self._replaces_local_record(when):
+            return
         self._attr_native_value = command
         self._attr_extra_state_attributes = {
             "error": error,
@@ -908,7 +963,33 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
             # attributes, which Home Assistant drops: a replay costs nothing and
             # changes nothing, without this having to recognise it.
             "time": when or dt_util.utcnow().isoformat(),
+            "source": SOURCE_RECEIVER,
         }
+
+    def _replaces_local_record(self, when: str | None) -> bool:
+        """Whether a receiver complaint may replace the failure Home Assistant recorded.
+
+        One published now - not a retained replay - is news, and does. A replay does only
+        when the receiver dated it later than the record shown: the retained complaint
+        arrives again at every reload and every start-up, after the record was restored,
+        and it would otherwise put a months-old refusal over the failure the household
+        is looking for. A replay with no date of its own cannot be placed, so it does not;
+        nor does one dated later than Home Assistant's own clock allows - a receiver whose
+        clock runs ahead (a year of 2030) would otherwise date a stale complaint "later" and
+        put it back over the record at every reload.
+
+        Both need a wrong receiver clock, and the price is the mirror case: a complaint
+        made while Home Assistant was down, and so only ever seen as a replay, is not shown
+        over Home Assistant's record when the receiver's clock is that wrong. Anything the
+        receiver publishes while Home Assistant listens is shown, whatever its date.
+        """
+        if not self.box.state.last_error_retained:
+            return True
+        received = _as_utc(when)
+        if received is None or received > dt_util.utcnow() + RECEIVER_CLOCK_TOLERANCE:
+            return False
+        shown = _as_utc(self._attr_extra_state_attributes.get("time"))
+        return shown is None or received > shown
 
 
 class OscamSourceSensor(Enigma2Entity, SensorEntity):

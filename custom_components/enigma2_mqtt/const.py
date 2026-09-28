@@ -252,6 +252,12 @@ ERROR_GRACE: Final = 1.0
 # be short. A cut error is still readable; an entity that silently refused to take one
 # would not be.
 ERROR_TEXT_MAX: Final = 255
+# Home Assistant's own failure text on the same sensor is written here, in the
+# installation's language, and goes only into an attribute, which has no 255-character
+# limit: a forced reinstall's refusal plus the sentence saying the interface stays stopped
+# is longer than 255, and cutting it would cut exactly the part saying how to get a
+# picture back. Still bounded, because it is stored with every state change.
+LOCAL_ERROR_TEXT_MAX: Final = 1024
 
 # State topic suffixes, relative to `<base_topic>/<node_id>/`.
 TOPIC_AVAILABILITY: Final = "availability"
@@ -581,6 +587,14 @@ TOPIC_RELEASE_INDEX: Final = "enigma2mqtt/release_index"
 CONF_PLUGIN_TARGET_VERSION: Final = "plugin_target_version"
 TARGET_LATEST: Final = "latest"
 SIGNAL_TARGET_VERSION: Final = f"{DOMAIN}_target_version"
+
+# The forced reinstall's progress, per entry: the installer's phase while it runs and None
+# when it has ended, so that the update card shows it as its own install. Not an MQTT topic.
+SIGNAL_FORCE_REINSTALL: Final = f"{DOMAIN}_force_reinstall"
+# Where Home Assistant records a failure of its own on „Ostatni błąd" - a forced reinstall
+# the plugin cannot report, because it may never publish again. A key in the box's update
+# counters, never an MQTT topic.
+TOPIC_LOCAL_ERROR: Final = "ha_last_error"
 
 # A release package the index lists is downloaded from the same origin as the index, beside
 # it - the feed serves the packages directly - with the same verified TLS, no redirects and

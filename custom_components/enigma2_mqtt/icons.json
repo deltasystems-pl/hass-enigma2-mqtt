@@ -83,6 +83,9 @@
       },
       "wake": {
         "default": "mdi:sleep-off"
+      },
+      "force_reinstall": {
+        "default": "mdi:package-down"
       }
     },
     "event": {

@@ -56,11 +56,13 @@ from .const import (
     DOMAIN,
     PLUGIN_RELEASES_URL,
     RELEASE_CHECK_INTERVAL,
+    SIGNAL_FORCE_REINSTALL,
     SIGNAL_RELEASE_INDEX,
     SIGNAL_TARGET_VERSION,
     SUPPORTED_PLUGIN_VERSION,
     TOPIC_INFO,
 )
+from .credentials import signal_ssh_credentials
 from .entity import Enigma2Entity
 from .installer import (
     InstallerError,
@@ -243,6 +245,23 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
                 self.hass,
                 f"{SIGNAL_TARGET_VERSION}_{self._entry.entry_id}",
                 self._handle_box_update,
+            )
+        )
+        # Credentials written without an options change reload nothing, and they decide
+        # whether this card can install: it reads them again when they are written.
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                signal_ssh_credentials(self._entry.entry_id),
+                self._handle_box_update,
+            )
+        )
+        # The forced reinstall is shown here while it runs, as this card's own install.
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                f"{SIGNAL_FORCE_REINSTALL}_{self._entry.entry_id}",
+                self._async_forced_phase,
             )
         )
         if self._check_releases:
@@ -592,6 +611,21 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             if build.version == version:
                 return build
         return None
+
+    @callback
+    def _async_forced_phase(self, phase: str | None) -> None:
+        """Show the forced reinstall's progress; None is its end, whatever the outcome."""
+        if self._installing:
+            # The card's own install holds the spinner; the installer refuses the other
+            # one as busy, and that one's end must not take this spinner down.
+            return
+        self._attr_in_progress = phase is not None
+        self._attr_update_percentage = (
+            (INSTALL_PHASES.index(phase) + 1) * 100 // len(INSTALL_PHASES)
+            if phase in INSTALL_PHASES
+            else None
+        )
+        self.async_write_ha_state()
 
     @callback
     def _async_installer_phase(self, phase: str) -> None:
