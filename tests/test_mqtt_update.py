@@ -19,6 +19,7 @@ ADR-0008. Three things are held here:
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import timedelta
 import json
 from pathlib import Path
@@ -43,9 +44,14 @@ from pytest_homeassistant_custom_component.common import (
 )
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
-from custom_components.enigma2_mqtt import button as button_module, mqtt_update, release_index
+from custom_components.enigma2_mqtt import (
+    bundle as bundle_module,
+    button as button_module,
+    mqtt_update,
+    release_index,
+)
 from custom_components.enigma2_mqtt.plugin_versions import async_plugin_versions
-from custom_components.enigma2_mqtt.relay import RELAY_PATH, async_get_relay
+from custom_components.enigma2_mqtt.relay import RELAY_PATH, RelayError, async_get_relay
 from custom_components.enigma2_mqtt.release_package import ORIGIN_DOWNLOAD, PackageSource
 
 from .conftest import (
@@ -58,7 +64,7 @@ from .conftest import (
 )
 from .signed_index import commit_of, keyset, release
 from .test_force_reinstall_button import INSTALL as FORCED_INSTALL, _press, _ready, _result
-from .test_update_entity import PLUGIN, _accept, _setup
+from .test_update_entity import PLUGIN, _accept, _load_real_bundle, _setup
 
 UPDATE_TOPIC = f"{BASE_TOPIC}/{NODE_ID}/update"
 CMD_UPDATE = command_topic("update")
@@ -513,6 +519,9 @@ async def test_an_offline_receiver_is_told_nothing_and_nothing_goes_over_ssh(
     fetch.assert_not_awaited()
     ssh.assert_not_awaited()
     assert not _commands(mqtt_mock)
+    # The path is the receiver's word on `info`, not its availability: still MQTT while offline.
+    assert config_entry.runtime_data.self_update_offered is True
+    assert (await async_plugin_versions(hass, config_entry)).path == "mqtt"
     async_fire_mqtt_message(hass, f"{BASE_TOPIC}/{NODE_ID}/availability", "online")
     await hass.async_block_till_done()
     assert hass.states.get(PLUGIN).attributes["update_path"] == "mqtt"
@@ -731,7 +740,8 @@ ENDS = [
     ("rolled_back", "interrupted", "update_mqtt_rolled_back_interrupted"),
     ("rolled_back", "drill", "update_mqtt_drill"),
     ("rolled_back", "internal_error", "update_mqtt_rolled_back"),
-    ("interrupted", "interrupted", "update_mqtt_interrupted"),
+    # The phase `installing` was seen before this end: the files may be a mix.
+    ("interrupted", "interrupted", "update_mqtt_interrupted_files_reinstall"),
     ("failed", "time_limit", "update_mqtt_time_limit"),
     ("failed", "not_stopped", "update_mqtt_not_stopped"),
     ("failed", "interface_not_started", "update_mqtt_interface_not_started"),
@@ -1107,6 +1117,12 @@ def _every_key() -> set[str]:
         "update_mqtt_release_only",
         "update_mqtt_no_relay",
         "update_mqtt_clock_skew",
+        "update_mqtt_interrupted",
+        "update_mqtt_interrupted_files_reinstall",
+        "update_mqtt_interrupted_files_manual",
+        "update_mqtt_interrupted_unknown_reinstall",
+        "update_mqtt_interrupted_unknown_manual",
+        "update_mqtt_reloaded",
     }
     return keys
 
@@ -1138,7 +1154,9 @@ def test_the_polish_sentences_are_the_design_s() -> None:
     assert said("update_mqtt_not_started") == (
         "Nowa wersja wtyczki nie uruchomiła się. Dekoder przywrócił poprzednią wersję 0.3.0."
     )
-    assert said("update_mqtt_busy") == "Na dekoderze trwa już instalacja lub aktualizacja wtyczki."
+    assert said("update_mqtt_busy") == (
+        "Na dekoderze trwa już instalacja, aktualizacja albo usuwanie wtyczki."
+    )
     assert said("update_mqtt_recording") == (
         "Dekoder nagrywa albo za chwilę zacznie nagrywać. Spróbuj ponownie po zakończeniu "
         "nagrania."
@@ -1230,3 +1248,546 @@ def test_the_window_edges_to_the_second(started: int, state: str) -> None:
     payload = json.loads(_transaction("installing", started=started))
     transaction = mqtt_update.parse_update(payload)
     assert mqtt_update.transaction_state(transaction, 1_000_000) == state
+
+
+# ---------------------------------------------------------------- review round 1 --
+
+# The plugin's own sentence when its helper stopped once the package manager had started
+# (`selfupdate.STUCK_STOPPED`, appended to the helper's): the doors stay closed.
+STUCK_STOPPED = (
+    "the update was interrupted: the update helper stopped after the package manager had "
+    "started on the plugin's files; an update stopped part-way, so the plugin's files may not "
+    "be the running version's; install the plugin again (from Home Assistant: force plugin "
+    "reinstall)"
+)
+FILES_REINSTALL_EN = (
+    "The update was interrupted on the receiver after its package manager had started replacing "
+    "the plugin's files, so they may now be a mix of two versions. Reinstall the plugin with "
+    "“Force plugin reinstall (SSH)” on the device page."
+)
+UNKNOWN_REINSTALL_EN = (
+    "The update was interrupted on the receiver, and Home Assistant cannot tell whether the "
+    "plugin's files had already been changed. If the receiver says the plugin must be "
+    "installed again, use “Force plugin reinstall (SSH)” on the device page."
+)
+
+
+@pytest.mark.parametrize(
+    ("credentials", "key"),
+    [
+        (True, "update_mqtt_interrupted_files_reinstall"),
+        (False, "update_mqtt_interrupted_files_manual"),
+    ],
+)
+async def test_an_interruption_after_the_package_manager_ran_names_the_repair(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    lan: None,
+    credentials: bool,
+    key: str,
+) -> None:
+    """`interrupted` after `installing` may have left a mix of two versions, and the receiver
+    keeps its doors closed until the plugin is installed again: never "nothing was changed"."""
+    await _self_updating(
+        hass, config_entry, box_on_the_broker, aioclient_mock, credentials=credentials
+    )
+    receiver = FakeReceiver(hass)
+    await receiver.arm()
+
+    with (
+        patch(FETCH, AsyncMock(return_value=_package())),
+        patch(SSH_INSTALL, AsyncMock()) as ssh,
+    ):
+        task = _install(hass)
+        await _until(lambda: receiver.requests)
+        receiver.phase("installing")
+        await _settle()
+        receiver.phase("finished", result="interrupted", reason="interrupted", error="stopped")
+        raised = await _refused(task)
+
+    assert raised.translation_key == key
+    ssh.assert_not_awaited()
+    message = hass.states.get(PLUGIN).attributes["receiver_transaction"]["message"]
+    assert "Nothing was changed" not in message
+    if credentials:
+        assert message == FILES_REINSTALL_EN
+    else:
+        assert "by hand" in message
+        assert "Force plugin reinstall" not in message
+
+
+@pytest.mark.parametrize("phases", [["downloading"], ["downloading", "verifying", "snapshot"]])
+async def test_an_interruption_before_the_files_says_nothing_changed(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    lan: None,
+    phases: list[str],
+) -> None:
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass)
+    await receiver.arm()
+
+    with patch(FETCH, AsyncMock(return_value=_package())):
+        task = _install(hass)
+        await _until(lambda: receiver.requests)
+        for phase in phases[1:]:
+            receiver.phase(phase)
+            await _settle()
+        receiver.phase(
+            "finished",
+            result="interrupted",
+            reason="interrupted",
+            error="the update was interrupted: the lock was taken",
+        )
+        raised = await _refused(task)
+
+    assert raised.translation_key == "update_mqtt_interrupted"
+
+
+async def test_the_receiver_s_own_words_about_the_files_win_over_the_phases_seen(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    lan: None,
+) -> None:
+    """A phase lost between two polls: the receiver's sentence names the reinstall, and that
+    is believed over the `downloading` Home Assistant saw last."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass)
+    await receiver.arm()
+
+    with patch(FETCH, AsyncMock(return_value=_package())):
+        task = _install(hass)
+        await _until(lambda: receiver.requests)
+        receiver.phase(
+            "finished", result="interrupted", reason="interrupted", error=STUCK_STOPPED
+        )
+        raised = await _refused(task)
+
+    assert raised.translation_key == "update_mqtt_interrupted_files_reinstall"
+
+
+async def test_an_interruption_whose_way_nobody_saw_may_have_changed_the_files(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    lan: None,
+) -> None:
+    """The end is the first word of the transaction Home Assistant hears - its phases went by
+    unseen - so it says it cannot tell, and names the repair."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass, None)
+    await receiver.arm()
+
+    with patch(FETCH, AsyncMock(return_value=_package())):
+        task = _install(hass)
+        await _until(lambda: receiver.requests)
+        receiver.phase("finished", result="interrupted", reason="interrupted", error="stopped")
+        raised = await _refused(task)
+
+    assert raised.translation_key == "update_mqtt_interrupted_unknown_reinstall"
+    assert (
+        hass.states.get(PLUGIN).attributes["receiver_transaction"]["message"]
+        == UNKNOWN_REINSTALL_EN
+    )
+
+
+async def test_an_interruption_found_on_the_broker_is_said_as_unknown(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    box_on_the_broker[UPDATE_TOPIC] = _transaction(
+        "finished", started_by="page", result="interrupted", reason="interrupted", error="x"
+    )
+    await _self_updating(
+        hass, config_entry, box_on_the_broker, aioclient_mock, credentials=False
+    )
+
+    message = hass.states.get(PLUGIN).attributes["receiver_transaction"]["message"]
+    assert message.startswith("The update was interrupted on the receiver, and Home Assistant")
+    assert "by hand" in message
+
+
+@pytest.mark.parametrize("update_first", [True, False], ids=["update first", "last_error first"])
+@pytest.mark.parametrize(
+    ("result", "reason", "message"),
+    [
+        ("rolled_back", "not_started", "The new version of the plugin did not start."),
+        ("withdrawn_before_restart", "question", "The receiver did not restart its interface"),
+        ("rolled_back", "drill", "The acceptance drill rolled the update back on purpose."),
+        ("rolled_back", "time_limit", "The update ran out of time and was undone"),
+        # A reason that also refuses: the end is told apart by its sentence.
+        ("failed", "busy", "The receiver is already installing"),
+    ],
+)
+async def test_the_end_of_a_transaction_on_last_error_is_not_a_refusal(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    update_first: bool,
+    result: str,
+    reason: str,
+    message: str,
+) -> None:
+    """The plugin repeats every end on `last_error`; the card says it once, by its result."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    error = "the receiver's own sentence for this end"
+    end = _transaction("finished", result=result, reason=reason, error=error)
+    mirrored = json.dumps({"cmd": "update", "error": error, "reason": reason, "ts": 1790500000})
+    for topic, payload in (
+        [(UPDATE_TOPIC, end), (LAST_ERROR_TOPIC, mirrored)]
+        if update_first
+        else [(LAST_ERROR_TOPIC, mirrored), (UPDATE_TOPIC, end)]
+    ):
+        async_fire_mqtt_message(hass, topic, payload)
+        await hass.async_block_till_done()
+
+    attributes = hass.states.get(PLUGIN).attributes
+    assert attributes["last_refusal"] is None
+    assert attributes["receiver_transaction"]["message"].startswith(message)
+
+
+async def test_an_end_only_reason_is_never_a_refusal(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Even without the transaction it ended - Home Assistant restarted in between."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    async_fire_mqtt_message(
+        hass,
+        LAST_ERROR_TOPIC,
+        json.dumps({"cmd": "update", "error": "x", "reason": "time_limit", "ts": 1790500000}),
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(PLUGIN).attributes["last_refusal"] is None
+
+    # A refusal after an end is one.
+    async_fire_mqtt_message(hass, UPDATE_TOPIC, _transaction("finished", result="installed"))
+    async_fire_mqtt_message(
+        hass,
+        LAST_ERROR_TOPIC,
+        json.dumps({"cmd": "update", "error": "y", "reason": "rate_limited", "ts": 1790500060}),
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(PLUGIN).attributes["last_refusal"]["reason"] == "rate_limited"
+
+
+async def test_a_cleared_last_error_takes_the_refusal_with_it(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    async_fire_mqtt_message(
+        hass,
+        LAST_ERROR_TOPIC,
+        json.dumps({"cmd": "update", "error": "x", "reason": "no_relay", "ts": 1790500000}),
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(PLUGIN).attributes["last_refusal"]["reason"] == "no_relay"
+
+    # The next command that succeeded cleared `last_error`: the refusal is not on it any more.
+    async_fire_mqtt_message(hass, LAST_ERROR_TOPIC, "", retain=True)
+    await hass.async_block_till_done()
+    assert hass.states.get(PLUGIN).attributes["last_refusal"] is None
+
+    async_fire_mqtt_message(
+        hass, LAST_ERROR_TOPIC, json.dumps({"cmd": "zap", "error": "no", "ts": 1790500001})
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(PLUGIN).attributes["last_refusal"] is None
+
+
+async def test_a_reload_during_the_follow_ends_the_call_and_the_new_card_follows(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    lan: None,
+) -> None:
+    """Saving the options reloads the entry. The old call says so at once - not "still
+    running" 25 minutes later - the download address stays, and the new card shows the
+    receiver's transaction to its end."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass)
+    await receiver.arm()
+    relay = async_get_relay(hass)
+
+    with patch(FETCH, AsyncMock(return_value=_package())):
+        task = _install(hass)
+        await _until(lambda: receiver.requests)
+        await _settle()
+        (grant,) = relay.grants(NODE_ID)
+        # What the broker holds for the new subscription: the phase the receiver is in.
+        box_on_the_broker[UPDATE_TOPIC] = _transaction("downloading")
+        assert await hass.config_entries.async_reload(config_entry.entry_id)
+        raised = await asyncio.wait_for(_refused(task), 5)
+
+    assert raised.translation_key == "update_mqtt_reloaded"
+    # The receiver may be downloading right now: the address was not taken away.
+    assert grant in relay.grants(NODE_ID)
+    await hass.async_block_till_done()
+    attributes = hass.states.get(PLUGIN).attributes
+    assert attributes["in_progress"] is True
+    assert attributes["receiver_transaction"]["state"] == "in_progress"
+
+    receiver.report()
+    receiver.phase("finished", result="installed")
+    await hass.async_block_till_done()
+    state = hass.states.get(PLUGIN)
+    assert state.attributes["installed_version"] == TARGET
+    assert state.attributes["in_progress"] is False
+    assert state.attributes["receiver_transaction"]["state"] == "finished"
+
+
+async def test_no_answer_keeps_the_address_for_a_late_start(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    lan: None,
+    short_bounds: None,
+) -> None:
+    """The sentence says a late start shows on the card; so the address it downloads from is
+    still there - until its own ten minutes are over."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass, None)
+    await receiver.arm()
+
+    with patch(FETCH, AsyncMock(return_value=_package())):
+        raised = await _refused(_install(hass))
+
+    assert raised.translation_key == "update_mqtt_no_answer"
+    (grant,) = async_get_relay(hass).grants(NODE_ID)
+    assert grant.held == 0
+    receiver.phase("downloading")
+    await hass.async_block_till_done()
+    assert hass.states.get(PLUGIN).attributes["in_progress"] is True
+    assert async_get_relay(hass).grants(NODE_ID) == [grant]
+
+
+async def test_the_card_agrees_with_the_receiver_once_the_call_is_over(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    lan: None,
+    short_bounds: None,
+) -> None:
+    """Home Assistant's update component clears the spinner as the call ends; the receiver's
+    transaction is still inside its window, so the card shows it again right after."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass)
+    await receiver.arm()
+
+    with patch(FETCH, AsyncMock(return_value=_package())):
+        task = _install(hass)
+        await _until(lambda: receiver.requests)
+        receiver.phase(
+            "rolling_back", started=(dt_util.utcnow() + timedelta(seconds=30)).timestamp()
+        )
+        raised = await _refused(task)
+
+    assert raised.translation_key == "update_mqtt_still_running"
+    await _settle()
+    attributes = hass.states.get(PLUGIN).attributes
+    assert attributes["receiver_transaction"]["state"] == "in_progress"
+    assert attributes["in_progress"] is True
+
+
+def test_the_sentences_hold_for_every_case_of_their_reason() -> None:
+    english, polish, german = _catalogue("en"), _catalogue("pl"), _catalogue("de")
+    # `internal_error` also ends an update after the package manager ran and the old files went
+    # back: never "before anything was changed", always "the previous version stays".
+    assert "before anything" not in english["update_mqtt_internal_error"]["message"]
+    assert "still in place" in english["update_mqtt_internal_error"]["message"]
+    assert "zanim" not in polish["update_mqtt_internal_error"]["message"]
+    assert "bevor" not in german["update_mqtt_internal_error"]["message"]
+    # `busy` is also the refusal while the plugin is being removed.
+    assert "removing" in english["update_mqtt_busy"]["message"]
+    assert "usuwanie" in polish["update_mqtt_busy"]["message"]
+    assert "entfernt" in german["update_mqtt_busy"]["message"]
+    # `relay` covers an address the receiver's clock already calls expired.
+    assert "clock" in english["update_mqtt_relay"]["message"]
+    assert "zegar" in polish["update_mqtt_relay"]["message"]
+    assert "Uhr" in german["update_mqtt_relay"]["message"]
+
+
+def test_the_polish_interruption_sentences_name_the_repair() -> None:
+    polish = _catalogue("pl")
+    assert polish["update_mqtt_interrupted_files_reinstall"]["message"] == (
+        "Aktualizację przerwano na dekoderze, gdy menedżer pakietów zaczął już podmieniać pliki "
+        "wtyczki, więc mogą one teraz pochodzić z dwóch różnych wersji. Zainstaluj wtyczkę od "
+        "nowa przyciskiem „Wymuś reinstalację wtyczki (SSH)” na stronie urządzenia."
+    )
+    assert "Nic nie zmieniono" not in polish["update_mqtt_interrupted_unknown_reinstall"]["message"]
+    assert "ręcznie" in polish["update_mqtt_interrupted_files_manual"]["message"]
+    assert "ręcznie" in polish["update_mqtt_interrupted_unknown_manual"]["message"]
+    german = _catalogue("de")
+    assert "Installiere" in german["update_mqtt_interrupted_files_manual"]["message"]
+
+
+async def test_a_release_the_index_does_not_list_is_never_sent(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    lan: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bundle built as a release the held index predates: a release number, and still not a
+    release the receiver's index lists - it would only be refused there."""
+    real = _load_real_bundle()
+    monkeypatch.setattr(bundle_module, "load_bundled_plugin", lambda: replace(real, build=None))
+    await _self_updating(
+        hass, config_entry, box_on_the_broker, aioclient_mock,
+        releases=[release(TARGET, sha256=SHA)],
+    )
+    bundled = (await async_plugin_versions(hass, config_entry)).bundled()
+    assert bundled is not None and bundled.is_release and bundled.version != TARGET
+
+    with (
+        patch(FETCH, AsyncMock(return_value=_package(bundled.version))) as fetch,
+        patch(SSH_INSTALL, AsyncMock()) as ssh,
+    ):
+        error = await _refused(_install(hass, bundled.display))
+
+    assert error.translation_key == "update_mqtt_release_only"
+    fetch.assert_not_awaited()
+    ssh.assert_not_awaited()
+    assert not _commands(mqtt_mock)
+
+
+async def test_a_followed_grant_is_not_replaced_for_the_same_version(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    lan: None,
+) -> None:
+    """Another package of the same version - a forged `relay_request`, say - is refused while
+    the receiver downloads from the grant Home Assistant follows."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass)
+    await receiver.arm()
+    relay = async_get_relay(hass)
+
+    with patch(FETCH, AsyncMock(return_value=_package())):
+        task = _install(hass)
+        await _until(lambda: receiver.requests)
+        (ours,) = relay.grants(NODE_ID)
+        other = PackageSource(TARGET, b"other bytes", "ef" * 32, None, (), ORIGIN_DOWNLOAD)
+        with pytest.raises(RelayError) as refused:
+            relay.grant(NODE_ID, "192.0.2.12", other)
+        assert refused.value.translation_key == "relay_busy"
+        assert relay.grants(NODE_ID) == [ours]
+        receiver.report()
+        receiver.phase("finished", result="installed")
+        await task
+
+
+async def test_a_grant_the_install_reused_outlives_its_end(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    lan: None,
+) -> None:
+    """A grant made earlier - for an install started at the television, answered on its
+    `relay_request` - and reused by Home Assistant's own request is not taken away when that
+    request is refused: the television's download may be using it."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    relay = async_get_relay(hass)
+    earlier = relay.grant(NODE_ID, "192.0.2.12", _package())
+    await FakeReceiver(hass, ("busy", "an update is already running on the receiver")).arm()
+
+    with patch(FETCH, AsyncMock(return_value=_package())):
+        raised = await _refused(_install(hass))
+
+    assert raised.translation_key == "update_mqtt_busy"
+    assert relay.grants(NODE_ID) == [earlier]
+    assert earlier.held == 0
+
+
+async def test_a_retained_complaint_is_not_the_refusal(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    lan: None,
+    short_bounds: None,
+) -> None:
+    """The broker's replay of an old refusal - HA's MQTT client reconnected in the minute -
+    says nothing about this request."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass, None)
+    await receiver.arm()
+
+    with patch(FETCH, AsyncMock(return_value=_package())):
+        task = _install(hass)
+        await _until(lambda: receiver.requests)
+        async_fire_mqtt_message(
+            hass,
+            LAST_ERROR_TOPIC,
+            json.dumps({"cmd": "update", "error": "x", "reason": "busy", "ts": 1}),
+            retain=True,
+        )
+        raised = await _refused(task)
+
+    assert raised.translation_key == "update_mqtt_no_answer"
+
+
+def test_a_reason_that_is_not_a_code_word_is_not_repeated() -> None:
+    payload = json.loads(
+        _transaction("finished", result="failed", reason="Not A Code", error="its words")
+    )
+    transaction = mqtt_update.parse_update(payload)
+    assert transaction["reason"] is None
+    assert mqtt_update.end_sentence(transaction) == ("update_mqtt_failed", {"error": "its words"})
+
+
+async def test_an_entry_without_a_commit_is_proven_by_its_version(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    lan: None,
+) -> None:
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass)
+    await receiver.arm()
+
+    with patch(FETCH, AsyncMock(return_value=replace(_package(), commit=None))):
+        task = _install(hass)
+        await _until(lambda: receiver.requests)
+        receiver.report(TARGET, "f" * 40)
+        receiver.phase("finished", result="installed")
+        await asyncio.wait_for(task, 5)

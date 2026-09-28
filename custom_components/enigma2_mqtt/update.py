@@ -37,6 +37,7 @@ turns the state on, or with `update.install` and that version.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 import logging
 from typing import Any
@@ -94,6 +95,7 @@ from .plugin_versions import (
     SOURCE_INDEX,
     PluginVersions,
     async_plugin_versions,
+    has_credentials,
 )
 from .release_package import PackageError, PackageSource, async_fetch_release
 from .release_store import CheckRateLimited
@@ -255,14 +257,20 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         # The receiver's last word on an update transaction, as the card reads it now.
         self._receiver_transaction: dict[str, Any] | None = None
         self._receiver_state: str | None = None
+        # The furthest phase seen of that transaction, as (id, phase) (`mqtt_update.reached`).
+        self._reached: tuple[str, str | None] | None = None
         # The timer that looks again when a receiver transaction's window opens or closes.
         self._window_timer: Any = None
         # The household's sentences for the ends of updates, from the `exceptions` section.
         self._sentences: dict[str, str] = {}
-        # The receiver's last refusal of an update, kept when a later complaint about another
-        # command replaces it on `last_error`; and how many complaints had arrived when read.
-        self._refusal: dict[str, Any] | None = None
+        # The receiver's last complaint about `cmd/update`, kept when a later complaint about
+        # another command replaces it on `last_error` and dropped when `last_error` is cleared;
+        # and how many complaints had arrived when it was read.
+        self._update_complaint: dict[str, Any] | None = None
         self._refusals_read = 0
+        # Ends the follow of this card's own update over MQTT, when the card goes away mid-way.
+        self._abandon_follow: Callable[[], None] | None = None
+        self._removed = False
         self._check_releases = bool(
             entry.options.get(CONF_CHECK_GITHUB_RELEASES, DEFAULT_CHECK_GITHUB_RELEASES)
         )
@@ -286,6 +294,7 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             self.hass, self.hass.config.language, "exceptions", {DOMAIN}
         )
         self.async_on_remove(self._cancel_window_timer)
+        self.async_on_remove(self._async_removed)
         self.async_on_remove(
             async_dispatcher_connect(self.hass, SIGNAL_RELEASE_INDEX, self._handle_box_update)
         )
@@ -551,13 +560,21 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         transaction = mqtt_update.parse_update(self.box.state.update)
         now = dt_util.utcnow().timestamp()
         self._receiver_transaction = transaction
+        self._reached = mqtt_update.reached(self._reached, transaction)
         self._receiver_state = mqtt_update.transaction_state(transaction, now)
         self._schedule_window_timer(mqtt_update.window_edge(transaction, now))
         if transaction is None:
             return None
         message = None
+        furthest = (
+            self._reached[1]
+            if self._reached is not None and self._reached[0] == transaction["id"]
+            else None
+        )
         if self._receiver_state == mqtt_update.STATE_FINISHED and (
-            end := mqtt_update.end_sentence(transaction)
+            end := mqtt_update.end_sentence(
+                transaction, furthest, repair_by_ssh=has_credentials(self._entry)
+            )
         ) is not None:
             key, extra = end
             message = self._sentence(
@@ -576,24 +593,31 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         receiver sees - no internet and no answer from Home Assistant (`no_relay`), a clock that
         calls Home Assistant's address expired (`clock_skew`) - and the card is where Home
         Assistant can say them in the household's language.
+
+        Only a refusal - one that came before any transaction started. The plugin repeats every
+        end of a transaction on `last_error` too; `receiver_transaction` says those, in the
+        words that fit their result, and a second, contradicting sentence here would only
+        confuse. A complaint about another command leaves the refusal standing; a cleared
+        `last_error` - the next command that succeeded - takes it away.
         """
         arrived = self.box.updates.get(TOPIC_LAST_ERROR, 0)
-        if arrived == self._refusals_read:
-            return self._refusal
-        self._refusals_read = arrived
-        error = self.box.state.last_error
-        if not isinstance(error, dict) or error.get("cmd") != "update":
-            return self._refusal
+        if arrived != self._refusals_read:
+            self._refusals_read = arrived
+            error = self.box.state.last_error
+            if error is None:
+                self._update_complaint = None
+            elif isinstance(error, dict) and error.get("cmd") == "update":
+                self._update_complaint = error
+        error = self._update_complaint
+        if error is None or not mqtt_update.is_refusal(error, self._receiver_transaction):
+            return None
         reason = error.get("reason")
         key, extra = mqtt_update.refusal_sentence(reason, error.get("error"))
-        self._refusal = {
+        return {
             "reason": reason if isinstance(reason, str) else None,
             "time": error.get("ts") if isinstance(error.get("ts"), int) else None,
-            "message": self._sentence(
-                key, mqtt_update.sentence_placeholders(None, None, extra)
-            ),
+            "message": self._sentence(key, mqtt_update.sentence_placeholders(None, None, extra)),
         }
-        return self._refusal
 
     def _schedule_window_timer(self, edge: float | None) -> None:
         self._cancel_window_timer()
@@ -765,8 +789,7 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             # call that started this install has to stop claiming it is still running.
             if mine:
                 self._installing = False
-                self._refresh_progress()
-                self.async_write_ha_state()
+                self._after_install()
 
     async def _async_install_over_mqtt(self, target: Build, source: str | None) -> None:
         """Install a release of the signed index with `cmd/update`, and follow it (ADR-0008).
@@ -800,7 +823,13 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             # Downloaded and held to its signed entry before anything reaches the receiver.
             package = await async_fetch_release(self.hass, target.version)
             await mqtt_update.async_install_over_mqtt(
-                self.hass, self.box, self._entry.title, package, self._async_mqtt_phase
+                self.hass,
+                self.box,
+                self._entry.title,
+                package,
+                self._async_mqtt_phase,
+                repair_by_ssh=has_credentials(self._entry),
+                on_follow=self._set_abandon_follow,
             )
         except PackageError as err:
             raise HomeAssistantError(
@@ -809,9 +838,48 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
                 translation_placeholders=err.placeholders,
             ) from err
         finally:
+            self._abandon_follow = None
             self._installing = False
-            self._refresh_progress()
-            self.async_write_ha_state()
+            self._after_install()
+
+    @callback
+    def _set_abandon_follow(self, abandon: Callable[[], None]) -> None:
+        self._abandon_follow = abandon
+
+    @callback
+    def _async_removed(self) -> None:
+        """The card goes away - an entry reload, say: its own follow ends, truthfully.
+
+        The receiver goes on with its transaction whatever Home Assistant does, and the card
+        that replaces this one shows it from the `update` topic. Waiting on here would end, 25
+        minutes later, with "still running" for an update that may long have finished.
+        """
+        self._removed = True
+        if self._abandon_follow is not None:
+            self._abandon_follow()
+
+    @callback
+    def _after_install(self) -> None:
+        """Say what the card shows once this card's own install is over - now, and again once
+        Home Assistant's update component has cleared its own spinner after the call.
+
+        The component sets `in_progress` to False when `async_install` returns or raises. While
+        the receiver still runs a transaction inside its window - after "still running", a
+        silence, or a refusal while an install started at the television runs - that would
+        contradict `receiver_transaction`, so the card reads the receiver again right after.
+        """
+        if self._removed:
+            return
+        self._refresh_progress()
+        self.async_write_ha_state()
+        self.hass.loop.call_soon(self._async_read_again)
+
+    @callback
+    def _async_read_again(self) -> None:
+        if self._removed or self._installing or self.hass is None:
+            return
+        self._refresh_progress()
+        self.async_write_ha_state()
 
     @callback
     def _async_mqtt_phase(self, phase: str | None) -> None:

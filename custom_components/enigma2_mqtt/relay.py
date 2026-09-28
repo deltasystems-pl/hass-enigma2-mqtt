@@ -32,7 +32,7 @@ version evicts the receiver's oldest grant, unless that grant is being sent at t
 update over MQTT that Home Assistant is following downloads from it; such a grant is not
 replaced either. Then the new one is refused, so that a forged request
 cannot take the package away from a download in flight. A receiver's grants go when its entry is
-unloaded.
+unloaded - but for one an update over MQTT downloads from, which goes at its own expiry.
 
 **Which address.** Home Assistant's own IPv4 address on the receiver's subnet, among the adapters
 Home Assistant knows; else its internal URL (`get_url` with the external and cloud URLs
@@ -193,7 +193,8 @@ class Grant:
     # Responses being sent right now: a grant being sent is neither evicted nor replaced.
     fetching: int = 0
     # Updates over MQTT following a transaction that downloads from this grant: held the same
-    # way, for as long as Home Assistant follows it (`mqtt_update`).
+    # way, for as long as Home Assistant follows it (`mqtt_update`) - and, when the card that
+    # followed it went away mid-follow, until the grant expires.
     held: int = 0
     served: int = 0
     cancel: CALLBACK_TYPE | None = field(default=None, repr=False)
@@ -288,9 +289,15 @@ class Relay:
 
     @callback
     def drop_node(self, node_id: str) -> None:
-        """Forget every grant of one receiver - its entry is going."""
+        """Forget every grant of one receiver - its entry is going.
+
+        Except one an update over MQTT downloads from (`held`): the receiver's transaction does
+        not stop because Home Assistant reloaded the entry - saving its options does that - and
+        taking the address away mid-download would fail an update the card that replaces this one
+        is showing. Such a grant goes at its own expiry, within ten minutes.
+        """
         for grant in list(self._grants.values()):
-            if grant.node_id == node_id:
+            if grant.node_id == node_id and not grant.held:
                 self.drop(grant)
         self._answered.pop(node_id, None)
         for key in [key for key in self._warned if key[0] == node_id]:
