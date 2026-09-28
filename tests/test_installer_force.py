@@ -1191,3 +1191,163 @@ async def test_an_interface_started_by_hand_that_then_records_gets_nothing_from_
     assert raised.value.code is InstallerErrorCode.RECORDING
     assert receiver.respawns == []
     assert _init(receiver) == []
+
+
+# ------------------------------------------------------------- review round 2
+
+
+@pytest.mark.parametrize(
+    ("state", "code"),
+    [("standby", InstallerErrorCode.STANDBY), ("streaming", InstallerErrorCode.STREAMING)],
+)
+async def test_a_box_that_came_up_in_standby_is_not_woken_by_the_last_look(
+    hass: HomeAssistant,
+    credentials: SshCredentials,
+    tmp_path: Path,
+    state: str,
+    code: InstallerErrorCode,
+) -> None:
+    """A booting box read as a respawn loop, and by the last look its interface runs - in
+    standby, as a box that was booting often does, or streaming. The clean restart would
+    wake it (and the television with it over HDMI-CEC) or cut the stream: the switched row
+    measures standby and streaming too, and refuses."""
+    receiver = _receiver(
+        enigma_running=False,
+        samples=[False, False, False],
+        interface_from="opkg install",
+        **{state: True},
+    )
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is code
+    assert receiver.restarts == []
+    assert receiver.respawns == []
+    assert _init(receiver) == []
+    assert receiver.files["plugin"] == "old"
+
+
+async def test_the_last_look_rereads_which_interface_was_there_before_the_restart(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    """The interface comes up after the pids before the restart were read - an empty set -
+    and before the last look. Kept, that set would make the interface that came up count
+    as "new" at once, and the proof would pass on it - the plugin's log is open in it -
+    while the new files never started. Here the image asks on the television instead of
+    restarting: nothing new ever runs, so the install must not be reported as installed."""
+    receiver = _receiver(
+        # Absent on the three samples and on the read before the restart; running from
+        # the last look on.
+        samples=[False, False, False, False],
+        question_on_restart=True,
+    )
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.RESTART_WITHDRAWN
+    assert receiver.files["plugin"] == "old"
+    assert receiver.respawns == []
+    assert _init(receiver) == []
+
+
+@pytest.mark.parametrize(
+    ("overrides", "code"),
+    [
+        ({"free_bytes": 1000}, InstallerErrorCode.NO_SPACE),
+        ({"python_version": "3.7.3"}, InstallerErrorCode.UNSUPPORTED_PYTHON),
+        ({"ha_mode": "off"}, InstallerErrorCode.IDENTITY_MISMATCH),
+    ],
+)
+async def test_a_refusal_before_the_lock_in_runlevel_4_of_ours_says_the_interface_stays_down(
+    hass: HomeAssistant,
+    credentials: SshCredentials,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    overrides: dict[str, Any],
+    code: InstallerErrorCode,
+) -> None:
+    """Without the lock nothing says the interrupted transaction is not still running, so
+    nothing is started - and the refusal is marked, so that whoever shows it says the
+    interface stays stopped and how to start it."""
+    receiver = _ours_stopped(**overrides)
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(InstallerError) as raised:
+            await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is code
+    assert raised.value.interface_stopped is True
+    assert not any(" claim " in command for command in receiver.commands)
+    assert receiver.respawns == []
+    assert _init(receiver) == []
+    assert _opkg(receiver) == []
+    assert "interface stays stopped" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {},
+        # A respawn loop is init's to start, not a stop of ours.
+        {"enigma_running": False, "webif_ok": False, "samples": [False, False, False]},
+    ],
+)
+@pytest.mark.parametrize("busy", [False, True])
+async def test_the_same_refusal_in_another_row_is_not_marked(
+    hass: HomeAssistant,
+    credentials: SshCredentials,
+    tmp_path: Path,
+    row: dict[str, Any],
+    busy: bool,
+) -> None:
+    receiver = _receiver(
+        **row,
+        **(
+            {"claim_busy": True, "lock": {"held": True, "origin": None, "remaining": 900}}
+            if busy
+            else {"free_bytes": 1000}
+        ),
+    )
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is (InstallerErrorCode.BUSY if busy else InstallerErrorCode.NO_SPACE)
+    assert raised.value.interface_stopped is False
+
+
+async def test_a_live_self_update_in_runlevel_4_of_ours_is_plain_busy(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    """A self-update whose heartbeat is fresh holds the lock: it has not "stopped without
+    finishing", and no minutes are promised - its end is its own. The interface still
+    stays stopped, and the refusal says so."""
+    receiver = _ours_stopped(
+        claim_busy=True,
+        lock={"held": True, "origin": "mqtt", "silent": 20, "remaining": 1780},
+    )
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.BUSY
+    assert raised.value.placeholders == {}
+    assert raised.value.interface_stopped is True
+    assert receiver.respawns == []
+    assert _init(receiver) == []
+
+
+async def test_a_stalled_installer_lock_in_runlevel_4_of_ours_is_marked_too(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    receiver = _ours_stopped(
+        claim_busy=True, lock={"held": True, "origin": None, "silent": 300, "remaining": 1501}
+    )
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.BUSY_STALLED
+    assert raised.value.interface_stopped is True

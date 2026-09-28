@@ -165,6 +165,26 @@ def test_a_self_update_record_that_ended_or_belongs_elsewhere_is_not_ours(
     assert leftovers(tmp_path)["ours"] is False
 
 
+
+@pytest.mark.parametrize("phase", ["installing", "restarting"])
+def test_a_self_update_of_this_boot_that_was_not_rolling_back_is_not_ours(
+    tmp_path: Path, phase: str
+) -> None:
+    """Only a rollback's stop-and-restore sends `init 4`. A self-update of this boot cut
+    off while it installed or restarted cleanly never stopped the interface, so it cannot
+    explain runlevel 4 - by its marker, or by its directory and a lock of this boot."""
+    _marker(tmp_path, id="0123456789ab", boot_id=boot_id(), phase=phase)
+    found = leftovers(tmp_path)
+    assert found["ours"] is False
+    assert found["rolling_back"] == []
+    (tmp_path / "etc/enigma2/mqttbridge-update.json").unlink()
+
+    _update_status(tmp_path, "0123456789ab", id="0123456789ab", phase=phase)
+    _lock(tmp_path, id="0123456789ab", boot_id=boot_id(), origin="mqtt")
+    found = leftovers(tmp_path)
+    assert found["ours"] is False
+    assert found["rolling_back"] == []
+
 def test_the_channel_an_interrupted_r2_was_keeping_is_read_from_its_script(
     tmp_path: Path,
 ) -> None:

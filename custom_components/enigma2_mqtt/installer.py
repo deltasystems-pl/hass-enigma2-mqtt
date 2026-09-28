@@ -217,6 +217,12 @@ class InstallerError(Exception):
         # What the abort sentence for this code needs filling in. Empty for every code
         # whose sentence has no holes, which is all but one of them.
         self.placeholders = placeholders or {}
+        # A forced reinstall refused before it took the lock, on a receiver whose interface
+        # an interrupted transaction of ours left stopped (runlevel 4): nothing was changed,
+        # and so nothing started the interface either. Whoever shows the refusal adds that
+        # the interface stays stopped and how to start it - the code's own sentence says
+        # only why the install was refused.
+        self.interface_stopped = False
 
 
 def _log_install_refusal(error: InstallerError) -> None:
@@ -245,6 +251,29 @@ def _log_install_refusal(error: InstallerError) -> None:
         error.code.value,
         error.detail or "the receiver did not answer one of the checks in a usable form",
     )
+
+
+def _left_stopped(error: InstallerError) -> InstallerError:
+    """Mark a refusal before the lock, in runlevel 4 of ours, as leaving the interface stopped.
+
+    A failure after the lock is claimed starts the interface on what is there (ADR-0008,
+    section 8): the picture comes first. Before the claim nothing is started, and that is
+    the conservative reading rather than an oversight. Runlevel 4 is ours because a stop-
+    and-restore of ours was cut off - and without the lock nothing says that script is not
+    still running: an `init 3` sent beside it would race its restore, and one sent beside a
+    self-update's rollback would start the interface under files it is still putting back.
+    The lock is what makes a start safe, so a refusal that never got it changes nothing,
+    the interface included. What it must not do is leave the household guessing: the
+    refusal says the interface stays stopped and how to start it - power the receiver off
+    and on, or deal with the cause and run the forced reinstall again, which does start it.
+    """
+    error.interface_stopped = True
+    error.detail = (
+        f"{error.detail or error.code.value}; the receiver's interface stays stopped in "
+        "runlevel 4, as an interrupted transaction of this project left it - nothing is "
+        "started without the transaction lock"
+    )
+    return error
 
 
 class _RollbackError(InstallerError):
@@ -2783,6 +2812,8 @@ async def _async_install_locked(
             plugin_enabled = _stored_setting(identity, "enabled") is True
             await _async_check_depends(session, source.depends, source.version)
         except InstallerError as err:
+            if gui is not None and gui.mode == _GUI_OURS_STOPPED:
+                _left_stopped(err)
             _log_install_refusal(err)
             raise
         claim = await session.run(
@@ -2793,9 +2824,13 @@ async def _async_install_locked(
         )
         interface_down = gui is not None and gui.mode == _GUI_OURS_STOPPED
         if claim.exit_status:
-            raise await _async_busy_error(
+            busy = await _async_busy_error(
                 session, remote_helper, remote_lock, interface_stopped=interface_down
             )
+            if interface_down:
+                _left_stopped(busy)
+                _LOGGER.warning("Receiver install refused (%s): %s", busy.code.value, busy.detail)
+            raise busy
         remote_lock_claimed = True
         # From here a failure in runlevel 4 of ours ends with the interface started on what
         # is there (below, where every failure ends): the picture comes first.

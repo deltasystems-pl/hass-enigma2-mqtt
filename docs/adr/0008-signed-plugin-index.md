@@ -265,7 +265,11 @@ switched off in its own settings is reinstalled and stays off, and the result sa
   that runs by then is guarded and restarted like any running interface - nothing is sent to
   init over it. The recovery writes an old snapshot's settings block only when that
   transaction's own stop-and-restore was cut off before its restore, and a failure after the
-  lock is taken still starts the interface: the picture comes first.
+  lock is taken still starts the interface: the picture comes first. A refusal before the lock
+  starts nothing - without the lock nothing says the interrupted stop-and-restore or rollback
+  has ended, and an `init 3` beside it would race its restore - so the refusal says that the
+  interface stays stopped and how to start it: power the receiver off and on, or remove the
+  cause and run the forced reinstall again.
 - **It exists only while SSH credentials are stored.** One helper writes and removes the credentials
   and signals the change; the button is created then, disabled by default, and removed with its
   registry entry when they are forgotten. That is a deliberate exception to "entities are never
