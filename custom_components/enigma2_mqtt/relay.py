@@ -28,8 +28,9 @@ no other path. `GET` only (a `HEAD` is not routed), the whole package whatever `
 
 **How many.** One grant per (receiver, version) - asking again for the same version gets the
 same address while enough of its ten minutes are left - and at most three per receiver. A fourth
-version evicts the receiver's oldest grant, unless that grant is being sent at this moment; a
-grant being sent is not replaced either. Then the new one is refused, so that a forged request
+version evicts the receiver's oldest grant, unless that grant is being sent at this moment or an
+update over MQTT that Home Assistant is following downloads from it; such a grant is not
+replaced either. Then the new one is refused, so that a forged request
 cannot take the package away from a download in flight. A receiver's grants go when its entry is
 unloaded.
 
@@ -191,6 +192,9 @@ class Grant:
     base: str | None = None
     # Responses being sent right now: a grant being sent is neither evicted nor replaced.
     fetching: int = 0
+    # Updates over MQTT following a transaction that downloads from this grant: held the same
+    # way, for as long as Home Assistant follows it (`mqtt_update`).
+    held: int = 0
     served: int = 0
     cancel: CALLBACK_TYPE | None = field(default=None, repr=False)
 
@@ -255,12 +259,12 @@ class Relay:
         for grant in [grant for grant in held if grant.version == package.version]:
             # Too close to its end, or for other bytes or another address: replaced, never
             # a second grant of the same version - unless it is being sent right now.
-            if grant.fetching:
+            if grant.fetching or grant.held:
                 raise RelayError("relay_busy")
             self.drop(grant)
             held.remove(grant)
         if len(held) >= RELAY_GRANTS_PER_RECEIVER:
-            evictable = [grant for grant in held if not grant.fetching]
+            evictable = [grant for grant in held if not grant.fetching and not grant.held]
             if not evictable:
                 raise RelayError("relay_busy")
             self.drop(evictable[0])

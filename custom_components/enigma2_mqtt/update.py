@@ -13,6 +13,18 @@ to the same SSH installer - so with SSH credentials the newest compatible releas
 `latest_version`, and without them every version is information in the summary and the
 attributes.
 
+**Two install paths, never both** (ADR-0008). A receiver that updates itself - it states the
+capability `self_update` and its box-only permission `update_allowed: true` - is updated over
+MQTT: the card sends `cmd/update` with the signed entry and a relay address and follows the
+receiver's own transaction (`mqtt_update`). Any other receiver is updated over SSH when
+credentials are stored. An update over MQTT that is refused, fails or is rolled back is said as it
+is and never retried over SSH.
+
+**The receiver's own transactions** - started at the television, on the OpenWebif page, or by a
+broker client - are shown here as running only while they plausibly run: not finished, and
+started within the last 25 minutes. The attribute `receiver_transaction` says what the receiver
+last said about one, and `stale` when that no longer can be true.
+
 The picture is worked out in `plugin_versions.py`, shared with the select that lets a
 household pin a version. Which build is newer than which is `buildid.is_newer`, and it is the
 release number and nothing else (ADR-0008 section 3, decided 2026-09-26): a higher number
@@ -35,11 +47,14 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import (
+    async_track_point_in_utc_time,
+    async_track_time_interval,
+)
 from homeassistant.helpers.translation import async_get_translations
 import homeassistant.util.dt as dt_util
 
-from . import release_package
+from . import mqtt_update, release_package
 from .box import Enigma2Box, Enigma2MqttConfigEntry
 from .buildid import Build, base_version, is_newer
 from .const import (
@@ -61,6 +76,8 @@ from .const import (
     SIGNAL_TARGET_VERSION,
     SUPPORTED_PLUGIN_VERSION,
     TOPIC_INFO,
+    TOPIC_LAST_ERROR,
+    TOPIC_UPDATE,
 )
 from .credentials import signal_ssh_credentials
 from .entity import Enigma2Entity
@@ -71,7 +88,13 @@ from .installer import (
     SshCredentials,
     async_install,
 )
-from .plugin_versions import SOURCE_BUNDLE, PluginVersions, async_plugin_versions
+from .plugin_versions import (
+    PATH_MQTT,
+    SOURCE_BUNDLE,
+    SOURCE_INDEX,
+    PluginVersions,
+    async_plugin_versions,
+)
 from .release_package import PackageError, PackageSource, async_fetch_release
 from .release_store import CheckRateLimited
 
@@ -97,6 +120,8 @@ SUMMARY_DEVELOPMENT = "update_summary_development"
 SUMMARY_PUBLISHED = "update_summary_published"
 SUMMARY_PUBLISHED_NO_INSTALL = "update_summary_published_no_install"
 SUMMARY_OLDER_RELEASE = "update_summary_older_release"
+SUMMARY_MQTT_NO_INDEX = "update_summary_mqtt_no_index"
+SUMMARY_MQTT_BUNDLE = "update_summary_mqtt_bundle"
 SUMMARY_LIMIT = 255
 # Why the bundle may not be installed, in the words the summary uses.
 _REFUSAL_SENTENCES = {
@@ -169,6 +194,13 @@ _NOT_FETCHED: dict[str, str] = {
 }
 
 
+def _offered_release(versions: PluginVersions, version: str) -> bool:
+    """Whether the signed index lists `version` as one this integration may install."""
+    return any(
+        item["version"] == version and item["compatible"] for item in versions.available()
+    )
+
+
 def plugin_compatibility(installed: str | None, bundled: str | None) -> str:
     """Return how the plugin on the box stands against the bundled one, by `N.N.N`.
 
@@ -214,10 +246,23 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         versions: PluginVersions,
     ) -> None:
         """Set up the update entity."""
-        super().__init__(box, "plugin", topics=(TOPIC_INFO,))
+        super().__init__(box, "plugin", topics=(TOPIC_INFO, TOPIC_UPDATE, TOPIC_LAST_ERROR))
         self._entry = entry
         self._versions = versions
         self._installing = False
+        # The forced reinstall's phase while it runs, shown as this card's own install.
+        self._forced_phase: str | None = None
+        # The receiver's last word on an update transaction, as the card reads it now.
+        self._receiver_transaction: dict[str, Any] | None = None
+        self._receiver_state: str | None = None
+        # The timer that looks again when a receiver transaction's window opens or closes.
+        self._window_timer: Any = None
+        # The household's sentences for the ends of updates, from the `exceptions` section.
+        self._sentences: dict[str, str] = {}
+        # The receiver's last refusal of an update, kept when a later complaint about another
+        # command replaces it on `last_error`; and how many complaints had arrived when read.
+        self._refusal: dict[str, Any] | None = None
+        self._refusals_read = 0
         self._check_releases = bool(
             entry.options.get(CONF_CHECK_GITHUB_RELEASES, DEFAULT_CHECK_GITHUB_RELEASES)
         )
@@ -237,6 +282,10 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         self._texts = await async_get_translations(
             self.hass, self.hass.config.language, "common", {DOMAIN}
         )
+        self._sentences = await async_get_translations(
+            self.hass, self.hass.config.language, "exceptions", {DOMAIN}
+        )
+        self.async_on_remove(self._cancel_window_timer)
         self.async_on_remove(
             async_dispatcher_connect(self.hass, SIGNAL_RELEASE_INDEX, self._handle_box_update)
         )
@@ -339,11 +388,12 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             sentences.append(self._text(SUMMARY_DEVELOPMENT, version=release))
         chosen = self._versions.chosen()
         refusal = self._versions.bundle_refusal()
+        over_mqtt = self._versions.box.self_update_offered
         if (
             chosen is not None
             and installed is not None
             and is_newer(chosen, installed)
-            and self._versions.source_of(chosen) != SOURCE_BUNDLE
+            and (over_mqtt or self._versions.source_of(chosen) != SOURCE_BUNDLE)
         ):
             # What the button installs is a release of the index, not the bundle: that is
             # what the summary names, and where it comes from.
@@ -352,6 +402,17 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             # The bundle is newer than the receiver's plugin, and still may not be installed.
             code, placeholders = refusal
             sentences.append(self._text(_REFUSAL_SENTENCES[code], **placeholders))
+        elif compatibility == COMPATIBILITY_OLDER and over_mqtt:
+            # A receiver that updates itself takes only releases of the signed index: the
+            # bundle is news, and SSH is not the way to it.
+            sentences.append(
+                self._text(
+                    SUMMARY_MQTT_NO_INDEX
+                    if self._versions.index is None
+                    else SUMMARY_MQTT_BUNDLE,
+                    version=offered,
+                )
+            )
         elif compatibility == COMPATIBILITY_OLDER:
             sentences.append(
                 self._text(
@@ -389,7 +450,7 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         return summary or None
 
     def _refresh_install_feature(self) -> None:
-        """Expose install only when there is a way to install: today, SSH and the bundle."""
+        """Expose install only when there is a way to install: over MQTT or over SSH."""
         self._attr_supported_features = (
             UpdateEntityFeature.INSTALL
             | UpdateEntityFeature.SPECIFIC_VERSION
@@ -462,8 +523,123 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             # Information only - nothing orders or offers by them.
             "installed_build": _build_attribute(installed),
             "bundled_build": _build_attribute(bundled),
+            "receiver_transaction": self._read_receiver_transaction(),
+            "last_refusal": self._last_refusal(),
         }
         self._attr_release_summary = self._summary(installed, bundled)
+        self._refresh_progress()
+
+    # ------------------------------------------------------ the receiver's transactions --
+
+    def _sentence(self, key: str, placeholders: dict[str, str]) -> str | None:
+        """One of the update sentences in the household's language, or None."""
+        text = self._sentences.get(f"component.{DOMAIN}.exceptions.{key}.message")
+        if not text:
+            return None
+        try:
+            return text.format(**placeholders)
+        except (IndexError, KeyError, ValueError):
+            return None
+
+    @callback
+    def _read_receiver_transaction(self) -> dict[str, Any] | None:
+        """The receiver's last update transaction as the card reads it, and when to look again.
+
+        `state` is `in_progress` only inside the window `mqtt_update.transaction_state` sets,
+        `finished` with the end said in words (`message`), `stale` otherwise.
+        """
+        transaction = mqtt_update.parse_update(self.box.state.update)
+        now = dt_util.utcnow().timestamp()
+        self._receiver_transaction = transaction
+        self._receiver_state = mqtt_update.transaction_state(transaction, now)
+        self._schedule_window_timer(mqtt_update.window_edge(transaction, now))
+        if transaction is None:
+            return None
+        message = None
+        if self._receiver_state == mqtt_update.STATE_FINISHED and (
+            end := mqtt_update.end_sentence(transaction)
+        ) is not None:
+            key, extra = end
+            message = self._sentence(
+                key, mqtt_update.sentence_placeholders(transaction, None, extra)
+            )
+        return {
+            **{key: value for key, value in transaction.items() if key != "error"},
+            "state": self._receiver_state,
+            "message": message,
+        }
+
+    def _last_refusal(self) -> dict[str, Any] | None:
+        """The receiver's last refusal of an update, said in words, while it is on `last_error`.
+
+        An install started at the television or on the page can be refused for reasons only the
+        receiver sees - no internet and no answer from Home Assistant (`no_relay`), a clock that
+        calls Home Assistant's address expired (`clock_skew`) - and the card is where Home
+        Assistant can say them in the household's language.
+        """
+        arrived = self.box.updates.get(TOPIC_LAST_ERROR, 0)
+        if arrived == self._refusals_read:
+            return self._refusal
+        self._refusals_read = arrived
+        error = self.box.state.last_error
+        if not isinstance(error, dict) or error.get("cmd") != "update":
+            return self._refusal
+        reason = error.get("reason")
+        key, extra = mqtt_update.refusal_sentence(reason, error.get("error"))
+        self._refusal = {
+            "reason": reason if isinstance(reason, str) else None,
+            "time": error.get("ts") if isinstance(error.get("ts"), int) else None,
+            "message": self._sentence(
+                key, mqtt_update.sentence_placeholders(None, None, extra)
+            ),
+        }
+        return self._refusal
+
+    def _schedule_window_timer(self, edge: float | None) -> None:
+        self._cancel_window_timer()
+        if edge is None or self.hass is None:
+            return
+        self._window_timer = async_track_point_in_utc_time(
+            self.hass,
+            self._async_window_edge,
+            # A moment past the edge, so the look finds the window already changed.
+            dt_util.utc_from_timestamp(edge + 1),
+        )
+
+    @callback
+    def _cancel_window_timer(self) -> None:
+        if self._window_timer is not None:
+            self._window_timer()
+            self._window_timer = None
+
+    @callback
+    def _async_window_edge(self, _now: datetime) -> None:
+        self._window_timer = None
+        self._async_read_state()
+        self.async_write_ha_state()
+
+    @callback
+    def _refresh_progress(self) -> None:
+        """What the card's spinner says, in order: this card's own install, the forced
+        reinstall, a transaction the receiver runs inside its window, nothing."""
+        if self._installing:
+            return
+        if self._forced_phase is not None:
+            self._attr_in_progress = True
+            self._attr_update_percentage = (
+                (INSTALL_PHASES.index(self._forced_phase) + 1) * 100 // len(INSTALL_PHASES)
+                if self._forced_phase in INSTALL_PHASES
+                else None
+            )
+        elif self._receiver_state == mqtt_update.STATE_IN_PROGRESS:
+            assert self._receiver_transaction is not None
+            self._attr_in_progress = True
+            self._attr_update_percentage = mqtt_update.phase_percentage(
+                self._receiver_transaction["phase"]
+            )
+        else:
+            self._attr_in_progress = False
+            self._attr_update_percentage = None
 
     async def async_install(
         self, version: str | None, backup: bool, **kwargs: Any
@@ -501,6 +677,9 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
                 translation_key="update_version_unavailable",
             )
         from_bundle = source == SOURCE_BUNDLE
+        if versions.path == PATH_MQTT:
+            await self._async_install_over_mqtt(target, source)
+            return
         if from_bundle and (refusal := versions.bundle_refusal()) is not None:
             code, placeholders = refusal
             raise HomeAssistantError(
@@ -586,9 +765,61 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             # call that started this install has to stop claiming it is still running.
             if mine:
                 self._installing = False
-                self._attr_in_progress = False
-                self._attr_update_percentage = None
+                self._refresh_progress()
                 self.async_write_ha_state()
+
+    async def _async_install_over_mqtt(self, target: Build, source: str | None) -> None:
+        """Install a release of the signed index with `cmd/update`, and follow it (ADR-0008).
+
+        Only a release the index lists: the receiver verifies what it gets against its own copy
+        of that index, so a build it does not list would only be refused there. Whatever the
+        outcome, nothing here falls back to SSH - a refusal, a failure and a rollback are said
+        in words, and "still running" after 25 minutes is not a failure.
+        """
+        if (
+            not target.is_release
+            or source not in (SOURCE_INDEX, SOURCE_BUNDLE)
+            or not _offered_release(self._versions, target.version)
+        ):
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="update_mqtt_release_only",
+                translation_placeholders={"version": target.display},
+            )
+        if self._installing:
+            # The one install this card follows is already running; the receiver would
+            # refuse a second one as busy, and that must not end the first one's spinner.
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="update_mqtt_busy"
+            )
+        self._installing = True
+        self._attr_in_progress = True
+        self._attr_update_percentage = None
+        self.async_write_ha_state()
+        try:
+            # Downloaded and held to its signed entry before anything reaches the receiver.
+            package = await async_fetch_release(self.hass, target.version)
+            await mqtt_update.async_install_over_mqtt(
+                self.hass, self.box, self._entry.title, package, self._async_mqtt_phase
+            )
+        except PackageError as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key=_NOT_FETCHED.get(err.code, "update_version_unavailable"),
+                translation_placeholders=err.placeholders,
+            ) from err
+        finally:
+            self._installing = False
+            self._refresh_progress()
+            self.async_write_ha_state()
+
+    @callback
+    def _async_mqtt_phase(self, phase: str | None) -> None:
+        """The receiver's phase of the transaction this card started, on the card's bar."""
+        if not self._installing:
+            return
+        self._attr_update_percentage = mqtt_update.phase_percentage(phase)
+        self.async_write_ha_state()
 
     def _target(self, version: str | None) -> Build | None:
         """The build `update.install` asked for: by name, else what the card offers.
@@ -614,17 +845,17 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
 
     @callback
     def _async_forced_phase(self, phase: str | None) -> None:
-        """Show the forced reinstall's progress; None is its end, whatever the outcome."""
+        """Show the forced reinstall's progress; None is its end, whatever the outcome.
+
+        It is shown over whatever the receiver's `update` topic says - a forged or stale phase
+        included - and when it ends the card goes back to that topic's reading.
+        """
         if self._installing:
             # The card's own install holds the spinner; the installer refuses the other
             # one as busy, and that one's end must not take this spinner down.
             return
-        self._attr_in_progress = phase is not None
-        self._attr_update_percentage = (
-            (INSTALL_PHASES.index(phase) + 1) * 100 // len(INSTALL_PHASES)
-            if phase in INSTALL_PHASES
-            else None
-        )
+        self._forced_phase = phase
+        self._refresh_progress()
         self.async_write_ha_state()
 
     @callback

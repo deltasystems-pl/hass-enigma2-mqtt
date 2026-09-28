@@ -151,6 +151,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transaction left (`leftovers`), who holds the shared lock and when the stale rule frees it
   (`lock-info`), which new interface process holds the plugin's log open (`logfd`), and a start of
   the interface detached from the SSH session (`respawn`).
+- **The update card updates a receiver that updates itself over MQTT**
+  ([ADR-0008](docs/adr/0008-signed-plugin-index.md), section 4). **Not yet run on a receiver.**
+  A receiver whose `info` names the capability `self_update` with its own `update_allowed` stated
+  `true` is updated with `cmd/update` - the signed entry's version and sha256 and a relay address
+  bound to that receiver, published once the subscription is confirmed - whatever SSH credentials
+  are stored (`update_path`: `mqtt`); any other receiver as before. Over MQTT only releases the
+  signed index lists are offered, never an older version. The card follows the receiver's own
+  transaction on `update` for at most 25 minutes with its phase as progress, and counts it
+  installed only when the receiver also reports the target and its signed commit on `info`. Every
+  refusal and every end - the plugin's `busy` (with the minutes until a stalled lock expires),
+  `opkg_busy`, `standby`, the recording guards, `epg_import`, `current`, `checksum`, `relay`,
+  `no_space`, `rate_limited`; a withdraw at the restart (`question` and the guards asked again);
+  a rollback by `not_started`, `time_limit`, `interrupted` or `drill`; and `failed` with
+  `time_limit`, `not_stopped`, `interface_not_started`, `restore_failed`, `restore_incomplete`,
+  `download` (the relay address in the sentence), `bad_package` and the others - is a sentence in
+  Polish, English and German, and **nothing is retried over SSH**. After 25 minutes the card
+  says the update is still running on the receiver instead of calling it failed. The relay grant a
+  followed update downloads from is never evicted by requests for other versions.
+- **The receiver's own update transactions on the update card.** The plugin's `update` topic is
+  read: a transaction started at the television, on the OpenWebif page or by any broker client
+  shows as in progress only while it is not finished and started within the last 25 minutes (and
+  at most a minute ahead of Home Assistant's clock), so a stale or forged retained phase cannot
+  hold the card for longer; the new attributes `receiver_transaction` (with `state` `in_progress`,
+  `finished` or `stale`, and the end in words) and `last_refusal` (the receiver's last refusal of
+  an update, in words - `no_relay` and `clock_skew` included) say what it last said. The forced
+  reinstall is shown over it and is never held by it. Diagnostics carry the topic.
 
 ### Changed
 

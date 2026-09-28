@@ -43,6 +43,7 @@ from .const import (
     ATTR_KEY,
     ATTR_NODE_ID,
     ATTR_PRESS,
+    CAPABILITY_SELF_UPDATE,
     CAPABILITY_UNINSTALL,
     COMMAND_TIMEOUT,
     CONF_BASE_TOPIC,
@@ -56,6 +57,7 @@ from .const import (
     CONF_SOFTCAM_RESTART_ALLOWED,
     CONF_SOURCE_LIST_SCOPE,
     CONF_UNINSTALL_ALLOWED,
+    CONF_UPDATE_ALLOWED,
     CONF_WOL_MAC,
     DEFAULT_BASE_TOPIC,
     DEFAULT_MANUFACTURER,
@@ -107,6 +109,7 @@ from .const import (
     TOPIC_SOFTCAM,
     TOPIC_TIMERS,
     TOPIC_TUNER,
+    TOPIC_UPDATE,
     TOPIC_VOLUME,
     TOPIC_ZAP_HISTORY,
 )
@@ -650,6 +653,13 @@ class Enigma2State:
     # Whether the last `zap_history` arrived retained: a replay of what the broker held,
     # which can never be the answer to a press of the clear button.
     zap_history_retained: bool = False
+    # The plugin's `update` topic: what its signed index offers, and its last or running
+    # update transaction (`mqtt_update.parse_update` reads it). None until it has published one,
+    # and again after a retraction.
+    update: dict[str, Any] | None = None
+    # Whether the last `update` arrived retained: the broker's replay, which can describe an
+    # earlier transaction and is never the answer to a request just sent.
+    update_retained: bool = False
     last_error: dict[str, Any] | None = None
     # Whether the last complaint arrived with the retain flag set. A retained payload
     # is what the broker had before we subscribed, so it is a replay of something that
@@ -863,6 +873,29 @@ class Enigma2Box:
             and settings.get(CONF_UNINSTALL_ALLOWED) is True
             and isinstance(capabilities, list)
             and CAPABILITY_UNINSTALL in capabilities
+        )
+
+    @property
+    def self_update_offered(self) -> bool:
+        """Return whether this receiver takes plugin updates over MQTT (ADR-0008).
+
+        Both halves of the receiver's own word on its current `info`: the capability
+        `self_update` - a plugin the package manager installed, which can put itself back - and
+        its box-only permission `update_allowed`, stated `true`. A permission that is not a
+        boolean is not a yes, and an `info` the plugin retracted states nothing. Availability is
+        deliberately not part of it: a receiver restarting in the middle of its own update is
+        offline for a moment, and an install pressed then must not go over SSH instead.
+        """
+        if self.info_retracted:
+            return False
+        info = self.state.info
+        settings = info.get("settings")
+        capabilities = info.get("capabilities")
+        return (
+            isinstance(settings, dict)
+            and settings.get(CONF_UPDATE_ALLOWED) is True
+            and isinstance(capabilities, list)
+            and CAPABILITY_SELF_UPDATE in capabilities
         )
 
     @property
@@ -1318,8 +1351,26 @@ class Enigma2Box:
             self._last_error_received(msg)
         elif suffix == TOPIC_RELAY_REQUEST:
             self._relay_request_received(msg)
+        elif suffix == TOPIC_UPDATE:
+            self._update_received(msg)
         else:
             _LOGGER.debug("Ignoring unknown topic %s", msg.topic)
+
+    @callback
+    def _update_received(self, msg: ReceiveMessage) -> None:
+        """Track the plugin's `update` topic.
+
+        An empty payload is a retraction and clears it; a payload that is not a JSON object
+        leaves the last good one alone, as for every state topic.
+        """
+        if decode_payload(msg.payload) is None:
+            self.state.update = None
+        elif (update := parse_json_payload(msg.payload)) is not None:
+            self.state.update = update
+        else:
+            return
+        self.state.update_retained = msg.retain
+        self._async_updated(TOPIC_UPDATE)
 
     @callback
     def _relay_request_received(self, msg: ReceiveMessage) -> None:

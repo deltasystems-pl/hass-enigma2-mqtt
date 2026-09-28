@@ -167,11 +167,28 @@ above the installed one.
 
 After a refusal or a rollback over MQTT the card says so and does not try SSH. Over MQTT the
 command is published once the broker has confirmed the subscription that hears the answer, and the
-transaction is followed for up to 21 minutes - one more than the receiver's own hard limit - after
-which the card says it is still running on the receiver and keeps following. Success is `installed`
-together with the target's version and commit on `info`. A transaction the receiver started shows
-as in progress only while it started within the last 21 minutes, so a stale or forged retained
-state cannot hold the card for longer.
+transaction is followed for up to ~~21 minutes - one more than the receiver's own hard limit~~
+**25 minutes** (corrected 2026-09-27: the plugin's helper measured its own worst case at 1353 s,
+22.6 minutes, [TRANSACTION.md §2.4](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TRANSACTION.md#24-the-heartbeat-helper-written),
+and a follower needs that plus the minute of clock skew it allows, with room for the file copying
+the measurement leaves out), after which the card says it is still running on the receiver - not
+that it failed - and goes on showing what the receiver says. Success is `installed` together with
+the target's version and signed commit on `info`. A transaction the receiver started shows as in
+progress only while it is not finished and started within the last 25 minutes (and at most a
+minute ahead of Home Assistant's clock), so a stale or forged retained state cannot hold the card
+for longer; a broker client that keeps republishing a fresh fake phase can, and that is why the
+rescue of §8 asks the receiver's lock, never this topic.
+
+As built (2026-09-27): "the receiver reports" is its current `info` - the capability and the
+permission stated `true`, a plugin that retracted its `info` stating nothing. A momentary
+`offline` does not switch the path to SSH: a receiver restarts in the middle of its own update, and
+the card is unavailable then, and comes back on the MQTT path, never on the other one. Over
+MQTT only a release the signed index lists is offered or installed - the receiver verifies against
+its own copy of that index - so with no index held there is nothing to install and no badge,
+whatever SSH credentials are stored; the bundle counts only when it is such a release. The relay
+grant a followed transaction downloads from is held until the follow ends, so requests for other
+versions cannot evict it; a grant nobody fetched is taken back at the end, so a refusal is not
+followed by a notice that the package was "not downloaded".
 
 ### 5. A receiver without internet gets both from Home Assistant, and verifies both itself
 

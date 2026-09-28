@@ -864,6 +864,37 @@ reported missing, although opkg itself would accept it - the check the design pr
 safe direction, since nothing on the receiver changes. The card never installs an older version
 than the one running.
 
+**A receiver that updates itself is updated over MQTT, and only that way** (ADR-0008 §4). From
+the plugin release after 0.3.0, a receiver whose `info` names the capability `self_update` and
+whose own setting `update_allowed` is on (set on the receiver, or ticked in the guided installer -
+never over MQTT) is updated by the plugin itself: `update_path` is `mqtt`, whatever SSH
+credentials are stored. Pressing install downloads and verifies the release as above, serves it
+on a relay address bound to the receiver (as for a receiver without internet, below), and sends
+`cmd/update` with the version, its signed sha256 and that address - so the receiver needs no
+internet. The card then shows the receiver's own progress (downloading, verifying, snapshot,
+installing, restarting, proving; a rollback without a percentage) and ends when the receiver says
+how it ended: success only when it reports `installed` **and** runs the target with its signed
+commit. Every refusal and every end is said in a sentence - „Na dekoderze trwa już instalacja lub
+aktualizacja wtyczki.", „Dekoder nagrywa albo za chwilę zacznie nagrywać. Spróbuj ponownie po
+zakończeniu nagrania.", „Nowa wersja wtyczki nie uruchomiła się. Dekoder przywrócił poprzednią
+wersję 0.3.0." and the others - and **none of them is retried over SSH**. The card follows a
+transaction for at most 25 minutes (the receiver's own worst case is under 23); after that it says
+„Aktualizacja wciąż trwa na dekoderze." rather than that it failed. Over MQTT only releases the
+signed index lists are offered, never the bundle unless it is such a release, and never an older
+version: a downgrade stays in the options flow, over SSH. With no index held there is nothing to
+install and no badge - press *Sprawdź aktualizacje wtyczki* first.
+
+**Updates the receiver runs by itself** - started at the television, on the plugin's OpenWebif
+page, or by another broker client - appear on the card too: as running only while they are not
+finished and started within the last 25 minutes (by the receiver's clock, at most a minute ahead
+of Home Assistant's), and in the attribute `receiver_transaction` (`state` is `in_progress`,
+`finished` with the end in words in `message`, or `stale`); a card with no install path has no
+progress bar, and shows it in the attribute only. A refusal of such an install that only
+the receiver sees - no internet and no answer from Home Assistant, a clock that calls Home
+Assistant's address expired - is in `last_refusal`, in the household's language. A phase on the
+broker that keeps the card busy cannot keep **„Wymuś reinstalację wtyczki (SSH)"** from running:
+it asks the lock on the receiver, never this topic.
+
 **A receiver without internet** can still install a release from its own screen: it asks this
 Home Assistant on `relay_request`, and Home Assistant - holding a verified index that lists the
 version, under the same rule as the integration's own installs (a downgrade the receiver asks for
