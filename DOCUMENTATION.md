@@ -1243,7 +1243,7 @@ package yourself before opkg sees it - which means downloading it first, as its 
    grep '"version": "0.3.0"' releases.json
    ```
 
-   This catches a damaged or swapped download, not a compromised origin: the index's signature,
+   This catches a damaged or truncated download, not a compromised origin: the index's signature,
    `releases.json.sig`, is checked by Home Assistant and by the plugin, and not here.
 3. Install that file - `opkg install ./enigma2-plugin-extensions-mqttbridge_0.3.0_all.ipk` (add
    `--force-reinstall` when that version is already installed, and `--force-downgrade` for an
