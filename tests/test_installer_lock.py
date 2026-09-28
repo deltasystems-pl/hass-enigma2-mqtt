@@ -525,3 +525,16 @@ def test_a_hand_back_takes_two_different_transaction_ids(
         installer_helper.hand_back_transaction(lock_dir, *ids)
 
     assert owner(lock_dir)["id"] == OURS
+
+
+def test_a_handed_back_record_keeps_the_owner_record_s_mode(tmp_path: Path) -> None:
+    """Every released reader opens the record as whoever runs it; the hand-back rewrites it
+    through a temporary made 0600, and the record must not keep that mode."""
+    lock_dir = tmp_path / "lock"
+    claim_transaction(lock_dir, OURS)
+    before = (lock_dir / "owner.json").stat().st_mode & 0o777
+
+    installer_helper.hand_back_transaction(lock_dir, OURS, ABANDONED)
+
+    assert (lock_dir / "owner.json").stat().st_mode & 0o777 == before
+    assert before != 0o600

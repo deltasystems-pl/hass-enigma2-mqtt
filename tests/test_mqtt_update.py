@@ -2357,3 +2357,29 @@ def test_polish_says_nothing_was_changed_one_way() -> None:
     text = (TRANSLATIONS / "pl.json").read_text(encoding="utf-8")
     assert "Nic nie zostało zmienione" not in text
     assert "Nic nie zmieniono" in text
+
+
+async def test_a_complaint_long_after_its_update_is_not_that_update_s_repeat(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """The burst is the end on `update` and its repeat at once. A complaint in the end's words
+    that comes long after the `update`, with no repeat seen, is judged by its stamp: here,
+    minutes after the end, a refusal."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass)
+    finished = dt_util.utcnow().timestamp() - 300
+    receiver.phase(
+        "finished", started=finished - 30, finished=finished, result="failed",
+        reason="opkg_busy", error=OPKG_BUSY,
+    )
+    await hass.async_block_till_done()
+    freezer.tick(timedelta(seconds=11))
+
+    receiver.last_error(OPKG_BUSY, "opkg_busy")
+    await hass.async_block_till_done()
+    assert hass.states.get(PLUGIN).attributes["last_refusal"]["reason"] == "opkg_busy"
