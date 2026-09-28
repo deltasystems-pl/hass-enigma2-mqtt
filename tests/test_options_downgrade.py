@@ -1,6 +1,6 @@
 """„Zainstaluj starszą wersję wtyczki": the options flow's confirmed downgrade over SSH.
 
-Spec section ae.7 and ae.8: SSH only; versions from the floor up to below the installed one, from
+ADR-0008, section 6: SSH only; versions from the floor up to below the installed one, from
 the verified index and under the one rule; the form names what disappears - the entities whose
 capability the target predates, and updates over MQTT when the target cannot update itself; a
 tick box is required; the install passes `downgrade` so the installer forces opkg and resets the

@@ -1190,7 +1190,7 @@ async def test_installing_a_release_of_the_index_downloads_it_first(
     config_entry: MockConfigEntry,
     aioclient_mock: AiohttpClientMocker,
 ) -> None:
-    """Spec section ae.7, "SSH path": the installer takes verified bytes; the card fetches
+    """ADR-0008, section 4 (the SSH path): the installer takes verified bytes; the card fetches
     them before the receiver is connected to."""
     await _setup(hass, config_entry, credentials=True)
     await _accept(hass, aioclient_mock, 1, [release("0.4.0"), release("0.3.0")])
@@ -1380,8 +1380,8 @@ async def test_a_release_is_offered_before_a_development_bundle_of_its_number(
     config_entry: MockConfigEntry,
     aioclient_mock: AiohttpClientMocker,
 ) -> None:
-    """Spec section ae.7: "the newest compatible, non-withdrawn release known, else the
-    bundle" - a development build of the same number is a choice, not the offer."""
+    """ADR-0008, section 3: the newest compatible, non-withdrawn release known, else the
+    bundle - a development build of the same number is a choice, not the offer."""
     candidate = replace(_candidate_bundle(commit_time_of("0.4.0") + 100), version="0.4.0")
     with patch.object(bundle_module, "load_bundled_plugin", return_value=candidate):
         await _setup(hass, config_entry, credentials=True)

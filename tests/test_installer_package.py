@@ -1,6 +1,6 @@
 """The SSH installer with a release of the signed index instead of the bundle.
 
-Spec section ae.7, "SSH path": the installer takes an IPK source - the bundle, or verified bytes
+ADR-0008, section 4 (the SSH path): the installer takes an IPK source - the bundle, or verified bytes
 held in memory - under the same lock, snapshot and rollback; checks every name in the release's
 `depends` before anything changes; adds `info.build.commit` to the restart proof when the plugin
 reports a build; and installs an older version only for the options flow's confirmed downgrade,

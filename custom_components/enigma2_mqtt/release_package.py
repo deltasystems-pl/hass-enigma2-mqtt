@@ -19,7 +19,7 @@ bytes are believed only when their size and sha256 are the signed entry's and th
 inside names this package and this version. When the bundle is those very bytes - the release
 this integration shipped - they are taken from the bundle and nothing is downloaded.
 
-**The second opinion** (defence in depth, OD 6 of the design): GitHub's API reports a `digest`
+**The second opinion** (defence in depth, ADR-0008 section 1): GitHub's API reports a `digest`
 for every release asset, and it has to agree with the signed sha256. A disagreement refuses; an
 API that cannot be reached, is rate-limited or has no digest to give is noted and does not refuse,
 because the signature is the authority and the API only a cross-check. Its verdict is kept a day
@@ -71,8 +71,8 @@ BELOW_FLOOR = "below_floor"
 INCOMPATIBLE = "incompatible"
 # Anything that goes wrong between asking the origin and holding the signed bytes: unreachable,
 # a redirect, an HTTP error, a file of the wrong size or checksum, or one that is not the package
-# it says it is. One sentence covers them, the one the design gives the household (section
-# ae.10); the log says which.
+# it says it is. One sentence covers them, the one the household is given for a download that
+# failed; the log says which.
 DOWNLOAD = "download"
 # GitHub's own digest of the release asset disagrees with the signed index.
 DIGEST = "digest"

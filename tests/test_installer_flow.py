@@ -1019,7 +1019,7 @@ async def test_the_guided_installer_reads_an_index_an_earlier_run_stored(
     assert connected == []
 
 
-# ------------------------------------------------ remote updates (spec ae.7, OD 7) --
+# ------------------------------------------- remote updates (ADR-0008, section 4) --
 
 
 @pytest.mark.parametrize("ticked", [False, True], ids=["unticked", "ticked"])

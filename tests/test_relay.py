@@ -1,7 +1,7 @@
 """The relay: a verified package served on the LAN to one receiver without internet.
 
-Spec section ae.7, "Relay view" and "Which address", and the relay handshake of ae.6: no
-authentication, a 43-character token, bound to the receiver's IPv4 address from `info.ip` (an
+ADR-0008, section 5 - the relay view, which address it is served on, and the relay handshake:
+no authentication, a 43-character token, bound to the receiver's IPv4 address from `info.ip` (an
 IPv4-mapped IPv6 peer unwrapped; no IPv4 address, no grant), ten minutes, repeatable until then,
 404 for everything else; one grant per (receiver, version) and at most three per receiver, a
 grant in use never evicted; the address on the receiver's subnet, else the internal URL, never the
