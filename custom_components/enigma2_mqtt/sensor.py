@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 from typing import Any
 
@@ -65,6 +65,7 @@ from .const import (
     EPG_IMPORT_STATES,
     EPG_TITLE_MAX,
     ERROR_TEXT_MAX,
+    LOCAL_ERROR_TEXT_MAX,
     TOPIC_BOUQUET,
     TOPIC_CAM,
     TOPIC_EPG,
@@ -87,6 +88,10 @@ PARALLEL_UPDATES = 0
 # Whose complaint „Ostatni błąd" shows: the receiver's, or one Home Assistant recorded itself.
 SOURCE_RECEIVER = "receiver"
 SOURCE_HOME_ASSISTANT = "home_assistant"
+# How far ahead of Home Assistant's own clock a receiver may date a replayed complaint and
+# still be believed. A receiver's clock that is minutes out is ordinary; one that is hours
+# or years ahead dates every complaint "later" than anything Home Assistant records.
+RECEIVER_CLOCK_TOLERANCE = timedelta(minutes=5)
 
 
 def _iso(value: Any) -> str | None:
@@ -914,7 +919,7 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
             if isinstance(local, dict) and local.get("cmd"):
                 self._attr_native_value = str(local["cmd"])[:ERROR_TEXT_MAX]
                 self._attr_extra_state_attributes = {
-                    "error": str(local.get("error") or "")[:ERROR_TEXT_MAX] or None,
+                    "error": str(local.get("error") or "")[:LOCAL_ERROR_TEXT_MAX] or None,
                     "time": local.get("ts") or dt_util.utcnow().isoformat(),
                     "source": SOURCE_HOME_ASSISTANT,
                 }
@@ -968,12 +973,20 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
         when the receiver dated it later than the record shown: the retained complaint
         arrives again at every reload and every start-up, after the record was restored,
         and it would otherwise put a months-old refusal over the failure the household
-        is looking for. A replay with no date of its own cannot be placed, so it does not.
+        is looking for. A replay with no date of its own cannot be placed, so it does not;
+        nor does one dated later than Home Assistant's own clock allows - a receiver whose
+        clock runs ahead (a year of 2030) would otherwise date a stale complaint "later" and
+        put it back over the record at every reload.
+
+        Both need a wrong receiver clock, and the price is the mirror case: a complaint
+        made while Home Assistant was down, and so only ever seen as a replay, is not shown
+        over Home Assistant's record when the receiver's clock is that wrong. Anything the
+        receiver publishes while Home Assistant listens is shown, whatever its date.
         """
         if not self.box.state.last_error_retained:
             return True
         received = _as_utc(when)
-        if received is None:
+        if received is None or received > dt_util.utcnow() + RECEIVER_CLOCK_TOLERANCE:
             return False
         shown = _as_utc(self._attr_extra_state_attributes.get("time"))
         return shown is None or received > shown

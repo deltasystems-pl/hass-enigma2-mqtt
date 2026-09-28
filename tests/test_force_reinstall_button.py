@@ -922,11 +922,12 @@ async def test_a_later_or_live_receiver_complaint_replaces_the_home_assistant_re
     enabled: None,
     hass_admin_user,
 ) -> None:
-    """Newer news does replace it: a replay the receiver dated later, and anything it
-    publishes now, whatever its clock says."""
+    """Newer news does replace it: a replay the receiver dated later - by a clock a minute
+    ahead of Home Assistant's, which is inside the tolerance - and anything it publishes
+    now, whatever its clock says."""
     await _ready(hass, config_entry, box_on_the_broker)
     await _fail_forced_reinstall(hass, hass_admin_user.id)
-    later = int(dt_util.utcnow().timestamp()) + 3600
+    later = int(dt_util.utcnow().timestamp()) + 60
     async_fire_mqtt_message(
         hass,
         f"{BASE_TOPIC}/{NODE_ID}/last_error",
@@ -1031,10 +1032,14 @@ async def test_a_press_while_it_runs_starts_nothing_and_says_so(
     hass_admin_user,
 ) -> None:
     """The call blocks for minutes. Presses meanwhile - even a whole new arming and
-    confirmation - start no second install, and get a notice that goes when it ends."""
+    confirmation - start no second install, and get a notice that goes when it ends.
+
+    A press during the run arms nothing: an arming made then would still be live when the
+    run ends, and one press inside its thirty seconds would start a second install."""
     await _ready(hass, config_entry, box_on_the_broker)
     gate = asyncio.Event()
     running = f"{DOMAIN}_force_reinstall_{config_entry.entry_id}_running"
+    confirmation = f"{DOMAIN}_force_reinstall_{config_entry.entry_id}"
 
     async def _slow(*_args: Any, **_kwargs: Any) -> InstallResult:
         await gate.wait()
@@ -1046,15 +1051,22 @@ async def test_a_press_while_it_runs_starts_nothing_and_says_so(
         await asyncio.sleep(0)
         await asyncio.sleep(0)
         await _press(hass, hass_admin_user.id)
+        assert running in _notices(hass)
+        assert confirmation not in _notices(hass)
         await _press(hass, hass_admin_user.id)
         assert running in _notices(hass)
+        assert confirmation not in _notices(hass)
         assert "already running" in _notices(hass)[running]["message"]
         gate.set()
         await task
         await hass.async_block_till_done()
+        # The run has ended; one press is a first press again, never a confirmation.
+        await _press(hass, hass_admin_user.id)
+        await hass.async_block_till_done()
 
     install.assert_awaited_once()
     assert running not in _notices(hass)
+    assert confirmation in _notices(hass)
 
 
 @pytest.mark.parametrize("how", ["forget", "reload"])
@@ -1185,3 +1197,154 @@ def test_the_confirmation_says_standby_refuses_while_the_interface_runs() -> Non
     assert "will leave standby" not in json.loads(
         (translations / "en.json").read_text(encoding="utf-8")
     )["common"]["force_reinstall_confirm_message"]
+
+
+# ------------------------------------------------------------------ review round 2
+
+
+@pytest.mark.parametrize(
+    "replayed",
+    [
+        # No date of its own: it cannot be placed.
+        json.dumps({"cmd": "zap", "error": "no such channel"}),
+        # Dated by a receiver whose clock runs years ahead.
+        json.dumps({"cmd": "zap", "error": "no such channel", "ts": 1_900_000_000}),
+    ],
+    ids=["undated", "2030"],
+)
+async def test_a_replay_that_cannot_be_placed_never_replaces_the_home_assistant_record(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+    hass_admin_user,
+    replayed: str,
+) -> None:
+    """The broker replays the receiver's retained complaint after every reload. Undated,
+    or dated in 2030 by a fast clock, it would otherwise go over the failure the
+    household is looking for - the 2030 one at every reload, for good."""
+    box_on_the_broker[f"{BASE_TOPIC}/{NODE_ID}/last_error"] = replayed
+    await _ready(hass, config_entry, box_on_the_broker)
+    await _fail_forced_reinstall(hass, hass_admin_user.id)
+    assert hass.states.get(LAST_ERROR).state == "force_reinstall"
+
+    for _ in range(2):
+        assert await hass.config_entries.async_reload(config_entry.entry_id)
+        await hass.async_block_till_done()
+        async_fire_mqtt_message(
+            hass, f"{BASE_TOPIC}/{NODE_ID}/last_error", replayed, retain=True
+        )
+        await hass.async_block_till_done()
+
+        state = hass.states.get(LAST_ERROR)
+        assert state.state == "force_reinstall"
+        assert state.attributes["source"] == "home_assistant"
+
+
+async def test_a_fast_clock_s_live_complaint_is_still_shown(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+    hass_admin_user,
+) -> None:
+    """The tolerance is only for replays: what the receiver says while Home Assistant
+    listens is news, whatever year its clock says."""
+    await _ready(hass, config_entry, box_on_the_broker)
+    await _fail_forced_reinstall(hass, hass_admin_user.id)
+
+    async_fire_mqtt_message(
+        hass,
+        f"{BASE_TOPIC}/{NODE_ID}/last_error",
+        json.dumps({"cmd": "zap", "error": "no such channel", "ts": 1_900_000_000}),
+    )
+    await hass.async_block_till_done()
+
+    state = hass.states.get(LAST_ERROR)
+    assert state.state == "zap"
+    assert state.attributes["source"] == "receiver"
+
+
+@pytest.mark.parametrize(
+    ("error", "opening"),
+    [
+        (InstallerError(InstallerErrorCode.NO_SPACE), "The receiver does not have enough free"),
+        (
+            InstallerError(InstallerErrorCode.BUSY_STALLED, "", {"minutes": "26"}),
+            "A plugin update on the receiver stopped without finishing",
+        ),
+    ],
+    ids=["no_space", "busy_stalled"],
+)
+async def test_a_refusal_that_leaves_the_interface_stopped_says_so_and_how_to_start_it(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+    hass_admin_user,
+    error: InstallerError,
+    opening: str,
+) -> None:
+    """Refused before the lock, in runlevel 4 left by an interrupted transaction: nothing
+    started the interface. The reason says why, then that the receiver stays without a
+    picture and how to get one - whole, on „Ostatni błąd" too, although it is longer than
+    the 255 characters a receiver's complaint is cut to."""
+    error.interface_stopped = True
+    await _ready(hass, config_entry, box_on_the_broker)
+
+    with (
+        patch(INSTALL, AsyncMock(side_effect=error)),
+        pytest.raises(HomeAssistantError) as raised,
+    ):
+        await _press(hass, hass_admin_user.id)
+        await _press(hass, hass_admin_user.id)
+
+    reason = raised.value.translation_placeholders["reason"]
+    assert reason.startswith(opening)
+    # The code's own sentence comes whole, placeholders filled, before the addition.
+    assert "{minutes}" not in reason
+    assert ("about 26 min" in reason) is (error.code is InstallerErrorCode.BUSY_STALLED)
+    assert "interface stays stopped" in reason
+    assert reason.endswith("run the forced plugin reinstall again, which starts it.")
+    shown = hass.states.get(LAST_ERROR).attributes["error"]
+    assert shown == reason
+    assert len(shown) > 255
+
+
+async def test_a_refusal_with_the_interface_running_adds_nothing(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+    hass_admin_user,
+) -> None:
+    await _ready(hass, config_entry, box_on_the_broker)
+
+    with (
+        patch(INSTALL, AsyncMock(side_effect=InstallerError(InstallerErrorCode.NO_SPACE))),
+        pytest.raises(HomeAssistantError) as raised,
+    ):
+        await _press(hass, hass_admin_user.id)
+        await _press(hass, hass_admin_user.id)
+
+    assert raised.value.translation_placeholders["reason"] == (
+        "The receiver does not have enough free space. Nothing was installed."
+    )
+
+
+def test_the_stopped_interface_sentence_is_written_in_all_three_languages() -> None:
+    translations = Path(button_module.__file__).parent / "translations"
+    for language, words in (
+        ("en", ("interface stays stopped", "switch the receiver off and on", "forced plugin")),
+        ("pl", ("pozostaje zatrzymany", "wyłącz dekoder i włącz go ponownie", "wymuszoną")),
+        ("de", ("bleibt gestoppt", "aus und wieder ein", "erzwungene")),
+    ):
+        common = json.loads((translations / f"{language}.json").read_text(encoding="utf-8"))[
+            "common"
+        ]
+        for phrase in words:
+            assert phrase in common["force_reinstall_interface_stopped"], (language, phrase)

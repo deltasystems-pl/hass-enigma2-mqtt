@@ -252,6 +252,12 @@ ERROR_GRACE: Final = 1.0
 # be short. A cut error is still readable; an entity that silently refused to take one
 # would not be.
 ERROR_TEXT_MAX: Final = 255
+# Home Assistant's own failure text on the same sensor is written here, in the
+# installation's language, and goes only into an attribute, which has no 255-character
+# limit: a forced reinstall's refusal plus the sentence saying the interface stays stopped
+# is longer than 255, and cutting it would cut exactly the part saying how to get a
+# picture back. Still bounded, because it is stored with every state change.
+LOCAL_ERROR_TEXT_MAX: Final = 1024
 
 # State topic suffixes, relative to `<base_topic>/<node_id>/`.
 TOPIC_AVAILABILITY: Final = "availability"

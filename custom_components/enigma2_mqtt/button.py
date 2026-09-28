@@ -794,15 +794,27 @@ class Enigma2ForceReinstallButton(Enigma2Entity, ButtonEntity):
         )
 
     async def _async_reason(self, err: InstallerError) -> str:
-        """The installer's sentence for `err`, in the installation's language."""
+        """The installer's sentence for `err`, in the installation's language.
+
+        A refusal before the lock on a receiver whose interface an interrupted transaction
+        left stopped started nothing (ADR-0008, section 8), and the code's own sentence
+        says only why it was refused - so the household is also told that the receiver
+        stays without a picture, and how to get one.
+        """
         texts = await self._async_texts("config")
         text = texts.get(f"component.{DOMAIN}.config.abort.{err.code.value}")
         if not text:
-            return err.code.value
-        try:
-            return text.format(**err.placeholders)
-        except (IndexError, KeyError):
-            return text
+            reason = err.code.value
+        else:
+            try:
+                reason = text.format(**err.placeholders)
+            except (IndexError, KeyError):
+                reason = text
+        if err.interface_stopped:
+            reason = f"{reason} " + await self._async_common(
+                "force_reinstall_interface_stopped"
+            )
+        return reason
 
 
 class Enigma2Button(Enigma2Entity, ButtonEntity):
