@@ -367,6 +367,43 @@ def test_a_swap_that_would_cross_filesystems_is_refused_before_anything_moves(
     assert (tmp_path / "etc/enigma2/mqttbridge.json").read_text() == '{"new":true}\n'
 
 
+def test_a_snapshot_tree_put_back_where_none_is_left_checks_the_filesystem_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An install that failed after opkg had taken the old tree away leaves no live tree -
+    and the snapshot's tree still goes in by a rename out of the staging directory, which
+    cannot cross filesystems either. So the check does not wait for a live tree to exist."""
+    _receiver(tmp_path)
+    backup = tmp_path / "home/root/mqttbridge-backups/ha-installer-0123456789ab"
+    snapshot(tmp_path, backup)
+    _upgrade(tmp_path)
+    shutil.rmtree(tmp_path / PLUGIN_DIR)
+    real_stat = os.stat
+    parent = str(staging_parent(tmp_path))
+
+    class _Elsewhere:
+        def __init__(self, result: os.stat_result) -> None:
+            self._result = result
+
+        def __getattr__(self, name: str) -> Any:
+            if name == "st_dev":
+                return self._result.st_dev + 1
+            return getattr(self._result, name)
+
+    def split_stat(path: Any, *args: Any, **kwargs: Any) -> Any:
+        result = real_stat(path, *args, **kwargs)
+        return _Elsewhere(result) if str(path) == parent else result
+
+    monkeypatch.setattr(installer_helper.os, "stat", split_stat)
+
+    with pytest.raises(ValueError, match="different filesystems"):
+        restore(tmp_path, backup, restore_provisioning=True, restore_settings=False)
+
+    assert not (tmp_path / PLUGIN_DIR).exists()
+    assert (tmp_path / f"usr/lib/opkg/info/{PACKAGE}.list").read_text() == "/new\n"
+    assert "Version: 0.3.0" in (tmp_path / "usr/lib/opkg/status").read_text()
+
+
 def _age(lock: Path, seconds: float, monkeypatch: pytest.MonkeyPatch, module: Any) -> None:
     """Make the lock's owner record `seconds` old by uptime, for `module`'s reading."""
     owner = json.loads((lock / "owner.json").read_text(encoding="ascii"))
