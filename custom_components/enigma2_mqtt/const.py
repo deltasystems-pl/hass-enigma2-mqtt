@@ -600,6 +600,10 @@ MQTT_UPDATE_FUTURE_TOLERANCE: Final = 60
 MQTT_UPDATE_ANSWER_TIMEOUT: Final = 60
 # After `installed`, how long the receiver has to report the target on `info`.
 MQTT_UPDATE_PROOF_TIMEOUT: Final = 120
+# After an `interrupted` end Home Assistant cannot judge, how long the receiver has to repeat it on
+# `last_error`, where the plugin appends the repair when its doors stay closed. It says it right
+# after `update`; this only covers a slow broker.
+MQTT_UPDATE_END_WAIT: Final = 10
 
 # The plugin version the household chose in „Wersja wtyczki do instalacji", stored in the
 # entry's options so it survives a restart. Absent means the select's first option,

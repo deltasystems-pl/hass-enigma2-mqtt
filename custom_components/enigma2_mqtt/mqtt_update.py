@@ -38,10 +38,13 @@ the copying the measurement leaves out. A transaction still running then is not 
 the card says the update is still running on the receiver, and keeps showing what `update` says.
 Success is `result: installed` **and** the receiver reporting the target on `info`, with the
 signed commit when the entry names one - the transaction's word alone is not the proof. An
-`interrupted` end is said by the phases seen on the way (`reached`), since the transaction does not
-say whether the package manager had run. Silence after the request keeps the relay address for a
-late start. When the card that asked goes away - its entry reloaded - the call ends at once with a
-sentence that says so, and the grant stays for its ten minutes: the receiver goes on regardless.
+`interrupted` end does not say by its result whether the package manager had run, so it is said by
+the evidence there is: the files may be a mix when the receiver's words say so or a phase from
+`installing` on was seen (`reached`); nothing changed only when the receiver's own sentence says
+the package manager never ran; otherwise Home Assistant says it cannot tell. Silence after the
+request keeps the relay address for a late start. When the card that asked goes away - its entry
+reloaded - the call ends at once with a sentence that says so, and the grant stays for its ten
+minutes: the receiver goes on regardless.
 
 **Transactions Home Assistant did not start** - at the television, on the OpenWebif page, or by a
 broker client - are shown on the card only while they plausibly run: not `finished`, and started
@@ -67,6 +70,7 @@ from homeassistant.exceptions import HomeAssistantError
 from .const import (
     DOMAIN,
     MQTT_UPDATE_ANSWER_TIMEOUT,
+    MQTT_UPDATE_END_WAIT,
     MQTT_UPDATE_FOLLOW,
     MQTT_UPDATE_FUTURE_TOLERANCE,
     MQTT_UPDATE_PROOF_TIMEOUT,
@@ -92,11 +96,29 @@ PHASES = (
 )
 RESULTS = ("installed", "withdrawn_before_restart", "rolled_back", "failed", "interrupted")
 # From `installing` on the package manager may have touched the plugin's files (the plugin's own
-# `FILES_PHASES`); before it nothing of the plugin has changed.
+# `FILES_PHASES`). Seeing only earlier phases proves nothing: the plugin polls its helper once a
+# second, so `installing` - and the package manager's start - can fall between two polls.
 FILES_PHASES = ("installing", "restarting", "proving", "rolling_back")
-_BEFORE_FILES = ("downloading", "verifying", "snapshot")
-# Every sentence in which the plugin says its files may no longer be whole names this repair.
+# The plugin's words for an `interrupted` whose helper stopped once the package manager had
+# started (`selfupdate._helper_died`); the end's own sentence carries them, the repair does not.
+_PACKAGE_MANAGER_STARTED = "after the package manager had started"
+# Every sentence in which the plugin says its files may no longer be whole names this repair; for
+# a helper that stopped part-way it is appended to the end's repeat on `last_error`.
 _REINSTALL_WORDS = "install the plugin again"
+# The one `interrupted` whose own sentence says the package manager never ran: the helper checks
+# that the interface which asked still runs only until it starts the package manager. A signal or
+# the lock taken can come after it as well as before, and a helper that stopped or a receiver that
+# lost power is judged by a marker that exists only from `installing` on.
+_NOTHING_CHANGED = (
+    "the update was interrupted: the receiver's interface restarted before the update was "
+    "installed"
+)
+# How long after a transaction's `finished` the plugin may still stamp its repeat of that end on
+# `last_error`: at once as a rule, but after a reload only once the fresh session is connected,
+# and after an interface restart only once the new one has read the helper's end. A sentence
+# stamped later is not that end, even in the same words - a refusal shares the helper's sentence
+# for `busy`, `opkg_busy`, `checksum`, `no_space` and others.
+_END_REPEAT_SECONDS = 120
 # The card has one bar. A rollback has no place on it that would not read as progress, so it
 # shows as running without a percentage.
 _PERCENT = {
@@ -333,22 +355,32 @@ def reached(
     return transaction["id"], seen
 
 
-def _interrupted(transaction: dict[str, Any], furthest: str | None, repair_by_ssh: bool) -> str:
-    """How an `interrupted` end is said: nothing changed, the files may be mixed, or unknown.
+def _interrupted(
+    transaction: dict[str, Any], furthest: str | None, repair_by_ssh: bool, said: str | None
+) -> str:
+    """How an `interrupted` end is said: the files may be mixed, nothing changed, or unknown.
 
-    `interrupted` comes before the package manager ran (a signal, the lock taken, the interface
-    restarting) and after it (the lock taken, a helper that stopped), and the transaction does
-    not say which (TRANSACTION.md section 7). The receiver's own sentence names the reinstall
-    whenever it keeps its doors closed over files that may be a mix; otherwise the phases seen on
-    the way decide, and without them Home Assistant says it cannot tell. The repair is the forced
+    `interrupted` comes before the package manager ran and after it - a signal, the lock taken,
+    a helper that stopped, a receiver that lost power - and its result does not say which
+    (TRANSACTION.md section 7). The files may be a mix on any evidence of it: the end's sentence
+    saying the package manager had started, or naming the reinstall; the end's repeat on
+    `last_error` (`said`) naming it; a phase from `installing` on seen on the way. Nothing
+    changed only when the receiver's own sentence says so, since a phase seen before
+    `installing` does not prove that the next one never came. Anything else Home Assistant
+    cannot tell, and says so with the repair to use if the receiver asks for it: the forced
     reinstall over SSH when SSH credentials are stored - the button exists only then - and the
     manual installation otherwise.
     """
     repair = "reinstall" if repair_by_ssh else "manual"
     error = transaction["error"] or ""
-    if _REINSTALL_WORDS in error or furthest in FILES_PHASES:
+    if (
+        _PACKAGE_MANAGER_STARTED in error
+        or _REINSTALL_WORDS in error
+        or (said is not None and _REINSTALL_WORDS in said)
+        or furthest in FILES_PHASES
+    ):
         return f"update_mqtt_interrupted_files_{repair}"
-    if furthest in _BEFORE_FILES:
+    if error == _NOTHING_CHANGED:
         return "update_mqtt_interrupted"
     return f"update_mqtt_interrupted_unknown_{repair}"
 
@@ -358,12 +390,14 @@ def end_sentence(
     furthest: str | None = None,
     *,
     repair_by_ssh: bool = True,
+    said: str | None = None,
 ) -> tuple[str, dict[str, str]] | None:
     """The translation key of how a finished transaction ended, or None for `installed`.
 
     The same `reason` means different things with different results - `time_limit` with
     `failed` changed nothing, with `rolled_back` it was undone - so the result is read first.
-    `furthest` is the furthest phase seen of it (`reached`), which only `interrupted` needs.
+    `furthest` is the furthest phase seen of it (`reached`) and `said` the sentence of its repeat
+    on `last_error` (`end_repeated`), which only `interrupted` needs.
     """
     result, reason = transaction["result"], transaction["reason"]
     if result == "installed":
@@ -373,7 +407,7 @@ def end_sentence(
     if result == "rolled_back":
         return _ROLLED_BACK.get(reason or "", "update_mqtt_rolled_back"), {}
     if result == "interrupted":
-        return _interrupted(transaction, furthest, repair_by_ssh), {}
+        return _interrupted(transaction, furthest, repair_by_ssh, said), {}
     if reason in _OWN_SENTENCE or reason in _SHARED:
         return refusal_sentence(reason, transaction["error"])
     return "update_mqtt_failed", {
@@ -381,34 +415,52 @@ def end_sentence(
     }
 
 
+def end_repeated(error: Any, transaction: dict[str, Any] | None) -> str | None:
+    """The sentence of `transaction`'s end as the plugin repeats it on `last_error`, or None.
+
+    The plugin repeats every end but `installed` there, with the end's reason and its sentence -
+    the repair appended when its doors stay closed - stamped as it says it, which is soon after
+    the end's `finished` on the same clock. A payload under the end's reason or result, starting
+    with its sentence and stamped no later than `_END_REPEAT_SECONDS` after it, is that repeat;
+    one without a usable stamp is judged by its words alone.
+    """
+    if (
+        not isinstance(error, dict)
+        or error.get("cmd") != "update"
+        or transaction is None
+        or transaction["phase"] != "finished"
+        or transaction["result"] in (None, "installed")
+    ):
+        return None
+    said, text = transaction["error"], error.get("error")
+    if not (
+        error.get("reason") in (transaction["reason"], transaction["result"])
+        and isinstance(said, str)
+        and isinstance(text, str)
+        and text.startswith(said)
+    ):
+        return None
+    stamped, finished = _whole(error.get("ts")), transaction["finished"]
+    if stamped is not None and finished is not None and stamped > finished + _END_REPEAT_SECONDS:
+        return None
+    return text
+
+
 def is_refusal(error: Any, transaction: dict[str, Any] | None) -> bool:
     """Whether a `last_error` payload is a refusal of `cmd/update`, and not an end.
 
-    The plugin repeats every end but `installed` on `last_error`, with the end's reason and its
-    sentence - the repair appended when its doors stay closed. So a reason only an end carries
-    is an end, and so is the sentence of the transaction that has just finished, under its reason
-    or its result. The rest is a refusal: it came before any transaction started. The plugin
-    carries no request id, so a refusal of somebody else's `cmd/update` in the same minute - an
-    install started at the television, say - reads as this one's; that is rare, and accepted.
+    A reason only an end carries is an end, and so is the repeat of the transaction that has
+    just finished (`end_repeated`). The rest is a refusal: it came before any transaction
+    started. The plugin carries no request id, so a refusal of somebody else's `cmd/update` in
+    the same minute - an install started at the television, say - reads as this one's; that is
+    rare, and accepted.
     """
     if not isinstance(error, dict) or error.get("cmd") != "update":
         return False
     reason = error.get("reason")
     if isinstance(reason, str) and reason in _END_ONLY:
         return False
-    if (
-        transaction is None
-        or transaction["phase"] != "finished"
-        or transaction["result"] in (None, "installed")
-    ):
-        return True
-    said, text = transaction["error"], error.get("error")
-    return not (
-        reason in (transaction["reason"], transaction["result"])
-        and isinstance(said, str)
-        and isinstance(text, str)
-        and text.startswith(said)
-    )
+    return end_repeated(error, transaction) is None
 
 
 def sentence_placeholders(
@@ -441,15 +493,21 @@ class _Watch:
     what came before is told apart by the box's own counters and the transaction id.
     """
 
-    def __init__(self, box: Any, version: str, before_id: str | None) -> None:
+    def __init__(self, box: Any, version: str, before: dict[str, Any] | None) -> None:
         self.box = box
         self.version = version
-        self.before_id = before_id
+        self.before_id = before["id"] if before is not None else None
+        # A transaction that had ended before the request went out had its end said then: a
+        # sentence arriving after the request is not that end again, whatever its words.
+        self.before_ended = before is not None and before["phase"] == "finished"
         self.ident: str | None = None
         self.transaction: dict[str, Any] | None = None
         # The furthest phase seen of the accepted transaction (`reached`).
         self.reached: tuple[str, str | None] | None = None
         self.refusal: tuple[Any, Any] | None = None
+        # The receiver's last complaint about `cmd/update` after the acceptance: the end's
+        # repeat, once it comes (`end_said`); one about another command leaves it.
+        self.complaint: Any = None
         self.phase_callback: Callable[[str | None], None] | None = None
         # Set when the card that asked is gone - its entry reloaded or unloaded: this box's
         # topics stop, and what the receiver does next is the new card's to show.
@@ -474,11 +532,18 @@ class _Watch:
     def _updated(self) -> None:
         box = self.box
         state = box.state
-        if self._new(TOPIC_LAST_ERROR) and self.ident is None and not state.last_error_retained:
+        if self._new(TOPIC_LAST_ERROR) and not state.last_error_retained:
             error = state.last_error
-            if is_refusal(error, parse_update(state.update)):
-                assert isinstance(error, dict)
-                self.refusal = (error.get("reason"), error.get("error"))
+            if self.ident is not None:
+                if isinstance(error, dict) and error.get("cmd") == "update":
+                    self.complaint = error
+            else:
+                held = parse_update(state.update)
+                if self.before_ended and held is not None and held["id"] == self.before_id:
+                    held = None
+                if is_refusal(error, held):
+                    assert isinstance(error, dict)
+                    self.refusal = (error.get("reason"), error.get("error"))
         if self._new(TOPIC_UPDATE):
             transaction = parse_update(state.update)
             if transaction is not None:
@@ -498,6 +563,10 @@ class _Watch:
                     if self.phase_callback is not None:
                         self.phase_callback(transaction["phase"])
         self.changed.set()
+
+    def end_said(self) -> str | None:
+        """The followed transaction's end as repeated on `last_error`, once it is there."""
+        return end_repeated(self.complaint, self.transaction)
 
     @callback
     def abandon(self) -> None:
@@ -560,7 +629,7 @@ async def async_install_over_mqtt(
     grant.base = base
     grant.held += 1
     url = f"{base}{RELAY_PATH}{grant.token}"
-    watch = _Watch(box, version, (parse_update(box.state.update) or {}).get("id"))
+    watch = _Watch(box, version, parse_update(box.state.update))
     if on_follow is not None:
         on_follow(watch.abandon)
     published = False
@@ -630,7 +699,18 @@ async def async_install_over_mqtt(
         transaction = watch.transaction
         assert transaction is not None
         furthest = watch.reached[1] if watch.reached is not None else None
-        if (end := end_sentence(transaction, furthest, repair_by_ssh=repair_by_ssh)) is not None:
+        end = end_sentence(
+            transaction, furthest, repair_by_ssh=repair_by_ssh, said=watch.end_said()
+        )
+        if end is not None and end[0].startswith("update_mqtt_interrupted_unknown_"):
+            # The plugin says the end again on `last_error` right after `update`, with the
+            # repair appended when its doors stay closed: wait a moment for what it adds.
+            if await watch.wait(lambda: watch.end_said() is not None, MQTT_UPDATE_END_WAIT):
+                end = end_sentence(
+                    transaction, furthest, repair_by_ssh=repair_by_ssh, said=watch.end_said()
+                )
+            _raise_if_abandoned(watch, box, placeholders)
+        if end is not None:
             key, extra = end
             if key == "update_mqtt_download":
                 extra = {**extra, "url": base}

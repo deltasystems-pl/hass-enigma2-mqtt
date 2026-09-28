@@ -559,6 +559,7 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         """
         transaction = mqtt_update.parse_update(self.box.state.update)
         now = dt_util.utcnow().timestamp()
+        self._read_complaint()
         self._receiver_transaction = transaction
         self._reached = mqtt_update.reached(self._reached, transaction)
         self._receiver_state = mqtt_update.transaction_state(transaction, now)
@@ -573,7 +574,10 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         )
         if self._receiver_state == mqtt_update.STATE_FINISHED and (
             end := mqtt_update.end_sentence(
-                transaction, furthest, repair_by_ssh=has_credentials(self._entry)
+                transaction,
+                furthest,
+                repair_by_ssh=has_credentials(self._entry),
+                said=mqtt_update.end_repeated(self._update_complaint, transaction),
             )
         ) is not None:
             key, extra = end
@@ -600,14 +604,7 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         confuse. A complaint about another command leaves the refusal standing; a cleared
         `last_error` - the next command that succeeded - takes it away.
         """
-        arrived = self.box.updates.get(TOPIC_LAST_ERROR, 0)
-        if arrived != self._refusals_read:
-            self._refusals_read = arrived
-            error = self.box.state.last_error
-            if error is None:
-                self._update_complaint = None
-            elif isinstance(error, dict) and error.get("cmd") == "update":
-                self._update_complaint = error
+        self._read_complaint()
         error = self._update_complaint
         if error is None or not mqtt_update.is_refusal(error, self._receiver_transaction):
             return None
@@ -618,6 +615,21 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             "time": error.get("ts") if isinstance(error.get("ts"), int) else None,
             "message": self._sentence(key, mqtt_update.sentence_placeholders(None, None, extra)),
         }
+
+    def _read_complaint(self) -> None:
+        """Take up the receiver's latest complaint about `cmd/update`, if one arrived since.
+
+        A refusal, or the repeat of an end - which the card reads for the repair the plugin
+        appends to an `interrupted` end when its doors stay closed.
+        """
+        arrived = self.box.updates.get(TOPIC_LAST_ERROR, 0)
+        if arrived != self._refusals_read:
+            self._refusals_read = arrived
+            error = self.box.state.last_error
+            if error is None:
+                self._update_complaint = None
+            elif isinstance(error, dict) and error.get("cmd") == "update":
+                self._update_complaint = error
 
     def _schedule_window_timer(self, edge: float | None) -> None:
         self._cancel_window_timer()
