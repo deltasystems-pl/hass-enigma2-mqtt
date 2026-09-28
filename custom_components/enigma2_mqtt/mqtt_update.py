@@ -25,7 +25,8 @@ this transaction is followed, so that a forged `relay_request` for other version
 mid-download. The command goes out only once the broker has confirmed the subscription that will
 carry the answer.
 
-**The answer.** A refusal is `last_error` with `cmd: update` and a `reason`; an acceptance is a
+**The answer.** A refusal is `last_error` with `cmd: update` and a `reason` - not the end of a
+transaction, which the plugin repeats there too (`is_refusal`); an acceptance is a
 new transaction on `update` - another id than the one held before the request, the version asked
 for, `started_by: home_assistant` - published as the receiver starts its helper. A retained
 payload is what the broker held before the request and is never an answer to it.
@@ -36,7 +37,11 @@ it takes at most 409 s, 1353 s in all (TRANSACTION.md section 2.4). Home Assista
 the copying the measurement leaves out. A transaction still running then is not called a failure:
 the card says the update is still running on the receiver, and keeps showing what `update` says.
 Success is `result: installed` **and** the receiver reporting the target on `info`, with the
-signed commit when the entry names one - the transaction's word alone is not the proof.
+signed commit when the entry names one - the transaction's word alone is not the proof. An
+`interrupted` end is said by the phases seen on the way (`reached`), since the transaction does not
+say whether the package manager had run. Silence after the request keeps the relay address for a
+late start. When the card that asked goes away - its entry reloaded - the call ends at once with a
+sentence that says so, and the grant stays for its ten minutes: the receiver goes on regardless.
 
 **Transactions Home Assistant did not start** - at the television, on the OpenWebif page, or by a
 broker client - are shown on the card only while they plausibly run: not `finished`, and started

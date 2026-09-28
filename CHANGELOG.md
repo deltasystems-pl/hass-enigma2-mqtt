@@ -168,14 +168,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `download` (the relay address in the sentence), `bad_package` and the others - is a sentence in
   Polish, English and German, and **nothing is retried over SSH**. After 25 minutes the card
   says the update is still running on the receiver instead of calling it failed. The relay grant a
-  followed update downloads from is never evicted by requests for other versions.
+  followed update downloads from is never evicted by requests for other versions. An `interrupted`
+  end is never called "nothing changed" once the card saw `installing` or the receiver's words name
+  the reinstall: it then says the files may be a mix and names the forced reinstall (or the manual
+  installation without SSH credentials), and with nothing seen it says it cannot tell. A receiver
+  that does not answer within a minute keeps its download address for a late start; an entry
+  reload in the middle of a follow ends the call at once with a sentence that says so, keeps the
+  address, and leaves the new card showing the receiver's progress.
 - **The receiver's own update transactions on the update card.** The plugin's `update` topic is
   read: a transaction started at the television, on the OpenWebif page or by any broker client
   shows as in progress only while it is not finished and started within the last 25 minutes (and
   at most a minute ahead of Home Assistant's clock), so a stale or forged retained phase cannot
   hold the card for longer; the new attributes `receiver_transaction` (with `state` `in_progress`,
   `finished` or `stale`, and the end in words) and `last_refusal` (the receiver's last refusal of
-  an update, in words - `no_relay` and `clock_skew` included) say what it last said. The forced
+  an update, in words - `no_relay` and `clock_skew` included - while it is on `last_error`, and
+  never the end of a transaction the receiver repeats there) say what it last said. The forced
   reinstall is shown over it and is never held by it. Diagnostics carry the topic.
 
 ### Changed

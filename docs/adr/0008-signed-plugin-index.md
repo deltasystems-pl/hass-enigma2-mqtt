@@ -187,8 +187,17 @@ MQTT only a release the signed index lists is offered or installed - the receive
 its own copy of that index - so with no index held there is nothing to install and no badge,
 whatever SSH credentials are stored; the bundle counts only when it is such a release. The relay
 grant a followed transaction downloads from is held until the follow ends, so requests for other
-versions cannot evict it; a grant nobody fetched is taken back at the end, so a refusal is not
-followed by a notice that the package was "not downloaded".
+versions cannot evict it; a grant nobody fetched is taken back after a refusal or an end before the
+download, so a refusal is not followed by a notice that the package was "not downloaded". After a
+silence it stays for its ten minutes, since the receiver may still start late and come for it. An
+entry reload in the middle of a follow - saving the options does one - ends the call at once with a
+sentence that says so rather than "still running" 25 minutes later; the grant stays held through the
+unload and goes at its own expiry, and the card that replaces the old one shows the receiver's
+transaction from `update`. The transaction does not say whether the package manager had run before an
+`interrupted` end, so the card never calls such an end "nothing changed" unless it saw the
+transaction only before `installing`: from `installing` on, or when the receiver's own sentence names
+the reinstall, it says the files may be a mix and names the forced reinstall (§8) - or the manual
+installation, without SSH credentials - and with no phase seen at all it says it cannot tell.
 
 ### 5. A receiver without internet gets both from Home Assistant, and verifies both itself
 
@@ -333,6 +342,17 @@ no receiver is set up, and one already past its read publishes nothing.
   size and sha256 - and serves it unauthenticated on the LAN, to one address, for ten minutes, to a
   receiver that verifies it again. The relay address travels over the broker, so a broker client can
   see it and name a host for the receiver to fetch from; the worst it achieves is a refusal.
+- A broker client can also publish a **forged retained `info`** for a receiver: the capability
+  `self_update`, `update_allowed` stated `true`, and an address of its choosing. The card then takes
+  the MQTT path - for a receiver that never claimed `self_update` the SSH path is no longer offered -
+  publishes `cmd/update` to the real receiver's command topic, and binds the relay grant to the
+  forged address. The forger can download a public signed package; the real receiver refuses the
+  command when its own `update_allowed` is off, ignores it when its plugin has no `cmd/update`, and
+  otherwise gets a `404` from the relay, fails as `download` and waits out its ten-minute limit.
+  That is **deny and delay, never an install**: what a receiver installs is a signed release it
+  verified itself. It is the same class as a forged `update` phase or `relay_request`, accepted for
+  the same reason - the Home Assistant Mosquitto add-on enforces no ACL (§9) - and the rescue of §8
+  asks nothing of these topics.
 - This card offers a plugin release only after the maintainer has approved the signing job for it in
   the plugin repository's CI; between the release and that approval, the version is on the opkg feed
   and in the next bundle, but not in the index.

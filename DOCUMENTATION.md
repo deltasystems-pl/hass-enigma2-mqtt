@@ -874,8 +874,8 @@ on a relay address bound to the receiver (as for a receiver without internet, be
 internet. The card then shows the receiver's own progress (downloading, verifying, snapshot,
 installing, restarting, proving; a rollback without a percentage) and ends when the receiver says
 how it ended: success only when it reports `installed` **and** runs the target with its signed
-commit. Every refusal and every end is said in a sentence - „Na dekoderze trwa już instalacja lub
-aktualizacja wtyczki.", „Dekoder nagrywa albo za chwilę zacznie nagrywać. Spróbuj ponownie po
+commit. Every refusal and every end is said in a sentence - „Na dekoderze trwa już instalacja,
+aktualizacja albo usuwanie wtyczki.", „Dekoder nagrywa albo za chwilę zacznie nagrywać. Spróbuj ponownie po
 zakończeniu nagrania.", „Nowa wersja wtyczki nie uruchomiła się. Dekoder przywrócił poprzednią
 wersję 0.3.0." and the others - and **none of them is retried over SSH**. The card follows a
 transaction for at most 25 minutes (the receiver's own worst case is under 23); after that it says
@@ -884,6 +884,19 @@ signed index lists are offered, never the bundle unless it is such a release, an
 version: a downgrade stays in the options flow, over SSH. With no index held there is nothing to
 install and no badge - press *Sprawdź aktualizacje wtyczki* first.
 
+An update the receiver reports as **interrupted** is said by what Home Assistant saw of it, since
+the receiver does not say whether its package manager had already run. Seen only before
+`installing`, it says nothing was changed. From `installing` on - or when the receiver's own words
+say the plugin must be installed again - it says the plugin's files may be a mix of two versions
+and names **„Wymuś reinstalację wtyczki (SSH)"**, or the manual installation when no SSH
+credentials are stored; with nothing seen of it, it says it cannot tell and names the same repair
+for when the receiver asks for it. If the silence after the request lasts a minute, the card says
+so, and the download address stays valid for its ten minutes in case the receiver starts late.
+Saving the integration's options reloads it: an install that was being followed then ends at once
+with „Home Assistant przeładował integrację w trakcie aktualizacji, więc to zlecenie już jej nie
+śledzi. Przebieg aktualizacji na dekoderze pokazuje karta." - the receiver goes on, its download
+address stays, and the card shows its progress from the `update` topic.
+
 **Updates the receiver runs by itself** - started at the television, on the plugin's OpenWebif
 page, or by another broker client - appear on the card too: as running only while they are not
 finished and started within the last 25 minutes (by the receiver's clock, at most a minute ahead
@@ -891,7 +904,10 @@ of Home Assistant's), and in the attribute `receiver_transaction` (`state` is `i
 `finished` with the end in words in `message`, or `stale`); a card with no install path has no
 progress bar, and shows it in the attribute only. A refusal of such an install that only
 the receiver sees - no internet and no answer from Home Assistant, a clock that calls Home
-Assistant's address expired - is in `last_refusal`, in the household's language. A phase on the
+Assistant's address expired - is in `last_refusal`, in the household's language, for as long as it
+is on the receiver's `last_error`: the next command that succeeds clears both. The end of a
+transaction, which the receiver repeats on `last_error`, is never a refusal there; it is said once,
+in `receiver_transaction`. A phase on the
 broker that keeps the card busy cannot keep **„Wymuś reinstalację wtyczki (SSH)"** from running:
 it asks the lock on the receiver, never this topic.
 
