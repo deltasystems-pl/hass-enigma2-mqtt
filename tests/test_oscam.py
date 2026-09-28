@@ -420,3 +420,57 @@ async def test_a_version_exactly_at_the_limit_is_still_published(
     await async_setup_box(hass, config_entry)
 
     assert config_entry.runtime_data.state.oscam["version"] == version
+
+
+@pytest.mark.parametrize(
+    "newcomer",
+    [
+        # A kind a later plugin may add, with an id prefix of its own.
+        {**READER, "id": "proxy_0123456789cd", "kind": "proxy"},
+        # A kind this integration does not know, under a prefix it does.
+        {**READER, "id": "source_0123456789cd", "kind": "relay"},
+    ],
+    ids=["new_prefix", "known_prefix"],
+)
+async def test_a_reader_of_a_kind_this_does_not_know_costs_only_that_reader(
+    hass, mqtt_mock, retained, config_entry, newcomer
+):
+    """A plugin that adds a kind of source must not blank every OSCam entity here: the
+    source is skipped - no entity is made for something this cannot describe - and the
+    rest of the payload is applied."""
+    retained[AVAILABILITY_TOPIC] = "online"
+    retained[INFO_TOPIC] = json.dumps(
+        {
+            **INFO,
+            "capabilities": [*INFO["capabilities"], "oscam"],
+            "settings": {"oscam_telemetry": True},
+        }
+    )
+    retained[OSCAM_TOPIC] = json.dumps(payload(READER, newcomer, SERVER))
+    await async_setup_box(hass, config_entry)
+
+    state = config_entry.runtime_data.state.oscam
+    assert state is not None, "the payload was rejected over one reader's kind"
+    assert [reader["id"] for reader in state["readers"]] == [READER["id"], SERVER["id"]]
+    assert state["readers_configured"] == 3
+    assert hass.states.get(source_entity(hass, READER["id"], "status")).state == "ready"
+    assert source_entity(hass, newcomer["id"], "status") is None
+
+
+@pytest.mark.parametrize("kind", [None, 7, ["reader"]])
+async def test_a_reader_without_a_kind_is_still_a_broken_payload(
+    hass, mqtt_mock, retained, config_entry, kind
+):
+    """Tolerance is for a value a later plugin may send, not for a malformed one."""
+    retained[AVAILABILITY_TOPIC] = "online"
+    retained[INFO_TOPIC] = json.dumps(
+        {
+            **INFO,
+            "capabilities": [*INFO["capabilities"], "oscam"],
+            "settings": {"oscam_telemetry": True},
+        }
+    )
+    retained[OSCAM_TOPIC] = json.dumps(payload(READER, {**READER_TWO, "kind": kind}))
+    await async_setup_box(hass, config_entry)
+
+    assert config_entry.runtime_data.state.oscam is None

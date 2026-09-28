@@ -1522,6 +1522,11 @@ class Enigma2Box:
                 return None
             source_id = reader.get("id")
             kind = reader.get("kind")
+            if isinstance(kind, str) and kind not in ("reader", "server", "unknown"):
+                # A kind of source a later plugin added. This integration cannot describe
+                # it, so it gets no entity - but the payload is not broken, and rejecting
+                # it would leave every OSCam entity on its last sample for good.
+                continue
             if (
                 not isinstance(source_id, str)
                 or not re.fullmatch(r"(?:reader|server|source)_[0-9a-f]{12}", source_id)
@@ -2002,8 +2007,13 @@ class Enigma2Box:
         press = payload.get(ATTR_PRESS, PRESS_SHORT)
         if not isinstance(key, str) or not key:
             return
-        if press not in (PRESS_SHORT, PRESS_LONG):
-            press = PRESS_SHORT
+        if not isinstance(press, str) or press not in (PRESS_SHORT, PRESS_LONG):
+            # A kind of press a later plugin may add. Read as a short press it would fire
+            # every automation and device trigger written for one; it is no event this
+            # integration can describe, so nothing fires. A payload that does not say how
+            # long the key was held is a short press.
+            _LOGGER.debug("Ignoring key %s with a press this does not know: %r", key, press)
+            return
 
         self.hass.bus.async_fire(
             EVENT_KEY,

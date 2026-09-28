@@ -387,7 +387,7 @@ conditional ones are, in full:
 | 1 | „Pobierz EPG" | the receiver reports the `epg_import` capability **and** permits an EPG import |
 | 4 | the conditional-access diagnostics | the `cam_telemetry` option is on |
 | 12 | the OSCam aggregates | the `oscam_telemetry` option is on |
-| 3 per OSCam source | status, ready cards, shared cards | the `oscam_telemetry` option is on, for each reader or server that receiver reports |
+| 3 per OSCam source | status, ready cards, shared cards | the `oscam_telemetry` option is on, for each reader or server that receiver reports; a source of a kind this integration does not know gets none, and the rest of the report still applies |
 
 **What takes one away again is not the same question as what creates it**, and the table
 splits on it. A row that follows an **option or a permission** is removed on a stated
@@ -495,7 +495,8 @@ while the box is unreachable, because that is precisely when somebody wants to w
   a send to it then raises an error, which stops an automation at that step; put
   `continue_on_error: true` on the step to let the automation carry on without the toast.
 - **Pilot &ndash; klawisz** - fires for every key the box reports, with the key name as the event
-  type and `press` (`short` or `long`) as an attribute. An event entity may only fire types it
+  type and `press` (`short` or `long`; a payload without one is a short press, and one with any
+  other value fires nothing) as an attribute. An event entity may only fire types it
   declared, so a key outside the declared list is logged at debug and dropped here - the bus
   event below still carries it.
 - **Ekran** - the last screenshot, with the moment it was taken as the state. It is a

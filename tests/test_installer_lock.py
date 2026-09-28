@@ -191,3 +191,81 @@ def test_a_kernel_with_no_uptime_falls_back_to_the_wall_clock(
 
     assert "it has been held for" in capsys.readouterr().err
     release_transaction(lock_dir)
+
+
+# --- a recovery that failed hands the lock back to the transaction it recovers ----------
+
+ABANDONED = "0123456789ab"
+OURS = "fedcba987654"
+
+
+def _stale_lock_of(lock_dir: Path, transaction: str) -> None:
+    """A lock an installer transaction abandoned: its id, claimed long before the bound."""
+    claim_transaction(lock_dir, transaction)
+    long_ago = {**owner(lock_dir), "uptime": (uptime() or 0.0) - STALE_LOCK_SECONDS - 60}
+    (lock_dir / "owner.json").write_text(json.dumps(long_ago), encoding="ascii")
+
+
+def test_a_lock_handed_back_names_the_abandoned_transaction_again(tmp_path: Path) -> None:
+    """The claim reclaimed the abandoned transaction's lock, and its recovery failed. Released,
+    the lock would forget the only record of which snapshot is still to be put back; handed
+    back, the next claim reclaims it at once and recovers by that id again."""
+    lock_dir = tmp_path / "lock"
+    _stale_lock_of(lock_dir, ABANDONED)
+    assert claim_transaction(lock_dir, OURS) == ABANDONED
+
+    installer_helper.hand_back_transaction(lock_dir, OURS, ABANDONED)
+
+    assert owner(lock_dir)["id"] == ABANDONED
+    # Stale as it was when this install reclaimed it: nothing waits thirty minutes.
+    assert installer_helper._is_stale(lock_dir)
+    assert claim_transaction(lock_dir, "a1b2c3d4e5f6") == ABANDONED
+
+
+def test_the_released_helper_sees_a_handed_back_lock_as_stale_too(tmp_path: Path) -> None:
+    """The rule is shared with every released installer and the plugin: a lock handed back
+    must be one they reclaim as well, never a new lock that holds them off."""
+    from . import released_installer_helper_0_3_1 as released
+
+    lock_dir = tmp_path / "lock"
+    claim_transaction(lock_dir, OURS)
+    installer_helper.hand_back_transaction(lock_dir, OURS, ABANDONED)
+
+    assert released._is_stale(lock_dir)
+    released.claim_transaction(lock_dir)
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        # Another installer's lock.
+        {"pid": 1, "started": 1, "id": "a1b2c3d4e5f6"},
+        # The plugin's self-update's, which names where it was started from.
+        {"pid": 1, "started": 1, "id": OURS, "origin": "mqtt"},
+        {"pid": 1, "started": 1},
+        [],
+    ],
+)
+def test_only_the_transactions_own_lock_is_handed_back(tmp_path: Path, record: object) -> None:
+    lock_dir = tmp_path / "lock"
+    lock_dir.mkdir()
+    text = json.dumps(record)
+    (lock_dir / "owner.json").write_text(text, encoding="ascii")
+
+    with pytest.raises(ValueError):
+        installer_helper.hand_back_transaction(lock_dir, OURS, ABANDONED)
+
+    assert (lock_dir / "owner.json").read_text(encoding="ascii") == text
+
+
+@pytest.mark.parametrize("ids", [(OURS, "../../etc"), ("nothex", ABANDONED), (OURS, OURS)])
+def test_a_hand_back_takes_two_different_transaction_ids(
+    tmp_path: Path, ids: tuple[str, str]
+) -> None:
+    lock_dir = tmp_path / "lock"
+    claim_transaction(lock_dir, OURS)
+
+    with pytest.raises(ValueError):
+        installer_helper.hand_back_transaction(lock_dir, *ids)
+
+    assert owner(lock_dir)["id"] == OURS

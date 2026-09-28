@@ -530,3 +530,73 @@ def test_a_restore_removes_only_its_own_leftovers_beside_plugins(tmp_path: Path)
     assert left == {*keep, "Plugins"}
     assert all((python / name / "f").read_text() == "x" for name in keep)
     assert (tmp_path / f"{PLUGIN_DIR}/plugin.py").read_text() == "old plugin\n"
+
+
+def test_rolling_back_a_first_install_checks_the_filesystem_before_anything_moves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A first install's snapshot has no plugin tree, and the rollback takes the new one away
+    - by a rename into the staging directory, which cannot cross filesystems either. On an
+    image with `Plugins/` on a filesystem of its own, that rename fails; checked only after
+    opkg's records were rewritten, it left records saying "not installed" over a plugin that
+    still is."""
+    _write(tmp_path, "usr/lib/opkg/status", "Package: unrelated\nVersion: 7\n")
+    (tmp_path / "usr/lib/opkg/info").mkdir(parents=True)
+    _write(tmp_path, f"{PLUGINS}/Extensions/Other/plugin.py", "somebody else's\n")
+    _write(tmp_path, "etc/enigma2/settings", f"config.tv.lastservice={WATCHED}\n")
+    backup = tmp_path / "home/root/mqttbridge-backups/ha-installer-0123456789ab"
+    snapshot(tmp_path, backup)
+    # What the first `opkg install` leaves behind.
+    _write(tmp_path, f"{PLUGIN_DIR}/plugin.py", "new plugin\n")
+    _write(tmp_path, f"usr/lib/opkg/info/{PACKAGE}.list", "/new\n")
+    _write(
+        tmp_path,
+        "usr/lib/opkg/status",
+        f"Package: unrelated\nVersion: 7\n\nPackage: {PACKAGE}\nVersion: 0.3.0\n",
+    )
+    real_stat = os.stat
+    parent = str(staging_parent(tmp_path))
+
+    class _Elsewhere:
+        def __init__(self, result: os.stat_result) -> None:
+            self._result = result
+
+        def __getattr__(self, name: str) -> Any:
+            if name == "st_dev":
+                return self._result.st_dev + 1
+            return getattr(self._result, name)
+
+    def split_stat(path: Any, *args: Any, **kwargs: Any) -> Any:
+        result = real_stat(path, *args, **kwargs)
+        return _Elsewhere(result) if str(path) == parent else result
+
+    monkeypatch.setattr(installer_helper.os, "stat", split_stat)
+
+    with pytest.raises(ValueError, match="different filesystems"):
+        restore(tmp_path, backup, restore_provisioning=False, restore_settings=False)
+
+    assert (tmp_path / f"{PLUGIN_DIR}/plugin.py").read_text() == "new plugin\n"
+    assert (tmp_path / f"usr/lib/opkg/info/{PACKAGE}.list").read_text() == "/new\n"
+    assert f"Package: {PACKAGE}" in (tmp_path / "usr/lib/opkg/status").read_text()
+
+
+def test_rolling_back_a_first_install_takes_the_new_plugin_away(tmp_path: Path) -> None:
+    """The same rollback on one filesystem: the tree and every record of it go."""
+    _write(tmp_path, "usr/lib/opkg/status", "Package: unrelated\nVersion: 7\n")
+    (tmp_path / "usr/lib/opkg/info").mkdir(parents=True)
+    _write(tmp_path, "etc/enigma2/settings", f"config.tv.lastservice={WATCHED}\n")
+    backup = tmp_path / "home/root/mqttbridge-backups/ha-installer-0123456789ab"
+    snapshot(tmp_path, backup)
+    _write(tmp_path, f"{PLUGIN_DIR}/plugin.py", "new plugin\n")
+    _write(tmp_path, f"usr/lib/opkg/info/{PACKAGE}.list", "/new\n")
+    _write(
+        tmp_path,
+        "usr/lib/opkg/status",
+        f"Package: unrelated\nVersion: 7\n\nPackage: {PACKAGE}\nVersion: 0.3.0\n",
+    )
+
+    restore(tmp_path, backup, restore_provisioning=False, restore_settings=False)
+
+    assert not (tmp_path / PLUGIN_DIR).exists()
+    assert not (tmp_path / f"usr/lib/opkg/info/{PACKAGE}.list").exists()
+    assert PACKAGE not in (tmp_path / "usr/lib/opkg/status").read_text()

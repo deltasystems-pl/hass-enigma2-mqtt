@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 import errno
 import fcntl
 import glob
@@ -608,9 +608,11 @@ def restore(
     else:
         cache_sources = []
     token = _staging_token(backup)
-    if metadata["plugin"]:
+    if metadata["plugin"] or plugin.exists():
         # Before anything moves: a swap that cannot be a rename must not leave opkg's
-        # records restored under a plugin tree that is still the new one.
+        # records restored under a plugin tree that is still the new one. A first
+        # install's snapshot has no tree, but the new one is still taken away by a rename
+        # into the staging directory - which cannot cross filesystems either.
         _require_one_filesystem(root, plugin)
     with _lock(root, OPKG_LOCK_WAIT_RESTORE_SECONDS):
         current = _stanzas(status_path.read_text(encoding="utf-8"))
@@ -767,7 +769,7 @@ def _replace_tree(root: Path, source: Path | None, live: Path, token: str) -> No
     staged_name, aside_name = staging_names(token)
     staged = parent / staged_name
     aside = parent / aside_name
-    if source is not None:
+    if source is not None or live.exists():
         _require_one_filesystem(root, live)
     # A set-aside tree left by an interrupted restore of this snapshot is either the
     # superseded one or - cut off between the two renames - the only copy of what was
@@ -1026,6 +1028,37 @@ def release_transaction(lock_dir: Path) -> None:
         raise ValueError("transaction lock has no owner")
     owner.unlink()
     lock_dir.rmdir()
+
+
+def hand_back_transaction(lock_dir: Path, owner: str, abandoned: str) -> None:
+    """Give the lock back to the abandoned transaction whose recovery just failed.
+
+    The claim reclaimed `abandoned`'s stale lock and reported its id, and putting its
+    snapshot back failed. Released, the lock would forget the only record of which snapshot
+    is still to be put back - the next install would start over a half-changed receiver
+    with nothing to recover. So the owner record names `abandoned` again, dated so that
+    the released stale rule - every installer's and the plugin's - finds it stale at once,
+    on any clock: it was stale when this install reclaimed it. No boot id and no uptime,
+    because those would make the rule judge it young by uptime; a start time more than
+    the bound in the past is stale by the wall clock even on a receiver that booted in
+    1970. The next claim reclaims it and recovers by that id again.
+
+    Only this transaction's own lock is handed back: the record must name `owner` and no
+    `origin`, or the lock is somebody else's by now and is left alone.
+    """
+    if not (TRANSACTION_ID.fullmatch(owner) and TRANSACTION_ID.fullmatch(abandoned)):
+        raise ValueError("a transaction id is twelve lowercase hexadecimal digits")
+    if owner == abandoned:
+        raise ValueError("a transaction cannot hand its lock back to itself")
+    recorded = json.loads((lock_dir / "owner.json").read_text(encoding="ascii"))
+    if not isinstance(recorded, dict) or "origin" in recorded or recorded.get("id") != owner:
+        raise ValueError("the lock is not this transaction's")
+    record = {
+        "pid": os.getpid(),
+        "started": int(time.time()) - STALE_LOCK_SECONDS - 1,
+        "id": abandoned,
+    }
+    _atomic_text(lock_dir / "owner.json", json.dumps(record) + "\n")
 
 
 def lock_info(lock_dir: Path) -> dict:
@@ -1799,6 +1832,7 @@ def main() -> int:
             "verify",
             "claim",
             "release",
+            "hand-back",
             "prune",
             "identity",
             "lock-probe",
@@ -1820,8 +1854,11 @@ def main() -> int:
     parser.add_argument("--keep-name", default="")
     parser.add_argument("--provisioning", action="store_true")
     parser.add_argument("--settings", action="store_true")
-    # The transaction's id, written into the lock's owner record by `claim`.
+    # The transaction's id, written into the lock's owner record by `claim`; for
+    # `hand-back`, the abandoned transaction the lock goes back to.
     parser.add_argument("--id", default="")
+    # `hand-back`: the transaction that holds the lock now, and hands it back.
+    parser.add_argument("--owner", default="")
     # A service reference is an option, never the positional path: `Path` would fold the
     # `//` of an IPTV reference's stream URL into one slash.
     parser.add_argument("--service", default="")
@@ -1924,6 +1961,8 @@ def _operate(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         print(json.dumps(lock_info(args.path), sort_keys=True))
     elif args.operation == "release":
         release_transaction(args.path)
+    elif args.operation == "hand-back":
+        hand_back_transaction(args.path, args.owner, args.id)
     elif args.operation == "prune":
         for name in prune_snapshots(args.path, keep_name=args.keep_name):
             print(f"pruned superseded installer snapshot {name}", file=sys.stderr)

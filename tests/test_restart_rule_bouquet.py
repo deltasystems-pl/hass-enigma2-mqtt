@@ -137,6 +137,8 @@ async def test_a_bouquet_that_stayed_is_kept_and_nothing_is_sent(
         (RestartRecord(SREF, False, SPORT, False), "kept"),
         # The channel is not where it should be; a bouquet change could move it again.
         (RestartRecord(SREF, False, FAVOURITES, True), "lost"),
+        # Somebody chose a channel after the start: their bouquet is theirs too.
+        (RestartRecord(SREF, False, FAVOURITES, True), "changed by the household"),
         (RestartRecord(SREF, False, None, False), "kept"),
     ],
 )
