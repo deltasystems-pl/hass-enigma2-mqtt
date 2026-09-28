@@ -833,13 +833,17 @@ async def test_a_hand_back_refused_as_somebody_elses_lock_releases_nothing(
     assert "no longer this transaction's" in caplog.text
 
 
-@pytest.mark.parametrize("fail_on", [None, "opkg install"], ids=["committed", "rolled_back"])
+@pytest.mark.parametrize(
+    "setup",
+    [{}, {"fail_on": "opkg install"}, {"question_on_restart": True}],
+    ids=["committed", "rolled_back", "withdrawn"],
+)
 async def test_every_release_names_the_transaction_that_claimed_the_lock(
-    hass: HomeAssistant, install_request: InstallRequest, tmp_path: Path, fail_on: str | None
+    hass: HomeAssistant, install_request: InstallRequest, tmp_path: Path, setup: dict
 ) -> None:
-    receiver = FakeReceiver(fail_on=fail_on)
+    receiver = FakeReceiver(**setup)
 
-    if fail_on is None:
+    if not setup:
         await _install(hass, install_request, tmp_path, receiver)
     else:
         with pytest.raises(InstallerError):

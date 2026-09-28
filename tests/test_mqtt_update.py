@@ -2517,3 +2517,33 @@ async def test_the_repeat_after_the_session_that_reopens_the_doors_is_the_end_s(
     attributes = hass.states.get(PLUGIN).attributes
     assert attributes["last_refusal"] is None
     assert attributes["receiver_transaction"]["message"] == FILES_REINSTALL_EN
+
+
+async def test_a_refusal_right_after_a_reconnect_is_a_refusal_on_the_card(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """The broker hands over an end from ten minutes ago, and its repeat is no longer on
+    `last_error`. The receiver reconnects - which says `update` again - and a second later
+    refuses an install in the end's words. That `update` did not first carry the end, so
+    the burst is not its repeat: the card shows the refusal."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass)
+    finished = dt_util.utcnow().timestamp() - 600
+    receiver.phase(
+        "finished", started=finished - 30, finished=finished, result="failed",
+        reason="opkg_busy", error=OPKG_BUSY, retain=True,
+    )
+    await hass.async_block_till_done()
+    freezer.tick(timedelta(seconds=5))
+
+    _republish(hass, finished)
+    await hass.async_block_till_done()
+    freezer.tick(timedelta(seconds=1))
+    receiver.last_error(OPKG_BUSY, "opkg_busy")
+    await hass.async_block_till_done()
+    assert hass.states.get(PLUGIN).attributes["last_refusal"]["reason"] == "opkg_busy"
