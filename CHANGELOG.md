@@ -135,10 +135,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transaction's own rollback was cut off before its restore, and what was read from the
   settings read again afterwards - and started with `init 3` on the channel that transaction
   recorded; a failure after the lock is taken still starts the interface, on the files that are
-  there. Runlevel 4 with no stop of ours is refused, and a live lock there says when it frees
-  itself. It proves the start by a new enigma2 holding the
-  plugin's log open, and by the announcement only when the plugin is switched on; a plugin that is
-  switched off stays off, and the result says so. It changes no setting.
+  there. A refusal before the lock - no space, an old Python, another receiver, a lock held -
+  starts nothing, since without the lock nothing says the interrupted transaction has stopped;
+  it is marked so that its message says the interface stays stopped and how to start it. An
+  installer's lock held there says when it frees itself. Runlevel 4 with no stop of ours is
+  refused. It proves the start by a new enigma2 holding the plugin's log open, and by the
+  announcement only when the plugin is switched on; a plugin that is switched off stays off, and
+  the result says so. It writes no setting of its own: the only settings it can write are the
+  snapshot's, put back for a rollback of ours cut off before its restore.
 - The installer's helper answers four more questions on the receiver: what an interrupted
   transaction left (`leftovers`), who holds the shared lock and when the stale rule frees it
   (`lock-info`), which new interface process holds the plugin's log open (`logfd`), and a start of
