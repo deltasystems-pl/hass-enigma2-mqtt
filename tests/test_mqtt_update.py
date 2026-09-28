@@ -19,6 +19,7 @@ ADR-0008. Three things are held here:
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from dataclasses import replace
 from datetime import timedelta
 import json
@@ -1547,7 +1548,13 @@ async def test_a_reload_during_the_follow_ends_the_call_and_the_new_card_follows
         raised = await asyncio.wait_for(_refused(task), 5)
 
     assert raised.translation_key == "update_mqtt_reloaded"
-    # The receiver may be downloading right now: the address was not taken away.
+    # The receiver may be downloading right now: the address was not taken away, and requests
+    # for other versions cannot evict it until its own ten minutes are over.
+    assert grant in relay.grants(NODE_ID)
+    for version in ("0.3.1", "0.3.2", "0.3.3"):
+        package = PackageSource(version, b"x", "ef" * 32, None, (), ORIGIN_DOWNLOAD)
+        with suppress(RelayError):
+            relay.grant(NODE_ID, "192.0.2.12", package)
     assert grant in relay.grants(NODE_ID)
     await hass.async_block_till_done()
     attributes = hass.states.get(PLUGIN).attributes
