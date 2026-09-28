@@ -302,6 +302,16 @@ The version card and the release check:
   them; the update card's install feature follows an enrolment or a forgetting at once, where it
   used to wait for the next reload.
 
+### Fixed
+
+- **A release cannot ship a plugin that is not a release.** Between releases `main` may bundle a
+  development build of the plugin so that it can be tested here; the release workflow now refuses
+  to build the zip unless the bundled package is a clean `release` build of the commit
+  `metadata.json` names, and that commit carries the plugin's tag `v<version>`
+  (`tools/check-release-bundle.py`). Plugin releases before 0.4.0 carry no build id, and for them
+  the tag alone decides.
+- German: the one sentence that addressed the reader as „Sie" now says „du", like the rest.
+
 ### Known limits
 
 - For as long as the receiver's question stays unanswered - at most 60 seconds, then the
@@ -315,6 +325,8 @@ The version card and the release check:
 
 ### Documentation
 
+- Comments and tests cite ADR-0008 instead of labels of a design document that is not part of
+  this repository, and a test keeps such labels out.
 - **Installable plugin versions from a signed release index are planned**, in
   [ADR-0008](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0008-signed-plugin-index.md)
   (proposed), the Home Assistant half of the plugin's
