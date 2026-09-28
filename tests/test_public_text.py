@@ -15,8 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SCANNED = ("custom_components", "tests", "tools", "docs", ".github")
 SUFFIXES = {".py", ".md", ".json", ".yml", ".yaml", ".sh"}
 PRIVATE_CITATION = re.compile(
-    r"[Ss]pec(?:ification)? (?:section )?§?ae\b"
-    r"|§ ?ae\.?[0-9]"
+    r"[Ss]pec(?:ification)? (?:section )?\u00a7?ae\b"
+    r"|\u00a7 ?ae\.?[0-9]"
     r"|\bae\.[0-9]+\b"
     r"|\bdesign section\b"
     r"|\bOD [A-Z0-9]+\b"

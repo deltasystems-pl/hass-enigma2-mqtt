@@ -1,10 +1,11 @@
 """The SSH installer with a release of the signed index instead of the bundle.
 
-ADR-0008, section 4 (the SSH path): the installer takes an IPK source - the bundle, or verified bytes
-held in memory - under the same lock, snapshot and rollback; checks every name in the release's
-`depends` before anything changes; adds `info.build.commit` to the restart proof when the plugin
-reports a build; and installs an older version only for the options flow's confirmed downgrade,
-after which the older plugin is asked to retract what the newer one published (`cmd/reset`).
+ADR-0008, section 4 (the SSH path): the installer takes an IPK source - the bundle, or verified
+bytes held in memory - under the same lock, snapshot and rollback; checks every name in the
+release's `depends` before anything changes; adds `info.build.commit` to the restart proof when
+the plugin reports a build; and installs an older version only for the options flow's confirmed
+downgrade, after which the older plugin is asked to retract what the newer one published
+(`cmd/reset`).
 """
 
 from __future__ import annotations
