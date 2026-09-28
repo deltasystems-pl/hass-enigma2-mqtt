@@ -97,7 +97,9 @@ async def test_retained_oscam_before_info_is_normalized_and_applied(
         "servers_connected",
         "shared_cards",
         "readers",
+        "skipped",
     }
+    assert state["skipped"] == []
     assert set(state["readers"][0]) == {
         "id",
         "kind",
@@ -452,9 +454,107 @@ async def test_a_reader_of_a_kind_this_does_not_know_costs_only_that_reader(
     state = config_entry.runtime_data.state.oscam
     assert state is not None, "the payload was rejected over one reader's kind"
     assert [reader["id"] for reader in state["readers"]] == [READER["id"], SERVER["id"]]
+    assert state["skipped"] == [newcomer["id"]]
     assert state["readers_configured"] == 3
     assert hass.states.get(source_entity(hass, READER["id"], "status")).state == "ready"
     assert source_entity(hass, newcomer["id"], "status") is None
+
+
+UNKNOWN_SOURCE = {
+    **READER,
+    "id": "source_0123456789cd",
+    "kind": "unknown",
+    "status": "connected",
+    "protocol": None,
+}
+
+
+def _oscam_info() -> str:
+    return json.dumps(
+        {
+            **INFO,
+            "capabilities": [*INFO["capabilities"], "oscam"],
+            "settings": {"oscam_telemetry": True},
+        }
+    )
+
+
+async def test_a_source_of_kind_unknown_is_applied_and_gets_its_status(
+    hass, mqtt_mock, retained, config_entry
+):
+    """`unknown` is a kind this integration knows: the plugin could not classify the
+    source, and says so. It is applied like any other, with the one entity every source
+    has; skipping it would hide a source the plugin reported."""
+    retained[AVAILABILITY_TOPIC] = "online"
+    retained[INFO_TOPIC] = _oscam_info()
+    retained[OSCAM_TOPIC] = json.dumps(payload(READER, UNKNOWN_SOURCE))
+    await async_setup_box(hass, config_entry)
+
+    state = config_entry.runtime_data.state.oscam
+    assert [reader["id"] for reader in state["readers"]] == [READER["id"], UNKNOWN_SOURCE["id"]]
+    entity_id = source_entity(hass, UNKNOWN_SOURCE["id"], "status")
+    assert hass.states.get(entity_id).state == "connected"
+    assert source_entity(hass, UNKNOWN_SOURCE["id"], "ready_cards") is None
+    assert source_entity(hass, UNKNOWN_SOURCE["id"], "shared_cards") is None
+
+
+async def test_a_source_a_later_plugin_names_differently_keeps_its_entity(
+    hass, mqtt_mock, retained, config_entry
+):
+    """A later plugin learns to classify a source it used to call `unknown`, under a kind
+    this integration does not know. The source is still there - same id - so its entity
+    stays, with the name and area somebody gave it: a source this cannot describe is
+    silence about it, not a report that it is gone. Nothing new is made for it either."""
+    retained[AVAILABILITY_TOPIC] = "online"
+    retained[INFO_TOPIC] = _oscam_info()
+    retained[OSCAM_TOPIC] = json.dumps(payload(READER, UNKNOWN_SOURCE))
+    await async_setup_box(hass, config_entry)
+    registry = er.async_get(hass)
+    entity_id = source_entity(hass, UNKNOWN_SOURCE["id"], "status")
+    registry.async_update_entity(entity_id, name="Moje zrodlo")
+    removed: list[str] = []
+    hass.bus.async_listen(
+        er.EVENT_ENTITY_REGISTRY_UPDATED,
+        lambda event: removed.append(event.data["entity_id"])
+        if event.data["action"] == "remove"
+        else None,
+    )
+
+    async_fire_mqtt_message(
+        hass, OSCAM_TOPIC, json.dumps(payload(READER, {**UNKNOWN_SOURCE, "kind": "relay"}))
+    )
+    await hass.async_block_till_done()
+
+    assert config_entry.runtime_data.state.oscam["readers"][0]["id"] == READER["id"]
+    assert source_entity(hass, UNKNOWN_SOURCE["id"], "status") == entity_id
+    assert registry.async_get(entity_id).name == "Moje zrodlo"
+    assert removed == []
+    for metric in ("ready_cards", "shared_cards"):
+        assert source_entity(hass, UNKNOWN_SOURCE["id"], metric) is None
+
+    # And when the source really is gone from an authoritative report, it goes.
+    async_fire_mqtt_message(hass, OSCAM_TOPIC, json.dumps(payload(READER)))
+    await hass.async_block_till_done()
+
+    assert source_entity(hass, UNKNOWN_SOURCE["id"], "status") is None
+    assert source_entity(hass, READER["id"], "status") is not None
+
+
+async def test_a_skipped_source_that_comes_back_under_a_known_kind_gets_its_entity(
+    hass, mqtt_mock, retained, config_entry
+):
+    """Counting a skipped source as present must not count it as having an entity: when a
+    plugin reports it again under a kind this knows, its entity is made then."""
+    retained[AVAILABILITY_TOPIC] = "online"
+    retained[INFO_TOPIC] = _oscam_info()
+    retained[OSCAM_TOPIC] = json.dumps(payload(READER, {**UNKNOWN_SOURCE, "kind": "relay"}))
+    await async_setup_box(hass, config_entry)
+    assert source_entity(hass, UNKNOWN_SOURCE["id"], "status") is None
+
+    async_fire_mqtt_message(hass, OSCAM_TOPIC, json.dumps(payload(READER, UNKNOWN_SOURCE)))
+    await hass.async_block_till_done()
+
+    assert source_entity(hass, UNKNOWN_SOURCE["id"], "status") is not None
 
 
 @pytest.mark.parametrize("kind", [None, 7, ["reader"]])

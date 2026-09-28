@@ -188,6 +188,10 @@ OSCAM_VERSION = re.compile(
 # a megabyte of `1.20_a_a_a...` would match, and it is a label for a bug report. The
 # longest version anyone has seen is a quarter of this.
 OSCAM_VERSION_MAX = 64
+# The shape of a source id under any kind, the ones a later plugin may add included: a
+# short lowercase prefix and twelve hexadecimal digits. Only for remembering which
+# skipped sources are there; a source that gets entities is held to its own prefix.
+_OSCAM_ANY_SOURCE_ID = re.compile(r"[a-z]{1,16}_[0-9a-f]{12}")
 
 # What the `process` topic may say, and the largest value of each that is a measurement
 # rather than a bug. The topic is five integers about the enigma2 process itself, and
@@ -1516,6 +1520,7 @@ class Enigma2Box:
             )
 
         normalized_readers: list[dict[str, Any]] = []
+        skipped: list[str] = []
         seen_ids: set[str] = set()
         for reader in readers:
             if not isinstance(reader, dict):
@@ -1526,6 +1531,14 @@ class Enigma2Box:
                 # A kind of source a later plugin added. This integration cannot describe
                 # it, so it gets no entity - but the payload is not broken, and rejecting
                 # it would leave every OSCam entity on its last sample for good.
+                #
+                # Its id is kept, though, as a source that is there: a later plugin that
+                # learns to classify a source it used to call `unknown` reports the same
+                # id under the new kind, and a source missing from an authoritative report
+                # has its entities removed - the name, area and history somebody gave them
+                # with it. Not being able to describe a source is not seeing it gone.
+                if isinstance(source_id, str) and _OSCAM_ANY_SOURCE_ID.fullmatch(source_id):
+                    skipped.append(source_id)
                 continue
             if (
                 not isinstance(source_id, str)
@@ -1581,6 +1594,9 @@ class Enigma2Box:
             "servers_connected": bounded(payload.get("servers_connected")),
             "shared_cards": bounded(payload.get("shared_cards")),
             "readers": normalized_readers,
+            # The ids of the sources skipped above for a kind this cannot describe: present,
+            # with no entity made for them here.
+            "skipped": skipped,
         }
 
     @callback

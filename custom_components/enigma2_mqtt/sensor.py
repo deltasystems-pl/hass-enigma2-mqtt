@@ -1109,8 +1109,11 @@ class _OscamEntityManager:
         authoritative = (
             payload.get("api_reachable") is True and payload.get("api_access") == "granted"
         )
-        current = {source["id"] for source in readers if isinstance(source, dict)}
-        additions = current - self.active
+        described = {source["id"] for source in readers if isinstance(source, dict)}
+        # A source skipped for a kind this cannot describe is still there: it keeps the
+        # entities it has, and gets none it does not.
+        current = described | set(payload.get("skipped") or [])
+        additions = described - self.active
         entities = []
         for source in readers:
             kind = source["kind"]
