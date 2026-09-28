@@ -3,8 +3,8 @@
 `main` may bundle a candidate of the plugin between releases - a development build - so that
 it can be tested here. A tag cut from such a `main` would ship the candidate to every household,
 so `release.yml` runs `tools/check-release-bundle.py` before it builds the zip. These tests are
-that check's rehearsal: the committed candidate bundle is refused, a release build at its tag
-passes, and each way of not being a release is refused on its own.
+that check's rehearsal: the committed bundle is judged by what its package says it is, a release
+build at its tag passes, and each way of not being a release is refused on its own.
 """
 
 from __future__ import annotations
@@ -17,6 +17,8 @@ from typing import Any
 
 import pytest
 import yaml
+
+from custom_components.enigma2_mqtt.buildid import base_version, package_build
 
 from .ipk import buildinfo, make_ipk
 
@@ -69,20 +71,82 @@ def _bundle(
     return directory
 
 
-def test_the_committed_candidate_bundle_is_refused(gate, plugin, monkeypatch) -> None:
-    """The bundle on `main` today is a development build of an untagged plugin commit, and
-    it stays refused even if somebody later tags that commit: the package says what it is."""
-    repo, _ = plugin
-    metadata = json.loads((COMMITTED_BUNDLE / "metadata.json").read_text(encoding="utf-8"))
+def _judged_by_its_package(gate, bundle: Path, repo: Path, monkeypatch) -> bool:
+    """Run the gate on `bundle` with its commit untagged and then tagged, and check the verdicts
+    against what the package itself says it is. Returns whether it says it is a release.
+
+    The expectation is read from the package rather than written down, because the committed
+    bundle changes kind: between releases `main` carries a development candidate, and the pull
+    request that ships a plugin release carries that release. A test pinned to either would go
+    red on the other, and the easy fix for a red test here is to delete it.
+    """
+    metadata = json.loads((bundle / "metadata.json").read_text(encoding="utf-8"))
+    version = metadata["version"]
+    build = package_build((bundle / metadata["filename"]).read_bytes())
+    if build is None:
+        # Packages from before build ids say nothing about themselves; their tag decides.
+        release = base_version(version) < (0, 4, 0)
+    else:
+        release = (
+            build["flavour"] == "release"
+            and build["dirty"] is False
+            and build["commit"] == metadata["source_commit"]
+        )
 
     monkeypatch.setattr(gate, "_tags_at", lambda plugin, commit: [])
-    untagged = gate.failures(COMMITTED_BUNDLE, repo)
-    monkeypatch.setattr(gate, "_tags_at", lambda plugin, commit: [f"v{metadata['version']}"])
-    tagged = gate.failures(COMMITTED_BUNDLE, repo)
+    untagged = gate.failures(bundle, repo)
+    monkeypatch.setattr(gate, "_tags_at", lambda plugin, commit: [f"v{version}"])
+    tagged = gate.failures(bundle, repo)
 
-    assert any("flavour is 'development', not a release build" in failure for failure in untagged)
-    assert any("does not carry the release tag" in failure for failure in untagged)
-    assert tagged == ["the bundled package's build flavour is 'development', not a release build"]
+    # Without its tag nothing passes, whatever the package says.
+    assert any(f"does not carry the release tag v{version}" in f for f in untagged), untagged
+    if release:
+        assert tagged == []
+    else:
+        # A tag on a candidate's commit does not make the candidate a release.
+        assert tagged, "a package that is not a release build passed once its commit was tagged"
+        assert not any("release tag" in failure for failure in tagged), tagged
+        if build is not None and build["flavour"] != "release":
+            assert any(
+                f"flavour is {build['flavour']!r}, not a release build" in failure
+                for failure in tagged
+            ), tagged
+    return release
+
+
+def test_the_committed_bundle_is_judged_by_what_its_package_says(
+    gate, plugin, monkeypatch
+) -> None:
+    """Refused without its plugin tag; with it, passed only if the package is a release build.
+
+    A development candidate stays refused even if somebody later tags its commit: the package
+    says what it is.
+    """
+    repo, _ = plugin
+    _judged_by_its_package(gate, COMMITTED_BUNDLE, repo, monkeypatch)
+
+
+@pytest.mark.parametrize(
+    ("version", "build", "release"),
+    [
+        ("0.4.0", {}, True),
+        ("0.4.0", {"flavour": "development"}, False),
+        ("0.4.0", {"dirty": True}, False),
+        ("0.4.0", {"commit": "d" * 40}, False),
+        ("0.3.0", None, True),
+        ("0.4.0", None, False),
+    ],
+)
+def test_both_kinds_of_committed_bundle_are_judged(
+    gate, plugin, tmp_path, monkeypatch, version: str, build: dict | None, release: bool
+) -> None:
+    """The committed bundle's test, on a release and on a candidate, so both of its outcomes
+    are exercised whichever kind `main` carries today."""
+    repo, commit = plugin
+    text = None if build is None else buildinfo(**{"commit": commit, **build})
+    bundle = _bundle(tmp_path / "bundle", version, commit, text)
+
+    assert _judged_by_its_package(gate, bundle, repo, monkeypatch) is release
 
 
 def test_a_release_build_at_its_tag_passes(gate, plugin, tmp_path, capsys) -> None:
@@ -171,6 +235,14 @@ def test_the_release_workflow_builds_the_zip_only_after_the_gate() -> None:
     needs = jobs["release"]["needs"]
 
     assert "bundle-is-release" in ([needs] if isinstance(needs, str) else needs)
+    # The cheap ways to keep the gate in the file and take its teeth out: a condition that lets
+    # the publishing job run past a failed or skipped gate, a gate that may fail without failing
+    # its job, or a gate step that is skipped (a skipped step passes).
+    assert "if" not in jobs["release"]
+    assert "continue-on-error" not in gate_job
+    for step in gate_job["steps"]:
+        assert "continue-on-error" not in step, step
+        assert "if" not in step, step
     checkouts = [step for step in gate_job["steps"] if step.get("with", {}).get("repository")]
     assert checkouts == [
         {
