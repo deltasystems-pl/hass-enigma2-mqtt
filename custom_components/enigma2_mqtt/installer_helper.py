@@ -1112,16 +1112,6 @@ def release_transaction(lock_dir: Path, owner: str = "") -> None:
         os.close(directory)
 
 
-def _still_named(lock_dir: Path, directory: int) -> bool:
-    """Whether the directory open at `directory` is still the one at `lock_dir`'s name."""
-    try:
-        named = os.stat(str(lock_dir))
-        held = os.fstat(directory)
-    except OSError:
-        return False
-    return (named.st_dev, named.st_ino) == (held.st_dev, held.st_ino)
-
-
 class LockNotOursError(ValueError):
     """The lock no longer names the transaction that tried to hand it back."""
 
