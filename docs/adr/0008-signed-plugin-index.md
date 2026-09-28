@@ -194,16 +194,26 @@ entry reload in the middle of a follow - saving the options does one - ends the 
 sentence that says so rather than "still running" 25 minutes later; the grant stays held through the
 unload and goes at its own expiry, and the card that replaces the old one shows the receiver's
 transaction from `update`. The result of an `interrupted` end does not say whether the package manager had
-run, so the card says it by the evidence: the files may be a mix - naming the forced reinstall (§8),
-or the manual installation without SSH credentials - when the receiver's sentence says its package
-manager had started or names the reinstall, on `update` or in the end's repeat on `last_error`, or
-when a phase from `installing` on was seen; "nothing changed" only when the receiver's own sentence
-says so; "cannot tell" otherwise. Phases seen only before `installing` prove nothing: the plugin
-polls its helper once a second, and a helper that dies within that second after writing
-`installing` is never published at that phase. A `last_error` is the repeat of an end only when it
-is stamped within two minutes of the end's `finished`, since a refusal can share the end's
-sentence word for word; a request made after a transaction ended never takes that end's words for
-its answer.
+run, so the card says it by the evidence, the receiver's words first: the files may be a mix -
+naming the forced reinstall (§8), or the manual installation without SSH credentials - when the
+receiver's sentence says its package manager had started or names the reinstall, on `update` or in
+the end's repeat on `last_error`; "nothing changed" when the helper's own sentence says the
+interface restarted before the package manager ran; the previous version in place after a signal,
+which ends `interrupted` only with the files untouched or put back whole; whole files, one version
+or the other, after the lock was taken, which the helper notices only between steps - the receiver
+then asks for an interface restart, never a reinstall. These three are matched on the helper's
+exact sentence and hold whatever phase was seen. Otherwise a phase from `installing` on seen on the
+way says the files may be a mix, and "cannot tell" is said for the rest. Phases seen only before
+`installing` prove nothing: the plugin polls its helper once a second, and a helper that dies
+within that second after writing `installing` is never published at that phase. A `last_error` is
+the repeat of an end only when it is stamped no earlier than the transaction started and within
+two minutes of the end's `finished`, since a refusal can share the end's sentence word for word; a
+request made after a transaction ended never takes that end's words for its answer. The card
+judges a live `last_error` by when it arrives as well: the plugin says an end on `update` and
+repeats it on `last_error` at once, while a refusal never comes with an `update`, so the first
+complaint in the end's words within ten seconds of that `update` is the repeat whatever its stamp,
+and a second one with no `update` between is a refusal. The two minutes are reasoned from the
+plugin's code and are still to be measured on a receiver.
 
 ### 5. A receiver without internet gets both from Home Assistant, and verifies both itself
 

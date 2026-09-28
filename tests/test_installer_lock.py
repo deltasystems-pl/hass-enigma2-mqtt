@@ -371,7 +371,17 @@ def test_a_count_that_is_not_one_reads_as_none(tmp_path: Path, attempts: object)
     assert installer_helper.claim_with_attempts(lock_dir, OURS)["attempts"] == 0
 
 
-@pytest.mark.parametrize("attempts", [-1, 10_000])
+@pytest.mark.parametrize("attempts", [True, False, -1, "2", 1.5, None])
+def test_the_installer_reads_a_count_that_is_not_one_as_none(attempts: object) -> None:
+    """The installer's own reading of the claim, beside the helper's: a boolean is no count,
+    though Python calls `True` an int that equals one."""
+    from custom_components.enigma2_mqtt import installer
+
+    claimed = json.dumps({"reclaimed": ABANDONED, "attempts": attempts})
+    assert installer._reclaimed(claimed, OURS) == (ABANDONED, 0)
+
+
+@pytest.mark.parametrize("attempts", [-1, 10_000, True, 1.0])
 def test_a_hand_back_refuses_a_count_out_of_range(tmp_path: Path, attempts: int) -> None:
     lock_dir = tmp_path / "lock"
     claim_transaction(lock_dir, OURS)
@@ -403,6 +413,39 @@ def test_only_the_transactions_own_lock_is_handed_back(tmp_path: Path, record: o
         installer_helper.hand_back_transaction(lock_dir, OURS, ABANDONED)
 
     assert (lock_dir / "owner.json").read_text(encoding="ascii") == text
+
+
+@pytest.mark.parametrize("taken", ["replaced", "renamed away"])
+def test_a_lock_taken_while_it_is_handed_back_is_left_to_its_new_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, taken: str
+) -> None:
+    """Our lock is stale by the time a slow recovery has failed, and a claimer may reclaim it
+    between the hand-back's read and its write: it renames the directory away and makes a new
+    one at its name. Written by path, the handed-back record would land in that new lock and
+    make a live install's lock look handed back, and stale, to the next claimer."""
+    lock_dir = tmp_path / "lock"
+    claim_transaction(lock_dir, OURS)
+    theirs = {"pid": 2, "started": int(time.time()), "id": "a1b2c3d4e5f6"}
+    reading = installer_helper.json.loads
+
+    def loads(text: str, *args: object, **kwargs: object) -> object:
+        # The claimer's reclaim, in the moment after our record was read.
+        monkeypatch.setattr(installer_helper.json, "loads", reading)
+        os.rename(lock_dir, tmp_path / ".lock-stale-claimer")
+        if taken == "replaced":
+            lock_dir.mkdir()
+            (lock_dir / "owner.json").write_text(json.dumps(theirs), encoding="ascii")
+        return reading(text, *args, **kwargs)
+
+    monkeypatch.setattr(installer_helper.json, "loads", loads)
+
+    with pytest.raises(installer_helper.LockNotOursError):
+        installer_helper.hand_back_transaction(lock_dir, OURS, ABANDONED)
+
+    if taken == "replaced":
+        assert owner(lock_dir) == theirs
+    else:
+        assert not lock_dir.exists()
 
 
 def test_a_lock_without_an_owner_record_is_not_handed_back(tmp_path: Path) -> None:
@@ -482,3 +525,16 @@ def test_a_hand_back_takes_two_different_transaction_ids(
         installer_helper.hand_back_transaction(lock_dir, *ids)
 
     assert owner(lock_dir)["id"] == OURS
+
+
+def test_a_handed_back_record_keeps_the_owner_record_s_mode(tmp_path: Path) -> None:
+    """Every released reader opens the record as whoever runs it; the hand-back rewrites it
+    through a temporary made 0600, and the record must not keep that mode."""
+    lock_dir = tmp_path / "lock"
+    claim_transaction(lock_dir, OURS)
+    before = (lock_dir / "owner.json").stat().st_mode & 0o777
+
+    installer_helper.hand_back_transaction(lock_dir, OURS, ABANDONED)
+
+    assert (lock_dir / "owner.json").stat().st_mode & 0o777 == before
+    assert before != 0o600

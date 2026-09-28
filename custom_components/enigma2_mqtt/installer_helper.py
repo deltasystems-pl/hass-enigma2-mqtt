@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 import errno
 import fcntl
 import glob
@@ -786,6 +786,11 @@ def _replace_tree(root: Path, source: Path | None, live: Path, token: str) -> No
     staged_name, aside_name = staging_names(token)
     staged = parent / staged_name
     aside = parent / aside_name
+    # The race guard. `restore` asks the same before it waits for opkg's lock, but a tree
+    # that appears while it waits - an opkg run that got the lock first - is seen only here,
+    # under the lock. Here it comes after opkg's records were rewritten, so a refusal leaves
+    # them restored under the new tree - and the restore fails, which says so - rather than
+    # a rename that fails half-way through the swap.
     if source is not None or live.exists():
         _require_one_filesystem(root, live)
     # A set-aside tree left by an interrupted restore of this snapshot is either the
@@ -1099,27 +1104,85 @@ def hand_back_transaction(
     Only this transaction's own lock is handed back: the record must be there, name
     `owner` and no `origin`, or the lock is somebody else's by now - `LockNotOursError`,
     and it is left alone.
+
+    Read and written through one descriptor of the lock directory. Our lock is stale by the
+    time a recovery has failed slowly enough, and a claimer may reclaim it between the read
+    and the write: by a rename of the directory, and a new one at its name. A write by path
+    would then land in that new lock and make a live install's lock look handed back - and
+    stale, to the next claimer. Through the descriptor it lands in the directory that was
+    read, wherever the rename moved it; and a lock directory that is no longer the one at
+    its name afterwards is somebody else's - `LockNotOursError` - which the installer then
+    neither hands back nor releases.
     """
     if not (TRANSACTION_ID.fullmatch(owner) and TRANSACTION_ID.fullmatch(abandoned)):
         raise ValueError("a transaction id is twelve lowercase hexadecimal digits")
     if owner == abandoned:
         raise ValueError("a transaction cannot hand its lock back to itself")
-    if not 1 <= attempts <= MAX_RECORDED_ATTEMPTS:
+    if (
+        not isinstance(attempts, int)
+        or isinstance(attempts, bool)
+        or not 1 <= attempts <= MAX_RECORDED_ATTEMPTS
+    ):
         raise ValueError(f"a count of failed recoveries is 1 to {MAX_RECORDED_ATTEMPTS}")
     try:
-        recorded = json.loads((lock_dir / "owner.json").read_text(encoding="ascii"))
-    except (OSError, ValueError) as error:
+        directory = os.open(str(lock_dir), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    except OSError as error:
         raise LockNotOursError("the lock is not this transaction's") from error
-    if not isinstance(recorded, dict) or "origin" in recorded or recorded.get("id") != owner:
-        raise LockNotOursError("the lock is not this transaction's")
-    record = {
-        "pid": os.getpid(),
-        "started": int(time.time()) - STALE_LOCK_SECONDS - 1,
-        "boot_id": HANDED_BACK_BOOT_ID,
-        "id": abandoned,
-        "attempts": attempts,
-    }
-    _atomic_text(lock_dir / "owner.json", json.dumps(record) + "\n")
+    try:
+        try:
+            recorded = json.loads(_read_at(directory, "owner.json"))
+        except (OSError, ValueError) as error:
+            raise LockNotOursError("the lock is not this transaction's") from error
+        if not isinstance(recorded, dict) or "origin" in recorded or recorded.get("id") != owner:
+            raise LockNotOursError("the lock is not this transaction's")
+        record = {
+            "pid": os.getpid(),
+            "started": int(time.time()) - STALE_LOCK_SECONDS - 1,
+            "boot_id": HANDED_BACK_BOOT_ID,
+            "id": abandoned,
+            "attempts": attempts,
+        }
+        _write_at(directory, "owner.json", json.dumps(record) + "\n")
+        try:
+            named = os.stat(str(lock_dir))
+        except OSError:
+            named = None
+        held = os.fstat(directory)
+        if named is None or (named.st_dev, named.st_ino) != (held.st_dev, held.st_ino):
+            raise LockNotOursError("the lock was taken while it was being handed back")
+    finally:
+        os.close(directory)
+
+
+def _read_at(directory: int, name: str) -> str:
+    """The ASCII text of `name` in the directory open at `directory`."""
+    descriptor = os.open(name, os.O_RDONLY, dir_fd=directory)
+    with os.fdopen(descriptor, "r", encoding="ascii") as handle:
+        return handle.read()
+
+
+def _write_at(directory: int, name: str, text: str) -> None:
+    """`_atomic_text` for `name` in the directory open at `directory`: a synced temporary
+    beside it, renamed over it, and the directory synced - all by the descriptor."""
+    try:
+        mode = stat.S_IMODE(os.stat(name, dir_fd=directory).st_mode)
+    except FileNotFoundError:
+        mode = 0o644
+    temporary = f".{name}.ha-{secrets.token_hex(4)}"
+    descriptor = os.open(
+        temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=directory
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, mode, dir_fd=directory)
+        os.replace(temporary, name, src_dir_fd=directory, dst_dir_fd=directory)
+        os.fsync(directory)
+    finally:
+        with suppress(FileNotFoundError):
+            os.unlink(temporary, dir_fd=directory)
 
 
 def lock_info(lock_dir: Path) -> dict:

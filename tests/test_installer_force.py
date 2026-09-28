@@ -1459,8 +1459,11 @@ async def test_a_self_update_still_rolling_back_is_named_so_the_household_waits(
         # This integration's own installer lock: no heartbeat, nothing running to wait for.
         {"held": True, "origin": None, "silent": 300, "remaining": 1501},
         {"held": True, "origin": None, "silent": 20, "remaining": 1780},
+        # A self-update lock that turned stale between the claim and this look: silent past
+        # the stall bound with no time left. Not "still running".
+        {"held": True, "origin": "mqtt", "silent": 1900, "remaining": 0},
     ],
-    ids=["stalled_self_update", "stale_installer", "fresh_installer"],
+    ids=["stalled_self_update", "stale_installer", "fresh_installer", "turned_stale"],
 )
 async def test_no_other_busy_lock_in_runlevel_4_of_ours_is_a_running_update(
     hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path, lock: dict[str, Any]

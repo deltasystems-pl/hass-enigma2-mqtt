@@ -891,15 +891,21 @@ version: a downgrade stays in the options flow, over SSH. With no index held the
 install and no badge - press *Sprawdź aktualizacje wtyczki* first.
 
 An update the receiver reports as **interrupted** is said by the evidence there is, since the
-result alone does not say whether the receiver's package manager had already run. When the
-receiver's words say it had started, or that the plugin must be installed again (on the update
-topic or on *Ostatni błąd*), or Home Assistant saw the phase `installing` or a later one, the card
-says the plugin's files may be a mix of two versions and names **„Wymuś reinstalację wtyczki
-(SSH)"**, or the manual installation when no SSH credentials are stored. It says nothing was
-changed only when the receiver says so - its interface restarted before the update was installed.
-Anything else it cannot tell, and says so, naming the same repair for when *Ostatni błąd* asks for
-it: a phase seen before `installing` proves nothing, because the next one can pass between two of
-the receiver's polls. If the silence after the request lasts a minute, the card says
+result alone does not say whether the receiver's package manager had already run. The receiver's
+own words come first. When they say it had started, or that the plugin must be installed again
+(on the update topic or on *Ostatni błąd*), the card says the plugin's files may be a mix of two
+versions and names **„Wymuś reinstalację wtyczki (SSH)"**, or the manual installation when no SSH
+credentials are stored. It says nothing was changed when the receiver says its interface restarted
+before the update was installed; that the previous version stays when the update was stopped by a
+signal (its files were untouched or put back whole); and that the files are whole - the previous
+version or the new one - when another process took the update's lock, in which case *Ostatni błąd*
+may ask for the receiver's interface to be restarted. Only then do the phases count: if Home
+Assistant saw `installing` or a later one, the files may be a mix. Anything else it cannot tell,
+and says so, naming the same repair for when *Ostatni błąd* asks for it: a phase seen before
+`installing` proves nothing, because the next one can pass between two of the receiver's polls.
+When a failed update could not put the previous files back (`restore_failed`, `restore_incomplete`),
+the card names the forced reinstall only when SSH credentials are stored, and the manual
+installation otherwise. If the silence after the request lasts a minute, the card says
 so, and the download address stays valid for its ten minutes in case the receiver starts late.
 Saving the integration's options reloads it: an install that was being followed then ends at once
 with „Home Assistant przeładował integrację w trakcie aktualizacji, więc to zlecenie już jej nie
@@ -916,7 +922,9 @@ the receiver sees - no internet and no answer from Home Assistant, a clock that 
 Assistant's address expired - is in `last_refusal`, in the household's language, for as long as it
 is on the receiver's `last_error`: the next command that succeeds clears both. The end of a
 transaction, which the receiver repeats on `last_error`, is never a refusal there; it is said once,
-in `receiver_transaction`. A phase on the
+in `receiver_transaction`. The repeat comes together with the end on the update topic, and a
+refusal never does, so a refusal in the very words of the last end - a second install refused
+for the same reason soon after - is still shown as a refusal. A phase on the
 broker that keeps the card busy cannot keep **„Wymuś reinstalację wtyczki (SSH)"** from running:
 it asks the lock on the receiver, never this topic.
 
