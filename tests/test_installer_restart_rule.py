@@ -24,6 +24,7 @@ from unittest.mock import patch
 from homeassistant.core import HomeAssistant
 import pytest
 
+from custom_components.enigma2_mqtt import installer_helper
 from custom_components.enigma2_mqtt.bundle import BundledPlugin
 from custom_components.enigma2_mqtt.installer import (
     CommandResult,
@@ -355,7 +356,10 @@ async def test_a_channel_the_household_chose_after_the_start_is_never_overridden
 
     assert receiver.zaps == []
     assert receiver.service == ELSEWHERE
-    assert "channel: lost" in caplog.text
+    # Not "lost": the channel was kept until somebody chose another, and a log reader
+    # looking for a restart that lost the channel must be able to tell the two apart.
+    assert "channel: changed by the household" in caplog.text
+    assert "channel: lost" not in caplog.text
 
 
 async def test_a_rollback_after_a_restart_is_one_script_that_writes_the_channel(
@@ -538,3 +542,266 @@ async def test_nothing_is_recovered_without_an_id_and_its_snapshot(
     await _install(hass, install_request, tmp_path, receiver)
 
     assert not any(" withdraw " in command for command in receiver.commands)
+
+
+# --- a recovery that fails keeps the abandoned transaction's id ------------------------
+
+
+def _nonce(receiver: FakeReceiver) -> str:
+    claim = next(command for command in receiver.commands if " claim " in command)
+    return claim.rsplit("--id ", 1)[1]
+
+
+def _sent(receiver: FakeReceiver, word: str) -> list[str]:
+    return [command for command in receiver.commands if f" {word} " in command]
+
+
+async def _recovery_fails_on(
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+    receiver: FakeReceiver,
+    how: str,
+) -> InstallerError:
+    """Install with a recovery of the abandoned snapshot that fails in the way named."""
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, install_request, tmp_path, receiver, run=_recovery(how))
+    return raised.value
+
+
+def _recovery(how: str) -> Any:
+    """A recovery of the abandoned snapshot that fails in the way named, every time."""
+
+    async def run(self: FakeSession, command: str, **kwargs: Any):
+        del kwargs
+        if " withdraw /home/root/mqttbridge-backups/ha-installer-0123456789ab" in command:
+            self.receiver.commands.append(command)
+            if how == "dropped":
+                raise OSError("connection reset")
+            if how == "timeout":
+                raise TimeoutError
+            if how == "busy":
+                return CommandResult(75, "", "opkg is busy")
+            return CommandResult(1, "", "deliberately failed")
+        return None
+
+    return run
+
+
+# The failures a later try may get past, and what the household is told about each: the
+# receiver's opkg was busy, or the connection went - nothing about the receiver being put
+# back, because it was not.
+MAY_PASS = {
+    "busy": InstallerErrorCode.OPKG_BUSY,
+    "dropped": InstallerErrorCode.SSH_UNAVAILABLE,
+    "timeout": InstallerErrorCode.SSH_UNAVAILABLE,
+}
+
+
+@pytest.mark.parametrize("how", sorted(MAY_PASS))
+async def test_a_recovery_that_may_pass_next_time_hands_the_lock_back(
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    how: str,
+) -> None:
+    """Released, the lock would forget the one record of which snapshot is still to be put
+    back, and the next install would start over a half-changed receiver with nothing to
+    recover. Handed back - to the abandoned id, stale as it was - the next claim reclaims it
+    at once and puts that snapshot back first. Only for a failure that may pass: opkg busy
+    with somebody else's run, a connection that dropped or did not answer in time."""
+    receiver = FakeReceiver(
+        reclaimed_id="0123456789ab", snapshots={"ha-installer-0123456789ab"}
+    )
+    caplog.set_level(logging.WARNING, logger="custom_components.enigma2_mqtt.installer")
+
+    err = await _recovery_fails_on(hass, install_request, tmp_path, receiver, how)
+
+    assert err.code is MAY_PASS[how]
+    handed = _sent(receiver, "hand-back")
+    assert len(handed) == 1
+    assert handed[0].endswith(f"--owner {_nonce(receiver)} --id 0123456789ab --attempts 1")
+    assert _sent(receiver, "release") == []
+    assert receiver.helper_removed is True
+    assert not any(" snapshot " in command for command in receiver.commands)
+    assert "handed back to the abandoned transaction 0123456789ab" in caplog.text
+
+
+async def test_a_recovery_that_fails_the_same_way_every_time_does_not_hold_installs_off(
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A restore that fails on what is in the snapshot - a record it cannot read, a flag it
+    does not know, a filesystem it cannot rename across - fails the same way on every try.
+    Handed back, it would be tried and failed by every install after it, for ever. So the
+    lock is released as before, the household is told the receiver could not be put back,
+    and the log names the snapshot to look at; the next install goes ahead."""
+    receiver = FakeReceiver(
+        reclaimed_id="0123456789ab", snapshots={"ha-installer-0123456789ab"}
+    )
+    caplog.set_level(logging.WARNING, logger="custom_components.enigma2_mqtt.installer")
+
+    err = await _recovery_fails_on(hass, install_request, tmp_path, receiver, "failed")
+
+    assert err.code is InstallerErrorCode.ROLLBACK_FAILED
+    assert "/home/root/mqttbridge-backups/ha-installer-0123456789ab" in err.detail
+    assert _sent(receiver, "hand-back") == []
+    assert len(_sent(receiver, "release")) == 1
+    assert "ha-installer-0123456789ab" in caplog.text
+    assert "by hand" in caplog.text
+
+    # The second and the third install over the same receiver: nothing to recover.
+    for _ in range(2):
+        receiver.commands.clear()
+        await _install(hass, install_request, tmp_path, receiver)
+        assert _sent(receiver, "withdraw") == []
+        assert len(_sent(receiver, "snapshot")) == 1
+
+
+async def test_a_recovery_that_keeps_failing_is_tried_three_times_and_then_given_up(
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """opkg busy on every try - somebody's own run that never ends - may pass, and is handed
+    back; but not for ever. The count travels with the lock, and the third failed recovery
+    releases it, names the snapshot for a person, and lets the next install go ahead."""
+    receiver = FakeReceiver(
+        reclaimed_id="0123456789ab", snapshots={"ha-installer-0123456789ab"}
+    )
+    caplog.set_level(logging.WARNING, logger="custom_components.enigma2_mqtt.installer")
+
+    codes = []
+    for attempt in (1, 2, 3):
+        receiver.commands.clear()
+        err = await _recovery_fails_on(hass, install_request, tmp_path, receiver, "busy")
+        codes.append(err.code)
+        if attempt < 3:
+            assert _sent(receiver, "hand-back")[0].endswith(f" --attempts {attempt}")
+            assert _sent(receiver, "release") == []
+        else:
+            assert _sent(receiver, "hand-back") == []
+            assert len(_sent(receiver, "release")) == 1
+
+    assert codes == [
+        InstallerErrorCode.OPKG_BUSY,
+        InstallerErrorCode.OPKG_BUSY,
+        InstallerErrorCode.ROLLBACK_FAILED,
+    ]
+    assert "3 times" in caplog.text
+    assert "by hand" in caplog.text
+
+    receiver.commands.clear()
+    await _install(hass, install_request, tmp_path, receiver)
+    assert _sent(receiver, "withdraw") == []
+
+
+async def test_a_snapshot_cut_off_before_its_record_is_nothing_to_recover(
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A power cut, or a killed helper, while the snapshot was being copied leaves its
+    directory without `snapshot.json`. That record is the snapshot's last write, and its
+    transaction changes nothing until the snapshot has returned - so a snapshot without it
+    belongs to a transaction that changed nothing, and there is nothing to put back. Trying
+    would fail on the missing record every time. Two installs in a row both go ahead."""
+    receiver = FakeReceiver(
+        reclaimed_id="0123456789ab", partial_snapshots={"ha-installer-0123456789ab"}
+    )
+    caplog.set_level(logging.WARNING, logger="custom_components.enigma2_mqtt.installer")
+
+    for _ in range(2):
+        receiver.commands.clear()
+        await _install(hass, install_request, tmp_path, receiver)
+        assert _sent(receiver, "withdraw") == []
+        assert _sent(receiver, "hand-back") == []
+
+    assert "ha-installer-0123456789ab" in caplog.text
+    assert "snapshot.json" in caplog.text
+
+
+async def test_a_hand_back_that_fails_still_frees_the_receiver_and_names_the_snapshot(
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    receiver = FakeReceiver(
+        reclaimed_id="0123456789ab",
+        snapshots={"ha-installer-0123456789ab"},
+        fail_on=" hand-back ",
+    )
+    caplog.set_level(logging.WARNING, logger="custom_components.enigma2_mqtt.installer")
+
+    await _recovery_fails_on(hass, install_request, tmp_path, receiver, "busy")
+
+    assert len(_sent(receiver, "release")) == 1
+    assert "ha-installer-0123456789ab" in caplog.text
+    assert "by hand" in caplog.text
+
+
+async def test_a_hand_back_refused_as_somebody_elses_lock_releases_nothing(
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The hand-back refuses a lock that no longer names this transaction - it went stale
+    under a slow recovery and somebody else took it. Releasing it then would take a live
+    self-update's or another install's lock away, so neither is done."""
+    receiver = FakeReceiver(
+        reclaimed_id="0123456789ab", snapshots={"ha-installer-0123456789ab"}
+    )
+    caplog.set_level(logging.WARNING, logger="custom_components.enigma2_mqtt.installer")
+    recovery = _recovery("busy")
+
+    async def run(self: FakeSession, command: str, **kwargs: Any):
+        if " hand-back " in command:
+            self.receiver.commands.append(command)
+            return CommandResult(
+                installer_helper.EXIT_LOCK_NOT_OURS, "", "the lock is not this transaction's"
+            )
+        return await recovery(self, command, **kwargs)
+
+    with pytest.raises(InstallerError):
+        await _install(hass, install_request, tmp_path, receiver, run=run)
+
+    assert len(_sent(receiver, "hand-back")) == 1
+    assert _sent(receiver, "release") == []
+    assert receiver.helper_removed is True
+    assert "ha-installer-0123456789ab" in caplog.text
+    assert "no longer this transaction's" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("reclaimed", "snapshots"),
+    [
+        # Recovered, then the install failed on its own snapshot: nothing is left to recover.
+        ("0123456789ab", {"ha-installer-0123456789ab"}),
+        # An id whose snapshot is gone: there was nothing to recover.
+        ("0123456789ab", set()),
+        ("", set()),
+    ],
+    ids=["recovered", "no_snapshot", "nothing_reclaimed"],
+)
+async def test_any_other_failure_before_the_snapshot_releases_the_lock(
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+    reclaimed: str,
+    snapshots: set[str],
+) -> None:
+    receiver = FakeReceiver(reclaimed_id=reclaimed, snapshots=snapshots, fail_on=" snapshot ")
+
+    with pytest.raises(InstallerError):
+        await _install(hass, install_request, tmp_path, receiver)
+
+    assert _sent(receiver, "hand-back") == []
+    assert len(_sent(receiver, "release")) == 1

@@ -363,6 +363,9 @@ no receiver is set up, and one already past its read publishes nothing.
     payload (l.1474-1476): the last good sample stays on the panel and goes stale;
   - a `key` `press` other than `short` or `long` is read as `short` (`box.py` l.1985-1987), so a new
     kind of press would fire the automations and device triggers of a short press.
+
+  Both are fixed for the next integration release: a reader of an unknown kind is skipped and the
+  rest of the payload applied, and a press of an unknown kind fires nothing.
 - The test that deleting an entry makes exactly one publish becomes a test for exactly two.
 - If this is reversed, the card goes back to the bundle over SSH, and the integration back to making
   no connection but the broker and, when asked, the receiver.

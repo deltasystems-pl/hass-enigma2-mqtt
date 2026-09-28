@@ -387,7 +387,7 @@ conditional ones are, in full:
 | 1 | „Pobierz EPG" | the receiver reports the `epg_import` capability **and** permits an EPG import |
 | 4 | the conditional-access diagnostics | the `cam_telemetry` option is on |
 | 12 | the OSCam aggregates | the `oscam_telemetry` option is on |
-| 3 per OSCam source | status, ready cards, shared cards | the `oscam_telemetry` option is on, for each reader or server that receiver reports |
+| 3 per OSCam source | status, ready cards, shared cards | the `oscam_telemetry` option is on, for each reader or server that receiver reports; a source of a kind this integration does not know gets none, and the rest of the report still applies |
 
 **What takes one away again is not the same question as what creates it**, and the table
 splits on it. A row that follows an **option or a permission** is removed on a stated
@@ -495,7 +495,8 @@ while the box is unreachable, because that is precisely when somebody wants to w
   a send to it then raises an error, which stops an automation at that step; put
   `continue_on_error: true` on the step to let the automation carry on without the toast.
 - **Pilot &ndash; klawisz** - fires for every key the box reports, with the key name as the event
-  type and `press` (`short` or `long`) as an attribute. An event entity may only fire types it
+  type and `press` (`short` or `long`; a payload without one is a short press, and one with any
+  other value fires nothing) as an attribute. An event entity may only fire types it
   declared, so a key outside the declared list is logged at debug and dropped here - the bus
   event below still carries it.
 - **Ekran** - the last screenshot, with the moment it was taken as the state. It is a
@@ -539,10 +540,15 @@ button in 0.2.0: the next error replaces it. `source` says whose complaint it is
 (section 4.5), which the plugin may never be able to report. Home Assistant's own text is kept
 up to 1024 characters. A replay of the receiver's retained complaint replaces Home Assistant's
 record only when the receiver dated it later than that record and no more than five minutes
-ahead of Home Assistant's clock: an undated replay, or one from a receiver whose clock runs
-fast, cannot be placed. The price is that a complaint made while Home Assistant was down, by a
-receiver whose clock is that wrong, stays behind Home Assistant's record; anything the receiver
-publishes while Home Assistant listens is shown whatever its date.
+ahead of Home Assistant's clock at the moment of the replay. An undated replay never replaces
+it. A replay dated further ahead does not either - but the five minutes are measured from each
+replay, so a receiver whose clock runs ahead by some amount D keeps a stale complaint out only
+for about D minus five minutes after Home Assistant recorded its own failure: from then on the
+complaint's date is no longer too far ahead, it is later than the record, and the next reload
+or restart puts it back. Only a clock that is wildly wrong - a year ahead - keeps it out for
+good. The price is that a complaint made while Home Assistant was down, by a receiver whose
+clock is that wrong, stays behind Home Assistant's record; anything the receiver publishes while
+Home Assistant listens is shown whatever its date.
 
 It is also the one entity of this device that **stays available while the receiver is not**.
 Deep standby is the headline case and it is precisely a box that has left the network; an
@@ -967,7 +973,12 @@ available while the receiver is offline over MQTT.
   Python, another receiver, the lock held - starts nothing, because without the lock nothing
   says the interrupted transaction has ended; its message says the interface stays stopped and
   that switching the receiver off and on, or running the reinstall again once the cause is
-  dealt with, starts it. Runlevel 4 with no such stop of this project's is left alone. It changes
+  dealt with, starts it. A connection to the receiver lost during those checks is such a
+  refusal too. One case is told otherwise: when the lock belongs to a plugin self-update whose
+  heartbeat is fresh, that update is rolling back right now and starts the interface itself when
+  it finishes, so the message says to wait for it and not to switch the receiver off, which
+  would cut its restore off half-way. Runlevel 4 with no such stop of this project's is left
+  alone. It changes
   no setting of its own - a plugin switched off stays off - and its proof is a new interface
   process holding the plugin's log open, plus the announcement when the plugin is switched on.
 - **The shared lock decides, not a topic.** It claims the receiver's install lock like every
@@ -977,7 +988,8 @@ available while the receiver is offline over MQTT.
   in how many minutes. A stale or forged `update` phase on the broker does not block it.
 - **Result.** The update card shows it running. Success posts a notification - or "installed, but
   switched off in its settings on the receiver". A failure raises its reason and puts it on
-  „Ostatni błąd" with `source: home_assistant`, because the plugin may never publish again.
+  „Ostatni błąd" with `source: home_assistant`, because the plugin may never publish again -
+  an unexpected error too, named by its type, with the details in Home Assistant's log.
 - **When a restart is the repair, not a reinstall.** When the plugin says its update could not
   stop the interface and asks for the receiver's interface to be restarted (`not_stopped`), the
   files on the receiver are already the right ones: restart the interface („Restart GUI", or from

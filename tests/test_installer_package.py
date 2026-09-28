@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import shutil
@@ -185,6 +186,8 @@ async def _install(
             return CommandResult(0, SHA + "\n")
         if command.startswith("for p in ") and "opkg status" in command:
             self.receiver.commands.append(command)
+            if getattr(self.receiver, "drops_depends", False):
+                raise OSError("connection reset")
             if shell is not None and opkg_dir is not None:
                 return await hass.async_add_executor_job(
                     _run_in_a_shell, shell, opkg_dir, command
@@ -612,3 +615,21 @@ async def test_the_proof_holds_a_reported_build_to_the_installed_commit(
         info["build"] = build
 
     assert await _watch_outcome(hass, commit, info) is proved
+
+
+async def test_a_connection_lost_under_the_dependency_question_is_a_refusal(
+    hass: HomeAssistant, credentials: SshCredentials, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Not an escaped `OSError` that nobody shows: the install is refused as the receiver
+    being out of reach, before the lock, with nothing changed."""
+    receiver = DependsReceiver(installed_version="0.3.0")
+    receiver.drops_depends = True
+
+    with caplog.at_level(logging.WARNING), pytest.raises(InstallerError) as raised:
+        await _install(hass, receiver, _request(credentials, _package()))
+
+    assert raised.value.code is InstallerErrorCode.SSH_UNAVAILABLE
+    joined = "\n".join(receiver.commands)
+    assert " claim " not in joined
+    assert "opkg install" not in joined
+    assert "Receiver install refused" in caplog.text

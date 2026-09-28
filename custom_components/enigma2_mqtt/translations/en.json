@@ -2,6 +2,8 @@
   "title": "Enigma2 MQTT",
   "common": {
     "force_reinstall_interface_stopped": "The receiver's interface stays stopped, as an interrupted update or installation of the plugin left it, so the receiver shows no picture. To start it, switch the receiver off and on again at its power switch or plug, or deal with the cause above and run the forced plugin reinstall again, which starts it.",
+    "force_reinstall_update_running": "The receiver's interface is stopped because a plugin update is still putting the previous plugin back, and that update starts the interface itself when it finishes. Wait for it to finish - it takes a few minutes - and do not switch the receiver off in the meantime, which would cut it off half-way. Run the forced plugin reinstall again only if there is still no picture afterwards.",
+    "force_reinstall_unexpected": "The forced plugin reinstall stopped on an unexpected error ({error}); the Home Assistant log has the details.",
     "update_summary_older": "The receiver runs an older plugin than this integration carries. Installing replaces it with the bundled {version} and leaves the receiver's own broker settings alone.",
     "update_summary_older_no_install": "The receiver runs an older plugin than the bundled {version}. No SSH credentials are stored, so this card cannot install it: reconfigure the receiver with “Keep SSH credentials for updates”, or install the IPK on the box by hand.",
     "update_summary_newer": "The receiver runs a plugin newer than the bundled {version}. Nothing here replaces it — this card never offers a downgrade.",

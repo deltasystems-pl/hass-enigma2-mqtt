@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import asyncssh
 from homeassistant.core import HomeAssistant
 import pytest
 
@@ -80,6 +81,11 @@ class ForceReceiver(FakeReceiver):
     # What the settings block of the snapshot a recovery puts back says, as identity
     # fields; applied when a restore with `--settings` runs.
     restored_settings: dict[str, Any] | None = None
+    # The SSH connection drops under the first command that is exactly this - or, for a
+    # value starting with a space, that contains it: the exception the transport raises
+    # instead of an answer.
+    drop_on: str | None = None
+    drop_with: BaseException | None = None
 
 
 def _ours(**overrides: Any) -> dict[str, Any]:
@@ -147,6 +153,13 @@ async def _force_run(self: FakeSession, command: str, **kwargs: Any) -> CommandR
     del kwargs
     receiver = self.receiver
     assert isinstance(receiver, ForceReceiver)
+    if receiver.drop_on and (
+        command == receiver.drop_on
+        or (receiver.drop_on.startswith(" ") and receiver.drop_on in command)
+    ):
+        receiver.commands.append(command)
+        receiver.drop_on = None
+        raise receiver.drop_with or OSError("connection reset")
     if receiver.recording_from and receiver.recording_from in command:
         receiver.recording = True
     if receiver.interface_from and receiver.interface_from in command:
@@ -1351,3 +1364,126 @@ async def test_a_stalled_installer_lock_in_runlevel_4_of_ours_is_marked_too(
 
     assert raised.value.code is InstallerErrorCode.BUSY_STALLED
     assert raised.value.interface_stopped is True
+
+
+# ------------------------------------------ a connection lost before the transaction lock
+
+
+# The raw commands between the interface's state and the claim; every other check there
+# runs through `_run_checked`, which already turns a lost connection into a refusal.
+_BEFORE_THE_LOCK = [
+    f"test -d {installer.PLUGIN_DIR}",
+    f"opkg status {installer.PACKAGE}",
+    " claim ",
+]
+_TRANSPORT_ERRORS = [
+    OSError("connection reset"),
+    TimeoutError(),
+    asyncssh.ConnectionLost("connection lost"),
+]
+
+
+@pytest.mark.parametrize("step", _BEFORE_THE_LOCK)
+@pytest.mark.parametrize("error", _TRANSPORT_ERRORS, ids=["oserror", "timeout", "lost"])
+async def test_a_connection_lost_before_the_lock_in_runlevel_4_of_ours_is_a_marked_refusal(
+    hass: HomeAssistant,
+    credentials: SshCredentials,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    step: str,
+    error: BaseException,
+) -> None:
+    """Wi-Fi blips during the preflight of a receiver with no picture. Nothing was changed
+    and nothing is started, as for any refusal before the lock - and it is one: marked, so
+    that the household is told the interface stays stopped, and logged."""
+    receiver = _ours_stopped(drop_on=step, drop_with=error)
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(InstallerError) as raised:
+            await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.SSH_UNAVAILABLE
+    assert raised.value.interface_stopped is True
+    assert receiver.respawns == []
+    assert _init(receiver) == []
+    assert _opkg(receiver) == []
+    assert "interface stays stopped" in caplog.text
+
+
+@pytest.mark.parametrize("step", _BEFORE_THE_LOCK)
+async def test_a_connection_lost_before_the_lock_elsewhere_is_a_plain_refusal(
+    hass: HomeAssistant,
+    credentials: SshCredentials,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    step: str,
+) -> None:
+    receiver = _receiver(drop_on=step)
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(InstallerError) as raised:
+            await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.SSH_UNAVAILABLE
+    assert raised.value.interface_stopped is False
+    assert _opkg(receiver) == []
+    assert "Receiver install refused" in caplog.text
+
+
+async def test_a_self_update_still_rolling_back_is_named_so_the_household_waits(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    """Runlevel 4 of ours and a self-update whose heartbeat is fresh: its own rollback is
+    running and starts the interface when it ends. Cutting the power now would cut it off, so
+    the refusal says a running update holds the receiver - not that it was left stopped."""
+    receiver = _ours_stopped(
+        claim_busy=True,
+        lock={"held": True, "origin": "mqtt", "silent": 20, "remaining": 1780},
+    )
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.interface_stopped is True
+    assert raised.value.update_running is True
+    assert "still running" in raised.value.detail
+    # The log line says the same as the household's sentence: not "stays stopped".
+    assert "stays stopped" not in raised.value.detail
+
+
+@pytest.mark.parametrize(
+    "lock",
+    [
+        # A self-update that stopped beating: stalled, not running.
+        {"held": True, "origin": "mqtt", "silent": 300, "remaining": 1501},
+        # This integration's own installer lock: no heartbeat, nothing running to wait for.
+        {"held": True, "origin": None, "silent": 300, "remaining": 1501},
+        {"held": True, "origin": None, "silent": 20, "remaining": 1780},
+    ],
+    ids=["stalled_self_update", "stale_installer", "fresh_installer"],
+)
+async def test_no_other_busy_lock_in_runlevel_4_of_ours_is_a_running_update(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path, lock: dict[str, Any]
+) -> None:
+    receiver = _ours_stopped(claim_busy=True, lock=lock)
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.interface_stopped is True
+    assert raised.value.update_running is False
+
+
+async def test_a_running_self_update_with_the_interface_up_is_plain_busy(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    receiver = _receiver(
+        claim_busy=True, lock={"held": True, "origin": "mqtt", "silent": 20, "remaining": 1780}
+    )
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.BUSY
+    assert raised.value.interface_stopped is False
+    assert raised.value.update_running is False

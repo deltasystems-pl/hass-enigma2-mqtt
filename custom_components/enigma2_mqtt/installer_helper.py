@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 import errno
 import fcntl
 import glob
@@ -89,6 +89,11 @@ EXIT_OPKG_BUSY = 75
 # had lost its name while the helper held it. For a restore that is its own outcome: the
 # files are back, but an opkg run may have written the database at the same time.
 EXIT_OPKG_LOCK_LOST = 76
+# The exit status of a hand-back that found the lock no longer names the transaction
+# handing it back. The caller must then neither hand it back nor release it: a release
+# checks no owner, and the lock is somebody else's - a live self-update's, or another
+# install's.
+EXIT_LOCK_NOT_OURS = 77
 SETTINGS_PREFIX = "config.plugins.mqttbridge."
 # The snapshot directories this installer makes, and nothing else. The nonce is
 # `secrets.token_hex(6)`; anything else under the backups directory belongs to whoever
@@ -106,6 +111,14 @@ STALE_LOCK_SECONDS = 30 * 60
 # A transaction's id, as the lock's owner record, the snapshot's name and the files of
 # its stop-and-restore carry it: twelve lowercase hexadecimal digits, and nothing else.
 TRANSACTION_ID = re.compile(r"[0-9a-f]{12}")
+# The boot id a handed-back owner record carries: no boot that ever runs, so every stale
+# rule - this helper's, every released installer's and the plugin's - finds the record
+# claimed before the last reboot, whatever the clock says. A kernel without a boot id
+# still has the record's start time, dated back past the bound.
+HANDED_BACK_BOOT_ID = "handed-back"
+# The most failed recoveries a handed-back lock may count. Only the installer decides when
+# to stop handing back; this only refuses a count that is not one.
+MAX_RECORDED_ATTEMPTS = 100
 # Where a restore builds the plugin directory before it swaps it in, and where the
 # directory it replaces waits until the swap is over. Two things decide the place. A
 # rename does not cross filesystems, so it is beside the `Plugins` tree rather than in
@@ -512,9 +525,13 @@ def _snapshot_into(root: Path, backup: Path) -> dict[str, object]:
         "webif_shim": webif_shim.is_file(),
         "webif_cache": bool(webif_cache_files),
     }
-    (backup / "snapshot.json").write_text(
-        json.dumps(metadata, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    # The record is the snapshot's last write, and it is on the flash before the snapshot
+    # returns: its transaction changes nothing until then. So a snapshot directory without
+    # it belongs to a transaction cut off before it changed anything - a power cut or a
+    # killed helper during the copy above - and a recovery passes over it: there is nothing
+    # to put back. Written through a synced rename, that holds on any filesystem, whatever
+    # order it writes back in.
+    _atomic_text(backup / "snapshot.json", json.dumps(metadata, sort_keys=True) + "\n")
     return metadata
 
 
@@ -608,9 +625,11 @@ def restore(
     else:
         cache_sources = []
     token = _staging_token(backup)
-    if metadata["plugin"]:
+    if metadata["plugin"] or plugin.exists():
         # Before anything moves: a swap that cannot be a rename must not leave opkg's
-        # records restored under a plugin tree that is still the new one.
+        # records restored under a plugin tree that is still the new one. A first
+        # install's snapshot has no tree, but the new one is still taken away by a rename
+        # into the staging directory - which cannot cross filesystems either.
         _require_one_filesystem(root, plugin)
     with _lock(root, OPKG_LOCK_WAIT_RESTORE_SECONDS):
         current = _stanzas(status_path.read_text(encoding="utf-8"))
@@ -767,7 +786,7 @@ def _replace_tree(root: Path, source: Path | None, live: Path, token: str) -> No
     staged_name, aside_name = staging_names(token)
     staged = parent / staged_name
     aside = parent / aside_name
-    if source is not None:
+    if source is not None or live.exists():
         _require_one_filesystem(root, live)
     # A set-aside tree left by an interrupted restore of this snapshot is either the
     # superseded one or - cut off between the two renames - the only copy of what was
@@ -905,6 +924,10 @@ def _is_stale(lock_dir: Path) -> str:
         return "its owner record is not an object"
     current = boot_id()
     recorded_boot = recorded.get("boot_id")
+    if recorded_boot == HANDED_BACK_BOOT_ID:
+        # The rule below finds it too, by the boot id on any kernel that has one; this
+        # only names it for the log, and holds on a kernel that has none.
+        return "it was handed back to a transaction whose recovery failed"
     if current and isinstance(recorded_boot, str) and recorded_boot and recorded_boot != current:
         return "it was claimed before the receiver last rebooted"
 
@@ -931,34 +954,52 @@ def _is_stale(lock_dir: Path) -> str:
     return ""
 
 
-def _reclaimable_id(lock_dir: Path) -> str:
-    """Return the transaction id a stale lock of this installer names, or ''.
+def _reclaimable(lock_dir: Path) -> dict:
+    """Return the transaction id a stale lock of this installer names, and its count.
 
     Only a record the SSH installer wrote counts, and that is a record without an
     `origin`: the plugin's own update helper names where it was started from, keeps
     its snapshots under another name and recovers its own transactions. An id that is
     not exactly twelve hexadecimal digits names nothing this installer made.
+
+    `attempts` is how many recoveries of that transaction have failed and handed the
+    lock back to it (`hand_back_transaction`): 0 for a lock its transaction abandoned
+    itself, and for a count that is not one.
     """
+    nothing = {"reclaimed": "", "attempts": 0}
     try:
         recorded = json.loads((lock_dir / "owner.json").read_text(encoding="ascii"))
     except (OSError, ValueError):
-        return ""
+        return nothing
     if not isinstance(recorded, dict) or "origin" in recorded:
-        return ""
+        return nothing
     candidate = recorded.get("id")
-    if isinstance(candidate, str) and TRANSACTION_ID.fullmatch(candidate):
-        return candidate
-    return ""
+    if not (isinstance(candidate, str) and TRANSACTION_ID.fullmatch(candidate)):
+        return nothing
+    attempts = recorded.get("attempts")
+    if (
+        not isinstance(attempts, int)
+        or isinstance(attempts, bool)
+        or not 0 <= attempts <= MAX_RECORDED_ATTEMPTS
+    ):
+        attempts = 0
+    return {"reclaimed": candidate, "attempts": attempts}
 
 
 def claim_transaction(lock_dir: Path, transaction_id: str = "") -> str:
+    """Claim the lock as `claim_with_attempts` does; return only the reclaimed id."""
+    return claim_with_attempts(lock_dir, transaction_id)["reclaimed"]
+
+
+def claim_with_attempts(lock_dir: Path, transaction_id: str = "") -> dict:
     """Claim the durable per-receiver transaction lock or fail busy.
 
     `transaction_id` goes into the owner record as `id`, so that whoever later finds
     this lock abandoned knows which snapshot belongs to it - by name, never by a file
     time, which a receiver without a battery-backed clock gets wrong. The return value
-    is the other side of that: the id of an abandoned installer transaction whose lock
-    this claim reclaimed, or an empty string.
+    is the other side of that: `reclaimed`, the id of an abandoned installer transaction
+    whose lock this claim reclaimed, or an empty string; and `attempts`, how many
+    recoveries of it have already failed.
 
     Reclaiming a stale lock is a rename, not a delete in place. Deciding that a lock is
     stale and then writing into it is check-then-act: two claimers can both decide it,
@@ -973,7 +1014,7 @@ def claim_transaction(lock_dir: Path, transaction_id: str = "") -> str:
     """
     if transaction_id and not TRANSACTION_ID.fullmatch(transaction_id):
         raise ValueError("a transaction id is twelve lowercase hexadecimal digits")
-    reclaimed = ""
+    reclaimed = {"reclaimed": "", "attempts": 0}
     try:
         lock_dir.mkdir(mode=0o700, parents=False)
     except FileExistsError:
@@ -993,7 +1034,7 @@ def claim_transaction(lock_dir: Path, transaction_id: str = "") -> str:
             except OSError:
                 shutil.rmtree(retired, ignore_errors=True)
             raise FileExistsError(lock_dir) from None
-        reclaimed = _reclaimable_id(retired)
+        reclaimed = _reclaimable(retired)
         shutil.rmtree(retired, ignore_errors=True)
         lock_dir.mkdir(mode=0o700, parents=False)
         print(f"reclaiming stale installer lock: {reason}", file=sys.stderr)
@@ -1026,6 +1067,59 @@ def release_transaction(lock_dir: Path) -> None:
         raise ValueError("transaction lock has no owner")
     owner.unlink()
     lock_dir.rmdir()
+
+
+class LockNotOursError(ValueError):
+    """The lock no longer names the transaction that tried to hand it back."""
+
+
+def hand_back_transaction(
+    lock_dir: Path, owner: str, abandoned: str, attempts: int = 1
+) -> None:
+    """Give the lock back to the abandoned transaction whose recovery just failed.
+
+    The claim reclaimed `abandoned`'s stale lock and reported its id, and putting its
+    snapshot back failed in a way a later try may get past. Released, the lock would
+    forget the only record of which snapshot is still to be put back - the next install
+    would start over a half-changed receiver with nothing to recover. So the owner record
+    names `abandoned` again, and is stale at once to every rule that reads it - this
+    helper's, every released installer's and the plugin's - on any clock:
+
+    - its boot id is `HANDED_BACK_BOOT_ID`, which no running kernel reports, so a rule
+      that has a boot id to compare finds it claimed before the last reboot - after a
+      clock step or a reboot into 1970 as much as before;
+    - its start time is a moment past the bound before now, which is all a kernel without
+      a boot id has to go by; no uptime, which the rules would read only under the same
+      boot id anyway.
+
+    `attempts` is how many recoveries of `abandoned` have failed, this one included. The
+    next claim reports it, and the installer stops handing the lock back when the count
+    says the recovery will not pass; released readers ignore the key.
+
+    Only this transaction's own lock is handed back: the record must be there, name
+    `owner` and no `origin`, or the lock is somebody else's by now - `LockNotOursError`,
+    and it is left alone.
+    """
+    if not (TRANSACTION_ID.fullmatch(owner) and TRANSACTION_ID.fullmatch(abandoned)):
+        raise ValueError("a transaction id is twelve lowercase hexadecimal digits")
+    if owner == abandoned:
+        raise ValueError("a transaction cannot hand its lock back to itself")
+    if not 1 <= attempts <= MAX_RECORDED_ATTEMPTS:
+        raise ValueError(f"a count of failed recoveries is 1 to {MAX_RECORDED_ATTEMPTS}")
+    try:
+        recorded = json.loads((lock_dir / "owner.json").read_text(encoding="ascii"))
+    except (OSError, ValueError) as error:
+        raise LockNotOursError("the lock is not this transaction's") from error
+    if not isinstance(recorded, dict) or "origin" in recorded or recorded.get("id") != owner:
+        raise LockNotOursError("the lock is not this transaction's")
+    record = {
+        "pid": os.getpid(),
+        "started": int(time.time()) - STALE_LOCK_SECONDS - 1,
+        "boot_id": HANDED_BACK_BOOT_ID,
+        "id": abandoned,
+        "attempts": attempts,
+    }
+    _atomic_text(lock_dir / "owner.json", json.dumps(record) + "\n")
 
 
 def lock_info(lock_dir: Path) -> dict:
@@ -1459,15 +1553,23 @@ def power_state(state: int, base: str = WEBIF_URL) -> bool:
 #   by then - while the restore went on; the channel and the start then went in under
 #   it. So the restore writes its own exit status to a file as its last act, and the
 #   finishing step waits until that file is there or the restore is gone - `kill -0`,
-#   and not a zombie in `/proc` - and reads the verdict from the file. A restore that is
-#   gone without writing one was killed, and the status says `restored lost`.
+#   and not a zombie in `/proc` - and reads the verdict from the file. A restore that
+#   cannot write the file (a full /tmp, something in the way of its temporary name) names
+#   its status in an empty file, `restore-rc-<status>`, which needs no room for data, and
+#   the script reads that too. A restore gone without either was killed - or could write
+#   neither - and the status says `restored lost`: its outcome is not known, and the
+#   installer reports a rollback to check by hand, saying exactly that.
 # - The waits are measured in time, from `/proc/uptime`, not counted in sleeps: busybox
 #   runs `sleep` itself and a caught signal ends it early, so a count of sleeps let a
 #   few signals turn an interface that was slow to stop into one that never stopped.
 # - The restore is bounded. A watchdog ends it with TERM after its limit, so the picture
 #   comes back even from a restore that hangs, and the finishing step sends KILL ten
-#   seconds after that; a restore cut off part-way is repeated by the next install's
-#   recovery, which is safe, while a missing picture is not. Signals are caught, not
+#   seconds after that. Nothing repeats a restore cut off part-way: the script still
+#   writes `restored` - `lost`, or the TERM's status - and starts the interface, the
+#   installer sees that end, reports the rollback failed and releases the lock, so the
+#   next install finds no abandoned transaction to recover. The snapshot stays on the
+#   receiver for a person, which the verdict says; a missing picture would be worse than
+#   a restore to finish by hand. Signals are caught, not
 #   ignored, until the restore and the watchdog are forked, so both start with the
 #   default dispositions and the watchdog's TERM ends the restore.
 # - The settings block and the channel are written only once enigma2 is seen to be
@@ -1478,7 +1580,12 @@ def power_state(state: int, base: str = WEBIF_URL) -> bool:
 # - Not `init 3` while the system goes down: when `runlevel` says sysvinit is in
 #   runlevel 0 or 6, the script says `started shutdown` and asks for nothing; the next
 #   start reads the restored files and the channel. Anything else it prints - nothing,
-#   an error, another level - starts the interface as always.
+#   an error, another level - starts the interface as always. The installer reports that
+#   end as "put back, but the interface did not start again", with the shutdown as its
+#   detail. Not measured during a real shutdown: whether the image's halt and reboot go
+#   through runlevels 0 and 6 at all. If a reboot empties /tmp before the installer has
+#   read the status, it finds no status file and says only that - not that the script
+#   never ran.
 # - `finish` is idempotent; the EXIT trap, there for an exit nobody planned, would run
 #   it a second time.
 # - It does not keep the transaction lock alive; the installer holds it. What no trap
@@ -1551,6 +1658,13 @@ finish() {{
         rc=
         if [ -f "$rcfile" ]; then
             read -r rc < "$rcfile"
+        else
+            for marker in "$rcfile"-*; do
+                if [ -f "$marker" ]; then
+                    rc=${{marker##*-}}
+                    break
+                fi
+            done
         fi
         case "$rc" in
         ''|*[!0-9]*) rc=lost ;;
@@ -1779,6 +1893,7 @@ def main() -> int:
             "verify",
             "claim",
             "release",
+            "hand-back",
             "prune",
             "identity",
             "lock-probe",
@@ -1800,8 +1915,14 @@ def main() -> int:
     parser.add_argument("--keep-name", default="")
     parser.add_argument("--provisioning", action="store_true")
     parser.add_argument("--settings", action="store_true")
-    # The transaction's id, written into the lock's owner record by `claim`.
+    # The transaction's id, written into the lock's owner record by `claim`; for
+    # `hand-back`, the abandoned transaction the lock goes back to.
     parser.add_argument("--id", default="")
+    # `hand-back`: the transaction that holds the lock now, and hands it back.
+    parser.add_argument("--owner", default="")
+    # `hand-back`: how many recoveries of the abandoned transaction have failed, this one
+    # included.
+    parser.add_argument("--attempts", type=int, default=1)
     # A service reference is an option, never the positional path: `Path` would fold the
     # `//` of an IPTV reference's stream URL into one slash.
     parser.add_argument("--service", default="")
@@ -1838,6 +1959,13 @@ def _recording_exit_status(path: Path, operate: Callable[[], int]) -> int:
     Whatever ends the operation from inside Python - a return, an exit, an exception -
     is written, by a rename of a finished file so that a reader never meets half a
     number. A signal that kills the process writes nothing, and the reader says so.
+
+    A status that cannot be written - a full /tmp, or something in the way of the
+    temporary name - would read exactly like a killed restore, and send a person to check
+    a receiver that is fine. So the status then goes into the name of an empty file beside
+    it, `<path>-<status>`, which needs no room for data; the reader looks for that too. A
+    receiver that cannot create even that is left reading "lost", which is still true: the
+    status is not known there.
     """
     code = 1
     try:
@@ -1846,10 +1974,18 @@ def _recording_exit_status(path: Path, operate: Callable[[], int]) -> int:
         code = exit_.code if isinstance(exit_.code, int) else (0 if exit_.code is None else 1)
         raise
     finally:
-        with suppress(OSError):
-            staged = path.with_name(path.name + ".tmp")
+        staged = path.with_name(path.name + ".tmp")
+        try:
             staged.write_text(f"{code}\n", encoding="ascii")
             os.replace(staged, path)
+        except OSError:
+            try:
+                if not 0 <= code <= 255:
+                    raise OSError("not an exit status a name can carry")
+                marker = path.with_name(f"{path.name}-{code}")
+                os.close(os.open(str(marker), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600))
+            except OSError:
+                print(f"exit status {code} could not be recorded at {path}", file=sys.stderr)
     return code
 
 
@@ -1884,11 +2020,18 @@ def _operate(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     elif args.path is None:
         parser.error("path is required for this operation")
     elif args.operation == "claim":
-        print(json.dumps({"reclaimed": claim_transaction(args.path, args.id)}))
+        print(json.dumps(claim_with_attempts(args.path, args.id)))
     elif args.operation == "lock-info":
         print(json.dumps(lock_info(args.path), sort_keys=True))
     elif args.operation == "release":
         release_transaction(args.path)
+    elif args.operation == "hand-back":
+        try:
+            hand_back_transaction(args.path, args.owner, args.id, args.attempts)
+        except LockNotOursError as error:
+            # Its own exit status: the caller must not release a lock that is not its.
+            print(str(error), file=sys.stderr)
+            return EXIT_LOCK_NOT_OURS
     elif args.operation == "prune":
         for name in prune_snapshots(args.path, keep_name=args.keep_name):
             print(f"pruned superseded installer snapshot {name}", file=sys.stderr)

@@ -59,6 +59,9 @@ BOUQUET_REPLAY_SECONDS = 3.0
 BOUQUET_ACK_SECONDS = 10.0
 TOPIC_CHANNELS = "channels"
 COMMAND_BOUQUET = "bouquet"
+# The restart record's `channel` when the image started on another channel and somebody
+# chose one before the zap back: not "lost" - the household decided - and never zapped.
+CHANNEL_CHANGED_BY_HOUSEHOLD = "changed by the household"
 
 
 class _Session(Protocol):
@@ -172,8 +175,10 @@ async def async_verify(
         else:
             current, _ = await async_read_state(session, helper)
             if not same_service(current, started_on):
-                # Not the image's choice any more: the household moved on.
-                outcome.channel = "lost"
+                # Not the image's choice any more: the household moved on. Said as such -
+                # a log reader looking for a restart that lost the channel must not find
+                # somebody's own change of channel under the same word.
+                outcome.channel = CHANNEL_CHANGED_BY_HOUSEHOLD
             else:
                 outcome.channel = (
                     "restored"

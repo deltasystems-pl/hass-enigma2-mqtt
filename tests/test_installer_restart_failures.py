@@ -456,6 +456,20 @@ VERDICTS = {
     (_NOT_STOPPED, 127, 1): InstallerErrorCode.ROLLBACK_FAILED,
     (_NOT_STOPPED, "lost", 0): InstallerErrorCode.ROLLBACK_FAILED,
     (_NOT_STOPPED, "lost", 1): InstallerErrorCode.ROLLBACK_FAILED,
+    # The receiver was shutting down (runlevel 0 or 6), so the script asked for no start:
+    # the restore's own verdict first, and "did not start again" when it succeeded.
+    (_STOPPED, 0, "shutdown"): InstallerErrorCode.ROLLBACK_RESTART_FAILED,
+    (_STOPPED, 75, "shutdown"): InstallerErrorCode.ROLLBACK_OPKG_BUSY,
+    (_STOPPED, 76, "shutdown"): InstallerErrorCode.ROLLBACK_OPKG_OVERLAP,
+    (_STOPPED, 143, "shutdown"): InstallerErrorCode.ROLLBACK_FAILED,
+    (_STOPPED, 127, "shutdown"): InstallerErrorCode.ROLLBACK_FAILED,
+    (_STOPPED, "lost", "shutdown"): InstallerErrorCode.ROLLBACK_FAILED,
+    (_NOT_STOPPED, 0, "shutdown"): InstallerErrorCode.ROLLBACK_FAILED,
+    (_NOT_STOPPED, 75, "shutdown"): InstallerErrorCode.ROLLBACK_OPKG_BUSY,
+    (_NOT_STOPPED, 76, "shutdown"): InstallerErrorCode.ROLLBACK_FAILED,
+    (_NOT_STOPPED, 143, "shutdown"): InstallerErrorCode.ROLLBACK_FAILED,
+    (_NOT_STOPPED, 127, "shutdown"): InstallerErrorCode.ROLLBACK_FAILED,
+    (_NOT_STOPPED, "lost", "shutdown"): InstallerErrorCode.ROLLBACK_FAILED,
 }
 
 
@@ -467,7 +481,7 @@ VERDICTS = {
     ],
 )
 async def test_every_end_of_the_script_gets_a_true_verdict(
-    credentials: SshCredentials, stop_timeout: bool, restored: int | str, started: int
+    credentials: SshCredentials, stop_timeout: bool, restored: int | str, started: int | str
 ) -> None:
     """The stop, the restore and the start, in every combination the script can report."""
     receiver = FakeReceiver(
@@ -672,3 +686,58 @@ async def test_the_receivers_own_answer_about_the_script_is_read_from_proc(
 
     directory.mkdir(parents=True)
     assert await installer._async_r2_absent(Local(), str(directory)) is False
+
+
+async def test_a_receiver_shutting_down_is_named_as_the_reason_nothing_started(
+    credentials: SshCredentials,
+) -> None:
+    """`started shutdown`: the files and the channel are back, and the script asked for no
+    start because sysvinit was halting or rebooting. The verdict is "put back, but did not
+    start again", and its detail says why - not an `init 3` that failed."""
+    receiver = FakeReceiver(r2_init3_status="shutdown")
+
+    with pytest.raises(InstallerError) as raised:
+        await _rollback(credentials, receiver.connect)
+
+    assert raised.value.code is InstallerErrorCode.ROLLBACK_RESTART_FAILED
+    assert "shutting down" in raised.value.__cause__.detail
+    assert receiver.files["plugin"] == "old"
+    assert _released(receiver)
+
+
+async def test_a_restore_that_left_no_status_is_not_called_a_failed_one(
+    credentials: SshCredentials,
+) -> None:
+    """`restored lost` is a restore gone without a status of its own - killed, or unable to
+    write it. It stays a failure to check by hand, and the detail says what is known: not
+    whether it completed."""
+    receiver = FakeReceiver(r2_restore_status="lost")
+
+    with pytest.raises(InstallerError) as raised:
+        await _rollback(credentials, receiver.connect)
+
+    assert raised.value.code is InstallerErrorCode.ROLLBACK_FAILED
+    assert "whether it completed is not known" in raised.value.__cause__.detail
+
+
+async def test_a_status_file_gone_after_the_start_answered_is_not_called_never_started(
+    credentials: SshCredentials,
+) -> None:
+    """`r2-start` answered, so its status file existed. Gone afterwards, it says nothing about
+    whether the script ran: a receiver that rebooted empties /tmp."""
+    receiver = FakeReceiver()
+    original = FakeSession.run
+
+    async def run(self: FakeSession, command: str, **kwargs: Any):
+        answer = await original(self, command, **kwargs)
+        if " r2-start " in command:
+            self.receiver.r2_dirs.clear()
+        return answer
+
+    with patch.object(FakeSession, "run", run), pytest.raises(InstallerError) as raised:
+        await _rollback(credentials, receiver.connect)
+
+    assert raised.value.code is InstallerErrorCode.ROLLBACK_FAILED
+    detail = raised.value.__cause__.detail
+    assert "left no status file" in detail
+    assert "restarted" in detail

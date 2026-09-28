@@ -128,21 +128,45 @@ async def test_a_broken_key_payload_is_ignored(
     assert fired == []
 
 
-async def test_an_unknown_press_is_treated_as_short(
+@pytest.mark.parametrize("press", ["double", "", 1, None, ["short"]])
+async def test_an_unknown_press_fires_nothing(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    press: object,
+) -> None:
+    """A kind of press a later plugin may add is not a short press: read as one, it would
+    fire every automation and device trigger written for a short press of that key. It is
+    not an event this integration can describe, so neither the bus nor the entity sees it."""
+    await async_setup_box(hass, config_entry)
+
+    fired: list[dict] = []
+    hass.bus.async_listen(EVENT_KEY, lambda event: fired.append(dict(event.data)))
+    before = hass.states.get(EVENT_ENTITY).state
+
+    async_fire_mqtt_message(
+        hass, KEY_TOPIC, json.dumps({"key": "KEY_OK", "press": press})
+    )
+    await hass.async_block_till_done()
+
+    assert fired == []
+    assert hass.states.get(EVENT_ENTITY).state == before
+
+
+async def test_a_press_without_a_length_is_short(
     hass: HomeAssistant,
     mqtt_mock,
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """Fail towards the harmless reading, rather than inventing a third kind."""
+    """A payload that does not say how long the key was held is a short press."""
     await async_setup_box(hass, config_entry)
 
     fired: list[dict] = []
     hass.bus.async_listen(EVENT_KEY, lambda event: fired.append(dict(event.data)))
 
-    async_fire_mqtt_message(
-        hass, KEY_TOPIC, json.dumps({"key": "KEY_OK", "press": "double"})
-    )
+    async_fire_mqtt_message(hass, KEY_TOPIC, json.dumps({"key": "KEY_OK"}))
     await hass.async_block_till_done()
 
     assert fired[0][ATTR_PRESS] == "short"

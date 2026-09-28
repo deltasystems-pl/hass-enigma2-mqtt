@@ -223,6 +223,11 @@ class InstallerError(Exception):
         # the interface stays stopped and how to start it - the code's own sentence says
         # only why the install was refused.
         self.interface_stopped = False
+        # The lock that refused it belongs to a plugin self-update that is still running -
+        # its heartbeat is fresh - in runlevel 4 of ours: its own rollback, which starts the
+        # interface when it ends. Whoever shows the refusal says to wait for it, never to
+        # switch the receiver off, which would cut that rollback off half-way.
+        self.update_running = False
 
 
 def _log_install_refusal(error: InstallerError) -> None:
@@ -268,12 +273,33 @@ def _left_stopped(error: InstallerError) -> InstallerError:
     and on, or deal with the cause and run the forced reinstall again, which does start it.
     """
     error.interface_stopped = True
+    if error.update_running:
+        error.detail = (
+            f"{error.detail or error.code.value}; the receiver's interface is stopped in "
+            "runlevel 4 while a plugin self-update is still running - its own rollback "
+            "starts the interface when it ends"
+        )
+        return error
     error.detail = (
         f"{error.detail or error.code.value}; the receiver's interface stays stopped in "
         "runlevel 4, as an interrupted transaction of this project left it - nothing is "
         "started without the transaction lock"
     )
     return error
+
+
+def _connection_lost(err: BaseException, step: str) -> InstallerError:
+    """A transport error before the lock, as the refusal it is: nothing was changed.
+
+    Every check before the claim either answers or refuses, and a connection that drops
+    under one of them is neither - so it used to escape as a raw `OSError` or asyncssh
+    error, which nobody marks and nobody shows: no sentence for the household, nothing on
+    „Ostatni błąd", and in runlevel 4 of ours no word that the interface stays stopped.
+    """
+    return InstallerError(
+        InstallerErrorCode.SSH_UNAVAILABLE,
+        f"the connection to the receiver was lost {step} ({type(err).__name__})",
+    )
 
 
 class _RollbackError(InstallerError):
@@ -1440,6 +1466,24 @@ def _r2_restore_code(steps: dict[str, str]) -> InstallerErrorCode | None:
     return InstallerErrorCode.ROLLBACK_FAILED
 
 
+def _r2_restore_detail(steps: dict[str, str]) -> str:
+    """Say what is known about a restore that did not succeed.
+
+    `restored lost` is a restore that ended without a status of its own: killed by the
+    watchdog or from outside, or one that finished but could not write the status - the
+    helper then names it in an empty file, which the script reads too, so this is left for
+    a receiver that could write neither. Whether it completed is therefore not known, and
+    the verdict stays a failure to check by hand rather than a guess either way.
+    """
+    rc = steps.get("restored")
+    if rc == "lost":
+        return (
+            "the restore ended without recording its exit status - it was killed, or its "
+            "status could not be written - so whether it completed is not known"
+        )
+    return f"the restore exited with status {rc}"
+
+
 def _rollback_record(
     record: restart_rule.RestartRecord | None, service: str | None, standby: bool | None
 ) -> restart_rule.RestartRecord:
@@ -1606,13 +1650,16 @@ async def _async_rollback(
                 tidy = True
                 r2_finished = present
                 if (code := _r2_restore_code(steps)) is not None:
-                    restore_error = InstallerError(code)
+                    restore_error = InstallerError(code, _r2_restore_detail(steps))
                 if not present:
-                    # The script never started - its status file is not there - so
-                    # nothing was stopped and nothing restored.
+                    # No status file. Unless the start's answer was lost, that file existed
+                    # before the script ran, so the likeliest way here is a receiver that
+                    # restarted and emptied /tmp - the script may have run to its end. Only
+                    # a lost answer followed by nothing of the script's means it never ran.
                     restore_error = InstallerError(
                         InstallerErrorCode.ROLLBACK_FAILED,
-                        "the stop-and-restore script did not start",
+                        "the stop-and-restore script left no status file: it did not start, "
+                        "or the receiver restarted and emptied /tmp before its end was read",
                     )
                 elif "stop_timeout" in steps:
                     # enigma2 never stopped. The script put the files back and left the
@@ -1643,6 +1690,16 @@ async def _async_rollback(
                             "the receiver's interface did not stop, so its settings were "
                             "not restored either"
                         )
+                elif steps["started"] == "shutdown":
+                    # sysvinit was halting or rebooting, so the script asked for no start:
+                    # an `init 3` then would ask for the interface back mid-shutdown. The
+                    # files and the channel are in place for the next start.
+                    raise InstallerError(
+                        InstallerErrorCode.ROLLBACK_RESTART_FAILED,
+                        "the receiver was shutting down (runlevel 0 or 6), so the script "
+                        "did not ask for its interface; the next start reads the restored "
+                        "files and the channel",
+                    )
                 elif steps["started"] not in ("", "0"):
                     raise InstallerError(InstallerErrorCode.ROLLBACK_RESTART_FAILED)
                 else:
@@ -1793,11 +1850,63 @@ async def _async_verify_restart(
     return outcome
 
 
+def _reclaimed(claimed: str, nonce: str) -> tuple[str, int]:
+    """The abandoned installer transaction the claim reclaimed, and its failed recoveries.
+
+    ('', 0) for none. The count is the one a failed recovery handed the lock back with
+    (`installer_helper.hand_back_transaction`); a lock its transaction abandoned itself
+    carries none, and a count that is not one reads as none.
+    """
+    try:
+        answer = json.loads(claimed or "{}")
+        reclaimed = answer.get("reclaimed", "")
+        attempts = answer.get("attempts", 0)
+    except (AttributeError, ValueError):
+        return "", 0
+    if (
+        not isinstance(reclaimed, str)
+        or not installer_helper.TRANSACTION_ID.fullmatch(reclaimed)
+        or reclaimed == nonce
+    ):
+        return "", 0
+    if not isinstance(attempts, int) or isinstance(attempts, bool) or attempts < 0:
+        attempts = 0
+    return reclaimed, attempts
+
+
+# How many failed recoveries of one abandoned transaction hand its lock back before the
+# next failure releases it instead. A failure that may pass - opkg busy with somebody
+# else's run, a connection that dropped - usually has by the second try; one that has
+# not by the third is not going to, and each try is an install the household asked for
+# and did not get.
+RECOVERY_ATTEMPTS = 3
+
+
+def _recovery_may_pass(err: BaseException) -> bool:
+    """Whether a failed recovery may succeed if it is simply tried again.
+
+    opkg busy with another run, a connection that dropped or a command that did not
+    answer in time: the snapshot is as good as it was. Anything else - a record the
+    restore cannot read or does not accept, a plugin directory it cannot rename across
+    filesystems - is in the snapshot or the receiver, and fails the same way every time.
+    An unexpected failure that is not the installer's own - a stop, say - may pass.
+    """
+    if not isinstance(err, InstallerError):
+        return True
+    return err.code is InstallerErrorCode.OPKG_BUSY or isinstance(
+        err.__cause__, _CONNECTION_LOST
+    )
+
+
+def _code_or_type(err: BaseException) -> str:
+    """How a failure is named in a log line or a detail: its code, else its type."""
+    return err.code.value if isinstance(err, InstallerError) else type(err).__name__
+
+
 async def _async_recover_abandoned(
     session: InstallerSession,
     remote_helper: str,
-    claimed: str,
-    nonce: str,
+    reclaimed: str,
     *,
     settings_for: frozenset[str] = frozenset(),
 ) -> bool:
@@ -1825,20 +1934,34 @@ async def _async_recover_abandoned(
     without being overwritten from memory. A lock whose transaction died before any
     rollback, or whose rollback already restored, never gets an old snapshot's settings:
     every plugin setting changed since would be reverted.
+
+    A snapshot directory without its `snapshot.json` is passed over. That record is the
+    snapshot's last write, synced before the snapshot returns, and the transaction changes
+    nothing until then - so its transaction was cut off before it changed anything, and
+    there is nothing to put back. Restoring it would fail on the missing record, the same
+    way on every try.
+
+    `reclaimed` is the id `_reclaimed` read from the claim, '' for none. When this fails in
+    a way a later try may get past, the caller hands the lock back to `reclaimed` rather
+    than releasing it, so that the next install tries again by the same id - a bounded
+    number of times (`RECOVERY_ATTEMPTS`).
     """
-    try:
-        reclaimed = json.loads(claimed or "{}").get("reclaimed", "")
-    except (AttributeError, ValueError):
-        return False
-    if (
-        not isinstance(reclaimed, str)
-        or not installer_helper.TRANSACTION_ID.fullmatch(reclaimed)
-        or reclaimed == nonce
-    ):
+    if not reclaimed:
         return False
     abandoned = f"{BACKUP_ROOT}/ha-installer-{reclaimed}"
-    present = await session.run(f"test -d {shlex.quote(abandoned)}", timeout=30)
+    present = await session.run(
+        f"test -f {shlex.quote(abandoned + '/snapshot.json')}", timeout=30
+    )
     if present.exit_status:
+        partial = await session.run(f"test -d {shlex.quote(abandoned)}", timeout=30)
+        if not partial.exit_status:
+            _LOGGER.warning(
+                "Installer: the snapshot %s of the abandoned transaction %s has no "
+                "snapshot.json - it was cut off while being taken, before its transaction "
+                "changed anything - so there is nothing to put back",
+                abandoned,
+                reclaimed,
+            )
         return False
     settings = reclaimed in settings_for
     if settings and await _async_enigma_pids(session):
@@ -1866,6 +1989,73 @@ async def _async_recover_abandoned(
         busy=InstallerErrorCode.OPKG_BUSY,
     )
     return settings
+
+
+_HANDED_BACK = "handed_back"
+_NOT_OURS = "not_ours"
+_NOT_HANDED_BACK = "not_handed_back"
+
+
+async def _async_hand_back(
+    session: InstallerSession,
+    remote_helper: str,
+    remote_lock: str,
+    nonce: str,
+    abandoned: str,
+    attempts: int,
+) -> str:
+    """Give the lock back to the abandoned transaction whose snapshot was not put back.
+
+    Released instead, the lock would forget the one record of which snapshot is still to
+    be put back, and the next install would start over a half-changed receiver with
+    nothing to recover. Handed back, it names that transaction again, stale as it was when
+    this install reclaimed it, with `attempts` failed recoveries, and the next claim
+    recovers by that id at once.
+
+    Returns `_HANDED_BACK`; `_NOT_OURS` when the helper refused because the lock no longer
+    names this transaction - it went stale under a slow recovery and somebody took it -
+    which the caller must then not release either; or `_NOT_HANDED_BACK` for any other
+    failure, and the caller releases the lock as before while the log names the snapshot
+    for a person.
+    """
+    snapshot = f"{BACKUP_ROOT}/ha-installer-{abandoned}"
+    try:
+        result = await session.run(
+            f"python3 {shlex.quote(remote_helper)} hand-back {shlex.quote(remote_lock)} "
+            f"--owner {nonce} --id {abandoned} --attempts {attempts}",
+            timeout=30,
+        )
+    except _CONNECTION_LOST:
+        result = None
+    if result is not None and not result.exit_status:
+        _LOGGER.warning(
+            "Installer: the transaction lock was handed back to the abandoned transaction "
+            "%s, whose snapshot %s could not be put back (try %d of %d); the next install "
+            "puts it back first",
+            abandoned,
+            snapshot,
+            attempts,
+            RECOVERY_ATTEMPTS,
+        )
+        return _HANDED_BACK
+    if result is not None and result.exit_status == installer_helper.EXIT_LOCK_NOT_OURS:
+        _LOGGER.error(
+            "Installer: the lock at %s is no longer this transaction's, so it is neither "
+            "handed back nor released; the snapshot %s of the abandoned transaction %s was "
+            "not put back - check the receiver by hand",
+            remote_lock,
+            snapshot,
+            abandoned,
+        )
+        return _NOT_OURS
+    _LOGGER.error(
+        "Installer: the snapshot %s of the abandoned transaction %s could not be put back, "
+        "and the lock could not be handed back to it; releasing the lock, so no later "
+        "install will put that snapshot back - check the receiver by hand",
+        snapshot,
+        abandoned,
+    )
+    return _NOT_HANDED_BACK
 
 
 # Every way an SSH command can fail to come back. asyncssh's own errors - a connection
@@ -2417,6 +2607,17 @@ async def _async_busy_error(
                 f"interface is stopped; the released rule frees it in about {minutes} min",
                 {"minutes": str(minutes)},
             )
+        if interface_stopped and isinstance(info.get("origin"), str) and isinstance(silent, int):
+            # A self-update beating within the stall bound, in runlevel 4 of ours, is one
+            # rolling back right now: nothing else of it sends `init 4`. Its restore ends in
+            # `init 3`, so the household is told to wait - not to cut the power under it.
+            error = InstallerError(
+                InstallerErrorCode.BUSY,
+                "a plugin self-update holds the receiver's lock and is still running "
+                f"(its last heartbeat {silent} s ago)",
+            )
+            error.update_running = True
+            return error
     return InstallerError(InstallerErrorCode.BUSY)
 
 
@@ -2778,6 +2979,10 @@ async def _async_install_locked(
     # Runlevel 4 of ours with the lock claimed: a failure before this install starts the
     # interface itself still starts it, on what is there.
     start_after_failure = False
+    # The abandoned installer transaction the claim reclaimed, until its snapshot is back,
+    # and how many recoveries of it had failed before this one.
+    abandoned = ""
+    recoveries = 0
     try:
         # Everything up to the transaction lock is a guard, and a guard that refuses
         # leaves the receiver as it found it. Each of those refusals is written to the
@@ -2811,18 +3016,38 @@ async def _async_install_locked(
             stored_name = _check_receiver_identity(identity, request)
             plugin_enabled = _stored_setting(identity, "enabled") is True
             await _async_check_depends(session, source.depends, source.version)
-        except InstallerError as err:
+        except (InstallerError, *_CONNECTION_LOST) as caught:
+            err = (
+                caught
+                if isinstance(caught, InstallerError)
+                else _connection_lost(caught, "during the checks before the install")
+            )
             if gui is not None and gui.mode == _GUI_OURS_STOPPED:
                 _left_stopped(err)
             _log_install_refusal(err)
-            raise
-        claim = await session.run(
-            f"mkdir -p {shlex.quote(BACKUP_ROOT)} && "
-            f"python3 {shlex.quote(remote_helper)} claim {shlex.quote(remote_lock)} "
-            f"--id {nonce}",
-            timeout=30,
-        )
+            if err is caught:
+                raise
+            raise err from caught
         interface_down = gui is not None and gui.mode == _GUI_OURS_STOPPED
+        try:
+            claim = await session.run(
+                f"mkdir -p {shlex.quote(BACKUP_ROOT)} && "
+                f"python3 {shlex.quote(remote_helper)} claim {shlex.quote(remote_lock)} "
+                f"--id {nonce}",
+                timeout=30,
+            )
+        except _CONNECTION_LOST as caught:
+            # Whether the claim reached the receiver is not known. If it did, the lock
+            # names this transaction and frees itself by the released rule; nothing of
+            # this transaction was changed either way, so there is nothing to recover.
+            # What cannot be kept is the id of an abandoned transaction the claim may have
+            # reclaimed on the way: its answer is lost with the connection.
+            err = _connection_lost(caught, "while claiming the transaction lock")
+            err.detail += "; if the claim reached the receiver, its lock frees itself"
+            if interface_down:
+                _left_stopped(err)
+            _LOGGER.warning("Receiver install refused (%s): %s", err.code.value, err.detail)
+            raise err from caught
         if claim.exit_status:
             busy = await _async_busy_error(
                 session, remote_helper, remote_lock, interface_stopped=interface_down
@@ -2835,25 +3060,64 @@ async def _async_install_locked(
         # From here a failure in runlevel 4 of ours ends with the interface started on what
         # is there (below, where every failure ends): the picture comes first.
         start_after_failure = interface_down
+        # Until its snapshot is put back, the lock is handed back to this id on a failure
+        # that may pass rather than released: see the release below.
+        abandoned, recoveries = _reclaimed(claim.stdout, nonce)
         try:
             settings_restored = await _async_recover_abandoned(
                 session,
                 remote_helper,
-                claim.stdout,
-                nonce,
+                abandoned,
                 settings_for=gui.unrestored if gui is not None and interface_down else frozenset(),
             )
-        except InstallerError as err:
-            if not interface_down:
+            abandoned = ""
+        except BaseException as caught:
+            snapshot = f"{BACKUP_ROOT}/ha-installer-{abandoned}"
+            given_up = not _recovery_may_pass(caught) or recoveries + 1 >= RECOVERY_ATTEMPTS
+            if given_up:
+                # Handed back, a recovery that will not pass would be tried - and failed -
+                # by every install after this one, for ever. Released as before, the next
+                # install goes ahead, and the snapshot is left for a person.
+                _LOGGER.error(
+                    "Installer: the snapshot %s of the abandoned transaction %s could not be "
+                    "put back (%s)%s; the lock is released, so no later install puts that "
+                    "snapshot back - check the receiver by hand",
+                    snapshot,
+                    abandoned,
+                    _code_or_type(caught),
+                    f", {recoveries + 1} times"
+                    if _recovery_may_pass(caught)
+                    else ", and would fail the same way again",
+                )
+                abandoned = ""
+            if not isinstance(caught, (InstallerError, *_CONNECTION_LOST)):
                 raise
-            # The interrupted transaction could not be put back, and the interface is
-            # started on what it left: "put back as it was" would not be true, and the
-            # snapshot stays for a person.
-            raise InstallerError(
-                InstallerErrorCode.ROLLBACK_FAILED,
-                "the snapshot of the interrupted transaction could not be put back "
-                f"({err.code.value}); the interface is started on the files that are there",
-            ) from err
+            if interface_down:
+                # The interrupted transaction could not be put back, and the interface is
+                # started on what it left: "put back as it was" would not be true, and the
+                # snapshot stays for a person.
+                raise InstallerError(
+                    InstallerErrorCode.ROLLBACK_FAILED,
+                    "the snapshot of the interrupted transaction could not be put back "
+                    f"({_code_or_type(caught)}); the interface is started on the files that "
+                    "are there",
+                ) from caught
+            if given_up:
+                # "The receiver was put back as it was" - the sentence of a failed install -
+                # would not be true: it could not be.
+                raise InstallerError(
+                    InstallerErrorCode.ROLLBACK_FAILED,
+                    f"the snapshot {snapshot} of an interrupted installation could not be put "
+                    f"back ({_code_or_type(caught)}); check it by hand",
+                ) from caught
+            if isinstance(caught, InstallerError) and caught.code is InstallerErrorCode.OPKG_BUSY:
+                # opkg busy, so nothing was installed - true, and the next try puts the
+                # snapshot back first.
+                raise
+            cause = caught if not isinstance(caught, InstallerError) else caught.__cause__
+            raise _connection_lost(
+                cause, "while putting back the snapshot of an interrupted installation"
+            ) from caught
         if settings_restored:
             # The settings block is now the snapshot's: what was read from it before - the
             # identity, whether the plugin is switched on, its name - may no longer hold.
@@ -3278,13 +3542,33 @@ async def _async_install_locked(
             try:
                 release = await connector(request.credentials)
                 try:
-                    result = await release.run(
-                        f"python3 {shlex.quote(remote_helper)} release {shlex.quote(remote_lock)}",
-                        timeout=30,
+                    # `abandoned` is still set only for a recovery that failed in a way
+                    # that may pass, and has not failed `RECOVERY_ATTEMPTS` times.
+                    handed = (
+                        await _async_hand_back(
+                            release,
+                            remote_helper,
+                            remote_lock,
+                            nonce,
+                            abandoned,
+                            recoveries + 1,
+                        )
+                        if abandoned
+                        else _NOT_HANDED_BACK
                     )
-                    if result.exit_status:
-                        raise InstallerError(InstallerErrorCode.ROLLBACK_FAILED)
-                    remote_lock_claimed = False
+                    if handed in (_HANDED_BACK, _NOT_OURS):
+                        # Handed back - or somebody else's by now, which is not this
+                        # transaction's to release either.
+                        remote_lock_claimed = False
+                    else:
+                        result = await release.run(
+                            f"python3 {shlex.quote(remote_helper)} release "
+                            f"{shlex.quote(remote_lock)}",
+                            timeout=30,
+                        )
+                        if result.exit_status:
+                            raise InstallerError(InstallerErrorCode.ROLLBACK_FAILED)
+                        remote_lock_claimed = False
                     await _async_remove_helper(release, remote_helper)
                 finally:
                     await release.close()

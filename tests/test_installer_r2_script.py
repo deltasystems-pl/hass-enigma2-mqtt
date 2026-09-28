@@ -920,3 +920,43 @@ def test_the_script_waits_for_an_interface_that_is_slow_to_stop(
     steps = box.status.read_text().split("\n")[1:]
     assert steps[:3] == ["stopping 0", "stopped", "restored 0"]
     box.assert_put_back()
+
+
+def test_a_status_the_restore_cannot_write_is_still_read(
+    shell: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The restore completes, but its status file cannot be written - here a directory sits
+    at the temporary name. The status then rides in the name of an empty file, and the
+    script reads it: a restore that happened is not reported as lost."""
+    box = Box(tmp_path, shell, restore_seconds=1.0)
+    box.start(monkeypatch)
+    (box.dir / "restore-rc.tmp").mkdir()
+
+    box.wait_for(lambda: "done" in box.status.read_text().split())
+
+    assert "restored 0" in box.status.read_text().split("\n")
+    assert not (box.dir / "restore-rc").exists()
+    assert (box.dir / "restore-rc-0").exists()
+    box.assert_put_back()
+
+
+def test_the_helper_names_its_status_in_a_file_when_it_cannot_write_one(
+    tmp_path: Path,
+) -> None:
+    rc_file = tmp_path / "restore-rc"
+    (tmp_path / "restore-rc.tmp").mkdir()
+    root = tmp_path / "root"
+    root.mkdir()
+    helper = tmp_path / "helper.py"
+    shutil.copyfile(installer_helper.__file__, helper)
+
+    finished = subprocess.run(
+        [sys.executable, str(helper), "identity", "--root", str(root), "--rc-file", str(rc_file)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert finished.returncode == 0
+    assert not rc_file.exists()
+    assert (tmp_path / "restore-rc-0").read_bytes() == b""
