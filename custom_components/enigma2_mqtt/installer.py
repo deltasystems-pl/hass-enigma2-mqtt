@@ -1466,6 +1466,24 @@ def _r2_restore_code(steps: dict[str, str]) -> InstallerErrorCode | None:
     return InstallerErrorCode.ROLLBACK_FAILED
 
 
+def _r2_restore_detail(steps: dict[str, str]) -> str:
+    """Say what is known about a restore that did not succeed.
+
+    `restored lost` is a restore that ended without a status of its own: killed by the
+    watchdog or from outside, or one that finished but could not write the status - the
+    helper then names it in an empty file, which the script reads too, so this is left for
+    a receiver that could write neither. Whether it completed is therefore not known, and
+    the verdict stays a failure to check by hand rather than a guess either way.
+    """
+    rc = steps.get("restored")
+    if rc == "lost":
+        return (
+            "the restore ended without recording its exit status - it was killed, or its "
+            "status could not be written - so whether it completed is not known"
+        )
+    return f"the restore exited with status {rc}"
+
+
 def _rollback_record(
     record: restart_rule.RestartRecord | None, service: str | None, standby: bool | None
 ) -> restart_rule.RestartRecord:
@@ -1632,13 +1650,16 @@ async def _async_rollback(
                 tidy = True
                 r2_finished = present
                 if (code := _r2_restore_code(steps)) is not None:
-                    restore_error = InstallerError(code)
+                    restore_error = InstallerError(code, _r2_restore_detail(steps))
                 if not present:
-                    # The script never started - its status file is not there - so
-                    # nothing was stopped and nothing restored.
+                    # No status file. Unless the start's answer was lost, that file existed
+                    # before the script ran, so the likeliest way here is a receiver that
+                    # restarted and emptied /tmp - the script may have run to its end. Only
+                    # a lost answer followed by nothing of the script's means it never ran.
                     restore_error = InstallerError(
                         InstallerErrorCode.ROLLBACK_FAILED,
-                        "the stop-and-restore script did not start",
+                        "the stop-and-restore script left no status file: it did not start, "
+                        "or the receiver restarted and emptied /tmp before its end was read",
                     )
                 elif "stop_timeout" in steps:
                     # enigma2 never stopped. The script put the files back and left the
@@ -1669,6 +1690,16 @@ async def _async_rollback(
                             "the receiver's interface did not stop, so its settings were "
                             "not restored either"
                         )
+                elif steps["started"] == "shutdown":
+                    # sysvinit was halting or rebooting, so the script asked for no start:
+                    # an `init 3` then would ask for the interface back mid-shutdown. The
+                    # files and the channel are in place for the next start.
+                    raise InstallerError(
+                        InstallerErrorCode.ROLLBACK_RESTART_FAILED,
+                        "the receiver was shutting down (runlevel 0 or 6), so the script "
+                        "did not ask for its interface; the next start reads the restored "
+                        "files and the channel",
+                    )
                 elif steps["started"] not in ("", "0"):
                     raise InstallerError(InstallerErrorCode.ROLLBACK_RESTART_FAILED)
                 else:

@@ -1459,15 +1459,23 @@ def power_state(state: int, base: str = WEBIF_URL) -> bool:
 #   by then - while the restore went on; the channel and the start then went in under
 #   it. So the restore writes its own exit status to a file as its last act, and the
 #   finishing step waits until that file is there or the restore is gone - `kill -0`,
-#   and not a zombie in `/proc` - and reads the verdict from the file. A restore that is
-#   gone without writing one was killed, and the status says `restored lost`.
+#   and not a zombie in `/proc` - and reads the verdict from the file. A restore that
+#   cannot write the file (a full /tmp, something in the way of its temporary name) names
+#   its status in an empty file, `restore-rc-<status>`, which needs no room for data, and
+#   the script reads that too. A restore gone without either was killed - or could write
+#   neither - and the status says `restored lost`: its outcome is not known, and the
+#   installer reports a rollback to check by hand, saying exactly that.
 # - The waits are measured in time, from `/proc/uptime`, not counted in sleeps: busybox
 #   runs `sleep` itself and a caught signal ends it early, so a count of sleeps let a
 #   few signals turn an interface that was slow to stop into one that never stopped.
 # - The restore is bounded. A watchdog ends it with TERM after its limit, so the picture
 #   comes back even from a restore that hangs, and the finishing step sends KILL ten
-#   seconds after that; a restore cut off part-way is repeated by the next install's
-#   recovery, which is safe, while a missing picture is not. Signals are caught, not
+#   seconds after that. Nothing repeats a restore cut off part-way: the script still
+#   writes `restored` - `lost`, or the TERM's status - and starts the interface, the
+#   installer sees that end, reports the rollback failed and releases the lock, so the
+#   next install finds no abandoned transaction to recover. The snapshot stays on the
+#   receiver for a person, which the verdict says; a missing picture would be worse than
+#   a restore to finish by hand. Signals are caught, not
 #   ignored, until the restore and the watchdog are forked, so both start with the
 #   default dispositions and the watchdog's TERM ends the restore.
 # - The settings block and the channel are written only once enigma2 is seen to be
@@ -1478,7 +1486,12 @@ def power_state(state: int, base: str = WEBIF_URL) -> bool:
 # - Not `init 3` while the system goes down: when `runlevel` says sysvinit is in
 #   runlevel 0 or 6, the script says `started shutdown` and asks for nothing; the next
 #   start reads the restored files and the channel. Anything else it prints - nothing,
-#   an error, another level - starts the interface as always.
+#   an error, another level - starts the interface as always. The installer reports that
+#   end as "put back, but the interface did not start again", with the shutdown as its
+#   detail. Not measured during a real shutdown: whether the image's halt and reboot go
+#   through runlevels 0 and 6 at all. If a reboot empties /tmp before the installer has
+#   read the status, it finds no status file and says only that - not that the script
+#   never ran.
 # - `finish` is idempotent; the EXIT trap, there for an exit nobody planned, would run
 #   it a second time.
 # - It does not keep the transaction lock alive; the installer holds it. What no trap
@@ -1551,6 +1564,13 @@ finish() {{
         rc=
         if [ -f "$rcfile" ]; then
             read -r rc < "$rcfile"
+        else
+            for marker in "$rcfile"-*; do
+                if [ -f "$marker" ]; then
+                    rc=${{marker##*-}}
+                    break
+                fi
+            done
         fi
         case "$rc" in
         ''|*[!0-9]*) rc=lost ;;
@@ -1838,6 +1858,13 @@ def _recording_exit_status(path: Path, operate: Callable[[], int]) -> int:
     Whatever ends the operation from inside Python - a return, an exit, an exception -
     is written, by a rename of a finished file so that a reader never meets half a
     number. A signal that kills the process writes nothing, and the reader says so.
+
+    A status that cannot be written - a full /tmp, or something in the way of the
+    temporary name - would read exactly like a killed restore, and send a person to check
+    a receiver that is fine. So the status then goes into the name of an empty file beside
+    it, `<path>-<status>`, which needs no room for data; the reader looks for that too. A
+    receiver that cannot create even that is left reading "lost", which is still true: the
+    status is not known there.
     """
     code = 1
     try:
@@ -1846,10 +1873,18 @@ def _recording_exit_status(path: Path, operate: Callable[[], int]) -> int:
         code = exit_.code if isinstance(exit_.code, int) else (0 if exit_.code is None else 1)
         raise
     finally:
-        with suppress(OSError):
-            staged = path.with_name(path.name + ".tmp")
+        staged = path.with_name(path.name + ".tmp")
+        try:
             staged.write_text(f"{code}\n", encoding="ascii")
             os.replace(staged, path)
+        except OSError:
+            try:
+                if not 0 <= code <= 255:
+                    raise OSError("not an exit status a name can carry")
+                marker = path.with_name(f"{path.name}-{code}")
+                os.close(os.open(str(marker), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600))
+            except OSError:
+                print(f"exit status {code} could not be recorded at {path}", file=sys.stderr)
     return code
 
 
