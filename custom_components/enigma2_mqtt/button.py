@@ -777,6 +777,21 @@ class Enigma2ForceReinstallButton(Enigma2Entity, ButtonEntity):
                 translation_key="force_reinstall_failed",
                 translation_placeholders={"reason": reason},
             ) from err
+        except Exception as err:
+            # Not one of the installer's refusals - a transport error from a step that
+            # raised it unwrapped, say. It is still a failed reinstall, and „Ostatni błąd"
+            # is still where the household looks for why; the type is all it names, since
+            # an exception's own text is nobody's sentence and may carry a host.
+            _LOGGER.error("Forced plugin reinstall over SSH failed", exc_info=err)
+            reason = await self._async_common(
+                "force_reinstall_unexpected", error=type(err).__name__
+            )
+            self.box.async_record_local_error(KEY_FORCE_REINSTALL, reason)
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="force_reinstall_failed",
+                translation_placeholders={"reason": reason},
+            ) from err
         finally:
             self._running = False
             persistent_notification.async_dismiss(self.hass, f"{self._notice_id}_running")
@@ -811,8 +826,12 @@ class Enigma2ForceReinstallButton(Enigma2Entity, ButtonEntity):
             except (IndexError, KeyError):
                 reason = text
         if err.interface_stopped:
+            # A self-update still rolling back starts the interface itself when it ends:
+            # the power switch would cut its restore off, so it gets the other sentence.
             reason = f"{reason} " + await self._async_common(
-                "force_reinstall_interface_stopped"
+                "force_reinstall_update_running"
+                if err.update_running
+                else "force_reinstall_interface_stopped"
             )
         return reason
 

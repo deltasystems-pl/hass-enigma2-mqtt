@@ -539,10 +539,15 @@ button in 0.2.0: the next error replaces it. `source` says whose complaint it is
 (section 4.5), which the plugin may never be able to report. Home Assistant's own text is kept
 up to 1024 characters. A replay of the receiver's retained complaint replaces Home Assistant's
 record only when the receiver dated it later than that record and no more than five minutes
-ahead of Home Assistant's clock: an undated replay, or one from a receiver whose clock runs
-fast, cannot be placed. The price is that a complaint made while Home Assistant was down, by a
-receiver whose clock is that wrong, stays behind Home Assistant's record; anything the receiver
-publishes while Home Assistant listens is shown whatever its date.
+ahead of Home Assistant's clock at the moment of the replay. An undated replay never replaces
+it. A replay dated further ahead does not either - but the five minutes are measured from each
+replay, so a receiver whose clock runs ahead by some amount D keeps a stale complaint out only
+for about D minus five minutes after Home Assistant recorded its own failure: from then on the
+complaint's date is no longer too far ahead, it is later than the record, and the next reload
+or restart puts it back. Only a clock that is wildly wrong - a year ahead - keeps it out for
+good. The price is that a complaint made while Home Assistant was down, by a receiver whose
+clock is that wrong, stays behind Home Assistant's record; anything the receiver publishes while
+Home Assistant listens is shown whatever its date.
 
 It is also the one entity of this device that **stays available while the receiver is not**.
 Deep standby is the headline case and it is precisely a box that has left the network; an
@@ -967,7 +972,12 @@ available while the receiver is offline over MQTT.
   Python, another receiver, the lock held - starts nothing, because without the lock nothing
   says the interrupted transaction has ended; its message says the interface stays stopped and
   that switching the receiver off and on, or running the reinstall again once the cause is
-  dealt with, starts it. Runlevel 4 with no such stop of this project's is left alone. It changes
+  dealt with, starts it. A connection to the receiver lost during those checks is such a
+  refusal too. One case is told otherwise: when the lock belongs to a plugin self-update whose
+  heartbeat is fresh, that update is rolling back right now and starts the interface itself when
+  it finishes, so the message says to wait for it and not to switch the receiver off, which
+  would cut its restore off half-way. Runlevel 4 with no such stop of this project's is left
+  alone. It changes
   no setting of its own - a plugin switched off stays off - and its proof is a new interface
   process holding the plugin's log open, plus the announcement when the plugin is switched on.
 - **The shared lock decides, not a topic.** It claims the receiver's install lock like every
@@ -977,7 +987,8 @@ available while the receiver is offline over MQTT.
   in how many minutes. A stale or forged `update` phase on the broker does not block it.
 - **Result.** The update card shows it running. Success posts a notification - or "installed, but
   switched off in its settings on the receiver". A failure raises its reason and puts it on
-  „Ostatni błąd" with `source: home_assistant`, because the plugin may never publish again.
+  „Ostatni błąd" with `source: home_assistant`, because the plugin may never publish again -
+  an unexpected error too, named by its type, with the details in Home Assistant's log.
 - **When a restart is the repair, not a reinstall.** When the plugin says its update could not
   stop the interface and asks for the receiver's interface to be restarted (`not_stopped`), the
   files on the receiver are already the right ones: restart the interface („Restart GUI", or from

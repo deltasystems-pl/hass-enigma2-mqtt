@@ -1348,3 +1348,80 @@ def test_the_stopped_interface_sentence_is_written_in_all_three_languages() -> N
         ]
         for phrase in words:
             assert phrase in common["force_reinstall_interface_stopped"], (language, phrase)
+
+
+async def test_an_unexpected_failure_is_on_last_error_too(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+    hass_admin_user,
+) -> None:
+    """Not every failure is an InstallerError - a transport error from a step nobody wrapped,
+    say. The press still ends in the button's own error, and „Ostatni błąd" still says the
+    reinstall failed, instead of a generic error and nothing recorded."""
+    await _ready(hass, config_entry, box_on_the_broker)
+
+    with (
+        patch(INSTALL, AsyncMock(side_effect=OSError("connection reset"))),
+        pytest.raises(HomeAssistantError) as raised,
+    ):
+        await _press(hass, hass_admin_user.id)
+        await _press(hass, hass_admin_user.id)
+
+    assert raised.value.translation_key == "force_reinstall_failed"
+    reason = raised.value.translation_placeholders["reason"]
+    assert "unexpected error (OSError)" in reason
+    state = hass.states.get(LAST_ERROR)
+    assert state.state == "force_reinstall"
+    assert state.attributes["source"] == "home_assistant"
+    assert state.attributes["error"] == reason
+    # The press is over: its "running" notice went with it.
+    assert not _notices(hass).get(
+        f"{DOMAIN}_force_reinstall_{config_entry.entry_id}_running"
+    )
+
+
+async def test_a_running_update_s_refusal_says_to_wait_not_to_pull_the_plug(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+    hass_admin_user,
+) -> None:
+    """A self-update rolling back holds the lock and starts the interface when it ends:
+    switching the receiver off now would cut its restore off."""
+    error = InstallerError(InstallerErrorCode.BUSY)
+    error.interface_stopped = True
+    error.update_running = True
+    await _ready(hass, config_entry, box_on_the_broker)
+
+    with (
+        patch(INSTALL, AsyncMock(side_effect=error)),
+        pytest.raises(HomeAssistantError) as raised,
+    ):
+        await _press(hass, hass_admin_user.id)
+        await _press(hass, hass_admin_user.id)
+
+    reason = raised.value.translation_placeholders["reason"]
+    assert reason.startswith("Another installation is already running on this receiver.")
+    assert "Wait for it to finish" in reason
+    assert "at its power switch or plug" not in reason
+    assert hass.states.get(LAST_ERROR).attributes["error"] == reason
+
+
+def test_the_new_sentences_are_written_in_all_three_languages() -> None:
+    translations = Path(button_module.__file__).parent / "translations"
+    for language, running, unexpected in (
+        ("en", "Wait for it to finish", "unexpected error"),
+        ("pl", "Poczekaj", "nieoczekiwany błąd"),
+        ("de", "Warte", "unerwarteten Fehler"),
+    ):
+        common = json.loads((translations / f"{language}.json").read_text(encoding="utf-8"))[
+            "common"
+        ]
+        assert running in common["force_reinstall_update_running"], language
+        assert unexpected in common["force_reinstall_unexpected"], language
+        assert "{error}" in common["force_reinstall_unexpected"], language

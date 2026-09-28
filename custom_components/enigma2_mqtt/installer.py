@@ -223,6 +223,11 @@ class InstallerError(Exception):
         # the interface stays stopped and how to start it - the code's own sentence says
         # only why the install was refused.
         self.interface_stopped = False
+        # The lock that refused it belongs to a plugin self-update that is still running -
+        # its heartbeat is fresh - in runlevel 4 of ours: its own rollback, which starts the
+        # interface when it ends. Whoever shows the refusal says to wait for it, never to
+        # switch the receiver off, which would cut that rollback off half-way.
+        self.update_running = False
 
 
 def _log_install_refusal(error: InstallerError) -> None:
@@ -268,12 +273,33 @@ def _left_stopped(error: InstallerError) -> InstallerError:
     and on, or deal with the cause and run the forced reinstall again, which does start it.
     """
     error.interface_stopped = True
+    if error.update_running:
+        error.detail = (
+            f"{error.detail or error.code.value}; the receiver's interface is stopped in "
+            "runlevel 4 while a plugin self-update is still running - its own rollback "
+            "starts the interface when it ends"
+        )
+        return error
     error.detail = (
         f"{error.detail or error.code.value}; the receiver's interface stays stopped in "
         "runlevel 4, as an interrupted transaction of this project left it - nothing is "
         "started without the transaction lock"
     )
     return error
+
+
+def _connection_lost(err: BaseException, step: str) -> InstallerError:
+    """A transport error before the lock, as the refusal it is: nothing was changed.
+
+    Every check before the claim either answers or refuses, and a connection that drops
+    under one of them is neither - so it used to escape as a raw `OSError` or asyncssh
+    error, which nobody marks and nobody shows: no sentence for the household, nothing on
+    „Ostatni błąd", and in runlevel 4 of ours no word that the interface stays stopped.
+    """
+    return InstallerError(
+        InstallerErrorCode.SSH_UNAVAILABLE,
+        f"the connection to the receiver was lost {step} ({type(err).__name__})",
+    )
 
 
 class _RollbackError(InstallerError):
@@ -2417,6 +2443,17 @@ async def _async_busy_error(
                 f"interface is stopped; the released rule frees it in about {minutes} min",
                 {"minutes": str(minutes)},
             )
+        if interface_stopped and isinstance(info.get("origin"), str) and isinstance(silent, int):
+            # A self-update beating within the stall bound, in runlevel 4 of ours, is one
+            # rolling back right now: nothing else of it sends `init 4`. Its restore ends in
+            # `init 3`, so the household is told to wait - not to cut the power under it.
+            error = InstallerError(
+                InstallerErrorCode.BUSY,
+                "a plugin self-update holds the receiver's lock and is still running "
+                f"(its last heartbeat {silent} s ago)",
+            )
+            error.update_running = True
+            return error
     return InstallerError(InstallerErrorCode.BUSY)
 
 
@@ -2811,18 +2848,36 @@ async def _async_install_locked(
             stored_name = _check_receiver_identity(identity, request)
             plugin_enabled = _stored_setting(identity, "enabled") is True
             await _async_check_depends(session, source.depends, source.version)
-        except InstallerError as err:
+        except (InstallerError, *_CONNECTION_LOST) as caught:
+            err = (
+                caught
+                if isinstance(caught, InstallerError)
+                else _connection_lost(caught, "during the checks before the install")
+            )
             if gui is not None and gui.mode == _GUI_OURS_STOPPED:
                 _left_stopped(err)
             _log_install_refusal(err)
-            raise
-        claim = await session.run(
-            f"mkdir -p {shlex.quote(BACKUP_ROOT)} && "
-            f"python3 {shlex.quote(remote_helper)} claim {shlex.quote(remote_lock)} "
-            f"--id {nonce}",
-            timeout=30,
-        )
+            if err is caught:
+                raise
+            raise err from caught
         interface_down = gui is not None and gui.mode == _GUI_OURS_STOPPED
+        try:
+            claim = await session.run(
+                f"mkdir -p {shlex.quote(BACKUP_ROOT)} && "
+                f"python3 {shlex.quote(remote_helper)} claim {shlex.quote(remote_lock)} "
+                f"--id {nonce}",
+                timeout=30,
+            )
+        except _CONNECTION_LOST as caught:
+            # Whether the claim reached the receiver is not known. If it did, the lock
+            # names this transaction and frees itself by the released rule; nothing of
+            # this transaction was changed either way, so there is nothing to recover.
+            err = _connection_lost(caught, "while claiming the transaction lock")
+            err.detail += "; if the claim reached the receiver, its lock frees itself"
+            if interface_down:
+                _left_stopped(err)
+            _LOGGER.warning("Receiver install refused (%s): %s", err.code.value, err.detail)
+            raise err from caught
         if claim.exit_status:
             busy = await _async_busy_error(
                 session, remote_helper, remote_lock, interface_stopped=interface_down

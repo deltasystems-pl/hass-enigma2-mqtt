@@ -974,9 +974,13 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
         arrives again at every reload and every start-up, after the record was restored,
         and it would otherwise put a months-old refusal over the failure the household
         is looking for. A replay with no date of its own cannot be placed, so it does not;
-        nor does one dated later than Home Assistant's own clock allows - a receiver whose
-        clock runs ahead (a year of 2030) would otherwise date a stale complaint "later" and
-        put it back over the record at every reload.
+        nor does one dated more than `RECEIVER_CLOCK_TOLERANCE` ahead of Home Assistant's
+        clock at the moment of the replay - a receiver whose clock runs ahead (a year of
+        2030) would otherwise date a stale complaint "later" and put it back over the record
+        at every reload. That keeps it out for good only for a gross skew: the tolerance is
+        measured from each replay, so a clock ahead by D keeps a stale complaint out for
+        about D minus the tolerance after the record, and a replay after that replaces it.
+        Nothing here can do better without a reference time from the receiver itself.
 
         Both need a wrong receiver clock, and the price is the mirror case: a complaint
         made while Home Assistant was down, and so only ever seen as a replay, is not shown
