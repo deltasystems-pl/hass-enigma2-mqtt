@@ -536,7 +536,13 @@ makes the replay harmless: the retained complaint arrives again on every reconne
 every start-up, and a clock reading would walk the time forward each time. There is no clear
 button in 0.2.0: the next error replaces it. `source` says whose complaint it is: `receiver`, or
 `home_assistant` for a failure Home Assistant records itself - a forced reinstall over SSH
-(section 4.5), which the plugin may never be able to report.
+(section 4.5), which the plugin may never be able to report. Home Assistant's own text is kept
+up to 1024 characters. A replay of the receiver's retained complaint replaces Home Assistant's
+record only when the receiver dated it later than that record and no more than five minutes
+ahead of Home Assistant's clock: an undated replay, or one from a receiver whose clock runs
+fast, cannot be placed. The price is that a complaint made while Home Assistant was down, by a
+receiver whose clock is that wrong, stays behind Home Assistant's record; anything the receiver
+publishes while Home Assistant listens is shown whatever its date.
 
 It is also the one entity of this device that **stays available while the receiver is not**.
 Deep standby is the headline case and it is precisely a box that has left the network; an
@@ -956,10 +962,14 @@ available while the receiver is offline over MQTT.
   seconds of samples can mistake a box that is still starting for a respawn loop, so the
   interface is looked at again immediately before it is stopped or started, and one that runs by
   then gets every guard and the clean restart. Runlevel 4 left by an interrupted install of this
-  project - a stop-and-restore cut off in this boot - is recovered and started, and a failure
-  after that still starts it; runlevel 4 with no such stop of this project's is left alone. It changes no setting - a plugin switched off stays
-  off - and its proof is a new interface process holding the plugin's log open, plus the
-  announcement when the plugin is switched on.
+  project - a stop-and-restore cut off in this boot - is recovered and started once the lock is
+  taken, and a failure after that still starts it. A refusal before the lock - no space, an old
+  Python, another receiver, the lock held - starts nothing, because without the lock nothing
+  says the interrupted transaction has ended; its message says the interface stays stopped and
+  that switching the receiver off and on, or running the reinstall again once the cause is
+  dealt with, starts it. Runlevel 4 with no such stop of this project's is left alone. It changes
+  no setting of its own - a plugin switched off stays off - and its proof is a new interface
+  process holding the plugin's log open, plus the announcement when the plugin is switched on.
 - **The shared lock decides, not a topic.** It claims the receiver's install lock like every
   install, by the 30-minute rule every installer and the plugin share: a lock whose holder is
   alive refuses it, and it never takes a lock back early - a plugin self-update that stopped
@@ -1214,19 +1224,43 @@ signatures, the feed carries no key, and the key that signs the plugin's release
 project's, which opkg does not use. So install the version the update card names, and check the
 package yourself before opkg sees it - which means downloading it first, as its own step:
 
-1. Download the package of that version onto the receiver, for example into `/tmp`: the `.ipk`
-   asset of the plugin's GitHub release for that version, or the file the feed
-   (`https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed`) lists for it.
-2. Run `sha256sum` on the downloaded file and compare the result with the `sha256` of that
-   version in the signed index, `releases.json` beside the feed. If they differ, stop and delete
-   the file.
-3. Install that file - `opkg install ./<file>.ipk` from the directory it is in (add
+1. Download the package of that version, and the index, onto the receiver - here `0.3.0`, into
+   `/tmp`:
+
+   ```sh
+   cd /tmp
+   wget -O enigma2-plugin-extensions-mqttbridge_0.3.0_all.ipk \
+       https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/enigma2-plugin-extensions-mqttbridge_0.3.0_all.ipk
+   wget -O releases.json https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/releases.json
+   ```
+
+   The `.ipk` asset of the plugin's GitHub release for that version is the same file.
+2. Compare the package's checksum with the `sha256` the index gives for that version. If they
+   differ, stop and delete the file.
+
+   ```sh
+   sha256sum enigma2-plugin-extensions-mqttbridge_0.3.0_all.ipk
+   grep '"version": "0.3.0"' releases.json
+   ```
+
+   This catches a damaged or swapped download, not a compromised origin: the index's signature,
+   `releases.json.sig`, is checked by Home Assistant and by the plugin, and not here.
+3. Install that file - `opkg install ./enigma2-plugin-extensions-mqttbridge_0.3.0_all.ipk` (add
    `--force-reinstall` when that version is already installed, and `--force-downgrade` for an
    older one) - and restart the receiver's interface from its menu.
 
-Adding the feed to opkg (`opkg update && opkg upgrade enigma2-plugin-extensions-mqttbridge`)
-downloads and installs in one step, with no moment to check the package: use it only if you accept
-that.
+**The feed.** The plugin's installation guide adds its opkg feed with this one line, which is also
+what lets the receiver's own plugin browser offer the plugin again:
+
+```sh
+echo 'src/gz enigma2-mqtt-bridge https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed' \
+    > /etc/opkg/enigma2-mqtt-bridge.conf
+opkg update
+```
+
+With the feed configured, `opkg upgrade enigma2-plugin-extensions-mqttbridge` - or the image's
+own software manager - downloads and installs in one step, with no moment to check the package:
+use it only if you accept that.
 
 ### Removing a receiver
 

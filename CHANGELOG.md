@@ -114,8 +114,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   running is started by the reinstall. A press while it runs starts nothing and says so. The
   update card shows it running; a failure is also recorded on „Ostatni błąd", with Home
   Assistant as its source, and the receiver's older complaint replayed by the broker at a
-  reload or a restart does not displace it. Enrolling or forgetting SSH credentials creates or removes it at once, without a reload -
-  forgetting removes its registry entry, so enrolling again brings a new button, disabled again.
+  reload or a restart does not displace it - nor does a replay with no date, or one dated more
+  than five minutes ahead of Home Assistant's clock by a receiver whose clock runs fast. A
+  refusal on a receiver whose interface an interrupted transaction left stopped says the
+  interface stays stopped and how to start it. Enrolling or forgetting SSH credentials creates or
+  removes it at once, without a reload - forgetting removes its registry entry, so enrolling
+  again brings a new button, disabled again.
 - **The SSH installer's forced mode**, the recovery path the forced-reinstall button uses
   ([ADR-0008](docs/adr/0008-signed-plugin-index.md), section 8). **Not yet run on a receiver.**
   It installs only the bundled package, over any version (`--force-downgrade` when opkg's records name a newer or unreadable version, never
