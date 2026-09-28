@@ -210,10 +210,13 @@ the repeat of an end only when it is stamped no earlier than the transaction sta
 two minutes of the end's `finished`, since a refusal can share the end's sentence word for word; a
 request made after a transaction ended never takes that end's words for its answer. The card
 judges a live `last_error` by when it arrives as well: the plugin says an end on `update` and
-repeats it on `last_error` at once, while a refusal never comes with an `update`, so the first
-complaint in the end's words within ten seconds of that `update` is the repeat whatever its stamp,
-and a second one with no `update` between is a refusal. The two minutes are reasoned from the
-plugin's code and are still to be measured on a receiver.
+repeats it on `last_error` at once, and only once. It also publishes `update` for other reasons -
+on every connect, after an origin check, after a relayed index - and a refusal can follow one of
+those within a second, so only the `update` at which the transaction was first seen finished can
+carry the repeat. The first complaint in the end's words within ten seconds of that `update`, with
+no `update` since, is the repeat whatever its stamp; any complaint in those words after the repeat
+was taken is a refusal; the rest is judged by its stamp, and a repeat found that way is taken too.
+The two minutes are reasoned from the plugin's code and are still to be measured on a receiver.
 
 ### 5. A receiver without internet gets both from Home Assistant, and verifies both itself
 

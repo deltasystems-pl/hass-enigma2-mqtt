@@ -277,8 +277,12 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         # The `update` messages seen, as (their count, Home Assistant's monotonic time when
         # the count was first seen at it); the time is None for a count found already there.
         self._update_seen: tuple[int, float | None] | None = None
-        # The (transaction id, `update` count) whose end's repeat the card has taken.
-        self._repeat_taken: tuple[str, int] | None = None
+        # The `update` message at which the transaction now on it was first seen finished, as
+        # (transaction id, count, monotonic time or None, as in `_update_seen`): the one
+        # message whose burst can carry that end's repeat.
+        self._end_seen: tuple[str, int, float | None] | None = None
+        # The transaction whose end's repeat the card has taken: the plugin says it once.
+        self._repeat_taken: str | None = None
         # Ends the follow of this card's own update over MQTT, when the card goes away mid-way.
         self._abandon_follow: Callable[[], None] | None = None
         self._removed = False
@@ -644,6 +648,15 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             self._update_seen = (count, None)
         elif self._update_seen[0] != count:
             self._update_seen = (count, now)
+        transaction = mqtt_update.parse_update(self.box.state.update)
+        if (
+            transaction is not None
+            and transaction["phase"] == "finished"
+            and (self._end_seen is None or self._end_seen[0] != transaction["id"])
+        ):
+            # A transaction only changes with an `update` message, so the count seen now is
+            # the one that carried its end - or, on the first read, one found already there.
+            self._end_seen = (transaction["id"], count, self._update_seen[1])
         arrived = self.box.updates.get(TOPIC_LAST_ERROR, 0)
         if arrived != self._refusals_read:
             self._refusals_read = arrived
@@ -659,33 +672,36 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         """Whether a complaint in the words of the end on `update` is that end's repeat.
 
         The plugin says an end on `update` and repeats it on `last_error` at once, in one burst,
-        and a refusal never comes with an `update`. So, as it arrives - live, not the broker's
-        replay: the first complaint in the end's words within `MQTT_UPDATE_END_WAIT` of an
-        `update` message is the repeat, whatever its stamp - a repeat after a slow reconnect
-        included; a second one with no `update` between them is a refusal in the same words -
-        within the end's two minutes included - as the call reads a complaint after an end it
-        had already seen. Anything else - a retained replay, whose order against `update` the
-        broker does not keep - is left to the words and the stamp.
+        and says that repeat once. It also publishes `update` for other reasons - on every
+        connect, after an origin check, after a relayed index - and a refusal can follow any of
+        those within a second. So, as it arrives - live, not the broker's replay: the first
+        complaint in the end's words within `MQTT_UPDATE_END_WAIT` of the `update` message at
+        which that transaction was first seen finished, with no `update` since, is the repeat,
+        whatever its stamp - a repeat after a slow reconnect included. Once the repeat is taken,
+        any later complaint in the same words is a refusal - within the end's two minutes
+        included - as the call reads a complaint after an end it had already seen. Anything
+        else - a complaint after a later `update` (the fresh session that reopens the doors
+        after an end republishes it), a retained replay, whose order against `update` the
+        broker does not keep - is left to the words and the stamp, and a repeat found by its
+        stamp is taken too.
         """
         transaction = mqtt_update.parse_update(self.box.state.update)
-        if self.box.state.last_error_retained or (
-            mqtt_update.end_words(error, transaction) is None
-        ):
-            if transaction is not None and mqtt_update.end_repeated(error, transaction):
-                self._repeat_taken = (transaction["id"], count)
-            return None
-        assert transaction is not None
-        if self._repeat_taken == (transaction["id"], count):
-            return False
-        seen = self._update_seen
-        if (
-            seen is not None
-            and seen[0] == count
-            and seen[1] is not None
-            and now - seen[1] <= MQTT_UPDATE_END_WAIT
-        ):
-            self._repeat_taken = (transaction["id"], count)
-            return True
+        retained = self.box.state.last_error_retained
+        if not retained and mqtt_update.end_words(error, transaction) is not None:
+            assert transaction is not None
+            if self._repeat_taken == transaction["id"]:
+                return False
+            seen = self._end_seen
+            if (
+                seen is not None
+                and seen[:2] == (transaction["id"], count)
+                and seen[2] is not None
+                and now - seen[2] <= MQTT_UPDATE_END_WAIT
+            ):
+                self._repeat_taken = transaction["id"]
+                return True
+        if transaction is not None and mqtt_update.end_repeated(error, transaction):
+            self._repeat_taken = transaction["id"]
         return None
 
     def _end_said(self, transaction: dict[str, Any]) -> str | None:
@@ -693,7 +709,7 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         if self._complaint_is_repeat is False:
             return None
         if self._complaint_is_repeat is True:
-            if self._repeat_taken is None or self._repeat_taken[0] != transaction["id"]:
+            if self._repeat_taken != transaction["id"]:
                 return None
             return mqtt_update.end_words(self._update_complaint, transaction)
         return mqtt_update.end_repeated(self._update_complaint, transaction)
