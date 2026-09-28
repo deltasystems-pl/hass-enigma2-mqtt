@@ -585,6 +585,26 @@ TOPIC_INTEGRATION_PREFIX: Final = "enigma2mqtt/integration"
 TOPIC_RELAY_REQUEST: Final = "relay_request"
 TOPIC_RELEASE_INDEX: Final = "enigma2mqtt/release_index"
 
+# The plugin's own update (from the release after 0.3.0): its state topic, the capability a
+# plugin the package manager installed claims, and how long Home Assistant follows one. The
+# helper holds a transaction for at most 1353 s (the plugin's TRANSACTION.md, section 2.4);
+# 25 minutes covers that with the minute of clock skew allowed and the file copying the
+# measurement leaves out.
+TOPIC_UPDATE: Final = "update"
+CAPABILITY_SELF_UPDATE: Final = "self_update"
+MQTT_UPDATE_FOLLOW: Final = 25 * 60
+# A `started` stamp further ahead of Home Assistant's clock than this is not believed.
+MQTT_UPDATE_FUTURE_TOLERANCE: Final = 60
+# The receiver refuses or starts its helper as the command arrives; a minute covers a slow
+# broker. Silence after it is said as silence, not as a refusal.
+MQTT_UPDATE_ANSWER_TIMEOUT: Final = 60
+# After `installed`, how long the receiver has to report the target on `info`.
+MQTT_UPDATE_PROOF_TIMEOUT: Final = 120
+# After an `interrupted` end Home Assistant cannot judge, how long the receiver has to repeat it on
+# `last_error`, where the plugin appends the repair when its doors stay closed. It says it right
+# after `update`; this only covers a slow broker.
+MQTT_UPDATE_END_WAIT: Final = 10
+
 # The plugin version the household chose in „Wersja wtyczki do instalacji", stored in the
 # entry's options so it survives a restart. Absent means the select's first option,
 # `latest`: the newest compatible release this card can install.

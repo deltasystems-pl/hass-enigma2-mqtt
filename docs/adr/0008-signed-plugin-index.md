@@ -167,11 +167,43 @@ above the installed one.
 
 After a refusal or a rollback over MQTT the card says so and does not try SSH. Over MQTT the
 command is published once the broker has confirmed the subscription that hears the answer, and the
-transaction is followed for up to 21 minutes - one more than the receiver's own hard limit - after
-which the card says it is still running on the receiver and keeps following. Success is `installed`
-together with the target's version and commit on `info`. A transaction the receiver started shows
-as in progress only while it started within the last 21 minutes, so a stale or forged retained
-state cannot hold the card for longer.
+transaction is followed for up to ~~21 minutes - one more than the receiver's own hard limit~~
+**25 minutes** (corrected 2026-09-27: the plugin's helper measured its own worst case at 1353 s,
+22.6 minutes, [TRANSACTION.md §2.4](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TRANSACTION.md#24-the-heartbeat-helper-written),
+and a follower needs that plus the minute of clock skew it allows, with room for the file copying
+the measurement leaves out), after which the card says it is still running on the receiver - not
+that it failed - and goes on showing what the receiver says. Success is `installed` together with
+the target's version and signed commit on `info`. A transaction the receiver started shows as in
+progress only while it is not finished and started within the last 25 minutes (and at most a
+minute ahead of Home Assistant's clock), so a stale or forged retained state cannot hold the card
+for longer; a broker client that keeps republishing a fresh fake phase can, and that is why the
+rescue of §8 asks the receiver's lock, never this topic.
+
+As built (2026-09-27): "the receiver reports" is its current `info` - the capability and the
+permission stated `true`, a plugin that retracted its `info` stating nothing. A momentary
+`offline` does not switch the path to SSH: a receiver restarts in the middle of its own update, and
+the card is unavailable then, and comes back on the MQTT path, never on the other one. Over
+MQTT only a release the signed index lists is offered or installed - the receiver verifies against
+its own copy of that index - so with no index held there is nothing to install and no badge,
+whatever SSH credentials are stored; the bundle counts only when it is such a release. The relay
+grant a followed transaction downloads from is held until the follow ends, so requests for other
+versions cannot evict it; a grant nobody fetched is taken back after a refusal or an end before the
+download, so a refusal is not followed by a notice that the package was "not downloaded". After a
+silence it stays for its ten minutes, since the receiver may still start late and come for it. An
+entry reload in the middle of a follow - saving the options does one - ends the call at once with a
+sentence that says so rather than "still running" 25 minutes later; the grant stays held through the
+unload and goes at its own expiry, and the card that replaces the old one shows the receiver's
+transaction from `update`. The result of an `interrupted` end does not say whether the package manager had
+run, so the card says it by the evidence: the files may be a mix - naming the forced reinstall (§8),
+or the manual installation without SSH credentials - when the receiver's sentence says its package
+manager had started or names the reinstall, on `update` or in the end's repeat on `last_error`, or
+when a phase from `installing` on was seen; "nothing changed" only when the receiver's own sentence
+says so; "cannot tell" otherwise. Phases seen only before `installing` prove nothing: the plugin
+polls its helper once a second, and a helper that dies within that second after writing
+`installing` is never published at that phase. A `last_error` is the repeat of an end only when it
+is stamped within two minutes of the end's `finished`, since a refusal can share the end's
+sentence word for word; a request made after a transaction ended never takes that end's words for
+its answer.
 
 ### 5. A receiver without internet gets both from Home Assistant, and verifies both itself
 
@@ -316,6 +348,17 @@ no receiver is set up, and one already past its read publishes nothing.
   size and sha256 - and serves it unauthenticated on the LAN, to one address, for ten minutes, to a
   receiver that verifies it again. The relay address travels over the broker, so a broker client can
   see it and name a host for the receiver to fetch from; the worst it achieves is a refusal.
+- A broker client can also publish a **forged retained `info`** for a receiver: the capability
+  `self_update`, `update_allowed` stated `true`, and an address of its choosing. The card then takes
+  the MQTT path - for a receiver that never claimed `self_update` the SSH path is no longer offered -
+  publishes `cmd/update` to the real receiver's command topic, and binds the relay grant to the
+  forged address. The forger can download a public signed package; the real receiver refuses the
+  command when its own `update_allowed` is off, ignores it when its plugin has no `cmd/update`, and
+  otherwise gets a `404` from the relay, fails as `download` and waits out its ten-minute limit.
+  That is **deny and delay, never an install**: what a receiver installs is a signed release it
+  verified itself. It is the same class as a forged `update` phase or `relay_request`, accepted for
+  the same reason - the Home Assistant Mosquitto add-on enforces no ACL (§9) - and the rescue of §8
+  asks nothing of these topics.
 - This card offers a plugin release only after the maintainer has approved the signing job for it in
   the plugin repository's CI; between the release and that approval, the version is on the opkg feed
   and in the next bundle, but not in the index.

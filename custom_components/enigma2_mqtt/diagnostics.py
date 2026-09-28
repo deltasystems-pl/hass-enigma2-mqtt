@@ -146,6 +146,7 @@ async def async_get_config_entry_diagnostics(
             # fields the contract names.
             "softcam": state.softcam,
             "epg_import": state.epg_import,
+            "update": state.update,
             "channels": _summarise_channels(state.channels),
             "zap_history": _summarise_zap_history(state.zap_history),
             "last_error": state.last_error,

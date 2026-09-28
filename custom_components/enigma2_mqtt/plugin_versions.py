@@ -9,6 +9,14 @@ once, here, from four sources:
   commit times, and which this integration may offer (`release_index.available`);
 - **this entry** - whether SSH credentials are stored, and the version chosen in the select.
 
+**Which path, and never both** (ADR-0008). A receiver that states the capability `self_update`
+with its box-only permission `update_allowed: true` updates itself over MQTT, and then only a
+release the signed index lists can be installed - the receiver verifies the package against its
+own copy of that index - so the bundle counts only as the release it may be. Otherwise the path is
+the SSH installer while credentials are stored, and there is none without them. A receiver that
+updates itself is never updated over SSH from this card, not even while no index is held: the
+receiver said how it wants to be updated.
+
 **The card offers what it will install, and only when it can** (ADR-0008 section 3).
 `latest_version` is the version the card would install when somebody presses the button, and it
 exists only while an install path does. Without one there is no badge: `latest_version` is the
@@ -56,6 +64,7 @@ from .const import (
 from .release_store import ReleaseIndexCache, async_release_index_cache
 
 PATH_SSH = "ssh"
+PATH_MQTT = "mqtt"
 
 # Where the card would take a build's package from.
 SOURCE_BUNDLE = "bundle"
@@ -140,8 +149,10 @@ class PluginVersions:
 
     @property
     def path(self) -> str | None:
-        """How this card would install: over SSH, with the bundle or a release of the index,
-        or not at all."""
+        """How this card would install: over MQTT, with a release of the index; over SSH, with
+        the bundle or a release of the index; or not at all."""
+        if self.box.self_update_offered:
+            return PATH_MQTT if self.index is not None else None
         if has_credentials(self.entry) and (self.bundle is not None or self.index is not None):
             return PATH_SSH
         return None
@@ -213,11 +224,12 @@ class PluginVersions:
         same number are both kept when they differ (a development bundle beside the release),
         the release first; the bundle that *is* the release is one build, not two.
         """
-        if self.path is None:
+        path = self.path
+        if path is None:
             return []
         found: dict[str, Build] = {}
         bundled = self.bundled() if self.bundle_refusal() is None else None
-        if bundled is not None:
+        if bundled is not None and path == PATH_SSH:
             found[bundled.display] = bundled
         for build in self._index_builds():
             found.setdefault(build.display, build)

@@ -28,10 +28,11 @@ no other path. `GET` only (a `HEAD` is not routed), the whole package whatever `
 
 **How many.** One grant per (receiver, version) - asking again for the same version gets the
 same address while enough of its ten minutes are left - and at most three per receiver. A fourth
-version evicts the receiver's oldest grant, unless that grant is being sent at this moment; a
-grant being sent is not replaced either. Then the new one is refused, so that a forged request
+version evicts the receiver's oldest grant, unless that grant is being sent at this moment or an
+update over MQTT that Home Assistant is following downloads from it; such a grant is not
+replaced either. Then the new one is refused, so that a forged request
 cannot take the package away from a download in flight. A receiver's grants go when its entry is
-unloaded.
+unloaded - but for one an update over MQTT downloads from, which goes at its own expiry.
 
 **Which address.** Home Assistant's own IPv4 address on the receiver's subnet, among the adapters
 Home Assistant knows; else its internal URL (`get_url` with the external and cloud URLs
@@ -191,6 +192,10 @@ class Grant:
     base: str | None = None
     # Responses being sent right now: a grant being sent is neither evicted nor replaced.
     fetching: int = 0
+    # Updates over MQTT following a transaction that downloads from this grant: held the same
+    # way, for as long as Home Assistant follows it (`mqtt_update`) - and, when the card that
+    # followed it went away mid-follow, until the grant expires.
+    held: int = 0
     served: int = 0
     cancel: CALLBACK_TYPE | None = field(default=None, repr=False)
 
@@ -255,12 +260,12 @@ class Relay:
         for grant in [grant for grant in held if grant.version == package.version]:
             # Too close to its end, or for other bytes or another address: replaced, never
             # a second grant of the same version - unless it is being sent right now.
-            if grant.fetching:
+            if grant.fetching or grant.held:
                 raise RelayError("relay_busy")
             self.drop(grant)
             held.remove(grant)
         if len(held) >= RELAY_GRANTS_PER_RECEIVER:
-            evictable = [grant for grant in held if not grant.fetching]
+            evictable = [grant for grant in held if not grant.fetching and not grant.held]
             if not evictable:
                 raise RelayError("relay_busy")
             self.drop(evictable[0])
@@ -284,9 +289,15 @@ class Relay:
 
     @callback
     def drop_node(self, node_id: str) -> None:
-        """Forget every grant of one receiver - its entry is going."""
+        """Forget every grant of one receiver - its entry is going.
+
+        Except one an update over MQTT downloads from (`held`): the receiver's transaction does
+        not stop because Home Assistant reloaded the entry - saving its options does that - and
+        taking the address away mid-download would fail an update the card that replaces this one
+        is showing. Such a grant goes at its own expiry, within ten minutes.
+        """
         for grant in list(self._grants.values()):
-            if grant.node_id == node_id:
+            if grant.node_id == node_id and not grant.held:
                 self.drop(grant)
         self._answered.pop(node_id, None)
         for key in [key for key in self._warned if key[0] == node_id]:
