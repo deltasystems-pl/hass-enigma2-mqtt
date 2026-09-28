@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import time
@@ -416,6 +417,20 @@ def test_a_lock_without_an_owner_record_is_not_handed_back(tmp_path: Path) -> No
     assert lock_dir.is_dir()
 
 
+def _run_helper(tmp_path: Path, *args: str) -> subprocess.CompletedProcess:
+    """Run the helper as the receiver does: a lone file, away from the integration.
+
+    Started from the package directory, Python would put that directory first on
+    `sys.path`, where the integration's `select.py` stands in for the standard library's.
+    """
+    standalone = tmp_path / "tmp" / "enigma2-mqtt-installer-0123456789ab.py"
+    standalone.parent.mkdir(exist_ok=True)
+    shutil.copyfile(installer_helper.__file__, standalone)
+    return subprocess.run(
+        [sys.executable, str(standalone), *args], capture_output=True, text=True, check=False
+    )
+
+
 @pytest.mark.parametrize("record", [None, {"pid": 1, "started": 1, "id": "a1b2c3d4e5f6"}])
 def test_a_refused_hand_back_says_so_by_its_own_exit_status(
     tmp_path: Path, record: dict | None
@@ -428,21 +443,7 @@ def test_a_refused_hand_back_says_so_by_its_own_exit_status(
     if record is not None:
         (lock_dir / "owner.json").write_text(json.dumps(record), encoding="ascii")
 
-    result = subprocess.run(
-        [
-            sys.executable,
-            installer_helper.__file__,
-            "hand-back",
-            str(lock_dir),
-            "--owner",
-            OURS,
-            "--id",
-            ABANDONED,
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = _run_helper(tmp_path, "hand-back", str(lock_dir), "--owner", OURS, "--id", ABANDONED)
 
     assert result.returncode == installer_helper.EXIT_LOCK_NOT_OURS
     assert "not this transaction's" in result.stderr
@@ -457,12 +458,7 @@ def test_the_claim_and_the_hand_back_carry_the_count_on_the_command_line(
     _stale_lock_of(lock_dir, ABANDONED)
 
     def helper(*args: str) -> subprocess.CompletedProcess:
-        return subprocess.run(
-            [sys.executable, installer_helper.__file__, *args],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        return _run_helper(tmp_path, *args)
 
     claimed = helper("claim", str(lock_dir), "--id", OURS)
     handed = helper(
