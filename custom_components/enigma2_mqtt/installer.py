@@ -1531,6 +1531,7 @@ async def _async_rollback(
     record: restart_rule.RestartRecord | None = None,
     hass: HomeAssistant | None = None,
     target: tuple[str, str] | None = None,
+    owner: str = "",
 ) -> None:
     """Restore only installer-owned paths and the exact pre-transaction metadata.
 
@@ -1765,8 +1766,7 @@ async def _async_rollback(
             released = await connector(credentials)
             try:
                 result = await released.run(
-                    f"python3 {shlex.quote(remote_helper)} release {shlex.quote(remote_lock)}",
-                    timeout=30,
+                    _release_command(remote_helper, remote_lock, owner), timeout=30
                 )
                 if result.exit_status:
                     raise InstallerError(InstallerErrorCode.ROLLBACK_FAILED)
@@ -2021,6 +2021,17 @@ _NOT_OURS = "not_ours"
 _NOT_HANDED_BACK = "not_handed_back"
 
 
+def _release_command(remote_helper: str, remote_lock: str, owner: str = "") -> str:
+    """The helper's `release`, which with `owner` removes the lock only while it names it.
+
+    The lock goes stale under a slow transaction, and a claimer may take it - rename it
+    away and make its own at the same name - before the release runs: released by path
+    alone, that live lock would be deleted.
+    """
+    command = f"python3 {shlex.quote(remote_helper)} release {shlex.quote(remote_lock)}"
+    return f"{command} --owner {owner}" if owner else command
+
+
 async def _async_hand_back(
     session: InstallerSession,
     remote_helper: str,
@@ -2262,12 +2273,12 @@ async def _async_release_after_withdraw(
     remote_helper: str,
     remote_lock: str,
     *leftovers: str,
+    owner: str = "",
 ) -> bool:
     """Release the lock after a withdrawal and tidy up; return whether it was released."""
     try:
         released = await session.run(
-            f"python3 {shlex.quote(remote_helper)} release {shlex.quote(remote_lock)}",
-            timeout=30,
+            _release_command(remote_helper, remote_lock, owner), timeout=30
         )
     except (OSError, TimeoutError):
         return False
@@ -3403,6 +3414,7 @@ async def _async_install_locked(
                         remote_ipk,
                         remote_manifest,
                         remote_provision_tmp,
+                        owner=nonce,
                     )
                     if withdrawal == "overlap":
                         _LOGGER.warning(
@@ -3455,8 +3467,7 @@ async def _async_install_locked(
             if not await _async_enigma_pids(cleanup) - old_enigma_pids:
                 raise InstallerError(InstallerErrorCode.RESTART_FAILED)
             released = await cleanup.run(
-                f"python3 {shlex.quote(remote_helper)} release {shlex.quote(remote_lock)}",
-                timeout=30,
+                _release_command(remote_helper, remote_lock, nonce), timeout=30
             )
             if released.exit_status:
                 raise InstallerError(InstallerErrorCode.ROLLBACK_FAILED)
@@ -3572,6 +3583,7 @@ async def _async_install_locked(
                     record=record,
                     hass=hass,
                     target=request.target(),
+                    owner=nonce,
                 )
             except asyncio.CancelledError:
                 _LOGGER.error(
@@ -3626,12 +3638,18 @@ async def _async_install_locked(
                         # transaction's to release either.
                         remote_lock_claimed = False
                     else:
+                        # With this transaction's id: after a hand-back that failed, the
+                        # lock at the path may already be a claimer's live one.
                         result = await release.run(
-                            f"python3 {shlex.quote(remote_helper)} release "
-                            f"{shlex.quote(remote_lock)}",
-                            timeout=30,
+                            _release_command(remote_helper, remote_lock, nonce), timeout=30
                         )
-                        if result.exit_status:
+                        if result.exit_status == installer_helper.EXIT_LOCK_NOT_OURS:
+                            _LOGGER.error(
+                                "Installer: the lock at %s is no longer this transaction's, "
+                                "so it is left alone",
+                                remote_lock,
+                            )
+                        elif result.exit_status:
                             raise InstallerError(InstallerErrorCode.ROLLBACK_FAILED)
                         remote_lock_claimed = False
                     await _async_remove_helper(release, remote_helper)

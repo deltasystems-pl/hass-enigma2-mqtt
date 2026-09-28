@@ -834,6 +834,69 @@ async def test_a_hand_back_refused_as_somebody_elses_lock_releases_nothing(
 
 
 @pytest.mark.parametrize(
+    "setup",
+    [{}, {"fail_on": "opkg install"}, {"question_on_restart": True}],
+    ids=["committed", "rolled_back", "withdrawn"],
+)
+async def test_every_release_names_the_transaction_that_claimed_the_lock(
+    hass: HomeAssistant, install_request: InstallRequest, tmp_path: Path, setup: dict
+) -> None:
+    receiver = FakeReceiver(**setup)
+
+    if not setup:
+        await _install(hass, install_request, tmp_path, receiver)
+    else:
+        with pytest.raises(InstallerError):
+            await _install(hass, install_request, tmp_path, receiver)
+
+    claim = _sent(receiver, "claim")[0].split()
+    nonce = claim[claim.index("--id") + 1]
+    releases = _sent(receiver, "release")
+    assert releases
+    assert all(release.split()[-2:] == ["--owner", nonce] for release in releases)
+
+
+async def test_the_release_after_a_failed_hand_back_releases_only_this_transaction_s_lock(
+    hass: HomeAssistant,
+    install_request: InstallRequest,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A hand-back that failed for any other reason is followed by a release - by then the
+    lock may be a claimer's that reclaimed ours in between. The release names this
+    transaction, and a lock that is no longer ours is left alone: not an error about a lock
+    that "remains", which would send somebody to delete a live install's lock by hand."""
+    receiver = FakeReceiver(
+        reclaimed_id="0123456789ab", snapshots={"ha-installer-0123456789ab"}
+    )
+    caplog.set_level(logging.WARNING, logger="custom_components.enigma2_mqtt.installer")
+    recovery = _recovery("busy")
+
+    async def run(self: FakeSession, command: str, **kwargs: Any):
+        if " hand-back " in command:
+            self.receiver.commands.append(command)
+            return CommandResult(1, "", "No such file or directory")
+        if " release " in command:
+            self.receiver.commands.append(command)
+            return CommandResult(
+                installer_helper.EXIT_LOCK_NOT_OURS, "", "the lock is not this transaction's"
+            )
+        return await recovery(self, command, **kwargs)
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, install_request, tmp_path, receiver, run=run)
+
+    claim = _sent(receiver, "claim")[0].split()
+    nonce = claim[claim.index("--id") + 1]
+    (release,) = _sent(receiver, "release")
+    assert release.split()[-2:] == ["--owner", nonce]
+    assert raised.value.code is MAY_PASS["busy"]
+    assert receiver.helper_removed is True
+    assert "no longer this transaction's, so it is left alone" in caplog.text
+    assert "lock remains" not in caplog.text
+
+
+@pytest.mark.parametrize(
     ("reclaimed", "snapshots"),
     [
         # Recovered, then the install failed on its own snapshot: nothing is left to recover.

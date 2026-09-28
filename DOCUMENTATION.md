@@ -922,9 +922,11 @@ the receiver sees - no internet and no answer from Home Assistant, a clock that 
 Assistant's address expired - is in `last_refusal`, in the household's language, for as long as it
 is on the receiver's `last_error`: the next command that succeeds clears both. The end of a
 transaction, which the receiver repeats on `last_error`, is never a refusal there; it is said once,
-in `receiver_transaction`. The repeat comes together with the end on the update topic, and a
-refusal never does, so a refusal in the very words of the last end - a second install refused
-for the same reason soon after - is still shown as a refusal. A phase on the
+in `receiver_transaction`. The receiver repeats an end once, together with the end on the update
+topic; it also publishes that topic for other reasons, so only the message that first carried
+the end counts. A refusal in the very words of the last end - a second install refused for the
+same reason soon after, even one that follows an unrelated update message - is still shown as a
+refusal. A phase on the
 broker that keeps the card busy cannot keep **„Wymuś reinstalację wtyczki (SSH)"** from running:
 it asks the lock on the receiver, never this topic.
 

@@ -186,7 +186,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hold the card for longer; the new attributes `receiver_transaction` (with `state` `in_progress`,
   `finished` or `stale`, and the end in words) and `last_refusal` (the receiver's last refusal of
   an update, in words - `no_relay` and `clock_skew` included - while it is on `last_error`, and
-  never the end of a transaction the receiver repeats there) say what it last said. The forced
+  never the end of a transaction the receiver repeats there, while a refusal in that end's words -
+  even right after the receiver publishes the update topic for another reason - is still shown)
+  say what it last said. The forced
   reinstall is shown over it and is never held by it. Diagnostics carry the topic.
 
 ### Changed
@@ -374,7 +376,9 @@ The version card and the release check:
   for a person to check. A handed-back lock names no boot that ever runs, so every stale rule -
   this helper's, released installers' and the plugin's - frees it at once on any clock, a
   receiver that rebooted into 1970 included. A hand-back refused because the lock is somebody
-  else's by now no longer ends in releasing that lock.
+  else's by now no longer ends in releasing that lock, and neither does one whose write failed
+  because a claimer reclaimed the lock in between. Every release of the lock now names the
+  transaction releasing it, and the helper leaves a lock that names another alone.
 - **A snapshot cut off while being taken is not recovered.** Its directory without
   `snapshot.json` - a power cut or a killed helper during the copy - belongs to a transaction that
   changed nothing, and is passed over instead of failing every recovery. The record is now synced

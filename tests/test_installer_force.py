@@ -996,6 +996,27 @@ async def test_a_failed_recovery_in_runlevel_4_still_brings_the_picture_back(
     assert receiver.helper_removed is True
 
 
+async def test_an_overlap_during_recovery_in_runlevel_4_brings_the_picture_back(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+) -> None:
+    """The interrupted transaction's snapshot is put back whole, and another run of the
+    package manager held its lock for part of it (exit 76). Nothing of the abandoned
+    transaction is left to put back, so the lock is released, not handed back; nothing is
+    installed over a database somebody else may have changed; and the picture still comes
+    back."""
+    receiver = _ours_stopped(lock_lost_on=" restore /home/root/mqttbridge-backups/ha-installer-")
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.ROLLBACK_OPKG_OVERLAP
+    assert _opkg(receiver) == []
+    assert not any(" hand-back " in command for command in receiver.commands)
+    assert any(" release " in command for command in receiver.commands)
+    assert receiver.respawns == ["start"]
+    assert receiver.enigma_running is True
+
+
 async def test_a_failed_install_in_runlevel_4_is_rolled_back_and_started(
     hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
 ) -> None:

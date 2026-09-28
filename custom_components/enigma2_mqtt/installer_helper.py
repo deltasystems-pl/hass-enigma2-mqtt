@@ -89,10 +89,9 @@ EXIT_OPKG_BUSY = 75
 # had lost its name while the helper held it. For a restore that is its own outcome: the
 # files are back, but an opkg run may have written the database at the same time.
 EXIT_OPKG_LOCK_LOST = 76
-# The exit status of a hand-back that found the lock no longer names the transaction
-# handing it back. The caller must then neither hand it back nor release it: a release
-# checks no owner, and the lock is somebody else's - a live self-update's, or another
-# install's.
+# The exit status of a hand-back or a release that found the lock no longer names the
+# transaction handing it back or releasing it. The caller must then leave it alone: the
+# lock is somebody else's - a live self-update's, or another install's.
 EXIT_LOCK_NOT_OURS = 77
 SETTINGS_PREFIX = "config.plugins.mqttbridge."
 # The snapshot directories this installer makes, and nothing else. The nonce is
@@ -1065,13 +1064,52 @@ def _write_owner(lock_dir: Path, transaction_id: str = "") -> None:
     _atomic_text(lock_dir / "owner.json", json.dumps(record) + "\n")
 
 
-def release_transaction(lock_dir: Path) -> None:
-    """Release only a well-formed installer transaction lock."""
-    owner = lock_dir / "owner.json"
-    if not owner.is_file():
-        raise ValueError("transaction lock has no owner")
-    owner.unlink()
-    lock_dir.rmdir()
+def release_transaction(lock_dir: Path, owner: str = "") -> None:
+    """Release only a well-formed installer transaction lock - with `owner`, only its own.
+
+    The installer releases its lock by path, and by then the lock may be somebody else's:
+    ours goes stale under a slow recovery, and a claimer may reclaim it - rename it away,
+    remove it and make its own at the same name - before the release runs. Deleting
+    whatever lock is at the path would then delete a live install's. With `owner` the
+    record must name that transaction and no `origin`, or `LockNotOursError` and the lock
+    is left alone.
+
+    Read and emptied through one descriptor of the directory, as `hand_back_transaction`
+    writes: the record that is removed is the one that was read. An emptied lock is fresh
+    to every claimer - an owner-less lock is judged by the directory's age - so none takes
+    it from here on, and the directory goes only while it is still the one at its name.
+    """
+    if not owner:
+        record = lock_dir / "owner.json"
+        if not record.is_file():
+            raise ValueError("transaction lock has no owner")
+        record.unlink()
+        lock_dir.rmdir()
+        return
+    if not TRANSACTION_ID.fullmatch(owner):
+        raise ValueError("a transaction id is twelve lowercase hexadecimal digits")
+    try:
+        directory = os.open(str(lock_dir), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    except OSError as error:
+        raise LockNotOursError("the lock is not this transaction's") from error
+    try:
+        try:
+            recorded = json.loads(_read_at(directory, "owner.json"))
+        except (OSError, ValueError) as error:
+            raise LockNotOursError("the lock is not this transaction's") from error
+        if not isinstance(recorded, dict) or "origin" in recorded or recorded.get("id") != owner:
+            raise LockNotOursError("the lock is not this transaction's")
+        try:
+            os.unlink("owner.json", dir_fd=directory)
+        except OSError as error:
+            # Judged as `hand_back_transaction` judges a failed write.
+            if not _still_named(lock_dir, directory):
+                raise LockNotOursError("the lock was taken while it was being released") from error
+            raise
+        if _still_named(lock_dir, directory):
+            os.rmdir(str(lock_dir))
+    finally:
+        os.close(directory)
 
 
 class LockNotOursError(ValueError):
@@ -1142,13 +1180,20 @@ def hand_back_transaction(
             "id": abandoned,
             "attempts": attempts,
         }
-        _write_at(directory, "owner.json", json.dumps(record) + "\n")
         try:
-            named = os.stat(str(lock_dir))
-        except OSError:
-            named = None
-        held = os.fstat(directory)
-        if named is None or (named.st_dev, named.st_ino) != (held.st_dev, held.st_ino):
+            _write_at(directory, "owner.json", json.dumps(record) + "\n")
+        except OSError as error:
+            # A claimer that finished its whole reclaim in between - renamed our lock away,
+            # removed it, made its own - leaves this write in a directory that is gone. Any
+            # failure here is judged by the identity below: our lock, still at its name, is a
+            # failure of ours; anything else is somebody else's lock now, and a generic
+            # failure would have the installer release it by path.
+            if not _still_named(lock_dir, directory):
+                raise LockNotOursError(
+                    "the lock was taken while it was being handed back"
+                ) from error
+            raise
+        if not _still_named(lock_dir, directory):
             raise LockNotOursError("the lock was taken while it was being handed back")
     finally:
         os.close(directory)
@@ -1981,7 +2026,8 @@ def main() -> int:
     # The transaction's id, written into the lock's owner record by `claim`; for
     # `hand-back`, the abandoned transaction the lock goes back to.
     parser.add_argument("--id", default="")
-    # `hand-back`: the transaction that holds the lock now, and hands it back.
+    # `hand-back` and `release`: the transaction that holds the lock now, and hands it back
+    # or releases it - only while the lock still names it.
     parser.add_argument("--owner", default="")
     # `hand-back`: how many recoveries of the abandoned transaction have failed, this one
     # included.
@@ -2087,7 +2133,11 @@ def _operate(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     elif args.operation == "lock-info":
         print(json.dumps(lock_info(args.path), sort_keys=True))
     elif args.operation == "release":
-        release_transaction(args.path)
+        try:
+            release_transaction(args.path, args.owner)
+        except LockNotOursError as error:
+            print(str(error), file=sys.stderr)
+            return EXIT_LOCK_NOT_OURS
     elif args.operation == "hand-back":
         try:
             hand_back_transaction(args.path, args.owner, args.id, args.attempts)

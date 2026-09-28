@@ -2383,3 +2383,167 @@ async def test_a_complaint_long_after_its_update_is_not_that_update_s_repeat(
     receiver.last_error(OPKG_BUSY, "opkg_busy")
     await hass.async_block_till_done()
     assert hass.states.get(PLUGIN).attributes["last_refusal"]["reason"] == "opkg_busy"
+
+
+def _republish(hass: HomeAssistant, finished: float, **changes: Any) -> None:
+    """The plugin says `update` again with the same ended transaction - on a connect, after
+    an origin check or a relayed index - with `changes` to its payload."""
+    payload = json.loads(
+        _transaction(
+            "finished", started=finished - 30, finished=finished, result="failed",
+            reason="opkg_busy", error=OPKG_BUSY,
+        )
+    )
+    payload.update(changes)
+    async_fire_mqtt_message(hass, UPDATE_TOPIC, json.dumps(payload))
+
+
+async def test_a_refusal_right_after_an_unrelated_update_is_a_refusal_on_the_card(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """The end and its repeat came together. Five minutes later the plugin says `update` for
+    another reason - its origin check changed the origin - and a second later refuses an
+    install started at the television in the end's words. Only the `update` that first carried
+    the end can carry its repeat: the card shows the refusal."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass)
+    finished = dt_util.utcnow().timestamp()
+    receiver.phase(
+        "finished", started=finished - 30, finished=finished, result="failed",
+        reason="opkg_busy", error=OPKG_BUSY,
+    )
+    receiver.last_error(OPKG_BUSY, "opkg_busy", ts=finished)
+    await hass.async_block_till_done()
+    assert hass.states.get(PLUGIN).attributes["last_refusal"] is None
+
+    freezer.tick(timedelta(seconds=300))
+    _republish(hass, finished, origin="reachable")
+    await hass.async_block_till_done()
+    freezer.tick(timedelta(seconds=1))
+    receiver.last_error(OPKG_BUSY, "opkg_busy")
+    await hass.async_block_till_done()
+    assert hass.states.get(PLUGIN).attributes["last_refusal"]["reason"] == "opkg_busy"
+
+
+async def test_a_refusal_after_an_unrelated_update_within_two_minutes_is_a_refusal(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """As above, inside the end's two minutes, where the stamp alone would call it the repeat:
+    the repeat was taken already, and the plugin says it once."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass)
+    finished = dt_util.utcnow().timestamp()
+    receiver.phase(
+        "finished", started=finished - 30, finished=finished, result="failed",
+        reason="opkg_busy", error=OPKG_BUSY,
+    )
+    receiver.last_error(OPKG_BUSY, "opkg_busy", ts=finished)
+    await hass.async_block_till_done()
+
+    freezer.tick(timedelta(seconds=30))
+    _republish(hass, finished)
+    await hass.async_block_till_done()
+    freezer.tick(timedelta(seconds=1))
+    receiver.last_error(OPKG_BUSY, "opkg_busy")
+    await hass.async_block_till_done()
+    assert hass.states.get(PLUGIN).attributes["last_refusal"]["reason"] == "opkg_busy"
+
+
+async def test_a_repeat_taken_by_its_stamp_is_taken(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A loaded receiver repeats the end twelve seconds after its `update`: past the burst, the
+    stamp says it is the repeat. A refusal in the same words twenty seconds later is then a
+    refusal, not the repeat a second time."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass)
+    finished = dt_util.utcnow().timestamp()
+    receiver.phase(
+        "finished", started=finished - 30, finished=finished, result="failed",
+        reason="opkg_busy", error=OPKG_BUSY,
+    )
+    await hass.async_block_till_done()
+    freezer.tick(timedelta(seconds=12))
+    receiver.last_error(OPKG_BUSY, "opkg_busy")
+    await hass.async_block_till_done()
+    assert hass.states.get(PLUGIN).attributes["last_refusal"] is None
+
+    freezer.tick(timedelta(seconds=20))
+    receiver.last_error(OPKG_BUSY, "opkg_busy")
+    await hass.async_block_till_done()
+    assert hass.states.get(PLUGIN).attributes["last_refusal"]["reason"] == "opkg_busy"
+
+
+async def test_the_repeat_after_the_session_that_reopens_the_doors_is_the_end_s(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """With its doors closed the plugin says the end on `update`, then reopens them with a
+    fresh session, which says `update` again and only then the repeat - with the reinstall
+    words. That repeat is the end's, found by its stamp, and its words reach the card."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass)
+    finished = dt_util.utcnow().timestamp()
+    ended = "the update was interrupted: the update helper stopped"
+    for _ in range(2):
+        receiver.phase(
+            "finished", started=finished - 30, finished=finished, result="interrupted",
+            reason="interrupted", error=ended,
+        )
+        await hass.async_block_till_done()
+        freezer.tick(timedelta(seconds=6))
+    receiver.last_error(ended + "; install the plugin again", "interrupted")
+    await hass.async_block_till_done()
+
+    attributes = hass.states.get(PLUGIN).attributes
+    assert attributes["last_refusal"] is None
+    assert attributes["receiver_transaction"]["message"] == FILES_REINSTALL_EN
+
+
+async def test_a_refusal_right_after_a_reconnect_is_a_refusal_on_the_card(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """The broker hands over an end from ten minutes ago, and its repeat is no longer on
+    `last_error`. The receiver reconnects - which says `update` again - and a second later
+    refuses an install in the end's words. That `update` did not first carry the end, so
+    the burst is not its repeat: the card shows the refusal."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass)
+    finished = dt_util.utcnow().timestamp() - 600
+    receiver.phase(
+        "finished", started=finished - 30, finished=finished, result="failed",
+        reason="opkg_busy", error=OPKG_BUSY, retain=True,
+    )
+    await hass.async_block_till_done()
+    freezer.tick(timedelta(seconds=5))
+
+    _republish(hass, finished)
+    await hass.async_block_till_done()
+    freezer.tick(timedelta(seconds=1))
+    receiver.last_error(OPKG_BUSY, "opkg_busy")
+    await hass.async_block_till_done()
+    assert hass.states.get(PLUGIN).attributes["last_refusal"]["reason"] == "opkg_busy"
