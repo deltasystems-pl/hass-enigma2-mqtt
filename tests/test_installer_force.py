@@ -1447,6 +1447,8 @@ async def test_a_self_update_still_rolling_back_is_named_so_the_household_waits(
     assert raised.value.interface_stopped is True
     assert raised.value.update_running is True
     assert "still running" in raised.value.detail
+    # The log line says the same as the household's sentence: not "stays stopped".
+    assert "stays stopped" not in raised.value.detail
 
 
 @pytest.mark.parametrize(
