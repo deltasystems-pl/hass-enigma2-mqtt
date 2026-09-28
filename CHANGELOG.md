@@ -390,6 +390,28 @@ The version card and the release check:
   every automation and device trigger written for a short press.
 - The restart record in the log says `channel: changed by the household` when somebody chose a
   channel after the start, instead of `lost`, which now only means the channel was not kept.
+- **An interrupted update over MQTT is said by the receiver's words first.** Its "nothing was
+  changed" wins over a phase seen on the way; an update stopped by a signal says the previous
+  version stays, and one whose lock another process took says the files are whole and names an
+  interface restart - where both used to say the files may be a mix and send the household to a
+  reinstall it did not need. The receiver's own reinstall words still win over all of them.
+- **A refusal in the words of the last update's end is shown on the card.** The end's repeat on
+  `last_error` comes with its `update`, a refusal never does; a second install refused for the
+  same reason within two minutes used to be taken for the end again, and an end repeated late
+  after a reconnect for a refusal.
+- **A failed update that could not put the previous files back names the repair there is**: the
+  forced reinstall only when SSH credentials are stored, the manual installation otherwise.
+- **A recovery of an abandoned installation whose restore finished under a lost opkg lock** is
+  said as that - the receiver was put back, another opkg run may have changed its package list -
+  and releases the lock, where it said the snapshot "could not be put back".
+- A helper file that cannot be read in Home Assistant is said as an upload that could not happen,
+  not as an SSH service that could not be reached.
+- A self-update lock that turned stale between the claim and the look at it is no longer called
+  a self-update "still running".
+- Handing a lock back after a failed recovery writes through the lock directory it read, and
+  refuses when a claimer took the lock meanwhile, so a live install's lock can no longer be made
+  to look handed back; a count of failed recoveries that is a boolean is refused.
+- Polish uses one phrasing, „Nic nie zmieniono.", for "nothing was changed".
 
 ### Known limits
 
@@ -404,6 +426,8 @@ The version card and the release check:
 
 ### Documentation
 
+- ADR-0000 refers to the operator's private notes without naming where they are kept; the PRD is
+  otherwise verbatim.
 - Comments and tests cite ADR-0008 instead of labels of a design document that is not part of
   this repository, and a test keeps such labels out.
 - **Installable plugin versions from a signed release index are planned**, in
