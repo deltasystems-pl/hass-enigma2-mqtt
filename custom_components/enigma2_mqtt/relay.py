@@ -1,7 +1,7 @@
 """The relay: a verified plugin package served to one receiver that has no internet of its own.
 
 A receiver without internet cannot fetch a release from the plugin's origin, and it must not
-have to (the design's OD 2). Home Assistant fetches and verifies the package (`release_package`),
+have to (ADR-0008, section 5). Home Assistant fetches and verifies the package (`release_package`),
 keeps the bytes in memory and serves them on a short-lived, unguessable address on the local
 network; the receiver downloads them from there and verifies them itself against its own signed
 index before opkg sees a byte. The relay is a courier, not an authority: the worst an attacker on

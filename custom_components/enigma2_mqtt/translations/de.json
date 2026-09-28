@@ -716,7 +716,7 @@
       "message": "Eine Einblendung blendet sich selbst aus, ihre Anzeigedauer muss daher {min} bis {max} Sekunden betragen, nicht {timeout}."
     },
     "bouquet_context_unsupported": {
-      "message": "Diese Receiver-Plugin-Version kann keinen Bouquet-Kontext aktivieren. Aktualisieren Sie das Plugin, um diese Aktion zu verwenden."
+      "message": "Diese Receiver-Plugin-Version kann keinen Bouquet-Kontext aktivieren. Aktualisiere das Plugin, um diese Aktion zu verwenden."
     },
     "unknown_channel": {
       "message": "In den Bouquets dieses Receivers gibt es keinen Sender namens {channel}."

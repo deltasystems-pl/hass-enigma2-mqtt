@@ -110,3 +110,18 @@ def test_no_entity_name_of_the_last_release_changes() -> None:
         for dotted, name in names.items():
             platform, key = dotted.split(".", 1)
             assert entity[platform][key]["name"] == name, f"{language}.json renames {dotted}"
+
+
+# The formal address: an imperative with "Sie" after it, or the capitalised possessive and
+# dative that only the formal "Sie" takes. "Sie" at the start of a sentence is also "she" or
+# "it" ("Sie besteht aus ..."), so it is not matched on its own.
+FORMAL_GERMAN = re.compile(r"\b\w+en Sie\b|\b(?:Ihnen|Ihr|Ihre|Ihren|Ihrem|Ihrer|Ihres)\b")
+
+
+def test_the_german_catalogue_speaks_to_the_reader_as_du_throughout() -> None:
+    """Every German string says "du"; one formal sentence among them reads as a mistake."""
+    texts = _flatten(json.loads((TRANSLATIONS / "de.json").read_text(encoding="utf-8")))
+
+    formal = {key: text for key, text in texts.items() if FORMAL_GERMAN.search(text)}
+
+    assert formal == {}

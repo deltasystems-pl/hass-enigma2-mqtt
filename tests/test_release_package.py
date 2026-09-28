@@ -1,7 +1,7 @@
 """A release of the signed index, fetched and verified before any receiver sees a byte of it.
 
-What the SSH path, the options flow's downgrade and the relay all stand on (spec section ae.7,
-"SSH path", and ae.3, "Channels"): only a version the rule allows; from the fixed origin, with no
+What the SSH path, the options flow's downgrade and the relay all stand on (ADR-0008, sections
+1 and 4): only a version the rule allows; from the fixed origin, with no
 redirect; believed only at the signed size and sha256, with a control file that names this package
 and this version; and cross-checked once a day per version against GitHub's own digest of the
 release asset, whose disagreement refuses and whose silence does not.

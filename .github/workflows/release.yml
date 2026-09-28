@@ -20,9 +20,43 @@ jobs:
       contents: read
     uses: ./.github/workflows/validate.yml
 
+  # Between releases `main` may bundle a candidate of the plugin - a development build - so
+  # that it can be tested here. A tag cut from such a `main` would publish that candidate to
+  # every household, so the zip is only built for a bundle that is a release of the plugin:
+  # a `release` build of the commit that carries the plugin's tag `v<version>`.
+  bundle-is-release:
+    name: Bundled plugin is a release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the pinned source commit
+        id: bundle
+        run: |
+          commit=$(python3 -c "import json; print(json.load(open('custom_components/enigma2_mqtt/bundled/metadata.json'))['source_commit'])")
+          case "$commit" in
+            *[!0-9a-f]*|'') echo "::error::invalid plugin source commit"; exit 1 ;;
+          esac
+          test "${#commit}" -eq 40
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+      # With its tags: whether the commit is a release is whether it carries one.
+      - uses: actions/checkout@v4
+        with:
+          repository: deltasystems-pl/enigma2-mqtt-bridge
+          ref: ${{ steps.bundle.outputs.commit }}
+          path: plugin-source
+          fetch-depth: 0
+
+      - name: Refuse a bundle that is not a plugin release
+        run: python3 tools/check-release-bundle.py --plugin-tree plugin-source
+
   release:
     name: Build and publish
-    needs: validate
+    needs: [validate, bundle-is-release]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
