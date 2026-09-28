@@ -277,6 +277,13 @@ The version card and the release check:
   once the plugin carries build ids; CI's rebuild of every bundled byte checks it, with the plugin's
   tags fetched. The bundled plugin's build id is read out of the package, and a package that names
   another commit than its source archive is refused.
+- **The bundled plugin is the plugin's candidate, not its 0.3.0 release**: a `development` build of
+  the plugin's `main` at `3cf8fd8`, which carries the signed self-update this integration's MQTT
+  path drives. It reports version 0.3.0 and shows as `0.3.0+g3cf8fd8`; by the one rule of ADR-0008
+  §3 it is never offered over an installed 0.3.0 release by itself (the same number), only when
+  chosen by name, and the forced reinstall installs it. CI rebuilds it byte for byte from that
+  commit, and the checks shared with the plugin (vectors, keys, contract) are pinned to the same
+  commit. The release of this integration bundles the plugin's release instead.
 - **A refused lock says when a stalled plugin self-update frees it.** Every installer path still
   takes the shared lock only by the released 30-minute stale rule - a lock whose heartbeat has
   stopped is never taken back earlier, since its `opkg` may still be running and a stopped helper

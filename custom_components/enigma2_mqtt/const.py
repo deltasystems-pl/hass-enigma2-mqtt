@@ -216,6 +216,10 @@ PLUGIN_SETTING_DEFAULTS: Final[dict[str, object]] = {
     "softcam_autoheal_seconds": DEFAULT_SOFTCAM_AUTOHEAL_SECONDS,
     "epg_import_allowed": False,
     "uninstall_allowed": False,
+    # Declared by the plugin after 0.3.0 (the signed self-update), and by the candidate bundled
+    # until its release; a plugin that does not know them never reads them.
+    "update_check": False,
+    "update_allowed": False,
     "log_level": "info",
     "epg_grid_events": 4,
 }
