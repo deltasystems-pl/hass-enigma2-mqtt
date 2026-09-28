@@ -797,6 +797,8 @@ async def test_every_end_is_said_in_words_and_never_retried_over_ssh(
         assert placeholders["url"] == "http://192.0.2.5:8123"
     ssh.assert_not_awaited()
     assert hass.states.get(PLUGIN).attributes["in_progress"] is False
+    # Ended before anybody fetched it: the address is taken back.
+    assert async_get_relay(hass).grants(NODE_ID) == []
 
 
 async def test_still_running_at_the_bound_is_not_a_failure(
@@ -1789,5 +1791,82 @@ async def test_an_entry_without_a_commit_is_proven_by_its_version(
         task = _install(hass)
         await _until(lambda: receiver.requests)
         receiver.report(TARGET, "f" * 40)
+        receiver.phase("finished", result="installed")
+        await asyncio.wait_for(task, 5)
+
+
+async def test_a_refusal_after_an_end_of_the_same_reason_is_a_refusal(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """The end and a later refusal can share a reason; the end's sentence tells them apart."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    ended = "the receiver's package manager was busy when the update got to it"
+    async_fire_mqtt_message(
+        hass,
+        UPDATE_TOPIC,
+        _transaction("finished", result="failed", reason="opkg_busy", error=ended),
+    )
+    async_fire_mqtt_message(
+        hass,
+        LAST_ERROR_TOPIC,
+        json.dumps({"cmd": "update", "error": ended, "reason": "opkg_busy", "ts": 1790500000}),
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(PLUGIN).attributes["last_refusal"] is None
+
+    async_fire_mqtt_message(
+        hass,
+        LAST_ERROR_TOPIC,
+        json.dumps(
+            {
+                "cmd": "update",
+                "error": "the receiver's package manager is busy",
+                "reason": "opkg_busy",
+                "ts": 1790500100,
+            }
+        ),
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(PLUGIN).attributes["last_refusal"]["reason"] == "opkg_busy"
+
+
+async def test_an_end_repeated_on_last_error_is_not_the_answer(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    lan: None,
+) -> None:
+    """The plugin says an earlier transaction's end again - a fresh session after its doors
+    reopened - in the minute after the request: that is not a refusal of it."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass, None)
+    await receiver.arm()
+
+    with patch(FETCH, AsyncMock(return_value=_package())):
+        task = _install(hass)
+        await _until(lambda: receiver.requests)
+        async_fire_mqtt_message(
+            hass,
+            LAST_ERROR_TOPIC,
+            json.dumps(
+                {
+                    "cmd": "update",
+                    "error": "the new plugin did not start; the previous version 0.3.0 is back",
+                    "reason": "not_started",
+                    "ts": 1,
+                }
+            ),
+        )
+        await _settle()
+        assert not task.done()
+        receiver.phase("downloading")
+        await _settle()
+        receiver.report()
         receiver.phase("finished", result="installed")
         await asyncio.wait_for(task, 5)
