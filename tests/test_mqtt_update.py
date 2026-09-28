@@ -1995,6 +1995,32 @@ async def test_a_refusal_after_an_end_of_the_same_reason_is_a_refusal(
     assert hass.states.get(PLUGIN).attributes["last_refusal"]["reason"] == "opkg_busy"
 
 
+async def test_a_refusal_in_other_words_right_after_an_end_is_a_refusal(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Inside the end's two minutes, a `busy` in the words of a lock left by a stopped helper is
+    not the repeat of an end said `busy` in the words of one still running."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass)
+    running = "an update is already running on the receiver"
+    receiver.phase("finished", result="failed", reason="busy", error=running)
+    receiver.last_error(running, "busy")
+    await hass.async_block_till_done()
+    assert hass.states.get(PLUGIN).attributes["last_refusal"] is None
+
+    receiver.last_error(
+        "the previous update stopped without finishing; a new one is possible in about 12 "
+        "minutes, when its lock on the receiver expires",
+        "busy",
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(PLUGIN).attributes["last_refusal"]["reason"] == "busy"
+
+
 @pytest.mark.parametrize("later", [5, 600], ids=["seconds later", "ten minutes later"])
 async def test_a_refusal_in_the_words_of_the_last_end_is_the_answer(
     hass: HomeAssistant,
