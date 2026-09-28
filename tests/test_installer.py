@@ -111,10 +111,15 @@ class FakeReceiver:
     # A restarted interface takes a while before OpenWebif answers: this many reads of
     # the state after a restart find nothing.
     blind_reads_after_restart: int = 0
-    # A claim that reclaims an abandoned installer lock reports its id; the snapshot
-    # named after it may or may not still be there.
+    # A claim that reclaims an abandoned installer lock reports its id, and how many
+    # recoveries of it have failed; the snapshot named after it may or may not still be
+    # there. The claim takes the lock, so what it reported is gone from it - until a
+    # hand-back puts an id and a count into it again.
     reclaimed_id: str = ""
+    reclaimed_attempts: int = 0
+    # Complete snapshots, and directories of snapshots cut off before their record.
     snapshots: set[str] = field(default_factory=set)
+    partial_snapshots: set[str] = field(default_factory=set)
     # The stop-and-restore script's status lines, as its status file holds them.
     r2_steps: list[str] = field(default_factory=list)
     r2_restore_status: int = 0
@@ -304,10 +309,26 @@ class FakeSession:
                 receiver.service = reference
             return CommandResult(0)
         if " claim " in command:
-            return CommandResult(0, json.dumps({"reclaimed": receiver.reclaimed_id}) + "\n")
+            answer = {"reclaimed": receiver.reclaimed_id, "attempts": receiver.reclaimed_attempts}
+            receiver.reclaimed_id = ""
+            receiver.reclaimed_attempts = 0
+            return CommandResult(0, json.dumps(answer) + "\n")
+        if " hand-back " in command:
+            words = command.split()
+            receiver.reclaimed_id = words[words.index("--id") + 1]
+            receiver.reclaimed_attempts = (
+                int(words[words.index("--attempts") + 1]) if "--attempts" in words else 0
+            )
+            return CommandResult(0)
+        if command.startswith("test -f /home/root/mqttbridge-backups/") and command.endswith(
+            "/snapshot.json"
+        ):
+            name = command.split("/home/root/mqttbridge-backups/", 1)[1].split("/", 1)[0]
+            return CommandResult(0 if name in receiver.snapshots else 1)
         if command.startswith("test -d /home/root/mqttbridge-backups/"):
             name = command.split("/home/root/mqttbridge-backups/", 1)[1]
-            return CommandResult(0 if name in receiver.snapshots else 1)
+            present = receiver.snapshots | receiver.partial_snapshots
+            return CommandResult(0 if name in present else 1)
         if " snapshot " in command:
             receiver.backup_exists = True
         if command.startswith("opkg install"):

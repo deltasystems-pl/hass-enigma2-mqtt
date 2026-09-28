@@ -327,17 +327,29 @@ The version card and the release check:
   which needs no room for data, and the script reads that. A restore that is still lost is
   reported as one whose outcome is not known, and a missing status file no longer claims the
   script never ran - a reboot empties /tmp too.
-- **A failed recovery of an abandoned installation keeps its id.** When putting back the snapshot
-  of a transaction that was abandoned without releasing its lock fails, the lock is handed back to
-  that transaction - stale, as it was - instead of released, so the next install puts that
-  snapshot back first rather than forgetting it.
+- **A failed recovery of an abandoned installation keeps its id - a bounded number of times.**
+  When putting back the snapshot of a transaction that was abandoned without releasing its lock
+  fails in a way a later try may get past - opkg busy with another run, a connection that dropped
+  or did not answer - the lock is handed back to that transaction, stale as it was, instead of
+  released, so the next install puts that snapshot back first rather than forgetting it. The lock
+  counts the failed recoveries; the third, or any failure that would repeat the same way, releases
+  it, tells the household the receiver could not be put back, and names the snapshot in the log
+  for a person to check. A handed-back lock names no boot that ever runs, so every stale rule -
+  this helper's, released installers' and the plugin's - frees it at once on any clock, a
+  receiver that rebooted into 1970 included. A hand-back refused because the lock is somebody
+  else's by now no longer ends in releasing that lock.
+- **A snapshot cut off while being taken is not recovered.** Its directory without
+  `snapshot.json` - a power cut or a killed helper during the copy - belongs to a transaction that
+  changed nothing, and is passed over instead of failing every recovery. The record is now synced
+  to the flash before the snapshot returns, so its absence proves that on any filesystem.
 - **Rolling back a first install checks the filesystem before opkg's records.** On an image with
   `Plugins/` on a filesystem of its own, the rename that takes the new plugin away fails; it is
   now checked before opkg's records are rewritten, as a rollback over an earlier version already
   was.
 - **Values a later plugin may add are tolerated.** An `oscam` reader of a kind this integration
   does not know is skipped, and the rest of the report still applies, where the whole report used
-  to be discarded. A `key` press other than `short` or `long` fires nothing, where it used to fire
+  to be discarded. A skipped source still counts as present: one a later plugin re-kinds keeps its
+  entity, name and area. A `key` press other than `short` or `long` fires nothing, where it used to fire
   every automation and device trigger written for a short press.
 - The restart record in the log says `channel: changed by the household` when somebody chose a
   channel after the start, instead of `lost`, which now only means the channel was not kept.

@@ -488,7 +488,7 @@ def test_the_claim_says_what_it_reclaimed_on_its_output(
         text=True,
     )
 
-    assert json.loads(result.stdout) == {"reclaimed": ""}
+    assert json.loads(result.stdout) == {"reclaimed": "", "attempts": 0}
 
 
 def test_a_zap_that_openwebif_refuses_is_not_a_zap(tmp_path: Path, socket_enabled: None) -> None:

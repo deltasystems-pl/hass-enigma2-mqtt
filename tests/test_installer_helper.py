@@ -640,6 +640,38 @@ def test_incomplete_snapshot_is_rejected_before_live_files_change(tmp_path: Path
     assert (root / "usr/lib/opkg/status").read_bytes() == before
 
 
+def test_the_snapshot_record_is_on_the_flash_before_the_snapshot_returns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`snapshot.json` is the snapshot's last write, and nothing is changed until the
+    snapshot has returned. Synced before it returns, its absence after a power cut proves
+    the cut came before any change - on any filesystem, whatever order it writes back in
+    - which is what lets a recovery pass over a snapshot directory without one."""
+    root = tmp_path / "root"
+    backup = tmp_path / "backup"
+    _receiver_tree(root)
+    synced: list[str] = []
+    real_fsync = os.fsync
+
+    def fsync(descriptor: int) -> None:
+        synced.append(os.readlink(f"/proc/self/fd/{descriptor}"))
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+
+    snapshot(root, backup)
+
+    record = backup / "snapshot.json"
+    assert json.loads(record.read_text(encoding="utf-8"))["schema"] == 2
+    # The record's own data, under a temporary name, then the directory that names it.
+    assert any(Path(path).name.startswith("snapshot.json.") for path in synced)
+    assert str(backup) in synced
+    assert synced[-1] == str(backup)
+    assert sorted(item.name for item in backup.iterdir() if item.name.startswith("snapshot")) == [
+        "snapshot.json"
+    ]
+
+
 def test_snapshot_refuses_symlink_plugin_directory(tmp_path: Path) -> None:
     root = tmp_path / "root"
     backup = tmp_path / "backup"
