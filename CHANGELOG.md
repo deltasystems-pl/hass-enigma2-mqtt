@@ -22,15 +22,17 @@ plugin 0.4.0 that permits it (`update_allowed`) is updated by the plugin itself 
 receiver over SSH when SSH credentials are stored, and **without an install path there is no
 update badge** - a behaviour change for a receiver behind the bundled plugin without SSH
 credentials. A receiver without internet gets the index and the package through Home Assistant and
-verifies both itself. An older plugin is installed only through a confirmed step in the options
-flow, and „Wymuś reinstalację wtyczki (SSH)" (*Force plugin reinstall (SSH)*) reinstalls the
-bundled plugin without needing the plugin to answer. Every restart the SSH installer causes now
-uses the receiver's own clean restart, which keeps the channel being watched.
+verifies both itself. Home Assistant never starts a downgrade over MQTT: it offers an older plugin
+only through a confirmed step in the options flow, over SSH (a downgrade chosen on the receiver
+itself may fetch its package through the relay, and the receiver verifies it against its own
+index). „Wymuś reinstalację wtyczki (SSH)" (*Force plugin reinstall (SSH)*) reinstalls the bundled
+plugin without needing the plugin to answer. An install or update over SSH now restarts the
+receiver's interface with the image's own clean restart, which keeps the channel being watched.
 
 **The integration now connects to more than your broker and, when asked, your receiver.** It reads
-the signed index from the plugin's fixed HTTPS origin when somebody asks for a check, when the
-daily check is on (off by default) and for an install; it downloads a package from there for an
-install, and asks GitHub's API at most once per version a day to cross-check its digest; and it
+the signed index from the plugin's fixed HTTPS origin when somebody asks for a check and when the
+daily check is on (off by default); it downloads a package from there for an install or a relay,
+and asks GitHub's API to cross-check the package's digest; and it
 serves a verified package, without authentication, to one receiver's address on your LAN for ten
 minutes when that receiver has no internet. The policy in SECURITY.md
 ([link](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/SECURITY.md)) is
@@ -50,9 +52,10 @@ an index signed with a higher-ranked test key accepted and a later lower-ranked 
 the forced reinstall - run with the plugin switched off and after the receiver's update helper was
 killed during an install, refused during an install started on the television while a client was
 streaming from the receiver, and refused on the lock the killed helper left, with the minutes until
-that lock may be taken. Not run on a receiver: a power loss, the options-flow downgrade, and the
-SSH installer's stop-and-restore paths - its rollback that puts the settings back, and the forced
-reinstall's respawn loop and recovery in runlevel 4.
+that lock may be taken. Not run on a receiver: a power loss, the options-flow downgrade, the SSH
+installer's withdrawal when the image asks a question instead of restarting, and its
+stop-and-restore paths - the rollback that puts the settings back, and the forced reinstall's
+respawn loop and recovery in runlevel 4.
 
 ### Added
 

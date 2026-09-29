@@ -43,13 +43,14 @@ connects - since 0.4.0, and only for the receiver plugin's releases - to:
 
 - the plugin's release origin, `https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/`, over
   HTTPS with a verified certificate and no redirects: for the signed release index when somebody
-  presses *Sprawdź aktualizacje wtyczki* or Home Assistant's own check for updates (at most once in
-  ten minutes), once a day when the option to check daily is on (off by default), and for an
-  install; and for the package of the release an install or a downgrade needs, unless the bundled
-  package is those very bytes;
-- GitHub's API, at most once per version a day during an install, to compare GitHub's own digest
-  of the release asset with the signed checksum. A disagreement refuses the install; an API that
-  cannot be reached does not.
+  presses *Sprawdź aktualizacje wtyczki* (at most once in ten minutes, a limit shared with Home
+  Assistant's own check for updates, which asks only while the daily option is on), and once a
+  day when the option to check daily is on (off by default); and for the package of a release that
+  an install, a downgrade or the relay below needs, unless the bundled package is those very
+  bytes;
+- GitHub's API, when such a package is downloaded, to compare GitHub's own digest of the release
+  asset with the signed checksum - its answer is kept for a day, in memory. A disagreement refuses
+  the package; an API that cannot be reached does not.
 
 It also **serves** a package: when a receiver without internet asks, or when the card updates a
 receiver over MQTT, Home Assistant offers the verified package at
@@ -62,16 +63,18 @@ more.
 
 **What an install trusts** ([ADR-0008](docs/adr/0008-signed-plugin-index.md)). Home Assistant
 installs, and asks a receiver to install, only a release named in the plugin's signed release
-index, and holds the package to that entry's size and SHA-256 before the receiver is connected to;
-the receiver checks it again. The index is verified with two Ed25519 public keys built into this
+index, and holds the package to that entry's size and SHA-256 before the receiver is connected to
+or the package is relayed; the receiver checks it again. The index is verified with two Ed25519 public keys built into this
 integration and into the plugin: a **main key**, used only in the plugin repository's CI, in a
 signing job the maintainer approves by hand for each index, and a **spare key** of higher rank,
 kept sealed offline, which signs only if the main key is lost or leaked. An index is accepted only
 when its serial rises for its key - by at most 1000 - and its key is not ranked below one already
 accepted; every newly accepted index is announced in the log and as a persistent notification with
 its serial, its key, the versions it adds and withdraws, and its floor. The origin, the broker and
-Home Assistant's relay are couriers, not authorities. An older plugin is installed only over SSH,
-through a confirmed step in the options flow; nothing is downgraded over MQTT. A lost or leaked
+Home Assistant's relay are couriers, not authorities. Home Assistant never starts a downgrade over
+MQTT: it offers an older plugin only over SSH, through a confirmed step in the options flow. A
+downgrade chosen on the receiver itself, on its screen or its OpenWebif page, may fetch its package
+through the relay; the receiver verifies it against its own index. A lost or leaked
 main key is handled as the plugin's
 [RELEASE-INDEX.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/RELEASE-INDEX.md#when-the-main-key-is-lost-or-leaked)
 says: a leak is treated as a theft - the spare signs the next index, and the next release of both
@@ -82,7 +85,9 @@ halves no longer embeds the main key.
 - Whoever controls the origin, the broker or the network in between can delay or withhold an index
   or an install - a broker client can, for example, forge a receiver's retained `info` so that the
   card binds its relay to an address of the forger's choosing - but cannot get anything installed
-  that the index does not name. That is deny and delay, never an install.
+  that the index does not name. That is deny and delay, never an install. A forged
+  `relay_request` also makes Home Assistant download a release the rule allows from the origin,
+  and cross-check it with GitHub - at most once a minute per receiver.
 - An index has **no expiry**: a withheld index cannot be detected, and a withdrawal reaches an
   installation only with a newer index.
 - Because the main key is used in CI, a compromise of the maintainer's GitHub account, a malicious
