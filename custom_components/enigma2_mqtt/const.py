@@ -216,8 +216,8 @@ PLUGIN_SETTING_DEFAULTS: Final[dict[str, object]] = {
     "softcam_autoheal_seconds": DEFAULT_SOFTCAM_AUTOHEAL_SECONDS,
     "epg_import_allowed": False,
     "uninstall_allowed": False,
-    # Declared by the plugin after 0.3.0 (the signed self-update), and by the candidate bundled
-    # until its release; a plugin that does not know them never reads them.
+    # Declared by the plugin from 0.4.0 on (the signed self-update); a plugin that does not know
+    # them never reads them.
     "update_check": False,
     "update_allowed": False,
     "log_level": "info",
@@ -491,7 +491,7 @@ RECORD_ACTIONS: Final = ("start", "stop")
 # The plugin release this version of the integration is written against: the version
 # the update entity shows as the one to install when no bundle loads. With a bundle, the
 # bundle's own version decides.
-SUPPORTED_PLUGIN_VERSION: Final = "0.3.0"
+SUPPORTED_PLUGIN_VERSION: Final = "0.4.0"
 PLUGIN_RELEASES_URL: Final = (
     "https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases"
 )
@@ -585,7 +585,7 @@ TOPIC_INTEGRATION_PREFIX: Final = "enigma2mqtt/integration"
 TOPIC_RELAY_REQUEST: Final = "relay_request"
 TOPIC_RELEASE_INDEX: Final = "enigma2mqtt/release_index"
 
-# The plugin's own update (from the release after 0.3.0): its state topic, the capability a
+# The plugin's own update (from 0.4.0 on): its state topic, the capability a
 # plugin the package manager installed claims, and how long Home Assistant follows one. The
 # helper holds a transaction for at most 1353 s (the plugin's TRANSACTION.md, section 2.4);
 # 25 minutes covers that with the minute of clock skew allowed and the file copying the

@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import timedelta
 import json
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -69,15 +70,22 @@ from custom_components.enigma2_mqtt.update import (
 )
 
 from .conftest import (
-    INFO,
+    INFO as BOX_INFO,
     INFO_TOPIC,
     NODE_ID,
-    PLUGIN_VERSION,
     async_setup_box,
     async_setup_box_then_retained,
 )
 from .signed_index import commit_time_of, keyset, release, sign
 from .test_options_flow import PLUGIN_DEFAULT_SETTINGS, PLUGIN_SETTINGS, _arm_config_ack
+
+# The version the scenarios in this file are written around: the bundled plugin's, and the one
+# the example receiver runs. They were written while the bundle was a 0.3.0 package, and place the
+# index's releases and the receiver's other versions around that number, so they keep it whatever
+# release is bundled - a release pull request that bundles the next release does not rewrite
+# them. The bundle's bytes stay the real package's.
+PLUGIN_VERSION = "0.3.0"
+INFO = {**BOX_INFO, "plugin": PLUGIN_VERSION}
 
 PLUGIN = "update.dekoder_salon_plugin"
 SELECT = "select.dekoder_salon_plugin_version_to_install"
@@ -119,8 +127,17 @@ def release_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     real = _load_real_bundle()
     monkeypatch.setattr(
-        bundle_module, "load_bundled_plugin", lambda: replace(real, build=None)
+        bundle_module,
+        "load_bundled_plugin",
+        lambda: replace(real, version=PLUGIN_VERSION, build=None),
     )
+
+
+@pytest.fixture
+def box_on_the_broker(box_on_the_broker: dict[str, str | bytes]) -> dict[str, str | bytes]:
+    """The example receiver, running the version these scenarios are written around."""
+    box_on_the_broker[INFO_TOPIC] = json.dumps(INFO)
+    return box_on_the_broker
 
 
 async def _setup(
@@ -458,6 +475,7 @@ def _candidate_bundle(time: int):
     real = _load_real_bundle()
     return replace(
         real,
+        version=PLUGIN_VERSION,
         build={"commit": CANDIDATE_COMMIT, "time": time, "dirty": False,
                "flavour": "development"},
     )
@@ -936,7 +954,10 @@ async def test_the_integration_topic_says_what_this_integration_works_with(
     assert len(calls) == 1
     topic, payload, qos, retain = calls[0].args[:4]
     assert (qos, retain) == (1, True)
-    assert json.loads(payload) == {"integration": "0.3.1", "contract": 1, "plugin_min": "0.2.0"}
+    manifest = json.loads((Path(bundle_module.__file__).parent / "manifest.json").read_text())
+    assert json.loads(payload) == {
+        "integration": manifest["version"], "contract": 1, "plugin_min": "0.2.0"
+    }
 
 
 async def test_the_domain_holds_one_picture_per_entry(

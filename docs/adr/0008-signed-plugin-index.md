@@ -3,8 +3,8 @@
 **Status:** accepted 2026-09-26, with the first code that implements it: the signed index
 reader, the compatibility rule, the build ids, the two new entities and the no-badge rule
 (§1-§3), the integration topic and the two messages at removal (§2, §10). The install paths of
-§4-§6 and §8-§9 are built in later changes; until each ships, the released integration behaves
-as the records it supersedes describe
+§4-§6 and §8-§9 were built in later changes; all of it shipped in 0.4.0, and until then the
+released integration behaved as the records it supersedes describe
 **Date:** 2026-09-26
 **Supersedes:** in part, once accepted - [ADR-0002](0002-scope-after-m0.md) §6, "There is no
 runtime download path for executable code, and there is no release check that phones home" (its
@@ -101,7 +101,7 @@ and settings, add a value to an enumeration, add a refusal and tighten free text
 retype or change a meaning - except as a named in-major exception, which the plugin decides in the
 pull request that makes it, after checking it against this integration's code and citing it by file
 and line. Four are named so far: `zap-moves-channel-list` and `epg-grid-generated-means-changed` (0.3.0),
-`timers-lists-finished` and `zap-under-popup-recorded` (not yet released).
+`timers-lists-finished` and `zap-under-popup-recorded` (0.4.0).
 
 This integration's half of the rule: ignore what it does not know, treat a value of an enumeration
 it does not know as unknown, and read a member it expects and does not find as the older plugin it
@@ -253,7 +253,7 @@ floor, never a withdrawn version.
 ### 7. Every restart the installer causes keeps the household's channel - from 0.4.0
 
 The installer follows the restart rule of
-[TRANSACTION.md §5](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TRANSACTION.md#5-the-restart-rule-planned-for-040-both-programs):
+[TRANSACTION.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TRANSACTION.md), section 5:
 
 - **Restart (R1)** wherever only the plugin's files changed: the preflight refuses while recording,
   streaming, in standby or with a timer due within ten minutes, and checks every package the release
@@ -407,7 +407,7 @@ no receiver is set up, and one already past its read publishes nothing.
   rule binds every later implementation, which may only lengthen it. Only the plugin's tests run
   against the other program's released code - a copy of this integration's released
   `installer_helper.py`; this integration tests the plugin's helper from the bundled source archive,
-  which is the candidate it ships, not a release.
+  which between releases is the candidate it ships, not a release.
 - On the SSH path the running plugin has no doors: it runs with the new files on disk until the
   restart, for up to 60 seconds when the image asks a question. Accepted as bounded; the MQTT path
   closes its doors.

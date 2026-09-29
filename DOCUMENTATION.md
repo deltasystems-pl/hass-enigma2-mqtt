@@ -60,14 +60,15 @@ works too: copy `custom_components/enigma2_mqtt` into your `config/custom_compon
 
 | Integration | Plugin | Status |
 |---|---|---|
-| 0.3.1 | 0.3.0 | current release |
+| 0.4.0 | 0.4.0 | current release |
+| 0.3.1 | 0.3.0 | superseded |
 | 0.3.0 | 0.3.0 | superseded |
 | 0.2.0 | 0.2.0 | superseded |
 | 0.1.0 | 0.1.0 | superseded |
 
 The integration ships the plugin it was built against, so the two move together. The bundle in
 this release is byte for byte the package on the plugin's own
-[releases page](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/tag/v0.3.0), and
+[releases page](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/tag/v0.4.0), and
 `custom_components/enigma2_mqtt/bundled/metadata.json` carries the SHA-256 to check it with.
 The integration refuses nothing when the versions differ, but the `update` entity tells you
 when the box runs a plugin older than the one this release was written against.
@@ -828,7 +829,7 @@ and the index has not withdrawn it; a bundle the rule refuses is named in the su
 reason, and never installed - by the card, or by the guided installer updating an older plugin,
 which ends with the same reason in words.
 
-**Versions are shown with their build.** From the plugin release after 0.3.0 the receiver reports
+**Versions are shown with their build.** From plugin 0.4.0 on the receiver reports
 a build id on `info.build`, and the card shows a development build as `0.3.0+g1a2b3c4` (with
 `.dirty` when its tree was not clean) and a release build as `0.3.0`. **The card compares release
 numbers only.** A higher number is an update. The same number is never one, in either direction:
@@ -871,7 +872,7 @@ safe direction, since nothing on the receiver changes. The card never installs a
 than the one running.
 
 **A receiver that updates itself is updated over MQTT, and only that way** (ADR-0008 §4). From
-the plugin release after 0.3.0, a receiver whose `info` names the capability `self_update` and
+plugin 0.4.0 on, a receiver whose `info` names the capability `self_update` and
 whose own setting `update_allowed` is on (set on the receiver, or ticked in the guided installer -
 never over MQTT) is updated by the plugin itself: `update_path` is `mqtt`, whatever SSH
 credentials are stored. Pressing install downloads and verifies the release as above, serves it

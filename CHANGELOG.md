@@ -7,9 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.4.0] - 2026-09-29
+
+The release in which Home Assistant installs the receiver plugin's own releases, and only those
+named in the plugin's signed release index - the Home Assistant half of the plugin's signed
+self-update, decided in this repository's
+ADR-0008 ([docs/adr/0008-signed-plugin-index.md](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0008-signed-plugin-index.md))
+and, for the receiver, in the plugin's
+ADR-0015 ([docs/adr/0015-signed-self-update.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0015-signed-self-update.md)).
+The update card offers what it will install, and only while it can install it: a receiver on
+plugin 0.4.0 that permits it (`update_allowed`) is updated by the plugin itself over MQTT, any other
+receiver over SSH when SSH credentials are stored, and **without an install path there is no
+update badge** - a behaviour change for a receiver behind the bundled plugin without SSH
+credentials. A receiver without internet gets the index and the package through Home Assistant and
+verifies both itself. Home Assistant never starts a downgrade over MQTT: it offers an older plugin
+only through a confirmed step in the options flow, over SSH (a downgrade chosen on the receiver
+itself may fetch its package through the relay, and the receiver verifies it against its own
+index). „Wymuś reinstalację wtyczki (SSH)" (*Force plugin reinstall (SSH)*) reinstalls the bundled
+plugin without needing the plugin to answer. An install or update over SSH now restarts the
+receiver's interface with the image's own clean restart, which keeps the channel being watched.
+
+**The integration now connects to more than your broker and, when asked, your receiver.** It reads
+the signed index from the plugin's fixed HTTPS origin when somebody asks for a check and when the
+daily check is on (off by default); it downloads a package from there for an install or a relay,
+and asks GitHub's API to cross-check the package's digest; and it
+serves a verified package, without authentication, to one receiver's address on your LAN for ten
+minutes when that receiver has no internet. The policy in SECURITY.md
+([link](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/SECURITY.md)) is
+rewritten for it: what an install trusts, and what that does not cover.
+
+The bundled plugin is, byte for byte, the plugin's own release v0.4.0
+([link](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/tag/v0.4.0)).
+Receivers on plugin 0.2.0 and 0.3.x are still supported (the same contract, 1); the update over
+MQTT, the relay for a receiver without internet and the build ids need plugin 0.4.0, and such a
+receiver is updated to it over SSH, or by hand.
+
+Before this release, its candidate ran on one receiver together with the plugin's 0.4.0 candidate:
+an update from the card over SSH with the clean restart; an upgrade over MQTT through Home
+Assistant's relay; a downgrade to 0.2.0 chosen on the television of a receiver without internet,
+through the relay; a deliberately broken release that the receiver put back, followed on the card;
+an index signed with a higher-ranked test key accepted and a later lower-ranked one refused; and
+the forced reinstall - run with the plugin switched off and after the receiver's update helper was
+killed during an install, refused during an install started on the television while a client was
+streaming from the receiver, and refused on the lock the killed helper left, with the minutes until
+that lock may be taken. Not run on a receiver: a power loss, the options-flow downgrade, the SSH
+installer's withdrawal when the image asks a question instead of restarting, and its
+stop-and-restore paths - the rollback that puts the settings back, and the forced reinstall's
+respawn loop and recovery in runlevel 4.
+
 ### Added
 
-- **The plugin's signed release index** ([ADR-0008](docs/adr/0008-signed-plugin-index.md), now
+- **The plugin's signed release index** ([ADR-0008](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0008-signed-plugin-index.md), now
   accepted). Home Assistant reads the list of plugin versions the plugin repository publishes -
   `releases.json` and its Ed25519 signature, from the plugin's fixed HTTPS origin, with a verified
   TLS context and no redirects - and accepts it only when a key built into this integration signed
@@ -102,7 +152,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `contract.json`.
 - **„Wymuś reinstalację wtyczki (SSH)"** (*Force plugin reinstall (SSH)*), a diagnostic button,
   disabled by default, that **exists only while SSH credentials are stored**
-  ([ADR-0008](docs/adr/0008-signed-plugin-index.md), section 8). **Not yet run on a receiver.** It reinstalls the bundled plugin over SSH
+  ([ADR-0008](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0008-signed-plugin-index.md), section 8). It reinstalls the bundled plugin over SSH
   without needing the plugin to answer - the recovery path for a plugin that is dead, switched off
   or too old to update itself. Home Assistant has no confirmation for a button, so the first press
   by an administrator arms it for 30 seconds and posts the confirmation as a notification (raising
@@ -121,8 +171,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   removes it at once, without a reload - forgetting removes its registry entry, so enrolling
   again brings a new button, disabled again.
 - **The SSH installer's forced mode**, the recovery path the forced-reinstall button uses
-  ([ADR-0008](docs/adr/0008-signed-plugin-index.md), section 8). **Not yet run on a receiver.**
-  It installs only the bundled package, over any version (`--force-downgrade` when opkg's records name a newer or unreadable version, never
+  ([ADR-0008](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0008-signed-plugin-index.md), section 8). Of its
+  paths, the running interface ran on a receiver before this release; the respawn loop and the
+  recovery in runlevel 4 did not. It installs only the bundled package, over any version (`--force-downgrade` when opkg's records name a newer or unreadable version, never
   otherwise), and never waits for the plugin to answer. It reads the state of the receiver's
   interface over SSH before any guard that needs OpenWebif - `runlevel` and three `pidof enigma2`
   samples over ten seconds - and decides by it: a running interface gets the update path's guards
@@ -152,7 +203,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`lock-info`), which new interface process holds the plugin's log open (`logfd`), and a start of
   the interface detached from the SSH session (`respawn`).
 - **The update card updates a receiver that updates itself over MQTT**
-  ([ADR-0008](docs/adr/0008-signed-plugin-index.md), section 4). **Not yet run on a receiver.**
+  ([ADR-0008](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0008-signed-plugin-index.md), section 4).
   A receiver whose `info` names the capability `self_update` with its own `update_allowed` stated
   `true` is updated with `cmd/update` - the signed entry's version and sha256 and a relay address
   bound to that receiver, published once the subscription is confirmed - whatever SSH credentials
@@ -193,10 +244,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-The SSH installer's restarts follow the restart rule of the plugin's
-[`docs/TRANSACTION.md`](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TRANSACTION.md#5-the-restart-rule-planned-for-040-both-programs).
-**Not yet run on a receiver.** It is accepted on hardware before the release that carries
-it, and taken out again if that fails.
+The SSH installer's restarts follow the restart rule in section 5 of the plugin's
+docs/TRANSACTION.md ([link](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TRANSACTION.md)).
+Its clean restart ran on a receiver before this release; the stop-and-restore of a rollback did
+not (the lead above says what ran).
 
 - **An install or update over SSH restarts the receiver's interface the way the receiver
   itself does, and keeps the channel.** Until now every restart the installer made was
@@ -267,7 +318,7 @@ The version card and the release check:
   install path. With credentials nothing changes.
 - **Plugin versions are shown with their build, and compared by release number only.** A
   development build of 0.3.0 now reads `0.3.0+g1a2b3c4` (`.dirty` when its tree was not clean),
-  from the build id the plugin publishes on `info.build` after 0.3.0. It is never shown as current,
+  from the build id the plugin publishes on `info.build` from 0.4.0 on. It is never shown as current,
   and never badged for the 0.3.0 release either: it may be newer code than the release, so the
   summary says „Wersja rozwojowa; dostępne wydanie 0.3.0." (*Development build; release 0.3.0
   available.*) and the attributes `development_build` and `same_version_release` say the same.
@@ -316,13 +367,13 @@ The version card and the release check:
   once the plugin carries build ids; CI's rebuild of every bundled byte checks it, with the plugin's
   tags fetched. The bundled plugin's build id is read out of the package, and a package that names
   another commit than its source archive is refused.
-- **The bundled plugin is the plugin's candidate, not its 0.3.0 release**: a `development` build of
-  the plugin's `main` at `3cf8fd8`, which carries the signed self-update this integration's MQTT
-  path drives. It reports version 0.3.0 and shows as `0.3.0+g3cf8fd8`; by the one rule of ADR-0008
-  §3 it is never offered over an installed 0.3.0 release by itself (the same number), only when
-  chosen by name, and the forced reinstall installs it. CI rebuilds it byte for byte from that
-  commit, and the checks shared with the plugin (vectors, keys, contract) are pinned to the same
-  commit. The release of this integration bundles the plugin's release instead.
+- **The bundled plugin is the plugin's 0.4.0 release**, a `release` build of commit `9e3fa96`,
+  byte for byte the package on the plugin's
+  [releases page](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/tag/v0.4.0)
+  (SHA-256 `7a6860a9b200dfc06d6a71eb26cdb0e4e02b8f163af97f523f7531e137295073`). CI rebuilds it
+  byte for byte from that commit, and the checks shared with the plugin (vectors, keys, contract)
+  are pinned to the same commit. Between the releases, `main` bundled development builds of the
+  plugin's candidate.
 - **A refused lock says when a stalled plugin self-update frees it.** Every installer path still
   takes the shared lock only by the released 30-minute stale rule - a lock whose heartbeat has
   stopped is never taken back earlier, since its `opkg` may still be running and a stopped helper
@@ -434,9 +485,9 @@ The version card and the release check:
   otherwise verbatim.
 - Comments and tests cite ADR-0008 instead of labels of a design document that is not part of
   this repository, and a test keeps such labels out.
-- **Installable plugin versions from a signed release index are planned**, in
-  [ADR-0008](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0008-signed-plugin-index.md)
-  (proposed), the Home Assistant half of the plugin's
+- **Installable plugin versions from a signed release index** are decided in
+  [ADR-0008](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0008-signed-plugin-index.md),
+  the Home Assistant half of the plugin's
   [ADR-0015](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0015-signed-self-update.md):
   plugin versions come only from the plugin's signed release index; compatibility is the plugin's
   contract major (1, from plugin 0.2.0) with no upper bound inside it; the update card offers what
@@ -453,13 +504,18 @@ The version card and the release check:
   index visible and recoverable. It also decides that a card without an install path shows no update
   badge, which changes 0.3.1's behaviour for a receiver behind the bundle without SSH credentials.
   It records two known defects to fix before the plugin adds such values: an unknown `oscam` reader
-  `kind` discards the whole `oscam` payload, and an unknown `key` `press` is read as a short press.
-  Accepted since, with the first code that implements it - see Added and Changed above.
-- ADR-0000 §6.3's `update` row and §7, ADR-0002 §6, ADR-0004 §4, ADR-0006 §5 and SECURITY.md's
-  "No telemetry" and "Supply chain" paragraphs are marked as superseded in part by ADR-0008
-  (proposed). Each still describes every released integration exactly; SECURITY.md's policy is
-  rewritten when the first release that implements ADR-0008 ships. ADR-0002 §6's "no release check
-  that phones home" has not held since the opt-in release check of 0.2.0, and the marker says so.
+  `kind` discards the whole `oscam` payload, and an unknown `key` `press` is read as a short press;
+  both are fixed in this release (see Fixed). It was accepted with the first code that implements
+  it, and everything it decides ships in this release - see Added and Changed above.
+- ADR-0000 §6.3's `update` row and §7, ADR-0002 §6, ADR-0004 §4 and ADR-0006 §5 are marked as
+  superseded in part by ADR-0008; each described every released integration exactly until this
+  release. ADR-0002 §6's "no release check that phones home" has not held since the opt-in release
+  check of 0.2.0, and the marker says so.
+- **SECURITY.md's policy is rewritten for this release**, as ADR-0008 said it would be: where the
+  integration connects and when, what an install trusts - the signed index, its two keys and how
+  the main key is used, the serial and rank rule - and what that does not cover: an index has no
+  expiry, a compromise of the maintainer's account is made detectable and recoverable but not
+  prevented, and HACS, this integration's own update path, is not signed.
 - The documentation of „Ostatni błąd" says what the five-minute clock tolerance really does: a
   receiver clock ahead by D keeps a stale complaint out for about D minus five minutes, not for
   good.
@@ -1137,7 +1193,8 @@ actions the README describes arrive in a later release.
   every push, every pull request, once a week and on the release tag itself, and a release
   is only published when the tag, the manifest version and the changelog agree.
 
-[Unreleased]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.1.0...v0.2.0
