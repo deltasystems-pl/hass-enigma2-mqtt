@@ -1,6 +1,6 @@
 {
   "repository": "deltasystems-pl/enigma2-mqtt-bridge",
-  "commit": "3cf8fd8c62d0b8dd83066f52e7278b1ffb3c0f3f",
+  "commit": "9e3fa9645cd20d50c2ad19fe08cc729e26101cd9",
   "path": "tests/vectors/release-index.json",
   "sha256": "68f84d9fc3c49928d2035e63c8ac699976fabd8723adb2924c710e412564b4dc"
 }

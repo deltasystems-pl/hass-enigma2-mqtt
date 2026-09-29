@@ -81,8 +81,11 @@ IDENT = "a1b2c3d4e5f6"
 TARGET = "0.4.0"
 SHA = "cd" * 32
 
+# The receiver of these scenarios runs 0.3.0 - the release before the one that updates itself -
+# whatever version this integration bundles.
 SELF_UPDATING = {
     **INFO,
+    "plugin": "0.3.0",
     "capabilities": [*INFO["capabilities"], "self_update"],
     "settings": {"update_allowed": True},
 }
@@ -495,9 +498,15 @@ async def test_a_build_the_index_does_not_list_is_never_sent(
     config_entry: MockConfigEntry,
     aioclient_mock: AiohttpClientMocker,
     lan: None,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`update.install` without a version and nothing offered would reinstall the bundle over
     SSH; over MQTT the receiver can only take a signed release, so it is refused here."""
+    real = _load_real_bundle()
+    development = {**(real.build or {}), "flavour": "development"}
+    monkeypatch.setattr(
+        bundle_module, "load_bundled_plugin", lambda: replace(real, build=development)
+    )
     await _self_updating(
         hass, config_entry, box_on_the_broker, aioclient_mock, releases=[release("0.3.0")]
     )
@@ -1953,11 +1962,10 @@ async def test_a_release_the_index_does_not_list_is_never_sent(
     real = _load_real_bundle()
     monkeypatch.setattr(bundle_module, "load_bundled_plugin", lambda: replace(real, build=None))
     await _self_updating(
-        hass, config_entry, box_on_the_broker, aioclient_mock,
-        releases=[release(TARGET, sha256=SHA)],
+        hass, config_entry, box_on_the_broker, aioclient_mock, releases=[release("0.3.0")]
     )
     bundled = (await async_plugin_versions(hass, config_entry)).bundled()
-    assert bundled is not None and bundled.is_release and bundled.version != TARGET
+    assert bundled is not None and bundled.is_release and bundled.version != "0.3.0"
 
     with (
         patch(FETCH, AsyncMock(return_value=_package(bundled.version))) as fetch,

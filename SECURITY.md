@@ -37,20 +37,65 @@ is **not encrypted at rest**, so anyone with the configuration directory or a ba
 read it. The password is never written to the log, and diagnostics redact both it and the
 broker credential.
 
-**No telemetry.** The integration makes no outbound connection other than to your broker, and
-over SSH to your receiver when you ask it to install or update the plugin. The optional check
-for a newer plugin release on GitHub is **off by default**. Nothing is reported anywhere.
+**Where it connects, and when.** There is no telemetry and no cloud service. Besides your broker,
+and your receiver over SSH when you ask it to install, update or remove the plugin, the integration
+connects - since 0.4.0, and only for the receiver plugin's releases - to:
 
-> **Superseded in part by [ADR-0008](docs/adr/0008-signed-plugin-index.md) (accepted):** an
-> integration that implements it fetches the plugin's signed release index and plugin packages from
-> the plugin's fixed HTTPS origin - only when you ask for a check, an install or a downgrade, or
-> when the daily check is on - asks GitHub's API once per install to cross-check a package's
-> digest, and serves a verified package, without authentication, to one receiver's address on your
-> LAN for ten minutes when that receiver has no internet access. That is not built: every released
-> integration behaves exactly as this paragraph says. The policy here - what is trusted, how the
-> signing keys are kept and rotated, that an index does not expire, and that HACS is an unsigned
-> path - is rewritten in the documentation pass that ships with the first release implementing
-> ADR-0008, not before.
+- the plugin's release origin, `https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/`, over
+  HTTPS with a verified certificate and no redirects: for the signed release index when somebody
+  presses *Sprawdź aktualizacje wtyczki* or Home Assistant's own check for updates (at most once in
+  ten minutes), once a day when the option to check daily is on (off by default), and for an
+  install; and for the package of the release an install or a downgrade needs, unless the bundled
+  package is those very bytes;
+- GitHub's API, at most once per version a day during an install, to compare GitHub's own digest
+  of the release asset with the signed checksum. A disagreement refuses the install; an API that
+  cannot be reached does not.
+
+It also **serves** a package: when a receiver without internet asks, or when the card updates a
+receiver over MQTT, Home Assistant offers the verified package at
+`/api/enigma2_mqtt/relay/<token>`, without authentication, for ten minutes, to that receiver's IPv4
+address alone. The address travels over the broker; the binding to the receiver's address is as
+strong as your `trusted_proxies` setting
+([DOCUMENTATION.md §4.5](DOCUMENTATION.md#45-buttons-and-update) says what it does behind a
+reverse proxy). Whoever gets past that binding can download the public, signed package - nothing
+more.
+
+**What an install trusts** ([ADR-0008](docs/adr/0008-signed-plugin-index.md)). Home Assistant
+installs, and asks a receiver to install, only a release named in the plugin's signed release
+index, and holds the package to that entry's size and SHA-256 before the receiver is connected to;
+the receiver checks it again. The index is verified with two Ed25519 public keys built into this
+integration and into the plugin: a **main key**, used only in the plugin repository's CI, in a
+signing job the maintainer approves by hand for each index, and a **spare key** of higher rank,
+kept sealed offline, which signs only if the main key is lost or leaked. An index is accepted only
+when its serial rises for its key - by at most 1000 - and its key is not ranked below one already
+accepted; every newly accepted index is announced in the log and as a persistent notification with
+its serial, its key, the versions it adds and withdraws, and its floor. The origin, the broker and
+Home Assistant's relay are couriers, not authorities. An older plugin is installed only over SSH,
+through a confirmed step in the options flow; nothing is downgraded over MQTT. A lost or leaked
+main key is handled as the plugin's
+[RELEASE-INDEX.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/RELEASE-INDEX.md#when-the-main-key-is-lost-or-leaked)
+says: a leak is treated as a theft - the spare signs the next index, and the next release of both
+halves no longer embeds the main key.
+
+**What that does not cover.**
+
+- Whoever controls the origin, the broker or the network in between can delay or withhold an index
+  or an install - a broker client can, for example, forge a receiver's retained `info` so that the
+  card binds its relay to an address of the forger's choosing - but cannot get anything installed
+  that the index does not name. That is deny and delay, never an install.
+- An index has **no expiry**: a withheld index cannot be detected, and a withdrawal reaches an
+  installation only with a newer index.
+- Because the main key is used in CI, a compromise of the maintainer's GitHub account, a malicious
+  workflow change merged to the plugin's `main`, or a compromised action in the signing job can
+  produce a validly signed index, and this integration would offer and install what it names. The
+  approval gate, the environment that admits only `main`, the tag and `main` rulesets, actions
+  pinned to full commit SHAs, two-factor authentication and the notification for every new index
+  make that **detectable, and recoverable with the spare key; they do not prevent it**.
+- **HACS, this integration's own update path, is not signed** and is rooted in GitHub, and this
+  integration holds the receiver's root credentials when you keep them. The signed index shares
+  that root of trust: the signature adds the checks above, not a second, independent root.
+- The image's own package manager reading the plugin's opkg feed, and any install by hand, check no
+  signature.
 
 **Privacy of the topics.** The `key` and `epg` topics reveal what is watched and which buttons
 are pressed, and the screen image is a picture of the television. [DOCUMENTATION.md §10](DOCUMENTATION.md#10-privacy)
@@ -58,16 +103,15 @@ documents the recorder exclusions; key publishing can be switched off on the box
 
 ## Supply chain
 
-Releases are built by GitHub Actions from the tag. The bundled receiver plugin (from M4) is built
-reproducibly from the exact public commit recorded in package metadata. The integration artifact
-also carries the complete corresponding source archive and hashes both files. A development
-candidate may pin reviewed code newer than the last plugin tag without pretending it is that
-tagged release; a published release pins an immutable public commit of
-[enigma2-mqtt-bridge](https://github.com/deltasystems-pl/enigma2-mqtt-bridge). CI reproduces both
-archives before publishing, and the installer verifies the IPK again before uploading it.
+Releases are built by GitHub Actions from the tag. The bundled receiver plugin is built
+reproducibly from the exact public commit of
+[enigma2-mqtt-bridge](https://github.com/deltasystems-pl/enigma2-mqtt-bridge) recorded in
+`bundled/metadata.json`, together with the complete corresponding source archive, and both files'
+hashes are recorded there. CI rebuilds both byte for byte, and the release workflow refuses to
+publish unless the bundled package is a release build of a commit that carries the plugin's
+release tag - between releases `main` may bundle a development build of the plugin's candidate,
+which says so in its build id. The installer verifies the package again before it uploads it.
 
-> **Superseded in part by [ADR-0008](docs/adr/0008-signed-plugin-index.md) (accepted):** the bundle
-> stays, but it is to stop being the only package the installer uploads. A package downloaded at
-> runtime is one the plugin's signed release index lists, verified by signature, size and sha256 -
-> not rebuilt by this repository's CI. Not built yet; rewritten with the rest of this policy when
-> the first release implementing ADR-0008 ships.
+Since 0.4.0 a package can also be downloaded at runtime: only a release the signed index lists,
+from the plugin's origin, verified by signature, size and SHA-256 - not rebuilt by this
+repository's CI. The forced reinstall installs only the bundle.

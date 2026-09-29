@@ -42,6 +42,7 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from custom_components.enigma2_mqtt import button as button_module, entity as entity_module
+from custom_components.enigma2_mqtt.bundle import load_bundled_plugin
 from custom_components.enigma2_mqtt.const import (
     CONF_KEEP_SSH_CREDENTIALS,
     CONF_SSH_HOST,
@@ -434,7 +435,8 @@ async def test_the_first_press_is_a_notice_and_starts_nothing(
     install.assert_not_awaited()
     notice = _notices(hass)[f"{DOMAIN}_force_reinstall_{config_entry.entry_id}"]
     assert notice["message"].startswith("Press again within 30 seconds to confirm.")
-    assert "0.3.0" in notice["title"]
+    # The confirmation names the bundled version, whatever release is bundled.
+    assert load_bundled_plugin().version in notice["title"]
 
 
 def test_the_confirmation_is_written_in_all_three_languages() -> None:
