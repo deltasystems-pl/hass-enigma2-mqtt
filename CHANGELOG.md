@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The manifest asks for `asyncssh>=2.24.0` instead of exactly `asyncssh==2.24.0`.**
+  Home Assistant installs asyncssh for its own SFTP backup integration and pins it to one
+  version. An exact pin in a custom integration fights that pin whenever the two versions
+  differ: each installs its own version over the other's when it is set up, which costs a
+  download at start-up and fails without internet. A minimum accepts whatever later version
+  Home Assistant brings. Home Assistant's manifest check (hassfest) now refuses the exact pin.
+  The tests still run against 2.24.0.
+
 ### Documentation
 
 - The update card's path in short: `update_allowed` is off as the plugin ships, so with SSH
