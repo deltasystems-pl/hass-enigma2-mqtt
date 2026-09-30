@@ -30,8 +30,9 @@ plugin. You do not have to install it by hand: this integration can put it on th
   integration's "Show the deep standby and reboot buttons" option. Waking a
   receiver from deep standby over the network has not been tested on hardware yet, so treat deep
   standby as possibly one-way.
-- A guided installer, and an update entity that updates the receiver plugin from a copy shipped
-  with the integration.
+- A guided installer, and an update entity that updates the receiver plugin - to the copy shipped
+  with the integration or to a release from the plugin's signed release index - over SSH, or over
+  MQTT on a receiver that allows it.
 - A receiver that loses power shows as unavailable within about 45 seconds. Nothing goes to a cloud.
 
 ## Install
