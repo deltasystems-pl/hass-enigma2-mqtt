@@ -244,8 +244,8 @@ courier, not an authority.
 
 (Amended 2026-09-30, documentation only, no change of decision: the heading names the case that
 needs the relay, not everything it serves. The retained index reaches every receiver on plugin
-0.4.0 or later, and every update Home Assistant starts over MQTT (§4) sends the relay's address with it,
-whether or not the receiver could reach the origin itself.)
+0.4.0 or later, and every update Home Assistant starts over MQTT (§4) sends the relay's address
+with it, whether or not the receiver could reach the origin itself.)
 
 ### 6. Older versions only through a confirmed SSH step
 
