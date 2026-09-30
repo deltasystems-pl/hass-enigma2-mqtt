@@ -26,9 +26,9 @@ Supported: the latest release. There are no long-term support branches.
 
 **Broker credentials.** Give each receiver its own broker login, restricted by ACL to its own
 topics - [DOCUMENTATION.md §3](DOCUMENTATION.md#3-configuration) has the snippet, and says
-why the Home Assistant Mosquitto add-on does not enforce it. The credential lives on the box, and most Enigma2 images
-ship with a default root password and an open telnet or SSH service, so treat the receiver as
-the least trusted device on the network and change that password.
+why the Home Assistant Mosquitto add-on does not enforce it. The credential lives on the box, and
+most Enigma2 images ship with a default root password and an open telnet or SSH service, so treat
+the receiver as the least trusted device on the network and change that password.
 
 **SSH password.** The guided installer asks for the receiver's SSH password. It is
 **discarded after a successful install** unless you explicitly ask to keep it for later plugin
@@ -64,11 +64,11 @@ more.
 **What an install trusts** ([ADR-0008](docs/adr/0008-signed-plugin-index.md)). Home Assistant
 installs, and asks a receiver to install, only a release named in the plugin's signed release
 index, and holds the package to that entry's size and SHA-256 before the receiver is connected to
-or the package is relayed; the receiver checks it again. The index is verified with two Ed25519 public keys built into this
-integration and into the plugin: a **main key**, used only in the plugin repository's CI, in a
-signing job the maintainer approves by hand for each index, and a **spare key** of higher rank,
-kept sealed offline, which signs only if the main key is lost or leaked. An index is accepted only
-when its serial rises for its key - by at most 1000 - and its key is not ranked below one already
+or the package is relayed; the receiver checks it again. The index is verified with two Ed25519
+public keys built into this integration and into the plugin: a **main key**, used only in the
+plugin repository's CI, in a signing job the maintainer approves by hand for each index, and a
+**spare key** of higher rank, kept sealed offline, which signs only if the main key is lost or
+leaked. An index is accepted only when its serial rises for its key - by at most 1000 - and its key is not ranked below one already
 accepted; every newly accepted index is announced in the log and as a persistent notification with
 its serial, its key, the versions it adds and withdraws, and its floor. The origin, the broker and
 Home Assistant's relay are couriers, not authorities. Home Assistant never starts a downgrade over
@@ -86,8 +86,9 @@ halves no longer embeds the main key.
   or an install - a broker client can, for example, forge a receiver's retained `info` so that the
   card binds its relay to an address of the forger's choosing - but cannot get anything installed
   that the index does not name. That is deny and delay, never an install. A forged
-  `relay_request` also makes Home Assistant download a release the rule allows from the origin,
-  and cross-check it with GitHub - at most once a minute per receiver.
+  `relay_request` also makes Home Assistant download a release the rule allows from the origin -
+  at most once a minute per receiver - and cross-check it with GitHub, which is asked about each
+  version at most once a day, whoever asks.
 - An index has **no expiry**: a withheld index cannot be detected, and a withdrawal reaches an
   installation only with a newer index.
 - Because the main key is used in CI, a compromise of the maintainer's GitHub account, a malicious
@@ -103,8 +104,9 @@ halves no longer embeds the main key.
   signature.
 
 **Privacy of the topics.** The `key` and `epg` topics reveal what is watched and which buttons
-are pressed, and the screen image is a picture of the television. [DOCUMENTATION.md §10](DOCUMENTATION.md#10-privacy)
-documents the recorder exclusions; key publishing can be switched off on the box.
+are pressed, and the screen image is a picture of the television.
+[DOCUMENTATION.md §10](DOCUMENTATION.md#10-privacy) documents the recorder exclusions; key
+publishing can be switched off on the box.
 
 ## Supply chain
 

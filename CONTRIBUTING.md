@@ -47,7 +47,10 @@ script and the by-effect checklist.
 - One topic per pull request, branched off `main`.
 - **CI must be green** - hassfest, the HACS action, ruff and pytest. This applies to the
   maintainer too; nothing is pushed straight to `main`.
-- Update `CHANGELOG.md` under `## [Unreleased]` when the change is visible to a user.
+- Update `CHANGELOG.md` under `## [Unreleased]` when the change is visible to a user. A
+  release's section becomes its GitHub release notes word for word, so its links are absolute,
+  and the release pull request points them at the release's tag (`blob/vX.Y.Z/...`) rather than
+  at `main`, whose files move on after the release.
 - Update the documentation in the same pull request as the behaviour.
 - New or changed behaviour comes with a test.
 

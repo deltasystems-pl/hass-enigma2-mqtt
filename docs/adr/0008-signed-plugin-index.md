@@ -4,7 +4,8 @@
 reader, the compatibility rule, the build ids, the two new entities and the no-badge rule
 (§1-§3), the integration topic and the two messages at removal (§2, §10). The install paths of
 §4-§6 and §8-§9 were built in later changes; all of it shipped in 0.4.0, and until then the
-released integration behaved as the records it supersedes describe
+released integration behaved as the records it supersedes describe. Amended 2026-09-30
+(documentation only: notes in §5 and §7)
 **Date:** 2026-09-26
 **Supersedes:** in part, once accepted - [ADR-0002](0002-scope-after-m0.md) §6, "There is no
 runtime download path for executable code, and there is no release check that phones home" (its
@@ -241,6 +242,11 @@ one; with neither, the relay is refused and the text says where to set the local
 receiver checks the index and the package against the signature itself: Home Assistant is a
 courier, not an authority.
 
+(Amended 2026-09-30, documentation only, no change of decision: the heading names the case that
+needs the relay, not everything it serves. The retained index reaches every receiver on the
+broker, and every update Home Assistant starts over MQTT (§4) sends the relay's address with it,
+whether or not the receiver could reach the origin itself.)
+
 ### 6. Older versions only through a confirmed SSH step
 
 A downgrade is never sent over MQTT. The options flow offers the versions from the floor up to below
@@ -276,7 +282,13 @@ The lock's owner record carries the installer's transaction id, so the recovery 
 transaction finds its snapshot by id, never by a clock that may have started in 1970. Two
 assumptions under R2 - that `init 4` loses unsaved settings, and that the image comes back on a
 channel written while it is stopped - are not yet measured on a receiver, and are measured before
-the code that relies on them merges.
+the code that relies on them merges. (Amended 2026-09-30, documentation only: that did not happen
+as written. The code merged and shipped in 0.4.0 with the installer's R2 never run on a receiver -
+neither the rollback that puts the settings back nor the forced reinstall's respawn and runlevel 4
+paths. The first assumption is still not measured; the second was seen to hold once on one
+receiver, for the plugin's own R2 in its hardware spike. The R1 restart did run on a receiver
+before the release, and in an update since. The plugin's TRANSACTION.md §5 keeps the current
+state.)
 
 **The released 0.3.x installer is not changed.** It keeps `init 4` / `init 3` on every path, so an
 update through it can bring a receiver back on another channel than the one it was playing.

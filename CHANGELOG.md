@@ -7,16 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+### Documentation
 
-## [0.4.0] - 2026-09-29
+- The update card's path in short: `update_allowed` is off as the plugin ships, so with SSH
+  credentials stored the card installs over SSH even on a receiver that runs plugin 0.4.0; over
+  MQTT once the receiver's own setting is on, after one *Sprawdź aktualizacje wtyczki* while no
+  index is held (DOCUMENTATION.md §4.5 and §8).
+- An install refused for standby after the television switched the receiver off over HDMI-CEC
+  (DOCUMENTATION.md §3 and §8).
+- SECURITY.md: GitHub is asked about each plugin version at most once a day; only the download
+  for a relay request is limited to once a minute per receiver.
+- ADR-0008 records that the installer's stop-and-restore paths shipped in 0.4.0 without having
+  run on a receiver, and that the relay serves more than receivers without internet.
+- The 0.4.0 notes link to the files as released rather than to `main`, and carry the date the
+  release was published.
+
+## [0.4.0] - 2026-09-30
 
 The release in which Home Assistant installs the receiver plugin's own releases, and only those
 named in the plugin's signed release index - the Home Assistant half of the plugin's signed
 self-update, decided in this repository's
-ADR-0008 ([docs/adr/0008-signed-plugin-index.md](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0008-signed-plugin-index.md))
+ADR-0008 ([docs/adr/0008-signed-plugin-index.md](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/v0.4.0/docs/adr/0008-signed-plugin-index.md))
 and, for the receiver, in the plugin's
-ADR-0015 ([docs/adr/0015-signed-self-update.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0015-signed-self-update.md)).
+ADR-0015 ([docs/adr/0015-signed-self-update.md](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/adr/0015-signed-self-update.md)).
 The update card offers what it will install, and only while it can install it: a receiver on
 plugin 0.4.0 that permits it (`update_allowed`) is updated by the plugin itself over MQTT, any other
 receiver over SSH when SSH credentials are stored, and **without an install path there is no
@@ -35,7 +48,7 @@ daily check is on (off by default); it downloads a package from there for an ins
 and asks GitHub's API to cross-check the package's digest; and it
 serves a verified package, without authentication, to one receiver's address on your LAN for ten
 minutes when that receiver has no internet. The policy in SECURITY.md
-([link](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/SECURITY.md)) is
+([link](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/v0.4.0/SECURITY.md)) is
 rewritten for it: what an install trusts, and what that does not cover.
 
 The bundled plugin is, byte for byte, the plugin's own release v0.4.0
@@ -59,7 +72,7 @@ respawn loop and recovery in runlevel 4.
 
 ### Added
 
-- **The plugin's signed release index** ([ADR-0008](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0008-signed-plugin-index.md), now
+- **The plugin's signed release index** ([ADR-0008](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/v0.4.0/docs/adr/0008-signed-plugin-index.md), now
   accepted). Home Assistant reads the list of plugin versions the plugin repository publishes -
   `releases.json` and its Ed25519 signature, from the plugin's fixed HTTPS origin, with a verified
   TLS context and no redirects - and accepts it only when a key built into this integration signed
@@ -152,7 +165,7 @@ respawn loop and recovery in runlevel 4.
   `contract.json`.
 - **„Wymuś reinstalację wtyczki (SSH)"** (*Force plugin reinstall (SSH)*), a diagnostic button,
   disabled by default, that **exists only while SSH credentials are stored**
-  ([ADR-0008](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0008-signed-plugin-index.md), section 8). It reinstalls the bundled plugin over SSH
+  ([ADR-0008](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/v0.4.0/docs/adr/0008-signed-plugin-index.md), section 8). It reinstalls the bundled plugin over SSH
   without needing the plugin to answer - the recovery path for a plugin that is dead, switched off
   or too old to update itself. Home Assistant has no confirmation for a button, so the first press
   by an administrator arms it for 30 seconds and posts the confirmation as a notification (raising
@@ -171,7 +184,7 @@ respawn loop and recovery in runlevel 4.
   removes it at once, without a reload - forgetting removes its registry entry, so enrolling
   again brings a new button, disabled again.
 - **The SSH installer's forced mode**, the recovery path the forced-reinstall button uses
-  ([ADR-0008](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0008-signed-plugin-index.md), section 8). Of its
+  ([ADR-0008](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/v0.4.0/docs/adr/0008-signed-plugin-index.md), section 8). Of its
   paths, the running interface ran on a receiver before this release; the respawn loop and the
   recovery in runlevel 4 did not. It installs only the bundled package, over any version (`--force-downgrade` when opkg's records name a newer or unreadable version, never
   otherwise), and never waits for the plugin to answer. It reads the state of the receiver's
@@ -203,7 +216,7 @@ respawn loop and recovery in runlevel 4.
   (`lock-info`), which new interface process holds the plugin's log open (`logfd`), and a start of
   the interface detached from the SSH session (`respawn`).
 - **The update card updates a receiver that updates itself over MQTT**
-  ([ADR-0008](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0008-signed-plugin-index.md), section 4).
+  ([ADR-0008](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/v0.4.0/docs/adr/0008-signed-plugin-index.md), section 4).
   A receiver whose `info` names the capability `self_update` with its own `update_allowed` stated
   `true` is updated with `cmd/update` - the signed entry's version and sha256 and a relay address
   bound to that receiver, published once the subscription is confirmed - whatever SSH credentials
@@ -245,7 +258,7 @@ respawn loop and recovery in runlevel 4.
 ### Changed
 
 The SSH installer's restarts follow the restart rule in section 5 of the plugin's
-docs/TRANSACTION.md ([link](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TRANSACTION.md)).
+docs/TRANSACTION.md ([link](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/TRANSACTION.md)).
 Its clean restart ran on a receiver before this release; the stop-and-restore of a rollback did
 not (the lead above says what ran).
 
@@ -486,9 +499,9 @@ The version card and the release check:
 - Comments and tests cite ADR-0008 instead of labels of a design document that is not part of
   this repository, and a test keeps such labels out.
 - **Installable plugin versions from a signed release index** are decided in
-  [ADR-0008](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/main/docs/adr/0008-signed-plugin-index.md),
+  [ADR-0008](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/v0.4.0/docs/adr/0008-signed-plugin-index.md),
   the Home Assistant half of the plugin's
-  [ADR-0015](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0015-signed-self-update.md):
+  [ADR-0015](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.4.0/docs/adr/0015-signed-self-update.md):
   plugin versions come only from the plugin's signed release index; compatibility is the plugin's
   contract major (1, from plugin 0.2.0) with no upper bound inside it; the update card offers what
   it will install, and only while it can install it; an upgrade goes through the receiver when the

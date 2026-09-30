@@ -194,7 +194,10 @@ the household is watching:
   starts detached and follows, so a lost connection cannot leave the receiver stopped.
 
 An install is refused before anything is changed while the receiver is **in standby** (a restart
-would wake it, and with HDMI-CEC the television) or **streaming** to another device.
+would wake it, and with HDMI-CEC the television) or **streaming** to another device. With HDMI-CEC
+set to follow the television, switching the television off - or a television that switches itself
+off at night - puts the receiver into standby as well, so an install tried after that is refused
+for standby: switch the receiver on first (its power switch, or the remote).
 
 **When an install fails.** Every failure ends on a sentence rather than a code, and the sentence
 says what state the receiver was left in. Most of them - no space, a recording running, a bad
@@ -323,7 +326,7 @@ appears.
 | **Bouquets to offer** | every bouquet the box publishes | Which bouquets feed the media player's channel list and the media browser. The choices are the bouquets on the `channels` topic, and a name can be typed for one the box has not published yet. This narrows the plugin's own `bouquets_for_select`; it cannot widen it. |
 | **Channels in the media player's source list** | every bouquet on offer | What `media_player.source_list` holds, and nothing else. **Every bouquet on offer** is what this integration has always done and stays the default, so an existing installation does not change under an automation that names a channel; on a receiver with about a thousand channels it is a dropdown of about a thousand rows. **The active bouquet** is the short list the receiver's own channel ± is walking, which is also what the „Kanał" select shows. `select_source` follows this setting; the `zap` action takes a service reference and does not. Three cases keep the long list whatever is chosen, because there is nothing to shorten it to and an empty source list would leave no way to change channel: a receiver that publishes no channel-list context (an older plugin without `bouquet_context`), a context naming a bouquet the **Bouquets to offer** option excludes, and a context naming a bouquet with no playable channel in it. The last two are logged as a warning, once per bouquet. 🔴 This setting is **not** about the recorder: Home Assistant declares `source_list` an unrecorded attribute and the recorder removes it before it measures a state against its size limit, so the long list never reached the database in the first place. |
 | **Bouquets hidden from "Recently watched"** („Bukiety ukryte w „Ostatnio oglądane"") | none | Which bouquets' channels [„Ostatnio oglądane"](#46-selects) leaves out - and that one entity only: „Ostatnio oglądane (wszystkie)", „Kanał", „Bukiet" and the media player are untouched. The choices are the bouquets on the `channels` topic, and a name can be typed. With it empty every entry shows. With a bouquet chosen, an entry shows only when its bouquet is a published bouquet that is not hidden **and** its channel is not a member of any hidden bouquet, so a channel of a hidden bouquet reached through another one stays hidden. While anything is chosen, an entry that cannot be checked - no bouquet path, a radio bouquet, a bouquet the plugin does not publish - is hidden too. A hidden name that is no longer on the `channels` topic is logged once. 🔴 **This is a filter in Home Assistant, not privacy on the network**: the receiver publishes every entry of its history on `zap_history` and every channel of every bouquet on `channels`, retained, to any broker login; its own History Zap screen, the plugin's OpenWebif page and „Ostatnio oglądane (wszystkie)" show everything. See [§4.6](#46-selects) for what the recorder keeps. |
-| **Check daily for available plugin versions** | off | Off means this integration asks nothing on its own. The plugin's **signed release index** - `releases.json` and its signature from the plugin's fixed HTTPS origin, `https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/` - is fetched only when somebody presses **Check for plugin updates** (*Sprawdź aktualizacje wtyczki*), or uses Home Assistant's own "Check for updates" while this option is on. On, it is also fetched **at most once every 24 hours**, one index for every receiver. It is fetched with a verified TLS context and no redirects, at most 64 KiB, and it is accepted only when its Ed25519 signature verifies with a key built into this integration and its serial rises by the rule in [ADR-0008](docs/adr/0008-signed-plugin-index.md) - the same rule the receiver applies. Manual checks share a ten-minute limit. The index, its signature, the stamps and the record of accepted serials are kept in `.storage/enigma2_mqtt.release_index`, so a reload or a restart asks nothing again; the old `.storage/enigma2_mqtt.release_check` is removed. **Every newly accepted index is announced**: a warning in the log and a persistent notification with its serial, its key, the versions it adds and withdraws, and its floor - the index is signed in the plugin repository's CI, so an index nobody expected must be visible. It is then published, retained, on `enigma2mqtt/release_index`, for receivers with no internet of their own - and put back, verified first, when the first receiver is set up and at every reconnect to the broker, if the broker lost it. What the broker retains there is read first: an index of a higher-ranked key, or a newer one of the same key - such as an index signed with the plugin's spare key in an emergency - is never overwritten, and when the rule accepts it, Home Assistant takes it and announces it like any new index. An index and a signature that do not match are read once more before they are judged, because a publication can land between the two requests; a pair that still does not verify is reported as "could not be verified", and the log keeps a warning. Nothing else is downloaded on a check; a release package is downloaded only when somebody installs it (see [Buttons and update](#45-buttons-and-update)). |
+| **Check daily for available plugin versions** | off | Off means this integration asks nothing on its own. The plugin's **signed release index** - `releases.json` and its signature from the plugin's fixed HTTPS origin, `https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/` - is fetched only when somebody presses **Check for plugin updates** (*Sprawdź aktualizacje wtyczki*), or uses Home Assistant's own "Check for updates" while this option is on. On, it is also fetched **at most once every 24 hours**, one index for every receiver. It is fetched with a verified TLS context and no redirects, at most 64 KiB, and it is accepted only when its Ed25519 signature verifies with a key built into this integration and its serial rises by the rule in [ADR-0008](docs/adr/0008-signed-plugin-index.md) - the same rule the receiver applies. Manual checks share a ten-minute limit. The index, its signature, the stamps and the record of accepted serials are kept in `.storage/enigma2_mqtt.release_index`, so a reload or a restart asks nothing again; the old `.storage/enigma2_mqtt.release_check` is removed. **Every newly accepted index is announced**: a warning in the log and a persistent notification with its serial, its key, the versions it adds and withdraws, and its floor - the index is signed in the plugin repository's CI, so an index nobody expected must be visible. It is then published, retained, on `enigma2mqtt/release_index`, where every receiver on the broker verifies it again - the way a receiver with no internet of its own learns of releases - and put back, verified first, when the first receiver is set up and at every reconnect to the broker, if the broker lost it. What the broker retains there is read first: an index of a higher-ranked key, or a newer one of the same key - such as an index signed with the plugin's spare key in an emergency - is never overwritten, and when the rule accepts it, Home Assistant takes it and announces it like any new index. An index and a signature that do not match are read once more before they are judged, because a publication can land between the two requests; a pair that still does not verify is reported as "could not be verified", and the log keeps a warning. Nothing else is downloaded on a check; a release package is downloaded only when somebody installs it (see [Buttons and update](#45-buttons-and-update)). |
 
 When a recent plugin advertises its configurable publishers, the same form also controls key
 events, screenshot mode and interval, and the delay before an on-zap screenshot. Older plugins
@@ -891,6 +894,17 @@ signed index lists are offered, never the bundle unless it is such a release, an
 version: a downgrade stays in the options flow, over SSH. With no index held there is nothing to
 install and no badge - press *Sprawdź aktualizacje wtyczki* first.
 
+**Which path the card takes, in short.** `update_allowed` is off as the plugin ships, and an
+update keeps whatever the receiver had; only the guided installer's tick box (*Allow remote plugin
+updates*, [§3](#3-configuration)), when a receiver is added, writes it from Home Assistant. So
+on most receivers the card installs **over SSH** when SSH credentials are stored (`update_path`
+`ssh`) - a receiver already on plugin 0.4.0 included - and has no install path without them. To
+have it update **over MQTT** instead, switch `update_allowed` on at the receiver: its setup screen
+(*Menu -> Plugins -> MQTT Bridge*) or the plugin's OpenWebif page. `update_path` then reads `mqtt`.
+While the card's `index_serial` is empty, press *Sprawdź aktualizacje wtyczki* once: over MQTT
+only releases of a signed index are offered, and Home Assistant fetches none by itself unless the
+daily check is on.
+
 An update the receiver reports as **interrupted** is said by the evidence there is, since the
 result alone does not say whether the receiver's package manager had already run. The receiver's
 own words come first. When they say it had started, or that the plugin must be installed again
@@ -1277,8 +1291,7 @@ plugin mismatch is where a missing entity or an unrecognised command usually end
 
 ## 8. Troubleshooting
 
-*Filled in as failure modes are found on real boxes, from M2 on.* The first three questions
-are already clear:
+*Filled in as failure modes are found on real boxes, from M2 on.* These are already clear:
 
 - **Nothing is discovered.** Check that the MQTT integration is connected, then subscribe to
   `enigma2mqtt/discovery/#` with an MQTT client. No retained message there means the plugin is
@@ -1287,6 +1300,12 @@ are already clear:
   A retained `offline` that never clears is the plugin's last will; the box lost the broker.
 - **Entities appear twice.** The box is in `discovery` mode *and* added here. Re-run the setup
   or send `cmd/ha_mode = integration`; the plugin retracts the discovery payloads.
+- **An install or update is refused for standby, although nobody switched the receiver off.**
+  With HDMI-CEC following the television, switching the television off puts the receiver into
+  standby too. Switch the receiver on, then install ([§3](#3-configuration)).
+- **The card installs over SSH, not over MQTT, on a receiver that runs plugin 0.4.0.** The
+  receiver's `update_allowed` is off, which is how the plugin ships; see *Which path the card
+  takes* in [§4.5](#45-buttons-and-update).
 
 ### The plugin does not start, and Home Assistant cannot help
 
