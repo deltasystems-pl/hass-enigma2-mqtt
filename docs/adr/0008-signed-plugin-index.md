@@ -243,8 +243,8 @@ receiver checks the index and the package against the signature itself: Home Ass
 courier, not an authority.
 
 (Amended 2026-09-30, documentation only, no change of decision: the heading names the case that
-needs the relay, not everything it serves. The retained index reaches every receiver on the
-broker, and every update Home Assistant starts over MQTT (§4) sends the relay's address with it,
+needs the relay, not everything it serves. The retained index reaches every receiver on plugin
+0.4.0 or later, and every update Home Assistant starts over MQTT (§4) sends the relay's address with it,
 whether or not the receiver could reach the origin itself.)
 
 ### 6. Older versions only through a confirmed SSH step
@@ -287,8 +287,8 @@ as written. The code merged and shipped in 0.4.0 with the installer's R2 never r
 neither the rollback that puts the settings back nor the forced reinstall's respawn and runlevel 4
 paths. The first assumption is still not measured; the second was seen to hold once on one
 receiver, for the plugin's own R2 in its hardware spike. The R1 restart did run on a receiver
-before the release, and in an update since. The plugin's TRANSACTION.md §5 keeps the current
-state.)
+before the release, and in an update since. The plugin's TRANSACTION.md §5, corrected after the
+release, keeps the current state.)
 
 **The released 0.3.x installer is not changed.** It keeps `init 4` / `init 3` on every path, so an
 update through it can bring a receiver back on another channel than the one it was playing.

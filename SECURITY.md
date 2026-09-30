@@ -88,7 +88,7 @@ halves no longer embeds the main key.
   that the index does not name. That is deny and delay, never an install. A forged
   `relay_request` also makes Home Assistant download a release the rule allows from the origin -
   at most once a minute per receiver - and cross-check it with GitHub, which is asked about each
-  version at most once a day, whoever asks.
+  version at most once a day while Home Assistant runs, whoever asks.
 - An index has **no expiry**: a withheld index cannot be detected, and a withdrawal reaches an
   installation only with a newer index.
 - Because the main key is used in CI, a compromise of the maintainer's GitHub account, a malicious
