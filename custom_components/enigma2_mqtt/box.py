@@ -918,6 +918,10 @@ class Enigma2Box:
         # The last good payload is kept for everything that reads it, as it always was;
         # this flag only withdraws what that payload *permitted*. See `uninstall_offered`.
         self.info_retracted: bool = False
+        # Whether an `info` that is a JSON object has arrived in this run. `state.info`
+        # cannot say: an `info` of `{}` is as false as none at all, and the topic's place
+        # in `seen` cannot either, because the announcement wakes the same listeners.
+        self.info_received: bool = False
         # The bouquet the source list scope last complained about, so that it is said
         # once rather than on every republished channel list.
         self._scope_fallback_warned: str | None = None
@@ -1761,6 +1765,7 @@ class Enigma2Box:
         if (info := parse_json_payload(msg.payload)) is None:
             return
         self.info_retracted = False
+        self.info_received = True
         self.state.info = info
         self.state.not_published = normalise_not_published(info)
         self._async_channel_topics_reviewed()
@@ -2785,13 +2790,17 @@ class Enigma2Box:
             generated=index.get("generated"),
             complete=not awaited,
         )
+        # What was read from `channels` while it was the source holds that payload as
+        # well, and nothing reads it while this list is on show. Let go on both paths
+        # below: where `channels` is kept for a bouquet with no topic of its own, the
+        # payload kept is the one in hand, and the list read from an earlier one would
+        # keep that superseded payload alive beside it.
+        self._combined_from = None
+        self._combined_list = ChannelList()
         if not self._index_needs_channels():
             if self.state.channels is not None:
                 self.state.channels = None
                 self.state.channels_released = True
-            # And what was read from it, which holds the payload as well.
-            self._combined_from = None
-            self._combined_list = ChannelList()
             self._cancel_refetch()
         elif self.state.channels is not None:
             self._cancel_refetch()

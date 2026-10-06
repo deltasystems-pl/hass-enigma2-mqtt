@@ -339,6 +339,60 @@ async def test_the_repair_goes_when_the_plugin_retracts_its_info(
     assert the_issue(hass, config_entry) is not None
 
 
+async def test_the_repair_goes_on_an_info_that_is_an_empty_object(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """`{}` has arrived and does not carry the member: the receiver's word, like any other.
+
+    It used to be read as "nothing has arrived yet", because an empty object is as false
+    as no object, and the repair stayed while the sensor beside it already said unknown.
+    """
+    reporting(box_on_the_broker, [CHANNELS_ENTRY])
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    assert the_issue(hass, config_entry) is not None
+
+    await publish(hass, INFO_TOPIC, "{}")
+
+    assert our_issues(hass) == []
+    assert hass.states.get(SENSOR).state == STATE_UNKNOWN
+
+
+@pytest.mark.parametrize("payload", ["not json", "[]", "3", '"text"'])
+async def test_a_payload_that_is_no_info_is_no_word_about_the_repair(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    payload: str,
+) -> None:
+    """Before any `info` and after one alike: what cannot be read has said nothing."""
+    reporting(box_on_the_broker, [CHANNELS_ENTRY])
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    await hass.config_entries.async_unload(config_entry.entry_id)
+    await hass.async_block_till_done()
+    box_on_the_broker.clear()
+    events: list[str] = []
+
+    @callback
+    def _changed(event: Event) -> None:
+        events.append(event.data["action"])
+
+    hass.bus.async_listen(ir.EVENT_REPAIRS_ISSUE_REGISTRY_UPDATED, _changed)
+
+    # Set up again with nothing retained, then the unreadable payload: nothing is deleted.
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+    await publish(hass, INFO_TOPIC, payload)
+    # The index wakes the same listener; it must still find that nothing has been said.
+    await publish(hass, BOUQUETS_TOPIC, json.dumps(INDEX))
+
+    assert events == []
+    assert the_issue(hass, config_entry) is not None
+
+
 async def test_unloading_leaves_the_repair_and_setting_up_again_keeps_it_ignored(
     hass: HomeAssistant,
     mqtt_mock,
@@ -690,6 +744,131 @@ async def test_each_kind_of_markup_is_taken_out_of_every_place_a_name_lands(
         assert text.strip()
         for part in forbidden:
             assert part not in text.lower(), (part, text)
+
+
+# By code point: none of these may appear in a source file, and none can be seen.
+INVISIBLE = {
+    name: chr(code)
+    for name, code in {
+        "left-to-right embedding": 0x202A,
+        "right-to-left embedding": 0x202B,
+        "pop directional formatting": 0x202C,
+        "left-to-right override": 0x202D,
+        "right-to-left override": 0x202E,
+        "left-to-right isolate": 0x2066,
+        "right-to-left isolate": 0x2067,
+        "first strong isolate": 0x2068,
+        "pop directional isolate": 0x2069,
+        "left-to-right mark": 0x200E,
+        "right-to-left mark": 0x200F,
+        "arabic letter mark": 0x061C,
+        "zero width space": 0x200B,
+        "zero width non-joiner": 0x200C,
+        "zero width joiner": 0x200D,
+        "word joiner": 0x2060,
+        "byte order mark": 0xFEFF,
+        "soft hyphen": 0x00AD,
+        "tag character": 0xE0041,
+        "escape": 0x1B,
+        "null": 0x00,
+    }.items()
+}
+RLO = INVISIBLE["right-to-left override"]
+ZWSP = INVISIBLE["zero width space"]
+ZWJ = INVISIBLE["zero width joiner"]
+WJ = INVISIBLE["word joiner"]
+
+
+@pytest.mark.parametrize("character", list(INVISIBLE.values()), ids=list(INVISIBLE))
+async def test_what_cannot_be_seen_is_taken_out_of_every_place_a_name_lands(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    character: str,
+) -> None:
+    """A direction control left open would turn the rest of the sentence around.
+
+    The same four places as the markup: the device's name, a bouquet's name from the
+    index, the name of a bouquet with no topic of its own, and a topic named whole.
+    """
+    hostile = f"Sp{character}ort{character}"
+    index = json.loads(json.dumps(INDEX))
+    index["bouquets"][1]["name"] = hostile
+    index["bouquets"].append({"name": f"no topic {hostile}", "sref": "s", "slug": "", "count": 1})
+    box_on_the_broker[ANNOUNCEMENT_TOPIC] = json.dumps({**ANNOUNCEMENT, "name": hostile})
+    box_on_the_broker[BOUQUETS_TOPIC] = json.dumps(index)
+    reporting(
+        box_on_the_broker,
+        [CHANNELS_ENTRY, LIST_ENTRY, {"topic": f"elsewhere {hostile}", "bytes": 1, "limit": 1}],
+    )
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    placeholders = the_issue(hass, config_entry).translation_placeholders
+
+    assert placeholders["name"] == "Sport"
+    assert placeholders["withheld"].split("\n") == [
+        "- the complete channel list (every bouquet in one message)",
+        "- the channel list of the bouquet “no topic Sport”",
+        "- the channel list of the bouquet “Sport”",
+        "- the topic `elsewhere Sport`",
+    ]
+
+
+def test_a_zero_width_character_does_not_carry_a_link_past_the_check() -> None:
+    """`www.` with something invisible inside it is still what a renderer links."""
+    from custom_components.enigma2_mqtt.withheld import _plain  # noqa: PLC0415
+
+    assert _plain(f"w{ZWSP}ww.e.example") == "www e.example"
+    assert _plain(f"see w{WJ}w{ZWJ}w.e.example") == "see www e.example"
+
+
+# Names of which nothing is left once they are plain text.
+NOTHING = [RLO + ZWSP, "***", "~~ ##", " \t ", ZWJ + ZWJ, "_ _"]
+
+
+@pytest.mark.parametrize("empty", NOTHING, ids=[ascii(name) for name in NOTHING])
+async def test_a_name_that_reduces_to_nothing_is_replaced_by_the_next_best_one(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    empty: str,
+) -> None:
+    """No empty quotation marks, and no title that begins with a colon.
+
+    A bouquet falls back to its slug, a bouquet without one and a topic to the
+    placeholder, and the device to the name it was given in Home Assistant.
+    """
+    index = json.loads(json.dumps(INDEX))
+    index["bouquets"][1]["name"] = empty
+    index["bouquets"].append({"name": empty, "sref": "s", "slug": "", "count": 1})
+    box_on_the_broker[ANNOUNCEMENT_TOPIC] = json.dumps({**ANNOUNCEMENT, "name": empty})
+    box_on_the_broker[BOUQUETS_TOPIC] = json.dumps(index)
+    reporting(
+        box_on_the_broker,
+        [CHANNELS_ENTRY, LIST_ENTRY, {"topic": empty, "bytes": 1, "limit": 1}],
+    )
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    placeholders = the_issue(hass, config_entry).translation_placeholders
+
+    assert placeholders["name"] == BOX_NAME
+    assert placeholders["withheld"].split("\n") == [
+        "- the complete channel list (every bouquet in one message)",
+        "- the channel list of the bouquet “?”",
+        "- the channel list of the bouquet “sport_hd_2”",
+        "- the topic `?`",
+    ]
+
+
+def test_a_device_whose_every_name_reduces_to_nothing_is_still_called_something() -> None:
+    """The name given here, then the node id, then the placeholder."""
+    from custom_components.enigma2_mqtt.withheld import NO_NAME, _named  # noqa: PLC0415
+
+    assert _named(RLO, "***", "vuuno4kse_005301") == "vuuno4kse_005301"
+    assert _named("", None, ZWSP) == NO_NAME == "?"
+    assert _named("Sport", "sport") == "Sport"
 
 
 def test_a_slug_keeps_its_underscores() -> None:

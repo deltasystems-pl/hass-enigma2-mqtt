@@ -31,6 +31,7 @@ one, and are written again only when the list or the index next changes.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
@@ -50,6 +51,8 @@ ISSUE_KEY = "payloads_withheld"
 
 # How long a bouquet's name, a device's name or a topic may be in the repair's text.
 NAME_MAX = 80
+# What stands where a name should be when nothing of it is left to show.
+NO_NAME = "?"
 
 # What each kind of topic is called. `{bouquet}` is the bouquet's name where the index
 # knows it and its slug otherwise; `{topic}` is the topic as the receiver named it.
@@ -114,6 +117,24 @@ def issue_id(entry_id: str) -> str:
     return f"{ISSUE_KEY}_{entry_id}"
 
 
+def _visible(text: str) -> str:
+    """Return `text` without the characters that are never seen and still act.
+
+    Format characters (Unicode category Cf) - the direction controls that make the rest
+    of a line read backwards, the zero-width spaces and joiners, the soft hyphen, the
+    byte-order mark, the tag characters - and the control characters that are not white
+    space. None of them is part of a name anybody typed on purpose, a direction control
+    left open reorders the words of the sentence around the name, and a zero-width
+    character inside `www.` would carry it past the check below. White space stays here
+    and is folded by the caller.
+    """
+    return "".join(
+        character
+        for character in text
+        if character.isspace() or unicodedata.category(character) not in ("Cf", "Cc")
+    )
+
+
 def _plain(text: str) -> str:
     """Return somebody else's text as one short line that is only ever text.
 
@@ -122,11 +143,28 @@ def _plain(text: str) -> str:
     Read as written there, a name could draw an image, offer a link that says "Fix it",
     or open a heading. So every character Markdown or HTML acts on is replaced or
     dropped, nothing is left that a renderer links on its own - a scheme, a `www.`, an
-    address - the white space becomes single spaces, and the length is bounded.
+    address - the white space becomes single spaces, and the length is bounded. What
+    cannot be seen goes first (`_visible`).
+
+    The result can be empty - a name made of nothing but such characters - and every
+    caller has something to say then (`_named`).
     """
-    text = _WWW.sub("www ", _SCHEME.sub(" ", text.translate(_INERT)))
+    text = _WWW.sub("www ", _SCHEME.sub(" ", _visible(text).translate(_INERT)))
     text = _LOOSE_UNDERSCORE.sub(" ", text).replace("//", "/")
     return " ".join(text.split())[:NAME_MAX].strip()
+
+
+def _named(*candidates: str | None) -> str:
+    """Return the first candidate that is still something once it is plain text.
+
+    A name that reduces to nothing would leave empty quotation marks in a sentence, or a
+    title that begins with a colon. The next best name stands in - a bouquet's slug, the
+    title of the receiver's entry here, its node id - and `NO_NAME` when none is left.
+    """
+    for candidate in candidates:
+        if candidate and (plain := _plain(candidate)):
+            return plain
+    return NO_NAME
 
 
 def _phrases(language: str) -> dict[str, str]:
@@ -152,11 +190,12 @@ def describe(box: Enigma2Box, topic: str, language: str) -> str:
         if topic.startswith(prefix) and slug and "/" not in slug:
             # The grid's slug is the channel topic's for nearly every bouquet, and the
             # index is the only place that still names a bouquet whose topic is gone.
-            name = box.bouquet_name_for_slug(slug) or slug
-            return phrases[key].format(bouquet=_plain(name))
+            return phrases[key].format(
+                bouquet=_named(box.bouquet_name_for_slug(slug), slug)
+            )
     if "/" in topic and topic.endswith("/config"):
         return phrases["discovery"]
-    return phrases["other"].format(topic=_plain(topic))
+    return phrases["other"].format(topic=_named(topic))
 
 
 def withheld_lines(box: Enigma2Box, language: str) -> str:
@@ -173,7 +212,7 @@ def withheld_lines(box: Enigma2Box, language: str) -> str:
         lines.append(describe(box, entry["topic"], language))
         if entry["topic"] == TOPIC_CHANNELS:
             lines.extend(
-                phrases["bouquet_channels"].format(bouquet=_plain(name))
+                phrases["bouquet_channels"].format(bouquet=_named(name))
                 for name in box.bouquet_names_without_topic()
             )
     shown = lines[:WITHHELD_ISSUE_MAX]
@@ -209,8 +248,12 @@ def async_setup_withheld_issue(
 
     @callback
     def _update() -> None:
-        if not box.state.info and not box.info_retracted:
-            # Nothing has arrived yet. Not the same as "nothing is withheld".
+        if not box.info_received and not box.info_retracted:
+            # Nothing has arrived yet. Not the same as "nothing is withheld". Asked of
+            # the box and not of the payload it holds: an `info` of `{}` has arrived, it
+            # does not carry the member, and that is the receiver's word like any other
+            # `info` without it - the sensor reads it the same way. A payload that is
+            # not a JSON object never counts as having arrived.
             return
         if box.info_retracted or not box.state.not_published:
             async_delete_withheld_issue(hass, entry.entry_id)
@@ -224,7 +267,14 @@ def async_setup_withheld_issue(
             learn_more_url=WITHHELD_LEARN_MORE_URL,
             translation_key=ISSUE_KEY,
             translation_placeholders={
-                "name": _plain(str(box.announcement.get("name") or box.name)),
+                # The entry's own title is asked too: the name stored with the entry
+                # follows the receiver's announcement, so it can be the same nothing.
+                "name": _named(
+                    str(box.announcement.get("name") or ""),
+                    box.name,
+                    entry.title,
+                    box.node_id,
+                ),
                 "withheld": withheld_lines(box, hass.config.language or "en"),
             },
         )

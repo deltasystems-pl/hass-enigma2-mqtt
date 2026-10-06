@@ -1625,6 +1625,55 @@ async def test_channels_retracted_takes_that_bouquets_list_and_nobody_elses(
     assert options(hass, CHANNEL_SELECT) == ["TVP 1 HD", "TVN HD"]
 
 
+async def test_a_superseded_channels_is_not_kept_alive_by_the_list_once_read_from_it(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Counted in the interpreter: one parsed copy of a channel, also after a new `channels`.
+
+    `channels` arrives first and is the list on show, so the model read from it holds
+    that payload. Then the index names a bouquet with no topic of its own: `channels` is
+    kept for it, and the list on show is the per-bouquet one. A changed `channels` then
+    replaces the payload in hand - and the model read from the first one, which nothing
+    reads any more, must not go on holding the first payload beside it.
+    """
+    marker = {"sref": "1:0:19:ABCD:3F3:1:C00000:0:0:0:", "name": "Only one of me, please"}
+    no_slug = {**NO_SLUG, "channels": [*NO_SLUG["channels"], marker]}
+    first = {**THREE, "bouquets": [ULUBIONE, no_slug, SPORT]}
+    second = {**first, "generated": first["generated"] + 60}
+
+    def alive() -> int:
+        gc.collect()
+        return sum(
+            1 for found in gc.get_objects() if isinstance(found, dict) and found == marker
+        ) - 1  # `marker` itself
+
+    store = three_base(retained)
+    store[INFO_TOPIC] = info(claims=True)
+    await async_setup_box_then_retained(hass, config_entry, store)
+    box: Enigma2Box = config_entry.runtime_data
+
+    await deliver(hass, CHANNELS_TOPIC, json.dumps(first))
+    assert box.channel_list.source == "channels"
+    assert box.channels_named(marker["name"]) == [marker]
+    assert alive() == 1
+
+    await deliver(hass, BOUQUETS_TOPIC, index_of(first, THREE_SLUGS))
+    await deliver(hass, list_topic("ulubione_tv"), list_of(ULUBIONE))
+    await deliver(hass, list_topic("sport"), list_of(SPORT))
+    assert box.channel_list.source == "bouquet_topics"
+    assert box.state.channels is not None, "kept: nothing else has that bouquet's list"
+    assert alive() == 1
+
+    await publish(hass, CHANNELS_TOPIC, json.dumps(second))
+
+    assert box.state.channels["generated"] == second["generated"]
+    assert box.channels_named(marker["name"]) == [marker]
+    assert alive() == 1
+
+
 async def test_a_republished_channels_is_not_a_second_copy_and_a_changed_one_is_read(
     hass: HomeAssistant,
     mqtt_mock,
