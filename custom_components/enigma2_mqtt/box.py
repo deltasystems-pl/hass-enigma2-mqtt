@@ -40,6 +40,7 @@ from homeassistant.helpers.event import async_call_later
 import homeassistant.util.dt as dt_util
 from yarl import URL
 
+from .buildid import base_version
 from .const import (
     ACK_TIMEOUT,
     ATTR_KEY,
@@ -106,6 +107,7 @@ from .const import (
     TOPIC_EPG,
     TOPIC_EPG_GRID,
     TOPIC_EPG_IMPORT,
+    TOPIC_ERROR_CLEARED,
     TOPIC_HDD,
     TOPIC_INFO,
     TOPIC_KEY,
@@ -1191,6 +1193,21 @@ class Enigma2Box:
             and isinstance(capabilities, list)
             and CAPABILITY_SELF_UPDATE in capabilities
         )
+
+    def plugin_at_least(self, version: tuple[int, int, int]) -> bool | None:
+        """Return whether the plugin on the receiver is `version` or a later release.
+
+        For a command the plugin announces no capability for: the release that added it is
+        then all there is to go by. Read from `info.plugin`, the number in front of any
+        build label, so a development build counts as the release it says it is. `None`
+        while the receiver has not said - no `info` yet, or a version that is not
+        `N.N.N` - which is not a "no": nothing is taken away on silence. A retracted
+        `info` leaves the last version standing, as it leaves the device details.
+        """
+        running = base_version(self.state.info.get("plugin"))
+        if running is None:
+            return None
+        return running >= version
 
     @property
     def is_on(self) -> bool:
@@ -2479,6 +2496,18 @@ class Enigma2Box:
             "ts": dt_util.utcnow().isoformat(),
         }
         self._async_updated(TOPIC_LOCAL_ERROR)
+
+    @callback
+    def async_clear_error_record(self) -> None:
+        """Forget the complaint "Ostatni błąd" shows, the receiver's or Home Assistant's own.
+
+        Called once the receiver has emptied its `last_error` for `cmd/clear_error`. The
+        sensor keeps its own record precisely because the topic is cleared by the next
+        command that succeeds; a clear somebody asked for is the one case in which the
+        record has to go as well.
+        """
+        self.state.local_error = None
+        self._async_updated(TOPIC_ERROR_CLEARED)
 
     @callback
     def _last_error_received(self, msg: ReceiveMessage) -> None:

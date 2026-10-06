@@ -85,6 +85,7 @@ from .const import (
     CAPABILITY_EPG_IMPORT,
     CAPABILITY_HISTORY_CLEAR,
     CAPABILITY_SOFTCAM,
+    CLEAR_ERROR_SINCE,
     CONF_BASE_TOPIC,
     CONF_DANGEROUS_BUTTONS,
     CONF_NODE_ID,
@@ -93,6 +94,7 @@ from .const import (
     HISTORY_CLEAR_REASONS,
     SIGNAL_FORCE_REINSTALL,
     TOPIC_EPG_IMPORT,
+    TOPIC_LAST_ERROR,
     TOPIC_SCREEN,
     TOPIC_ZAP_HISTORY,
     WAKE_ON_LAN_NOT_SUPPORTED,
@@ -239,11 +241,44 @@ async def _async_history_clear(box: Enigma2Box) -> None:
     )
 
 
+async def _async_clear_error(box: Enigma2Box) -> None:
+    """Ask the receiver to clear `last_error`, wait to see it empty, then clear our record.
+
+    The plugin answers `cmd/clear_error` with the empty retained payload whether or not
+    an error was there, so there is always an effect to wait for: an empty `last_error`
+    that arrived **after** the press. A broker replays no empty retained payload, so an
+    empty one is always news. Without it nothing is
+    forgotten here - a receiver that did not answer has cleared nothing, and a sensor
+    that said otherwise would be put right by the retained complaint at the next reload.
+    The one refusal the command has - an update being applied - arrives on `last_error`
+    under the command's own name and is raised as the receiver's sentence; a complaint
+    about another command in the meantime is neither the answer nor a refusal.
+
+    Only then does "Ostatni błąd" lose its own record, which is what the press is for:
+    that sensor outlives every other clearing of the topic on purpose.
+    """
+    before = box.updates.get(TOPIC_LAST_ERROR, 0)
+
+    def cleared() -> bool:
+        return box.updates.get(TOPIC_LAST_ERROR, 0) > before and box.state.last_error is None
+
+    await box.async_command("clear_error", PRESS, effect=cleared)
+    if box.state.last_error is not None:
+        # A complaint that came in right behind the empty payload is newer than the
+        # clear, and the sensor already shows it: it stays.
+        return
+    box.async_clear_error_record()
+
+
 @dataclass(frozen=True, kw_only=True)
 class Enigma2ButtonDescription(ButtonEntityDescription):
     """A button, and what pressing it does."""
 
     press_fn: Callable[[Enigma2Box], Coroutine[Any, Any, None]]
+    # The first plugin release that has this button's command, for a command the plugin
+    # announces no capability for. The button is unavailable while the receiver states an
+    # older one - after a downgrade, say - where the command is answered "unknown command".
+    since: tuple[int, int, int] | None = None
     # Whether this button works while the box is unreachable.
     offline: bool = False
     # Whether what this button promises depends on the receiver waking to a magic
@@ -345,6 +380,20 @@ HISTORY_CLEAR_BUTTON = Enigma2ButtonDescription(
     needs_panic_button=True,
 )
 
+# "Wyczyść ostatni błąd": empties the receiver's retained `last_error` and, once the
+# receiver has done it, the record "Ostatni błąd" keeps. `cmd/clear_error` came with plugin
+# 0.5.0 and has no capability name and no permission - it changes nothing on the receiver -
+# so the gate is the plugin's release: commands are not capabilities in the contract, and
+# the release that added this one is all there is to go by. An older plugin answers the
+# command "unknown command", so it gets no button. A diagnostic entity, beside the sensor
+# it clears.
+CLEAR_ERROR_BUTTON = Enigma2ButtonDescription(
+    key="clear_error",
+    entity_category=EntityCategory.DIAGNOSTIC,
+    press_fn=_async_clear_error,
+    since=CLEAR_ERROR_SINCE,
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -387,6 +436,7 @@ async def async_setup_entry(
             SOFTCAM_BUTTON,
             EPG_IMPORT_BUTTON,
             HISTORY_CLEAR_BUTTON,
+            CLEAR_ERROR_BUTTON,
         )
     }
 
@@ -517,6 +567,23 @@ async def async_setup_entry(
             lambda: CAPABILITY_HISTORY_CLEAR in box.capabilities,
             # Never removed, for the reason the history selects give: a capability that
             # goes quiet is not a decision, and a dashboard's button is not its price.
+            lambda: False,
+            async_add_entities,
+        ).start()
+    )
+
+    entry.async_on_unload(
+        OptionalEntities(
+            hass,
+            box,
+            "button",
+            [CLEAR_ERROR_BUTTON.key],
+            factory,
+            # A stated plugin release that has the command, and nothing weaker: before
+            # `info` arrives, or with a version that cannot be read, nothing is created.
+            lambda: box.plugin_at_least(CLEAR_ERROR_SINCE) is True,
+            # Never removed. A receiver taken back to an older plugin keeps the entity,
+            # as it keeps every other one, and the button is unavailable there instead.
             lambda: False,
             async_add_entities,
         ).start()
@@ -856,6 +923,11 @@ class Enigma2Button(Enigma2Entity, ButtonEntity):
         if (
             self.entity_description.needs_panic_button
             and self.box.zap_history_panic_button is False
+        ):
+            return False
+        if (
+            self.entity_description.since is not None
+            and self.box.plugin_at_least(self.entity_description.since) is False
         ):
             return False
         return super().available

@@ -73,6 +73,15 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   address (SECURITY.md).
 - The diagnostics download carries the chosen picture and the state of the picon lookup, as a
   status and counts.
+- **"Wyczyść ostatni błąd" (*Clear last error*), a diagnostic button.** It sends plugin 0.5.0's
+  `cmd/clear_error`, which empties the receiver's retained `last_error`, and once the receiver
+  has done that it also clears the record "Ostatni błąd" keeps - the receiver's complaint or
+  Home Assistant's own - so the sensor reads `unknown` again. The plugin announces no
+  capability for the command, so the button is created only for a receiver whose `info.plugin`
+  is 0.5.0 or later; an older plugin would answer "unknown command" and gets none, and on a
+  receiver taken back to an older plugin the button is unavailable. It is unavailable while
+  the receiver is offline, and a press the receiver does not answer raises and clears nothing
+  (DOCUMENTATION.md §4.3 and §4.5).
 
 ### Changed
 

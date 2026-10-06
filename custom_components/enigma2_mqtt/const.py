@@ -665,6 +665,14 @@ SIGNAL_FORCE_REINSTALL: Final = f"{DOMAIN}_force_reinstall"
 # the plugin cannot report, because it may never publish again. A key in the box's update
 # counters, never an MQTT topic.
 TOPIC_LOCAL_ERROR: Final = "ha_last_error"
+# Where the box object says that "Ostatni błąd" was cleared on request: the receiver
+# emptied its `last_error` for "Wyczyść ostatni błąd", and the sensor's own record goes
+# with it. Like the key above, a key in the box's update counters and never an MQTT topic.
+TOPIC_ERROR_CLEARED: Final = "ha_error_cleared"
+# The first plugin release that has `cmd/clear_error`. The plugin announces no capability
+# for the command - it needs no hook and no permission - so the release that added it is
+# the only thing a consumer can go by, and an older plugin answers it "unknown command".
+CLEAR_ERROR_SINCE: Final = (0, 5, 0)
 
 # A release package the index lists is downloaded from the same origin as the index, beside
 # it - the feed serves the packages directly - with the same verified TLS, no redirects and
