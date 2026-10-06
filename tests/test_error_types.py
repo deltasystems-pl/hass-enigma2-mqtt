@@ -66,6 +66,7 @@ def test_the_installer_s_refusals_are_exactly_these() -> None:
         "STREAMING",
         "BUSY",
         "BUSY_STALLED",
+        "BUSY_UNTIL",
         "OPKG_BUSY",
         "NEWER_INSTALLED",
         "BUNDLE_BELOW_FLOOR",

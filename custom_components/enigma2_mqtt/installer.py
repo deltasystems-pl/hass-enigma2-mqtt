@@ -189,6 +189,11 @@ class InstallerErrorCode(StrEnum):
     # The lock is held by a plugin self-update whose helper stopped beating: refused like
     # any busy lock - the released rule frees it, nothing earlier - with when that is.
     BUSY_STALLED = "busy_stalled"
+    # The lock is held by an installation of this project over SSH. Its record is written
+    # once, so nothing says whether that installation still runs or stopped without
+    # releasing it: refused like any busy lock, with when the released rule frees it at
+    # the latest.
+    BUSY_UNTIL = "busy_until"
     # opkg's records name a newer plugin than the one that runs and than the one to be
     # installed: the residue of a restore that did not complete. Not "a newer plugin is
     # installed"; the forced reinstall is the repair.
@@ -218,6 +223,7 @@ REFUSALS: Final = frozenset(
         InstallerErrorCode.STREAMING,
         InstallerErrorCode.BUSY,
         InstallerErrorCode.BUSY_STALLED,
+        InstallerErrorCode.BUSY_UNTIL,
         InstallerErrorCode.OPKG_BUSY,
         InstallerErrorCode.NEWER_INSTALLED,
         InstallerErrorCode.BUNDLE_BELOW_FLOOR,
@@ -2631,6 +2637,14 @@ async def _async_busy_error(
     picture, so an installer's lock - which has no heartbeat to judge and frees itself
     30 minutes after its claim - gets the same "in about N minutes" rather than a plain
     "busy" with no end in sight.
+
+    An installer's lock met while the interface runs has an end too, and says it
+    (`BUSY_UNTIL`): the helper that claimed it may be long dead - a Home Assistant that
+    restarted mid-install, a connection that never came back - and "another installation
+    is running" was then all a household heard for up to half an hour, with nothing to
+    say when to try again. Whether that installation still runs cannot be told from its
+    record, so the sentence promises only the latest moment. A lock whose time cannot be
+    read, and a self-update that is beating, stay plain "busy".
     """
     try:
         result = await session.run(
@@ -2688,6 +2702,20 @@ async def _async_busy_error(
             )
             error.update_running = True
             return error
+        if (
+            info.get("origin") is None
+            and isinstance(remaining, int)
+            and not isinstance(remaining, bool)
+            and remaining > 0
+        ):
+            minutes = max(1, math.ceil(remaining / 60))
+            return InstallerError(
+                InstallerErrorCode.BUSY_UNTIL,
+                "an installation of this integration holds the receiver's lock - running, "
+                "or stopped without releasing it; the released rule frees it in about "
+                f"{minutes} min at the latest",
+                {"minutes": str(minutes)},
+            )
     return InstallerError(InstallerErrorCode.BUSY)
 
 

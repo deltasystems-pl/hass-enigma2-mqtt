@@ -217,8 +217,13 @@ stays behind as evidence and is pruned by the next two successful installs. Two 
 - *„...but the installer's transaction lock could not be released."* The receiver is back as it
   was and the only thing left behind is the lock that keeps two installs off one box. Delete
   `/home/root/mqttbridge-backups/.ha-installer.lock` over SSH, or wait thirty minutes for it to
-  be judged stale; until then the next attempt is refused with "another installation is already
-  running".
+  be judged stale; until then the next attempt is refused with "another installation holds the
+  lock on this receiver ... The lock expires in about N min at the latest", N being what is
+  left of the thirty minutes. The same sentence answers an install - the update card's, the
+  guided installer's or the forced reinstall - while another one really is running on the
+  receiver, since the lock's record cannot say which of the two it is. A plain "another
+  installation is already running" is left for an install this Home Assistant itself is
+  running on that receiver, and for a lock whose age cannot be read.
 - *„...the receiver's package manager (opkg) is busy..."* Somebody is installing or removing a
   package from the receiver's own menu, or its update check is running. Before a snapshot this
   means nothing was changed: wait a minute and install again. During a rollback it means nothing

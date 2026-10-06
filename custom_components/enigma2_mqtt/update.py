@@ -187,6 +187,7 @@ _RULED_OUT: dict[InstallerErrorCode, str] = {
     InstallerErrorCode.DEPENDS_MISSING: "update_depends_missing",
     InstallerErrorCode.PACKAGE_INVALID: "update_download_failed",
     InstallerErrorCode.BUSY_STALLED: "update_busy_stalled",
+    InstallerErrorCode.BUSY_UNTIL: "update_busy_until",
     InstallerErrorCode.RECORDS_MISMATCH: "update_records_mismatch",
 }
 

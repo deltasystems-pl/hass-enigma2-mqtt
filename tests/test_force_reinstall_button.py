@@ -1353,6 +1353,49 @@ def test_the_stopped_interface_sentence_is_written_in_all_three_languages() -> N
             assert phrase in common["force_reinstall_interface_stopped"], (language, phrase)
 
 
+@pytest.mark.parametrize(
+    ("language", "words"),
+    [
+        ("en", "The lock expires in about 17 min at the latest"),
+        ("pl", "Blokada wygaśnie najpóźniej za około 17 min"),
+        ("de", "Die Sperre läuft spätestens in etwa 17 Min. ab"),
+    ],
+)
+async def test_another_installation_s_lock_says_how_long_is_left_in_every_language(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+    hass_admin_user,
+    language: str,
+    words: str,
+) -> None:
+    """A dead helper's lock ages out for up to thirty minutes. The press is refused all that
+    time, and now says when it will not be - on the last-error sensor too."""
+    await _ready(hass, config_entry, box_on_the_broker)
+    # After the set-up: the entity ids were made from the English names.
+    hass.config.language = language
+
+    with (
+        patch(
+            INSTALL,
+            AsyncMock(
+                side_effect=InstallerError(InstallerErrorCode.BUSY_UNTIL, "", {"minutes": "17"})
+            ),
+        ),
+        pytest.raises(HomeAssistantError) as raised,
+    ):
+        await _press(hass, hass_admin_user.id)
+        await _press(hass, hass_admin_user.id)
+
+    reason = raised.value.translation_placeholders["reason"]
+    assert words in reason
+    assert "{minutes}" not in reason
+    assert isinstance(raised.value, ServiceValidationError)
+    assert hass.states.get(LAST_ERROR).attributes["error"] == reason
+
+
 async def test_credentials_gone_between_the_two_presses_are_a_refusal(
     hass: HomeAssistant,
     mqtt_mock,
@@ -1382,6 +1425,7 @@ async def test_credentials_gone_between_the_two_presses_are_a_refusal(
     [
         ("BUSY", True),
         ("BUSY_STALLED", True),
+        ("BUSY_UNTIL", True),
         ("OPKG_BUSY", True),
         ("RECORDING", True),
         ("TIMER_DUE", True),

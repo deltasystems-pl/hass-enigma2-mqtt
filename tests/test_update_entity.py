@@ -1145,6 +1145,11 @@ async def test_a_bundle_at_the_floor_is_offered(
             "update_busy_stalled",
         ),
         (
+            "BUSY_UNTIL",
+            {"minutes": "17"},
+            "update_busy_until",
+        ),
+        (
             "RECORDS_MISMATCH",
             {"recorded": "0.9.0", "running": "0.2.0"},
             "update_records_mismatch",
@@ -1159,6 +1164,7 @@ async def test_a_bundle_at_the_floor_is_offered(
         "missing dependencies",
         "bytes that changed",
         "a stalled self-update's lock",
+        "another installation's lock",
         "opkg's records naming another version",
     ],
 )
