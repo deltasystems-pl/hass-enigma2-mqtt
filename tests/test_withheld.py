@@ -10,9 +10,11 @@ carries the count - for a receiver that reports the member, and for no other.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 import re
+import tarfile
 from typing import Any
 
 from homeassistant.const import STATE_UNKNOWN, EntityCategory
@@ -238,7 +240,7 @@ async def test_one_repair_per_receiver_says_what_and_where_to_read_more(
         "name": BOX_NAME,
         "withheld": (
             "- the complete channel list (every bouquet in one message)\n"
-            "- the programme guide of the bouquet “astra”\n"
+            "- the EPG of the bouquet “astra”\n"
             "- the channel list of the bouquet “sport_hd_2”"
         ),
     }
@@ -265,7 +267,7 @@ async def test_the_repair_follows_the_list_and_goes_when_it_is_empty(
     await publish(hass, INFO_TOPIC, info([GRID_ENTRY]))
 
     assert the_issue(hass, config_entry).translation_placeholders["withheld"] == (
-        "- the programme guide of the bouquet “astra”"
+        "- the EPG of the bouquet “astra”"
     )
 
     await publish(hass, INFO_TOPIC, info([]))
@@ -337,22 +339,130 @@ async def test_the_repair_goes_when_the_plugin_retracts_its_info(
     assert the_issue(hass, config_entry) is not None
 
 
-async def test_the_repair_goes_with_the_entry_on_unload_and_returns_on_setup(
+async def test_unloading_leaves_the_repair_and_setting_up_again_keeps_it_ignored(
     hass: HomeAssistant,
     mqtt_mock,
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
+    """Somebody pressed "Ignore". A reload is not a reason to ask them again.
+
+    Deleting an issue deletes the record that it was ignored, so neither the unload nor
+    the set-up - where the retained `info` has not arrived yet - may delete it.
+    """
     reporting(box_on_the_broker, [CHANNELS_ENTRY])
-    await async_setup_box(hass, config_entry)
-    assert the_issue(hass, config_entry) is not None
+    burst = dict(box_on_the_broker)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    ir.async_ignore_issue(hass, DOMAIN, the_issue(hass, config_entry).issue_id, True)
+    ignored = the_issue(hass, config_entry).dismissed_version
+    assert ignored is not None
+    touched: list[str] = []
+
+    @callback
+    def _record(event: Event) -> None:
+        touched.append(event.data["action"])
+
+    hass.bus.async_listen(ir.EVENT_REPAIRS_ISSUE_REGISTRY_UPDATED, _record)
 
     assert await hass.config_entries.async_unload(config_entry.entry_id)
     await hass.async_block_till_done()
 
-    assert our_issues(hass) == []
+    assert the_issue(hass, config_entry).dismissed_version == ignored
+
+    # Set up again, in the order a broker produces: the entry first, `info` afterwards.
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert the_issue(hass, config_entry).dismissed_version == ignored
+    for topic, payload in burst.items():
+        async_fire_mqtt_message(hass, topic, payload, retain=True)
+    await hass.async_block_till_done()
+
+    assert the_issue(hass, config_entry).dismissed_version == ignored
+    assert "remove" not in touched
+
+
+async def test_an_ignored_repair_survives_a_restart_of_home_assistant(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Home Assistant loads an issue like this one inactive, with its "ignored" kept.
+
+    That is what the registry holds after a restart, before any integration has spoken.
+    The same list arriving again brings it back active and still ignored.
+    """
+    reporting(box_on_the_broker, [CHANNELS_ENTRY])
+    burst = dict(box_on_the_broker)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    issue = the_issue(hass, config_entry)
+    ir.async_ignore_issue(hass, DOMAIN, issue.issue_id, True)
+    ignored = the_issue(hass, config_entry).dismissed_version
+    assert await hass.config_entries.async_unload(config_entry.entry_id)
+    await hass.async_block_till_done()
+    registry = ir.async_get(hass)
+    registry.issues[(DOMAIN, issue.issue_id)] = dataclasses.replace(
+        the_issue(hass, config_entry), active=False
+    )
 
     assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert the_issue(hass, config_entry).active is False
+    for topic, payload in burst.items():
+        async_fire_mqtt_message(hass, topic, payload, retain=True)
+    await hass.async_block_till_done()
+
+    restored = the_issue(hass, config_entry)
+    assert restored.active is True
+    assert restored.dismissed_version == ignored
+    assert restored.translation_placeholders == issue.translation_placeholders
+
+
+async def test_a_changed_list_rewrites_an_ignored_repair_and_leaves_it_ignored(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The decision: "Ignore" holds for as long as anything is withheld.
+
+    The diagnostic sensor is where a change shows. Once the receiver publishes
+    everything the repair is deleted, and one raised later is a new one.
+    """
+    reporting(box_on_the_broker, [CHANNELS_ENTRY])
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    ir.async_ignore_issue(hass, DOMAIN, the_issue(hass, config_entry).issue_id, True)
+
+    await publish(hass, INFO_TOPIC, info([CHANNELS_ENTRY, GRID_ENTRY]))
+
+    issue = the_issue(hass, config_entry)
+    assert issue.dismissed_version is not None
+    assert issue.translation_placeholders["withheld"].count("\n") == 1
+
+    await publish(hass, INFO_TOPIC, info([]))
+    assert the_issue(hass, config_entry) is None
+    await publish(hass, INFO_TOPIC, info([GRID_ENTRY]))
+
+    assert the_issue(hass, config_entry).dismissed_version is None
+
+
+async def test_a_reload_before_the_receiver_has_spoken_deletes_nothing(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The announcement alone, or nothing at all, is no word on what is withheld."""
+    reporting(box_on_the_broker, [CHANNELS_ENTRY])
+    announcement = box_on_the_broker[ANNOUNCEMENT_TOPIC]
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    assert the_issue(hass, config_entry) is not None
+    assert await hass.config_entries.async_unload(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+    async_fire_mqtt_message(hass, ANNOUNCEMENT_TOPIC, announcement, retain=True)
     await hass.async_block_till_done()
 
     assert the_issue(hass, config_entry) is not None
@@ -367,6 +477,8 @@ async def test_the_repair_goes_when_the_entry_is_removed(
     reporting(box_on_the_broker, [CHANNELS_ENTRY])
     await async_setup_box(hass, config_entry)
     assert the_issue(hass, config_entry) is not None
+
+    ir.async_ignore_issue(hass, DOMAIN, the_issue(hass, config_entry).issue_id, True)
 
     assert await hass.config_entries.async_remove(config_entry.entry_id)
     await hass.async_block_till_done()
@@ -390,7 +502,7 @@ async def test_a_bouquet_is_named_as_the_index_names_it_once_the_index_is_here(
     await publish(hass, BOUQUETS_TOPIC, json.dumps(INDEX))
 
     assert the_issue(hass, config_entry).translation_placeholders["withheld"] == (
-        "- the programme guide of the bouquet “Astra 19.2E”\n"
+        "- the EPG of the bouquet “Astra 19.2E”\n"
         "- the channel list of the bouquet “Sport (HD)”"
     )
     assert len(our_issues(hass)) == 1
@@ -416,15 +528,116 @@ async def test_a_name_cannot_break_out_of_its_line(
 
     assert lines[0] == "- the topic `weird'topic - injected`"
     assert len(lines) == 2
-    assert lines[1].startswith("- the channel list of the bouquet “Sport # Heading xxx")
+    assert lines[1].startswith("- the channel list of the bouquet “Sport Heading xxx")
     assert len(lines[1]) < 130
+
+
+async def test_nothing_a_receiver_sends_is_ever_markdown(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A bouquet's name, the device's name, a slug and a topic are text and stay text.
+
+    The description is rendered as Markdown and the names come from the receiver, so a
+    bouquet called like the first one below would otherwise put an image and a link that
+    says "Fix it" into a Home Assistant repair.
+    """
+    hostile = (
+        "![x](https://e.example/p.png) [Fix it](https://e.example/login) "
+        "<b onclick=x>bold</b> <https://e.example> www.e.example WWW.E.EXAMPLE "
+        "mailto:a@e.example **strong** __strong__ _em_ ~~gone~~ `code` \\[esc\\] "
+        "&lt;i&gt; &#60;u&#62; | cell | # Heading {name} javascript:alert(1)"
+    )
+    index = json.loads(json.dumps(INDEX))
+    index["bouquets"][0]["name"] = hostile
+    index["bouquets"][1]["name"] = "](http://e.example)" + "x" * 300
+    box_on_the_broker[ANNOUNCEMENT_TOPIC] = json.dumps({**ANNOUNCEMENT, "name": hostile})
+    box_on_the_broker[BOUQUETS_TOPIC] = json.dumps(index)
+    reporting(
+        box_on_the_broker,
+        [
+            GRID_ENTRY,
+            LIST_ENTRY,
+            # No index entry: named by its slug, which is the receiver's text too.
+            {"topic": "channels/[y](http:e.example)*z*", "bytes": 1, "limit": 1},
+            # Not a topic this knows: named whole.
+            {"topic": "x/[z](https://e.example)<i>`", "bytes": 1, "limit": 1},
+        ],
+    )
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    placeholders = the_issue(hass, config_entry).translation_placeholders
+    lines = placeholders["withheld"].split("\n")
+
+    assert len(lines) == 4
+    for text in (placeholders["name"], *lines):
+        assert "](" not in text
+        assert "<" not in text and ">" not in text
+        assert "[" not in text and "]" not in text
+        assert "://" not in text and "http:" not in text and "https:" not in text
+        assert "mailto:" not in text and "javascript:" not in text
+        assert "www." not in text.lower()
+        assert "@" not in text and "&" not in text and "\\" not in text
+        assert "*" not in text and "~" not in text and "#" not in text and "|" not in text
+        assert "{" not in text and "}" not in text
+        assert " _" not in text and "_ " not in text
+        assert len(text) <= 80 + 60
+    # A code span is the only backtick left, and only around a topic.
+    assert [line.count("`") for line in lines] == [0, 0, 0, 2]
+    assert len(placeholders["name"]) <= 80
+    # What a name is for survives: it can still be read.
+    assert placeholders["name"].startswith(
+        "!(x)(https /e.example/p.png) (Fix it)(https /e.example/login)"
+    )
+    assert lines[1].startswith("- the channel list of the bouquet “)(http /e.example)xxx")
+    assert lines[2] == "- the channel list of the bouquet “(y)(http e.example)z”"
+    # And a slug keeps the underscores that are its letters.
+    assert "sport_hd_2" not in placeholders["withheld"]
+    await publish(hass, BOUQUETS_TOPIC, json.dumps({"generated": 1, "bouquets": []}))
+    assert "“sport_hd_2”" in the_issue(hass, config_entry).translation_placeholders["withheld"]
+
+
+async def test_a_bouquet_with_no_topic_of_its_own_is_named_when_channels_is_withheld(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Its list is on `channels` only, and the receiver's list has no topic to name.
+
+    Told from the index and `not_published` together: an empty slug, and `channels`
+    withheld. With `channels` published there is nothing missing and nothing is said.
+    """
+    cyrillic = "".join(map(chr, (0x420, 0x443, 0x441, 0x441, 0x43A, 0x438, 0x435)))
+    index = json.loads(json.dumps(INDEX))
+    index["bouquets"].insert(
+        1, {"name": cyrillic, "sref": "1:7:1:0:0:0:0:0:0:0:c", "slug": "", "count": 40}
+    )
+    box_on_the_broker[BOUQUETS_TOPIC] = json.dumps(index)
+    reporting(box_on_the_broker, [GRID_ENTRY])
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    assert the_issue(hass, config_entry).translation_placeholders["withheld"] == (
+        "- the EPG of the bouquet “Astra 19.2E”"
+    )
+
+    await publish(hass, INFO_TOPIC, info([CHANNELS_ENTRY, GRID_ENTRY]))
+
+    assert the_issue(hass, config_entry).translation_placeholders["withheld"] == (
+        "- the complete channel list (every bouquet in one message)\n"
+        f"- the channel list of the bouquet “{cyrillic}”\n"
+        "- the EPG of the bouquet “Astra 19.2E”"
+    )
+    assert len(our_issues(hass)) == 1
 
 
 WORDS = {
     "en": {
         "channels": "the complete channel list",
         "list": "the channel list of the bouquet “Sport (HD)”",
-        "grid": "the programme guide of the bouquet “Astra 19.2E”",
+        "grid": "the EPG of the bouquet “Astra 19.2E”",
         "discovery": "the MQTT discovery message of the device",
         "other": "the topic `something/else`",
         "more": "and 3 more",
@@ -432,15 +645,15 @@ WORDS = {
     "pl": {
         "channels": "pełna lista kanałów",
         "list": "lista kanałów bukietu „Sport (HD)”",
-        "grid": "przewodnik EPG bukietu „Astra 19.2E”",
-        "discovery": "wiadomość MQTT discovery urządzenia",
+        "grid": "EPG bukietu „Astra 19.2E”",
+        "discovery": "wiadomość wykrywania MQTT (discovery) urządzenia",
         "other": "temat `something/else`",
-        "more": "oraz kolejne: 3",
+        "more": "i jeszcze 3",
     },
     "de": {
         "channels": "die vollständige Senderliste",
         "list": "die Senderliste des Bouquets „Sport (HD)“",
-        "grid": "der Programmführer (EPG) des Bouquets „Astra 19.2E“",
+        "grid": "das EPG des Bouquets „Astra 19.2E“",
         "discovery": "die MQTT-Discovery-Nachricht des Geräts",
         "other": "das Topic `something/else`",
         "more": "und 3 weitere",
@@ -522,21 +735,61 @@ def test_the_repair_has_a_title_and_a_description_in_every_language() -> None:
         assert "{name}" in strings["title"]
 
 
-def test_the_learn_more_anchor_exists_in_the_plugins_document() -> None:
-    """The anchor is a heading of the plugin's TROUBLESHOOTING.md, slugged as GitHub does.
+def _bundled_troubleshooting() -> str:
+    """Return `docs/TROUBLESHOOTING.md` from the bundled plugin source archive."""
+    bundled = COMPONENT / "bundled"
+    metadata = json.loads((bundled / "metadata.json").read_text(encoding="utf-8"))
+    prefix = f"enigma2-mqtt-bridge-{metadata['source_commit']}/"
+    with tarfile.open(bundled / metadata["source_filename"], "r:gz") as tar:
+        member = tar.extractfile(f"{prefix}docs/TROUBLESHOOTING.md")
+        assert member is not None
+        return member.read().decode("utf-8")
 
-    The heading is quoted here because the document lives in the other repository; when
-    it is reworded there, this is the line that has to follow.
+
+def _github_anchor(heading: str) -> str:
+    return re.sub(r"[^a-z0-9 -]", "", heading.lower()).replace(" ", "-")
+
+
+def test_the_learn_more_link_points_into_the_plugins_troubleshooting_document() -> None:
+    from custom_components.enigma2_mqtt.const import WITHHELD_LEARN_MORE_URL  # noqa: PLC0415
+
+    document, _, anchor = WITHHELD_LEARN_MORE_URL.partition("#")
+
+    assert document == (
+        "https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TROUBLESHOOTING.md"
+    )
+    assert anchor and anchor == _github_anchor(anchor)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "the section the link points at was written after plugin 0.4.0, which is the "
+        "plugin source bundled here; this turns into a pass - and, being strict, into a "
+        "failure that says to remove this marker - when the bundle moves to a plugin "
+        "that has it"
+    ),
+)
+def test_the_learn_more_anchor_is_a_heading_of_the_bundled_plugins_document() -> None:
+    """The anchor is checked against the plugin's own document, not against a copy here.
+
+    Until the bundled plugin has the section, the link is unverified by any test: it was
+    checked by hand against the plugin's `main`.
     """
     from custom_components.enigma2_mqtt.const import WITHHELD_LEARN_MORE_URL  # noqa: PLC0415
 
-    heading = "Entities keep going unavailable and coming back"
-    anchor = re.sub(r"[^a-z0-9 -]", "", heading.lower()).replace(" ", "-")
+    anchors = {
+        _github_anchor(line[3:].strip())
+        for line in _bundled_troubleshooting().splitlines()
+        if line.startswith("## ")
+    }
 
-    assert WITHHELD_LEARN_MORE_URL.endswith(f"/docs/TROUBLESHOOTING.md#{anchor}")
-    assert WITHHELD_LEARN_MORE_URL.startswith(
-        "https://github.com/deltasystems-pl/enigma2-mqtt-bridge/"
-    )
+    assert WITHHELD_LEARN_MORE_URL.partition("#")[2] in anchors
+
+
+def test_the_bundled_troubleshooting_document_is_read_at_all() -> None:
+    """The expected failure above must be about the anchor, not about reading the file."""
+    assert "## Reporting a problem" in _bundled_troubleshooting()
 
 
 # ------------------------------------------------------------------------- sensor

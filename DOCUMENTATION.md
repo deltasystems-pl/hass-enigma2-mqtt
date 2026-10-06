@@ -1133,7 +1133,8 @@ exactly as before. Three things follow from topics that arrive one at a time:
   the index and publishes its channels on `channels` only, so the integration reads that one
   bouquet from `channels` - and keeps `channels` in memory for it, beside the per-bouquet
   lists. On a receiver whose `channels` is too big to be published there is nowhere to read it
-  from: the bouquet is offered without channels. The way out is on the receiver - narrow
+  from: the bouquet is offered without channels, and the repair names it
+  ([§8](#8-troubleshooting)). The way out is on the receiver - narrow
   `bouquets_for_select` until `channels` fits one packet again, or give the bouquet a name with
   a Latin letter or a digit in it.
 - **„Ostatnio oglądane" fails toward hiding.** While a bouquet named in the hide option is on
@@ -1374,12 +1375,19 @@ plugin mismatch is where a missing entity or an unrecognised command usually end
   plugin 0.5.0 did not send it. The repair lists what is missing - the complete channel list,
   one bouquet's channel list, one bouquet's programme guide, the device's MQTT discovery
   message - and „Nieopublikowane dane" has the topics and sizes ([§4.3](#43-sensors)). A missing
-  complete channel list costs nothing here: the integration reads the per-bouquet lists
-  instead. For the rest, set `bouquets_for_select` on the receiver - the plugin's setup screen
+  complete channel list costs nothing here by itself: the integration reads the per-bouquet
+  lists instead. The exception is a bouquet whose name has no ASCII letter or digit, which has
+  no list of its own to read ([§4.6](#46-selects)); the repair names it too. For the rest, set
+  `bouquets_for_select` on the receiver - the plugin's setup screen
   or its OpenWebif page - to the bouquets the household uses, or split a very large bouquet
   into smaller ones. Lowering `epg_grid_events` does not bring a missing guide back: the plugin
   shortens a guide as far as it can before it gives up on it. The repair goes by itself once
-  the receiver publishes everything; the plugin's
+  the receiver publishes everything. **Ignore** holds for as long as anything is withheld -
+  across a reload and a restart, and also when the list changes, which the sensor shows - and
+  is forgotten when the repair goes, when the receiver is removed, and, as for every repair,
+  when Home Assistant is updated. Unloading or disabling the receiver leaves the repair where
+  it is until Home Assistant restarts. The list inside the repair is written in the
+  installation's language, also for a user whose profile is set to another one. The plugin's
   [troubleshooting page](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TROUBLESHOOTING.md#entities-keep-going-unavailable-and-coming-back)
   has the receiver's side of it.
 - **Entities keep going unavailable and coming back, and the selects are empty, on a receiver

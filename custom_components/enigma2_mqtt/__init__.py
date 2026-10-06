@@ -19,7 +19,6 @@ from homeassistant.components import mqtt
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
-from homeassistant.helpers import issue_registry as ir
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
@@ -38,7 +37,7 @@ from .const import (
 )
 from .relay import async_answer_relay_request, async_get_relay
 from .release_store import async_release_index_cache
-from .withheld import async_setup_withheld_issue, issue_id
+from .withheld import async_delete_withheld_issue, async_setup_withheld_issue
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -125,7 +124,9 @@ async def async_setup_entry(
     await _async_publish_integration(hass, entry)
 
     # One repair per receiver while it says it withheld a payload that would not fit one
-    # MQTT packet; removed with the entry's unload, like everything else the entry holds.
+    # MQTT packet. Unloading stops following the receiver and leaves the repair as it is,
+    # so that one somebody chose to ignore is still ignored after a reload; removing the
+    # entry is what deletes it.
     entry.async_on_unload(async_setup_withheld_issue(hass, entry, box))
 
     # A receiver without internet asks for a package on `relay_request`; the answer is an
@@ -211,9 +212,8 @@ async def async_remove_entry(
     The retained `enigma2mqtt/release_index` stays - a signed index is harmless to
     anybody who reads it, and it is not this receiver's.
     """
-    # Unloading removed the receiver's repair already; an entry removed without ever
-    # having been loaded in this run has none, and this is then nothing.
-    ir.async_delete_issue(hass, DOMAIN, issue_id(entry.entry_id))
+    # The receiver's repair goes with it, and with it the record that it was ignored.
+    async_delete_withheld_issue(hass, entry.entry_id)
     try:
         if not await mqtt.async_wait_for_mqtt_client(hass):
             _LOGGER.debug(

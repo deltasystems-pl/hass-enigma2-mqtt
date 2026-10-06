@@ -719,7 +719,7 @@
   "issues": {
     "payloads_withheld": {
       "title": "{name}: the receiver is not publishing everything",
-      "description": "The plugin on {name} did not publish the following, because each would be bigger than one MQTT message may be and the broker would close the connection:\n\n{withheld}\n\nWhat that means here: the channels of a bouquet whose list is missing are not offered, and a bouquet whose programme guide is missing has none.\n\nTo get them back, limit the bouquets the plugin publishes with its `bouquets_for_select` setting on the receiver (the plugin's setup screen or its OpenWebif page), or split a very large bouquet into smaller ones. Lowering `epg_grid_events` does not bring a missing guide back: the plugin already shortens a guide as far as it can before it gives up on it.\n\nThis notice goes away by itself once the receiver publishes everything again."
+      "description": "The plugin on {name} did not publish the following, because each of these messages would exceed the size one MQTT message may have and the broker would close the connection:\n\n{withheld}\n\nIn Home Assistant this means: the channels of a bouquet whose list is missing are not offered, and a bouquet without its EPG shows no programmes.\n\nTo get them back, limit the bouquets the plugin publishes with its `bouquets_for_select` setting on the receiver (the plugin's setup screen or its OpenWebif page), or split a very large bouquet into smaller ones. Lowering `epg_grid_events` does not bring a missing EPG back: the plugin already shortens it as far as it can before it gives up on it.\n\nThis notice goes away by itself once the receiver publishes everything again."
     }
   },
   "exceptions": {

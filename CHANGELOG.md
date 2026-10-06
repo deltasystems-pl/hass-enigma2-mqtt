@@ -33,7 +33,9 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   receiver - what is missing, in words, and which setting on the receiver brings it back - and
   the new diagnostic sensor „Nieopublikowane dane" (*Withheld payloads*) carries the count, with
   the topics and their sizes as attributes. The repair goes by itself when the receiver publishes
-  everything again; the sensor exists only for a receiver that reports the list
+  everything again, and one that was ignored stays ignored across a reload and a restart for as
+  long as anything is withheld. It also names a bouquet that has no topic of its own when
+  `channels` is what was withheld. The sensor exists only for a receiver that reports the list
   (DOCUMENTATION.md §4.3 and §8).
 - **„EPG &ndash; aktywny bukiet" has the attribute `events_per_channel`** when the plugin
   reports it: how many programmes a channel carries in that guide at most, which is lower than

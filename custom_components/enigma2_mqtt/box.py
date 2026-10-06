@@ -1168,6 +1168,18 @@ class Enigma2Box:
                 return entry["name"]
         return None
 
+    def bouquet_names_without_topic(self) -> list[str]:
+        """Return the bouquets of the index that have no channel topic of their own.
+
+        Their channels are published on `channels` only, so they are what a withheld
+        `channels` takes away that the receiver's own list of withheld topics cannot name.
+        """
+        return [
+            entry["name"]
+            for entry in (self.state.bouquet_index or {}).get("bouquets") or []
+            if not entry["slug"]
+        ]
+
     @property
     def active_bouquet(self) -> dict[str, Any] | None:
         """Return the bouquet whose channel list the receiver is currently walking.
