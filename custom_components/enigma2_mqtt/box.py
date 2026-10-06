@@ -749,6 +749,17 @@ class Enigma2CommandError(HomeAssistantError):
     """A command the box refused, or never carried out."""
 
 
+class Enigma2CommandRefused(Enigma2CommandError, ServiceValidationError):
+    """A command the box refused with a code that says the moment was wrong, not the box.
+
+    The receiver did nothing and said why in a code this integration knows: standby, a
+    zap history too short to clear, a recording being played back. Home Assistant shows
+    a `ServiceValidationError` as the sentence it carries, where a plain
+    `HomeAssistantError` reads as an action that failed (`errors.py`). Still an
+    `Enigma2CommandError`, so everything that catches a refusal catches this one.
+    """
+
+
 @dataclass(slots=True)
 class _Pending:
     """One command whose effect is being waited for."""
@@ -760,6 +771,9 @@ class _Pending:
     # `<cmd>_<reason>`. Empty for nearly every command: the receiver's sentence is then
     # the whole answer, as it always was.
     reasons: frozenset[str] = frozenset()
+    # Those of `reasons` that say the receiver tried and did not manage, rather than
+    # that it refused: raised as a failure, not as a refusal.
+    failures: frozenset[str] = frozenset()
 
     @callback
     def resolve(self) -> None:
@@ -775,11 +789,17 @@ class _Pending:
         reads why in its own language; anything else - no code, a code from a newer
         plugin, a code that is not a string - is the receiver's English sentence, which
         is never wrong, only untranslated.
+
+        A known code is also what says whose fault it was: a refusal is raised as one
+        (`Enigma2CommandRefused`), a code listed in `failures` as the failure it is. The
+        sentence without a code can be either, and stays the general error.
         """
         if self.future.done():
             return
+        refusal: Enigma2CommandError
         if isinstance(reason, str) and reason in self.reasons:
-            refusal = Enigma2CommandError(
+            kind = Enigma2CommandError if reason in self.failures else Enigma2CommandRefused
+            refusal = kind(
                 translation_domain=DOMAIN,
                 translation_key=f"{self.cmd}_{reason}",
             )
@@ -1541,6 +1561,7 @@ class Enigma2Box:
         effect: Callable[[], bool] | None = None,
         timeout: float = COMMAND_TIMEOUT,
         reasons: Collection[str] = (),
+        failures: Collection[str] = (),
     ) -> None:
         """Send a command and wait for proof that it worked.
 
@@ -1559,7 +1580,8 @@ class Enigma2Box:
 
         `reasons` are the refusal codes the command has translations for; a complaint
         carrying one of them in `last_error.reason` raises `<name>_<reason>` instead of
-        the receiver's English sentence.
+        the receiver's English sentence - as a refusal, `Enigma2CommandRefused`, unless
+        the code is also in `failures`, the codes that say the receiver tried and failed.
         """
         already_done = effect is not None and effect()
         pending = _Pending(
@@ -1567,6 +1589,7 @@ class Enigma2Box:
             predicate=effect if effect is not None else lambda: False,
             future=self.hass.loop.create_future(),
             reasons=frozenset(reasons),
+            failures=frozenset(failures),
         )
         self._pending.append(pending)
         try:

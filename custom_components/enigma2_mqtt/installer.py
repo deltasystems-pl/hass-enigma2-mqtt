@@ -27,7 +27,7 @@ import secrets
 import shlex
 import tarfile
 import time
-from typing import Any, Protocol
+from typing import Any, Final, Protocol
 
 # asyncssh pulls in cryptography, which is slow to import and reads from disk. Importing
 # it here means that happens once, while Home Assistant is importing this module in an
@@ -200,6 +200,33 @@ class InstallerErrorCode(StrEnum):
     GUI_STOPPED = "gui_stopped"
     # A forced reinstall's new interface never opened the plugin's log: it did not load it.
     PLUGIN_NOT_STARTED = "plugin_not_started"
+
+
+# The codes that are a refusal and not a failure: the moment was wrong - a recording, a
+# timer about to start, standby, a stream, another install or the package manager holding
+# its lock - or the request was, by the signed index's rule or because a newer plugin is
+# installed. The installer changed nothing, or put back what it had changed, and trying
+# again later or asking for something else is all there is to do. A service call that
+# ends with one of them raises Home Assistant's validation error, every other code its
+# general one (`errors.py`). A code is listed here only when every place that raises it
+# is such a refusal.
+REFUSALS: Final = frozenset(
+    {
+        InstallerErrorCode.RECORDING,
+        InstallerErrorCode.TIMER_DUE,
+        InstallerErrorCode.STANDBY,
+        InstallerErrorCode.STREAMING,
+        InstallerErrorCode.BUSY,
+        InstallerErrorCode.BUSY_STALLED,
+        InstallerErrorCode.OPKG_BUSY,
+        InstallerErrorCode.NEWER_INSTALLED,
+        InstallerErrorCode.BUNDLE_BELOW_FLOOR,
+        InstallerErrorCode.BUNDLE_WITHDRAWN,
+        InstallerErrorCode.VERSION_BELOW_FLOOR,
+        InstallerErrorCode.VERSION_WITHDRAWN,
+        InstallerErrorCode.VERSION_NOT_INSTALLABLE,
+    }
+)
 
 
 class InstallerError(Exception):

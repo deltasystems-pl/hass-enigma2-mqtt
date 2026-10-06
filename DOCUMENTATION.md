@@ -1364,6 +1364,30 @@ plugin that clears `last_error` on success ends the wait immediately.
 Zapping to the channel that is already on is still sent, but nothing is waited for: there is
 no change coming, and pretending otherwise would mean waiting out the whole timeout.
 
+### Which error a refused call raises
+
+Every button, select, action and the update card answer a call that did not do what was asked
+by raising, with a sentence in the household's language. There are two kinds, and both are a
+`HomeAssistantError` to anything that catches one:
+
+| Raised | When | Examples |
+|---|---|---|
+| `ServiceValidationError` | The call was **refused and nothing was done**, for a reason the caller can act on or wait out: the moment, or what was asked for | *Sprawdź aktualizacje wtyczki* pressed again inside its ten minutes; the zap history refusing to clear in standby or with one channel in it; an install refused for a recording, a timer about to start, standby, a stream, another install or the package manager running; a version the signed index withdraws or does not list; a downgrade |
+| `HomeAssistantError` | Something was **tried and failed**, the receiver did not answer, or the refusal is the receiver's own English sentence without a reason code, which can be either | no answer within ten seconds; an install, restart or rollback that failed; a download that failed; a receiver that cannot be reached over SSH; `not_cleared` after the 0 key |
+
+In the frontend a `ServiceValidationError` is shown as the sentence it carries, and a
+`HomeAssistantError` with "Failed to perform the action" in front of it. Over the WebSocket API
+the answer carries the code `service_validation_error` or `home_assistant_error` and the
+sentence's `translation_key`.
+
+**The REST API answers 500 for both.** `POST /api/services/<domain>/<service>` turns only a
+schema error and an unknown service into a client error (measured on Home Assistant 2026.9.2):
+an action that raises either kind is answered `500 Internal Server Error`, and Home Assistant's
+web server logs the traceback itself. That is Home Assistant's handling of every integration's
+errors, and nothing an integration raises changes it. A script that calls these actions over
+REST reads a 500 as "refused or failed" and finds the sentence in the Home Assistant log, or
+uses the WebSocket API.
+
 ### `get_epg_grid`
 
 Returns `{"bouquets": [...]}`, assembled from the retained `epg_grid/<bouquet_slug>` topics the

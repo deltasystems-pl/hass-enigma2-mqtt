@@ -28,7 +28,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import ATTR_ENTITY_ID, STATE_UNAVAILABLE
 from homeassistant.core import Context, Event, HomeAssistant, State, callback
 from homeassistant.data_entry_flow import FlowResultType
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_registry import EVENT_ENTITY_REGISTRY_UPDATED
 from homeassistant.setup import async_setup_component
@@ -722,6 +722,7 @@ async def test_a_withdrawn_bundle_is_refused_at_the_first_press(
         await _press(hass, hass_admin_user.id)
 
     assert raised.value.translation_key == "update_version_withdrawn"
+    assert isinstance(raised.value, ServiceValidationError)
     install.assert_not_awaited()
     assert f"{DOMAIN}_force_reinstall_{config_entry.entry_id}" not in _notices(hass)
 
@@ -1352,6 +1353,83 @@ def test_the_stopped_interface_sentence_is_written_in_all_three_languages() -> N
             assert phrase in common["force_reinstall_interface_stopped"], (language, phrase)
 
 
+async def test_credentials_gone_between_the_two_presses_are_a_refusal(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+    hass_admin_user,
+) -> None:
+    """Armed with credentials, confirmed without: nothing is tried, so nothing failed."""
+    await _ready(hass, config_entry, box_on_the_broker)
+    await _press(hass, hass_admin_user.id)
+
+    with (
+        patch("custom_components.enigma2_mqtt.button.stored_ssh_credentials", return_value=None),
+        patch(INSTALL, AsyncMock(return_value=_result())) as install,
+        pytest.raises(HomeAssistantError) as raised,
+    ):
+        await _press(hass, hass_admin_user.id)
+
+    assert raised.value.translation_key == "update_no_credentials"
+    assert isinstance(raised.value, ServiceValidationError)
+    install.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("code", "refusal"),
+    [
+        ("BUSY", True),
+        ("BUSY_STALLED", True),
+        ("OPKG_BUSY", True),
+        ("RECORDING", True),
+        ("TIMER_DUE", True),
+        ("STANDBY", True),
+        ("STREAMING", True),
+        ("NEWER_INSTALLED", True),
+        ("INSTALL_FAILED", False),
+        ("SSH_UNAVAILABLE", False),
+        ("GUI_STOPPED", False),
+        ("ROLLBACK_FAILED", False),
+        ("PLUGIN_NOT_STARTED", False),
+    ],
+)
+async def test_a_refusal_is_raised_as_a_refusal_and_a_failure_as_a_failure(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+    hass_admin_user,
+    code: str,
+    refusal: bool,
+) -> None:
+    """Another install running, a recording, standby: nothing failed, the moment was wrong.
+
+    Home Assistant shows a validation error as the sentence it carries, and a general
+    error as an action that failed. The sentence and its key are the same either way, and
+    both are recorded on the last-error sensor.
+    """
+    await _ready(hass, config_entry, box_on_the_broker)
+
+    with (
+        patch(
+            INSTALL,
+            AsyncMock(
+                side_effect=InstallerError(InstallerErrorCode[code], "why", {"minutes": "20"})
+            ),
+        ),
+        pytest.raises(HomeAssistantError) as raised,
+    ):
+        await _press(hass, hass_admin_user.id)
+        await _press(hass, hass_admin_user.id)
+
+    assert raised.value.translation_key == "force_reinstall_failed"
+    assert isinstance(raised.value, ServiceValidationError) is refusal
+    assert hass.states.get(LAST_ERROR).state == "force_reinstall"
+
+
 async def test_an_unexpected_failure_is_on_last_error_too(
     hass: HomeAssistant,
     mqtt_mock,
@@ -1373,6 +1451,7 @@ async def test_an_unexpected_failure_is_on_last_error_too(
         await _press(hass, hass_admin_user.id)
 
     assert raised.value.translation_key == "force_reinstall_failed"
+    assert not isinstance(raised.value, ServiceValidationError)
     reason = raised.value.translation_placeholders["reason"]
     assert "unexpected error (OSError)" in reason
     state = hass.states.get(LAST_ERROR)

@@ -34,7 +34,7 @@ from homeassistant.components.http import ApiConfig
 from homeassistant.components.mqtt import ReceiveMessage
 from homeassistant.const import ATTR_ENTITY_ID, STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.setup import async_setup_component
 import homeassistant.util.dt as dt_util
 import pytest
@@ -487,6 +487,7 @@ async def test_no_downgrade_over_mqtt(
         error = await _refused(_install(hass, "0.2.0"))
 
     assert error.translation_key == "update_downgrade"
+    assert isinstance(error, ServiceValidationError)
     fetch.assert_not_awaited()
     assert not _commands(mqtt_mock)
 
@@ -517,6 +518,7 @@ async def test_a_build_the_index_does_not_list_is_never_sent(
         error = await _refused(_install(hass, bundled.display))
 
     assert error.translation_key == "update_mqtt_release_only"
+    assert isinstance(error, ServiceValidationError)
     ssh.assert_not_awaited()
     assert not _commands(mqtt_mock)
 
@@ -584,6 +586,30 @@ REFUSALS = [
     ("internal_error", "the helper could not be launched", "update_mqtt_internal_error"),
     ("from_a_newer_plugin", "a sentence nobody translated", "update_mqtt_refused"),
 ]
+# The refusals a household can act on or wait out - the receiver's own setting, the
+# moment, the version asked for. They are raised as a refusal; a request the receiver
+# could not read, an image that cannot restart, a helper that would not start and a
+# reason nobody knows are raised as a failure.
+ACTIONABLE = {
+    "not_permitted",
+    "no_capability",
+    "busy",
+    "opkg_busy",
+    "standby",
+    "recording",
+    "recording_due",
+    "recording_unknown",
+    "epg_import",
+    "unknown_version",
+    "withdrawn",
+    "below_floor",
+    "incompatible",
+    "depends",
+    "downgrade",
+    "current",
+    "no_space",
+    "rate_limited",
+}
 
 
 @pytest.mark.parametrize(("reason", "error", "key"), REFUSALS)
@@ -608,6 +634,7 @@ async def test_every_refusal_is_said_in_words_and_never_retried_over_ssh(
         raised = await _refused(_install(hass))
 
     assert raised.translation_key == key
+    assert isinstance(raised, ServiceValidationError) is (reason in ACTIONABLE)
     if key == "update_mqtt_refused":
         assert raised.translation_placeholders["error"] == error
     ssh.assert_not_awaited()
@@ -754,6 +781,36 @@ async def test_only_the_accepted_transaction_is_followed(
         await task
 
 
+async def test_a_second_install_while_one_is_followed_is_a_refusal_and_ends_nothing(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    lan: None,
+) -> None:
+    """Asked of the card itself, past Home Assistant's own check for an install in progress:
+    the second request is refused for the moment, and the first one's spinner stays."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass)
+    await receiver.arm()
+    entity = hass.data["entity_components"]["update"].get_entity(PLUGIN)
+
+    with patch(FETCH, AsyncMock(return_value=_package())):
+        task = _install(hass)
+        await _until(lambda: receiver.requests)
+        with pytest.raises(HomeAssistantError) as raised:
+            await entity.async_install(version=None, backup=False)
+        assert raised.value.translation_key == "update_mqtt_busy"
+        assert isinstance(raised.value, ServiceValidationError)
+        assert not task.done()
+        assert hass.states.get(PLUGIN).attributes["in_progress"] is True
+        assert len(receiver.requests) == 1
+        receiver.report()
+        receiver.phase("finished", result="installed")
+        await task
+
+
 # -------------------------------------------------------------------- the ends --
 
 ENDS = [
@@ -859,6 +916,7 @@ async def test_still_running_at_the_bound_is_not_a_failure(
         raised = await _refused(task)
 
     assert raised.translation_key == "update_mqtt_still_running"
+    assert not isinstance(raised, ServiceValidationError)
     ssh.assert_not_awaited()
     # The call is over; what the receiver says goes on being shown, within its own window,
     # which closes on its own timer.
@@ -903,6 +961,7 @@ async def test_installed_counts_only_when_the_receiver_runs_the_signed_build(
         raised = await _refused(task)
 
     assert raised.translation_key == "update_mqtt_unproven"
+    assert not isinstance(raised, ServiceValidationError)
 
 
 async def test_the_proof_may_arrive_after_the_end(
@@ -1910,6 +1969,7 @@ async def test_the_card_agrees_with_the_receiver_once_the_call_is_over(
         raised = await _refused(task)
 
     assert raised.translation_key == "update_mqtt_still_running"
+    assert not isinstance(raised, ServiceValidationError)
     await _settle()
     attributes = hass.states.get(PLUGIN).attributes
     assert attributes["receiver_transaction"]["state"] == "in_progress"
@@ -1974,6 +2034,7 @@ async def test_a_release_the_index_does_not_list_is_never_sent(
         error = await _refused(_install(hass, bundled.display))
 
     assert error.translation_key == "update_mqtt_release_only"
+    assert isinstance(error, ServiceValidationError)
     fetch.assert_not_awaited()
     ssh.assert_not_awaited()
     assert not _commands(mqtt_mock)

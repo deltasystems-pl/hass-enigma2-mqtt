@@ -69,7 +69,6 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
-    DOMAIN,
     MQTT_UPDATE_ANSWER_TIMEOUT,
     MQTT_UPDATE_END_WAIT,
     MQTT_UPDATE_FOLLOW,
@@ -79,6 +78,7 @@ from .const import (
     TOPIC_LAST_ERROR,
     TOPIC_UPDATE,
 )
+from .errors import service_error
 from .relay import RELAY_PATH, RelayError, async_get_relay, async_relay_base, receiver_address
 from .release_package import PackageSource
 
@@ -541,12 +541,38 @@ def sentence_placeholders(
     }
 
 
-def _error(key: str, placeholders: dict[str, str]) -> HomeAssistantError:
-    return HomeAssistantError(
-        translation_domain=DOMAIN,
-        translation_key=key,
-        translation_placeholders=placeholders,
-    )
+# The refusals of `cmd/update` that the household can act on or wait out: the receiver's
+# own setting, the moment, or the version asked for. They are raised as a refusal; the
+# rest - a request the receiver could not read, an image that cannot restart its
+# interface, a reason from a newer plugin - as a failure, like every end of a transaction.
+_CALLER_CAN_ACT = frozenset(
+    {
+        "not_permitted",
+        "no_capability",
+        "busy",
+        "opkg_busy",
+        "standby",
+        "recording",
+        "recording_due",
+        "recording_unknown",
+        "epg_import",
+        "unknown_version",
+        "withdrawn",
+        "below_floor",
+        "incompatible",
+        "depends",
+        "downgrade",
+        "current",
+        "no_space",
+        "rate_limited",
+    }
+)
+
+
+def _error(
+    key: str, placeholders: dict[str, str], *, refused: bool = False
+) -> HomeAssistantError:
+    return service_error(refused, key, placeholders)
 
 
 class _Watch:
@@ -733,7 +759,11 @@ async def async_install_over_mqtt(
                     reason,
                     error,
                 )
-                raise _error(key, sentence_placeholders(None, version, extra))
+                raise _error(
+                    key,
+                    sentence_placeholders(None, version, extra),
+                    refused=reason in _CALLER_CAN_ACT,
+                )
             # Silence is not a refusal: the receiver may still start, late, and download from
             # the address it was given - which stays until its own ten minutes are over.
             raise _error("update_mqtt_no_answer", placeholders)

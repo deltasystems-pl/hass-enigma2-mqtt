@@ -23,7 +23,7 @@ from homeassistant.components.remote import (
 from homeassistant.components.update import ATTR_VERSION, UpdateEntityFeature
 from homeassistant.const import ATTR_ENTITY_ID, STATE_OFF, STATE_ON, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 import pytest
 from pytest_homeassistant_custom_component.common import (
@@ -563,6 +563,7 @@ async def test_an_install_without_credentials_says_which_setting_is_missing(
         await entity.async_install(version=None, backup=False)
 
     assert raised.value.translation_key == "update_no_credentials"
+    assert isinstance(raised.value, ServiceValidationError)
 
 
 async def test_an_install_reports_progress_and_always_stops_reporting_it(
