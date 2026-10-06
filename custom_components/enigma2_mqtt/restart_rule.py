@@ -400,6 +400,12 @@ async def async_record(
         if bouquet is not None and not _has_channel_list(channels):
             # A receiver that does not publish `channels`: the bouquet's own topic says
             # what is in it. Read here, before the channel, for the reason above.
+            #
+            # Whether the plugin publishes such topics at all is on `info`, which this
+            # does not read: the record is taken where no receiver is set up yet, and one
+            # more retained topic is one more wait. So a plugin up to 0.4.0 whose
+            # `channels` is absent, or late, costs one read of an index that is not there
+            # - `BOUQUET_REPLAY_SECONDS` at most - before it answers what it always did.
             listed = await _async_bouquet_topic(hass, base_topic, node_id, bouquet)
     except Exception:  # noqa: BLE001 - a record without a bouquet is still a record
         _LOGGER.debug("The receiver's bouquet could not be recorded", exc_info=True)
