@@ -901,6 +901,9 @@ class Enigma2Box:
         # Ends the request that asks the broker for the retained `channels` again:
         # its subscription, its confirmation tracker and its timer.
         self._refetch: CALLBACK_TYPE | None = None
+        # When the broker's answer to that request arrived, to know the same delivery
+        # again should the wildcard subscription be handed it too.
+        self._refetch_answered: float | None = None
 
     # ------------------------------------------------------------------ properties
 
@@ -2437,6 +2440,11 @@ class Enigma2Box:
         is then the only place that bouquet's list is, so it is kept, and read for that
         bouquet alone.
         """
+        if msg.retain and msg.timestamp == self._refetch_answered:
+            # The broker's answer to the request below, handed to the wildcard
+            # subscription as well because it never had a retained `channels`: read once.
+            self._refetch_answered = None
+            return
         channels = parse_json_payload(msg.payload)
         self._cancel_refetch()
         if self._topic_list is not None and self._channel_topics_live:
@@ -2778,6 +2786,7 @@ class Enigma2Box:
         def _answered(answer: ReceiveMessage) -> None:
             if self._refetch is _cancel and answer.retain:
                 self._channels_received(answer)
+                self._refetch_answered = answer.timestamp
 
         async def _subscribe() -> None:
             try:
@@ -2809,15 +2818,14 @@ class Enigma2Box:
     def _async_refetch_unanswered(self) -> None:
         """The broker had no `channels` to answer with: stop waiting for one.
 
-        The list kept on show for the wait goes, because there is nothing to go back to;
-        a receiver still read from the per-bouquet topics is looked at again, and a
-        bouquet with no topic of its own is then a bouquet without its list.
+        The list kept on show for the wait goes, because there is nothing to go back to.
+        A receiver still read from the per-bouquet topics needs nothing done here: it
+        asked for the sake of a bouquet with no topic of its own, which is already being
+        waited for and is shown without its list when that wait is over.
         """
         self._cancel_refetch()
         self.state.channels_released = False
-        if self._channel_topics_live:
-            self._async_channel_topics_changed()
-        elif self._topic_list is not None:
+        if not self._channel_topics_live and self._topic_list is not None:
             self._topic_list = None
             self._channel_generation += 1
             self._async_updated(TOPIC_CHANNELS)

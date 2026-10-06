@@ -633,6 +633,74 @@ async def test_a_bouquet_with_no_topic_of_its_own_is_named_when_channels_is_with
     assert len(our_issues(hass)) == 1
 
 
+HOSTILE = [
+    ("[a](https://e.example/login)", ["](", "[", "]", "://", "https:"]),
+    ("![i](http://e.example/p.png)", ["](", "[", "]", "://", "http:"]),
+    ("<b onclick=x>b</b> <https://e.example>", ["<", ">", "://"]),
+    ("see www.e.example or WWW.E.EXAMPLE", ["www."]),
+    ("write a@e.example", ["@"]),
+    ("mailto:a javascript:alert(1)", ["mailto:", "javascript:"]),
+    ("&lt;i&gt; &#60;u&#62; &amp;", ["&"]),
+    ("**strong** *em*", ["*"]),
+    ("__strong__ _em_ x_ _y", ["_"]),
+    ("~~gone~~", ["~"]),
+    ("`code` ``more``", ["`"]),
+    ("| a | b |", ["|"]),
+    ("# Heading ## Two", ["#"]),
+    ("{name} {withheld}", ["{", "}"]),
+    ("\\[esc\\] \\*x\\* \\<", ["\\", "[", "<", "*"]),
+]
+
+
+@pytest.mark.parametrize(("hostile", "forbidden"), HOSTILE, ids=[case[0][:12] for case in HOSTILE])
+async def test_each_kind_of_markup_is_taken_out_of_every_place_a_name_lands(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    hostile: str,
+    forbidden: list[str],
+) -> None:
+    """One short name per kind, so that no check passes because the name was cut first.
+
+    The four places: the device's name, a bouquet's name from the index, the name of a
+    bouquet with no topic of its own, and a topic named whole.
+    """
+    index = json.loads(json.dumps(INDEX))
+    index["bouquets"][1]["name"] = hostile
+    index["bouquets"].append({"name": f"no topic {hostile}", "sref": "s", "slug": "", "count": 1})
+    box_on_the_broker[ANNOUNCEMENT_TOPIC] = json.dumps({**ANNOUNCEMENT, "name": hostile})
+    box_on_the_broker[BOUQUETS_TOPIC] = json.dumps(index)
+    reporting(
+        box_on_the_broker,
+        [CHANNELS_ENTRY, LIST_ENTRY, {"topic": f"elsewhere {hostile}", "bytes": 1, "limit": 1}],
+    )
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    placeholders = the_issue(hass, config_entry).translation_placeholders
+    lines = placeholders["withheld"].split("\n")
+
+    assert len(lines) == 4
+    assert lines[1].startswith("- the channel list of the bouquet “no topic")
+    assert lines[2].startswith("- the channel list of the bouquet “")
+    assert lines[3].startswith("- the topic `elsewhere") and lines[3].endswith("`")
+    # The code span around a topic is the phrase's own; what is inside it is checked.
+    texts = [placeholders["name"], lines[1], lines[2], lines[3][len("- the topic `") : -1]]
+    for text in texts:
+        assert text.strip()
+        for part in forbidden:
+            assert part not in text.lower(), (part, text)
+
+
+def test_a_slug_keeps_its_underscores() -> None:
+    """Inside a word an underscore is a letter of the slug, not emphasis."""
+    from custom_components.enigma2_mqtt.withheld import _plain  # noqa: PLC0415
+
+    assert _plain("sport_hd_2") == "sport_hd_2"
+    assert _plain("_sport_ hd_ _2") == "sport hd 2"
+    assert _plain("  Astra 19.2E:  HD (free)  ") == "Astra 19.2E: HD (free)"
+
+
 WORDS = {
     "en": {
         "channels": "the complete channel list",

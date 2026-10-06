@@ -2045,6 +2045,64 @@ async def test_without_a_confirmation_the_wait_still_ends(
         assert box.channel_list.source == "none"
 
 
+async def test_channels_completing_a_list_that_was_waited_for_wakes_everybody_once(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Nothing was on show yet; `channels` is the last piece, and is not shown twice."""
+    box, changes = await _three(hass, retained, config_entry, "index", "ulubione", "sport")
+    assert "channels" not in box.updates
+
+    await deliver(hass, *THREE_MESSAGES["channels"])
+
+    assert box.channel_list.source == "bouquet_topics"
+    assert box.updates["channels"] == 1
+    assert three_readers(hass, box) == three_expected(NO_SLUG_NAME)
+
+
+async def test_an_answer_that_arrives_with_the_subscription_leaves_no_subscription(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The request is over before the unsubscribe handle exists: it is used at once."""
+    box, _changes = await _complete(hass, retained, config_entry, combined=True)
+    retained[CHANNELS_TOPIC] = json.dumps(CHANNELS)
+    with spying(CHANNELS_TOPIC) as subscriptions:
+        await publish(hass, INFO_TOPIC, info(claims=False))
+
+        assert box.channel_list.source == "channels"
+        assert subscriptions == [{"live": False}]
+
+
+async def test_an_answer_both_subscriptions_are_handed_is_read_once(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The wildcard never had a retained `channels`, so the broker's answer is its too."""
+    store = base(retained)
+    store[INFO_TOPIC] = info(claims=True)
+    store.update(per_bouquet())
+    entry = hiding(config_entry, "Sport")
+    await async_setup_box_then_retained(hass, entry, store)
+    box: Enigma2Box = entry.runtime_data
+    # Published while Home Assistant was listening: not retained on arrival, let go.
+    await publish(hass, CHANNELS_TOPIC, json.dumps(CHANNELS))
+    assert box.state.channels_released is True
+    await publish(hass, INFO_TOPIC, info(claims=False))
+    counted = box.updates["channels"]
+
+    await deliver(hass, CHANNELS_TOPIC, json.dumps(CHANNELS))
+
+    assert box.channel_list.source == "channels"
+    assert box.updates["channels"] == counted + 1
+
+
 # ------------------------------------------------------------ smaller things
 
 
