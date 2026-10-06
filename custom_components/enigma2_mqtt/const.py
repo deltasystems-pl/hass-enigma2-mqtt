@@ -323,6 +323,15 @@ CHANNEL_TOPICS_SETTLE: Final = 5.0
 INFO_NOT_PUBLISHED: Final = "not_published"
 NOT_PUBLISHED_MAX: Final = 200
 NOT_PUBLISHED_TOPIC_MAX: Final = 200
+# How many of them the diagnostic sensor's attribute and the repair's text name.
+WITHHELD_ATTRIBUTE_MAX: Final = 20
+WITHHELD_ISSUE_MAX: Final = 10
+# Where the repair sends the reader: the plugin's own account of what is missing and how
+# to get it back.
+WITHHELD_LEARN_MORE_URL: Final = (
+    "https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/"
+    "TROUBLESHOOTING.md#entities-keep-going-unavailable-and-coming-back"
+)
 
 # The on-demand EPG import. The plugin claims the capability only where it found the
 # image's own EPG-Importer already loaded and the EPG cache can import in place; the

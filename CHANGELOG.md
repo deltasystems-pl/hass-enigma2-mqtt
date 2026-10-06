@@ -8,7 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 What is new here needs **plugin 0.5.0** on the receiver. A receiver on plugin 0.4.0 or older is
-read as before: it does not claim `channel_topics`, so its channel list comes from `channels`.
+read as before: its `info` carries no `not_published` and it does not claim `channel_topics`, so
+it gets no repair and no new sensor, and its channel list comes from `channels`.
 
 ### Added
 
@@ -24,6 +25,14 @@ read as before: it does not claim `channel_topics`, so its channel list comes fr
   topics arrive one by one, and no entity is rewritten once per bouquet. A bouquet whose own
   topic the receiver did not publish stays on the list of bouquets, with no channels
   (DOCUMENTATION.md §4.6).
+- **A repair and a diagnostic sensor say what the receiver did not publish.** Plugin 0.5.0 does
+  not send a payload that would not fit one MQTT packet, and names its topic in
+  `info.not_published`. While that list has an entry, Home Assistant shows one repair for the
+  receiver - what is missing, in words, and which setting on the receiver brings it back - and
+  the new diagnostic sensor „Nieopublikowane dane" (*Withheld payloads*) carries the count, with
+  the topics and their sizes as attributes. The repair goes by itself when the receiver publishes
+  everything again; the sensor exists only for a receiver that reports the list
+  (DOCUMENTATION.md §4.3 and §8).
 - **„EPG &ndash; aktywny bukiet" has the attribute `events_per_channel`** when the plugin
   reports it: how many programmes a channel carries in that guide at most, which is lower than
   the receiver's `epg_grid_events` on a guide the plugin shortened to fit one packet.

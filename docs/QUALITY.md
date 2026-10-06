@@ -52,8 +52,10 @@ Not targeted for v1, but recorded so the decision is visible. Four gold rules ar
 because they were cheap: `diagnostics` and `devices` landed in M1 and the download grew to
 every state topic in M3; `discovery` is inherent - the plugin announces itself over MQTT; and
 `reconfiguration-flow` landed with the options in M3. `entity-translations` is met for the
-three languages shipped. `dynamic-devices`, `stale-devices`, `repair-issues`, and the platinum
-async/typing rules are M5 or later.
+three languages shipped. `repair-issues` is met for the one condition that has a remedy a
+person can apply: a receiver that could not publish a payload raises a repair naming it and the
+setting that brings it back. `dynamic-devices`, `stale-devices` and the platinum async/typing
+rules are M5 or later.
 
 Two notes on what the ticks above do **not** claim.
 

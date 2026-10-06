@@ -77,7 +77,8 @@ into `config/custom_components/enigma2_mqtt/` and restart. Do not keep a backup 
 - Plugin 0.4.0 to go with integration 0.4.0; the installer brings that version. Plugin 0.2.0
   and 0.3.x still work with it, without the update over MQTT.
 - Unreleased, on `main`: a receiver with a very large channel list is read one bouquet at a
-  time. That needs plugin 0.5.0; with an older plugin everything behaves as before.
+  time, and a repair says what the receiver could not publish. Both need plugin 0.5.0; with an
+  older plugin everything behaves as before.
 - SSH access to the receiver, if the integration should install or update the plugin.
 
 ## Screenshots

@@ -468,7 +468,8 @@
         "name": "Import EPG",
         "state": {"idle": "Bezczynny", "running": "Trwa", "done": "Zakończony", "failed": "Nieudany"}
       },
-      "last_error": {"name": "Ostatni błąd"}
+      "last_error": {"name": "Ostatni błąd"},
+      "withheld_payloads": {"name": "Nieopublikowane dane"}
     },
     "switch": {
       "power": {
@@ -686,6 +687,12 @@
         "active_bouquet": "Aktywny bukiet",
         "all": "Wszystkie oferowane bukiety"
       }
+    }
+  },
+  "issues": {
+    "payloads_withheld": {
+      "title": "{name}: dekoder nie publikuje wszystkich danych",
+      "description": "Wtyczka na dekoderze {name} nie opublikowała poniższych danych, bo każda z tych wiadomości byłaby większa, niż może być jedna wiadomość MQTT, a broker zerwałby połączenie:\n\n{withheld}\n\nCo to oznacza tutaj: kanały bukietu, którego listy brakuje, nie są oferowane, a bukiet, którego przewodnika brakuje, nie ma programu.\n\nAby je odzyskać, ogranicz bukiety publikowane przez wtyczkę ustawieniem `bouquets_for_select` na dekoderze (ekran ustawień wtyczki albo jej strona w OpenWebif) lub podziel bardzo duży bukiet na mniejsze. Zmniejszenie `epg_grid_events` nie przywróci brakującego przewodnika: wtyczka sama skraca przewodnik, na ile się da, zanim z niego zrezygnuje.\n\nTo powiadomienie zniknie samo, gdy dekoder znów opublikuje wszystko."
     }
   },
   "exceptions": {
