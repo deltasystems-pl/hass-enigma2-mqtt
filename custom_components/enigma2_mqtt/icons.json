@@ -213,6 +213,9 @@
       },
       "uptime": {
         "default": "mdi:clock-start"
+      },
+      "withheld_payloads": {
+        "default": "mdi:package-variant-closed-remove"
       }
     },
     "switch": {

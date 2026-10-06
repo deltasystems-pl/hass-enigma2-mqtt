@@ -468,7 +468,8 @@
         "name": "EPG-Import",
         "state": {"idle": "Bereit", "running": "Läuft", "done": "Abgeschlossen", "failed": "Fehlgeschlagen"}
       },
-      "last_error": {"name": "Letzter Fehler"}
+      "last_error": {"name": "Letzter Fehler"},
+      "withheld_payloads": {"name": "Zurückgehaltene Daten"}
     },
     "switch": {
       "power": {
@@ -686,6 +687,12 @@
         "active_bouquet": "Das aktive Bouquet",
         "all": "Alle angebotenen Bouquets"
       }
+    }
+  },
+  "issues": {
+    "payloads_withheld": {
+      "title": "{name}: Der Receiver veröffentlicht nicht alles",
+      "description": "Das Plugin auf {name} hat Folgendes nicht veröffentlicht, weil jede dieser Nachrichten die zulässige Größe einer MQTT-Nachricht überschreiten würde und der Broker die Verbindung trennen würde:\n\n{withheld}\n\nIn Home Assistant bedeutet das: Die Sender eines Bouquets, dessen Liste fehlt, werden nicht angeboten, und ein Bouquet ohne EPG hat kein Programm.\n\nUm sie zurückzubekommen, begrenze mit der Einstellung `bouquets_for_select` am Receiver (Einstellungsbildschirm des Plugins oder seine OpenWebif-Seite) die Bouquets, die das Plugin veröffentlicht, oder teile ein sehr großes Bouquet in kleinere auf. `epg_grid_events` zu verringern bringt ein fehlendes EPG nicht zurück: Das Plugin kürzt es selbst so weit wie möglich, bevor es darauf verzichtet.\n\nDieser Hinweis verschwindet von selbst, sobald der Receiver wieder alles veröffentlicht."
     }
   },
   "exceptions": {

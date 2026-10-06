@@ -326,7 +326,7 @@ appears.
 | **Wake-on-LAN MAC address** | the address the box reports on `info` | The target of the magic packet the „Obudź (WoL)" button, `media_player.turn_on` and `remote.turn_on` send. Set it when the receiver reports a different interface from the one that is plugged in - a box on Wi-Fi does not answer a packet sent to its cable port. Written as `00:00:5e:00:53:01`, `00-00-5e-00-53-01`, `0000.5e00.5301` or `00005e005301`, in any case; it is stored lower-case and colon-separated whichever you type, and anything that is not an address fails the form rather than failing later from inside `wake_on_lan`. Whichever address a packet would go to - the override, or the one the box reports - is registered on the device as its MAC connection, so the rest of Home Assistant knows it too. On current Home Assistant that connection does not merge devices across integrations, so a router or DHCP integration may still show a second card for the same receiver; it is there so that what *is* keyed on a MAC can find this one. A value stored by an earlier release that is not an address is dropped once at startup, with a line in the log. |
 | **Bouquets to offer** | every bouquet the box publishes | Which bouquets feed the media player's channel list and the media browser. The choices are the bouquets on the `channels` topic, and a name can be typed for one the box has not published yet. This narrows the plugin's own `bouquets_for_select`; it cannot widen it. |
 | **Channels in the media player's source list** | every bouquet on offer | What `media_player.source_list` holds, and nothing else. **Every bouquet on offer** is what this integration has always done and stays the default, so an existing installation does not change under an automation that names a channel; on a receiver with about a thousand channels it is a dropdown of about a thousand rows. **The active bouquet** is the short list the receiver's own channel ± is walking, which is also what the „Kanał" select shows. `select_source` follows this setting; the `zap` action takes a service reference and does not. Three cases keep the long list whatever is chosen, because there is nothing to shorten it to and an empty source list would leave no way to change channel: a receiver that publishes no channel-list context (an older plugin without `bouquet_context`), a context naming a bouquet the **Bouquets to offer** option excludes, and a context naming a bouquet with no playable channel in it. The last two are logged as a warning, once per bouquet. 🔴 This setting is **not** about the recorder: Home Assistant declares `source_list` an unrecorded attribute and the recorder removes it before it measures a state against its size limit, so the long list never reached the database in the first place. |
-| **Bouquets hidden from "Recently watched"** („Bukiety ukryte w „Ostatnio oglądane"") | none | Which bouquets' channels [„Ostatnio oglądane"](#46-selects) leaves out - and that one entity only: „Ostatnio oglądane (wszystkie)", „Kanał", „Bukiet" and the media player are untouched. The choices are the bouquets on the `channels` topic, and a name can be typed. With it empty every entry shows. With a bouquet chosen, an entry shows only when its bouquet is a published bouquet that is not hidden **and** its channel is not a member of any hidden bouquet, so a channel of a hidden bouquet reached through another one stays hidden. While anything is chosen, an entry that cannot be checked - no bouquet path, a radio bouquet, a bouquet the plugin does not publish - is hidden too. A hidden name that is no longer on the `channels` topic is logged once. 🔴 **This is a filter in Home Assistant, not privacy on the network**: the receiver publishes every entry of its history on `zap_history` and every channel of every bouquet on `channels`, retained, to any broker login; its own History Zap screen, the plugin's OpenWebif page and „Ostatnio oglądane (wszystkie)" show everything. See [§4.6](#46-selects) for what the recorder keeps. |
+| **Bouquets hidden from "Recently watched"** („Bukiety ukryte w „Ostatnio oglądane"") | none | Which bouquets' channels [„Ostatnio oglądane"](#46-selects) leaves out - and that one entity only: „Ostatnio oglądane (wszystkie)", „Kanał", „Bukiet" and the media player are untouched. The choices are the bouquets on the `channels` topic, and a name can be typed. With it empty every entry shows. With a bouquet chosen, an entry shows only when its bouquet is a published bouquet that is not hidden **and** its channel is not a member of any hidden bouquet, so a channel of a hidden bouquet reached through another one stays hidden. While anything is chosen, an entry that cannot be checked - no bouquet path, a radio bouquet, a bouquet the plugin does not publish - is hidden too. And while a hidden bouquet is listed without its channels - plugin 0.5.0 could not publish that bouquet's own topic, or it has not arrived - every entry is hidden, because which channels to hide is what is missing. A hidden name that is no longer on the `channels` topic is logged once. 🔴 **This is a filter in Home Assistant, not privacy on the network**: the receiver publishes every entry of its history on `zap_history` and every channel of every bouquet on `channels`, retained, to any broker login; its own History Zap screen, the plugin's OpenWebif page and „Ostatnio oglądane (wszystkie)" show everything. See [§4.6](#46-selects) for what the recorder keeps. |
 | **Check daily for available plugin versions** | off | Off means this integration asks nothing on its own. The plugin's **signed release index** - `releases.json` and its signature from the plugin's fixed HTTPS origin, `https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/` - is fetched only when somebody presses **Check for plugin updates** (*Sprawdź aktualizacje wtyczki*), or uses Home Assistant's own "Check for updates" while this option is on. On, it is also fetched **at most once every 24 hours**, one index for every receiver. It is fetched with a verified TLS context and no redirects, at most 64 KiB, and it is accepted only when its Ed25519 signature verifies with a key built into this integration and its serial rises by the rule in [ADR-0008](docs/adr/0008-signed-plugin-index.md) - the same rule the receiver applies. Manual checks share a ten-minute limit. The index, its signature, the stamps and the record of accepted serials are kept in `.storage/enigma2_mqtt.release_index`, so a reload or a restart asks nothing again; the old `.storage/enigma2_mqtt.release_check` is removed. **Every newly accepted index is announced**: a warning in the log and a persistent notification with its serial, its key, the versions it adds and withdraws, and its floor - the index is signed in the plugin repository's CI, so an index nobody expected must be visible. It is then published, retained, on `enigma2mqtt/release_index`, where every receiver on plugin 0.4.0 or later verifies it again - the way a receiver with no internet of its own learns of releases - and put back, verified first, when the first receiver is set up and at every reconnect to the broker, if the broker lost it. What the broker retains there is read first: an index of a higher-ranked key, or a newer one of the same key - such as an index signed with the plugin's spare key in an emergency - is never overwritten, and when the rule accepts it, Home Assistant takes it and announces it like any new index. An index and a signature that do not match are read once more before they are judged, because a publication can land between the two requests; a pair that still does not verify is reported as "could not be verified", and the log keeps a warning. Nothing else is downloaded on a check; a release package is downloaded only when somebody installs it (see [Buttons and update](#45-buttons-and-update)). |
 
 When a recent plugin advertises its configurable publishers, the same form also controls key
@@ -373,7 +373,7 @@ everything.
 
 ## 4. Entities
 
-**Twenty-five entities on every receiver**, and thirty-two more that exist only while
+**Twenty-five entities on every receiver**, and thirty-three more that exist only while
 something says they should - plus one set of three per OSCam source, which has no fixed
 number because it follows however many readers and servers that receiver has. The
 conditional ones are, in full:
@@ -387,6 +387,7 @@ conditional ones are, in full:
 | 1 | „Import EPG" | the receiver reports the `epg_import` capability |
 | 1 | „Ekran &ndash; dyskretnie" | the receiver reports the `toast` capability |
 | 5 | the enigma2 process diagnostics | the receiver reports the `process` capability |
+| 1 | „Nieopublikowane dane" | the receiver's `info` carries `not_published` - plugin 0.5.0 or later |
 | 2 | „Głębokie uśpienie", „Restart" | the Home Assistant option asks for them **and** the receiver permits deep standby |
 | 1 | „Restart softcam" | the receiver reports the `softcam` capability **and** permits a softcam restart |
 | 1 | „Pobierz EPG" | the receiver reports the `epg_import` capability **and** permits an EPG import |
@@ -399,7 +400,7 @@ splits on it. A row that follows an **option or a permission** is removed on a s
 „no": somebody decided, at the television or on the options form, and an entity that can
 never say anything again is worse than none. A row that follows a **capability** is
 removed only where the control behind it would be permanently refused - „Odśwież EPG" on
-a receiver that builds no grids. „Softcam", „Import EPG", „EPG &ndash; aktywny bukiet" and the five process
+a receiver that builds no grids. „Softcam", „Import EPG", „EPG &ndash; aktywny bukiet", „Nieopublikowane dane" and the five process
 diagnostics are neither: they are sensors with a history, and a capability that stops being named is an older
 plugin after a downgrade, a hook that failed to attach on one boot, or a receiver that has
 not answered yet. None of those is a decision, so they stay and say nothing until the
@@ -520,7 +521,8 @@ while the box is unreachable, because that is precisely when somebody wants to w
 | `agc` | *AGC* | `<node_id>_agc` | `tuner` | % · diagnostic · **disabled by default** |
 | `ber` | *BER* | `<node_id>_ber` | `tuner` | count · diagnostic · **disabled by default** |
 | `uptime` | *Czas pracy* | `<node_id>_uptime` | `info` | seconds · diagnostic · **disabled by default** |
-| `epg_active_bouquet` | *EPG &ndash; aktywny bukiet* | `<node_id>_epg_active_bouquet` | `bouquet`, `epg_grid/<bouquet_slug>` | how many channels of the active bouquet have a programme now or next · no unit · attribute `channels` (**not recorded**) · only while the receiver names the `epg_grid` and `bouquet_context` capabilities |
+| `epg_active_bouquet` | *EPG &ndash; aktywny bukiet* | `<node_id>_epg_active_bouquet` | `bouquet`, `epg_grid/<bouquet_slug>` | how many channels of the active bouquet have a programme now or next · no unit · attribute `channels` (**not recorded**), and `events_per_channel` from plugin 0.5.0 on · only while the receiver names the `epg_grid` and `bouquet_context` capabilities |
+| `withheld_payloads` | *Nieopublikowane dane* | `<node_id>_withheld_payloads` | `info` | how many payloads the receiver did not publish because they do not fit one MQTT packet · diagnostic · **on by default** · attributes `topics` and `not_shown` · only for a receiver whose `info` carries `not_published` (plugin 0.5.0 or later) |
 | `softcam` | *Softcam* | `<node_id>_softcam` | `softcam` | the selected cam binary · diagnostic · only while the receiver names the `softcam` capability |
 | `epg_import` | *Import EPG* | `<node_id>_epg_import` | `epg_import` | `idle`, `running`, `done` or `failed` · diagnostic · attributes `started`, `finished`, `events`, `error` · only while the receiver names the `epg_import` capability |
 | `last_error` | *Ostatni błąd* | `<node_id>_last_error` | `last_error` | the refused command's name · diagnostic · attributes `error`, `time` and `source` |
@@ -611,6 +613,20 @@ cancel an import, so after the watchdog it keeps refusing a new one for as long 
 still runs. Every value that is not what the contract says - a state outside
 the four, a time of zero, `true` as a count - is `unknown` rather than guessed at.
 
+**Nieopublikowane dane** (*Withheld payloads*) counts the topics the receiver did not publish.
+A broker closes the connection on an MQTT packet over its limit, so plugin 0.5.0 does not send
+a payload that would need one: it leaves the topic out, retracts an older copy of it, and names
+it in `info.not_published`. The state is the length of that list - `0` on nearly every
+receiver - and `unknown` if the plugin stops reporting it: a receiver that has had the sensor
+keeps it, also after a restart of Home Assistant, so a plugin put back to an older version
+leaves a sensor that says `unknown` rather than one that is gone. The attribute `topics` holds up to
+twenty entries, each `topic`, `bytes` (the size the packet would have needed when the plugin
+first withheld it) and `limit`; `not_shown` is how many more there are. A topic under the
+receiver's own tree is named without its prefix: `channels`, `channels/<bouquet_slug>`,
+`epg_grid/<bouquet_slug>`. While the count is not zero, Home Assistant also shows a repair
+that says the same in words ([§8](#8-troubleshooting)). A receiver on plugin 0.4.0 or older
+never gets this sensor.
+
 **EPG &ndash; aktywny bukiet** is what is on across the bouquet the receiver's channel ± is
 walking - the same list its own EPG would show for it. It reads the retained grid whose
 `bouquet` names the active context, so switching bouquets on the remote or through „Bukiet"
@@ -622,6 +638,11 @@ is every channel of that bouquet, in the receiver's order:
 | `name`, `sref` | the channel, as the grid names it |
 | `now` | `{title, begin, end}` for the programme on air, or `null` |
 | `next` | the same for the one after it, or `null` |
+
+From plugin 0.5.0 on the sensor also has `events_per_channel`: the most programmes a channel
+carries in this guide. It equals the receiver's `epg_grid_events` unless the plugin shortened
+the guide to fit one MQTT packet, which is how "two programmes left today" is told from "cut
+to two". With an older plugin the attribute is not there.
 
 `begin` and `end` are **epoch seconds**, not ISO strings - the one exception to the rule
 below, because a card drawing a progress bar for two hundred channels wants numbers it can
@@ -1092,6 +1113,41 @@ receiver that loses the capability has them taken out of the entity registry rat
 behind unavailable. A receiver that has not said what it can do yet keeps whatever it has -
 silence is not "no".
 
+**Where the channel list comes from.** Up to plugin 0.4.0 it is the `channels` topic: every
+bouquet with its channels in one payload. From plugin 0.5.0 on the receiver also publishes the
+`bouquets` topic - the index of its bouquets - and one `channels/<bouquet_slug>` per bouquet,
+and names the capability `channel_topics`; on a receiver whose list is too big for one MQTT
+packet `channels` is then not published at all. While the capability is named and the index
+has arrived, the per-bouquet topics are what everything below reads - the two selects, the
+media player's sources and browser, zapping by name, the [options](#options) and the filter
+behind „Ostatnio oglądane" - and they win where the two disagree. Otherwise `channels` is read,
+exactly as before. Three things follow from topics that arrive one at a time:
+
+- **The list appears whole.** Nothing is offered bouquet by bouquet while the topics arrive.
+  When every bouquet of the index has its list, the list is shown at once; if one is still
+  missing five seconds after the last message, the list is shown as far as it goes.
+- **A bouquet without its own topic stays a bouquet.** When the receiver could not publish one
+  bouquet's list - it is too big for a packet by itself, and named in the repair - „Bukiet"
+  still offers the bouquet and „Kanał" is empty while the receiver is on it.
+- **A bouquet whose name has no ASCII letter or digit has no topic of its own.** The topic's
+  name is made from the bouquet's name, and a name written only in Cyrillic, Greek, Arabic,
+  Hebrew or CJK characters leaves nothing to make it from. The plugin lists such a bouquet in
+  the index and publishes its channels on `channels` only, so the integration reads that one
+  bouquet from `channels` - and keeps `channels` in memory for it, beside the per-bouquet
+  lists. On a receiver whose `channels` is too big to be published there is nowhere to read it
+  from: the bouquet is offered without channels, and the repair names it
+  ([§8](#8-troubleshooting)). The way out is on the receiver - narrow
+  `bouquets_for_select` until `channels` fits one packet again, or give the bouquet a name with
+  a Latin letter or a digit in it.
+- **„Ostatnio oglądane" fails toward hiding.** While a bouquet named in the hide option is on
+  the list without its channels, the filtered list shows nothing at all.
+
+After a plugin is put back to 0.4.0 the capability is gone and `channels` is read again; the
+per-bouquet topics the newer plugin left on the broker are ignored. The integration asks the
+broker for `channels` once more at that point and keeps the list it was showing meanwhile; a
+broker that has no `channels` to answer with ends that after about ten seconds, and the list
+is then empty until the receiver publishes one.
+
 - **„Bukiet"** lists the bouquets on the `channels` topic, in the order the receiver published
   them and narrowed by the [bouquets option](#options), and points at the one the `bouquet`
   topic names. Nothing is selected when the receiver reports a null context: that is the radio
@@ -1279,10 +1335,18 @@ installer of M4 can create one, rather than after.
 Four things are summarised rather than included, because their contents answer no question a
 bug report asks and describe a household instead. **`screen`** appears as a size and the moment
 it was taken, never as the picture of somebody's television. **`channels`** appears as the
-bouquet names and how many services each holds, not as the channel list. **`key`** does not
+bouquet names and how many services each holds, not as the channel list - and so do the
+`bouquets` index and each `channels/<bouquet_slug>` of plugin 0.5.0, under `bouquets` and
+`bouquet_channels`. **`key`** does not
 appear at all: it is who pressed what a moment ago, which is not state. **`zap_history`**
 appears as the number of entries, `current`, `limit` and `panic_button` - no channel name and
 no reference, whatever the hide option says.
+
+`box.channel_list` says which of the two sources the entities are reading (`channels`,
+`bouquet_topics` or `none`), whether every bouquet's list is in, and how many channels each
+bouquet has here - `null` for a bouquet whose own topic is missing. `box.not_published` is the
+receiver's list of what it did not publish, `null` for a plugin that does not report it, and
+each `epg_grid` entry carries its `events_per_channel`.
 
 One thing is stated rather than left to be worked out. The **`plugin`** block gives the version
 installed on the box, the version bundled here, the version this release was written against,
@@ -1308,6 +1372,30 @@ plugin mismatch is where a missing entity or an unrecognised command usually end
 - **The card installs over SSH, not over MQTT, on a receiver that runs plugin 0.4.0.** The
   receiver's `update_allowed` is off, which is how the plugin ships; see *Which path the card
   takes* in [§4.5](#45-buttons-and-update).
+- **A repair says „the receiver is not publishing everything", or a bouquet has no channels or
+  no programme guide.** The receiver has a payload that does not fit one MQTT packet, and
+  plugin 0.5.0 did not send it. The repair lists what is missing - the complete channel list,
+  one bouquet's channel list, one bouquet's programme guide, the device's MQTT discovery
+  message - and „Nieopublikowane dane" has the topics and sizes ([§4.3](#43-sensors)). A missing
+  complete channel list costs nothing here by itself: the integration reads the per-bouquet
+  lists instead. The exception is a bouquet whose name has no ASCII letter or digit, which has
+  no list of its own to read ([§4.6](#46-selects)); the repair names it too. For the rest, set
+  `bouquets_for_select` on the receiver - the plugin's setup screen
+  or its OpenWebif page - to the bouquets the household uses, or split a very large bouquet
+  into smaller ones. Lowering `epg_grid_events` does not bring a missing guide back: the plugin
+  shortens a guide as far as it can before it gives up on it. The repair goes by itself once
+  the receiver publishes everything. **Ignore** holds for as long as anything is withheld -
+  across a reload and a restart, and also when the list changes, which the sensor shows - and
+  is forgotten when the repair goes, when the receiver is removed, and, as for every repair,
+  when Home Assistant is updated. Unloading or disabling the receiver leaves the repair where
+  it is until Home Assistant restarts. The list inside the repair is written in the
+  installation's language, also for a user whose profile is set to another one. The plugin's
+  [troubleshooting page](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/TROUBLESHOOTING.md#entities-keep-going-unavailable-and-coming-back)
+  has the receiver's side of it.
+- **Entities keep going unavailable and coming back, and the selects are empty, on a receiver
+  with a very large channel list and plugin 0.4.0 or older.** That plugin sends the oversize
+  payload and the broker closes the connection each time. Update the plugin to 0.5.0, or
+  narrow `bouquets_for_select` on the receiver.
 
 ### The plugin does not start, and Home Assistant cannot help
 

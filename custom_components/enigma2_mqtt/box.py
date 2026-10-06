@@ -36,6 +36,7 @@ from homeassistant.const import ATTR_DEVICE_ID
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.event import async_call_later
 import homeassistant.util.dt as dt_util
 
 from .const import (
@@ -43,8 +44,11 @@ from .const import (
     ATTR_KEY,
     ATTR_NODE_ID,
     ATTR_PRESS,
+    CAPABILITY_CHANNEL_TOPICS,
     CAPABILITY_SELF_UPDATE,
     CAPABILITY_UNINSTALL,
+    CHANNEL_TOPICS_SETTLE,
+    CHANNELS_REFETCH_GRACE,
     COMMAND_TIMEOUT,
     CONF_BASE_TOPIC,
     CONF_BOUQUETS,
@@ -68,6 +72,7 @@ from .const import (
     ERROR_GRACE,
     ERROR_TEXT_MAX,
     EVENT_KEY,
+    INFO_NOT_PUBLISHED,
     INFO_WOL,
     KEY_PREFIX,
     MANUFACTURERS,
@@ -77,6 +82,8 @@ from .const import (
     MAX_SOFTCAM_INSTANCES,
     MAX_SOFTCAM_MANAGER_MINUTES,
     MAX_SOFTCAM_RESTARTS_TODAY,
+    NOT_PUBLISHED_MAX,
+    NOT_PUBLISHED_TOPIC_MAX,
     PAYLOAD_ONLINE,
     POWER_ON,
     PRESS_LONG,
@@ -89,6 +96,8 @@ from .const import (
     SUBSCRIBE_TIMEOUT,
     TOPIC_AVAILABILITY,
     TOPIC_BOUQUET,
+    TOPIC_BOUQUET_CHANNELS,
+    TOPIC_BOUQUETS,
     TOPIC_CAM,
     TOPIC_CHANNELS,
     TOPIC_EPG,
@@ -390,6 +399,153 @@ def same_service(one: Any, other: Any) -> bool:
     return bool(identity) and identity == service_identity(other)
 
 
+def normalise_not_published(info: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Return `info.not_published` as the contract shapes it, or None when it is not there.
+
+    None is a plugin that does not report the member - anything up to 0.4.0 - and is not
+    the same answer as `[]`, which is a plugin that reports it and withheld nothing. A
+    member that is not a list is not this contract's member, so it is read as absent
+    rather than as "nothing withheld".
+
+    An entry is kept when it names a topic; its sizes are whole numbers or None. Anything
+    else an entry carries is dropped, a topic named twice counts once, and both the length
+    of a topic and the number of entries are bounded, because what is kept here ends up in
+    a state attribute, a repair's text and the diagnostics download.
+    """
+    raw = info.get(INFO_NOT_PUBLISHED)
+    if not isinstance(raw, list):
+        return None
+
+    def whole(value: Any) -> int | None:
+        return (
+            value
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0
+            else None
+        )
+
+    entries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw:
+        if len(entries) >= NOT_PUBLISHED_MAX:
+            break
+        if not isinstance(item, dict):
+            continue
+        topic = item.get("topic")
+        if not isinstance(topic, str) or not topic or len(topic) > NOT_PUBLISHED_TOPIC_MAX:
+            continue
+        if topic in seen:
+            continue
+        seen.add(topic)
+        entries.append(
+            {"topic": topic, "bytes": whole(item.get("bytes")), "limit": whole(item.get("limit"))}
+        )
+    return entries
+
+
+# Where a channel list came from. `none` is a receiver that has published no list at all,
+# or has retracted it.
+CHANNEL_SOURCE_NONE: Final = "none"
+CHANNEL_SOURCE_COMBINED: Final = "channels"
+CHANNEL_SOURCE_BOUQUET_TOPICS: Final = "bouquet_topics"
+
+
+@dataclass(frozen=True, slots=True)
+class ChannelList:
+    """The receiver's bouquets and their channels, whichever topics carried them.
+
+    Everything that offers, resolves or filters a channel reads this and nothing else, so
+    a receiver whose lists arrive one bouquet a topic and one that publishes them all on
+    `channels` look the same from every entity, action and filter.
+
+    `bouquets` holds what a reader may walk: each is a dict with `name`, `sref` and a
+    `channels` list. From `channels` they are the payload's own objects. From the
+    per-bouquet topics each also carries `slug`, `count` and `listed`, and `listed` is
+    False for a bouquet the index names whose list is not here - withheld by the receiver,
+    retracted, or not arrived - which then has an empty `channels`. `names` is every
+    bouquet name the receiver published, for the options form.
+    """
+
+    source: str = CHANNEL_SOURCE_NONE
+    bouquets: tuple[dict[str, Any], ...] = ()
+    names: tuple[str, ...] = ()
+    generated: Any = None
+    # False while the index names a bouquet whose list has neither arrived nor been
+    # reported as withheld. Always True for the other two sources.
+    complete: bool = True
+
+
+def _retracted(payload: Any) -> bool:
+    """Return whether a payload is a retraction: empty, or nothing but white space.
+
+    Asked of the raw payload, not of its text: bytes that are not UTF-8 decode to
+    nothing, and a corrupt publish read as a retraction would take away a bouquet's list
+    - which the zap-history filter then has to treat as unknown - over one bad message.
+    """
+    return isinstance(payload, (bytes, bytearray, str)) and not payload.strip()
+
+
+def _combined_channel_list(channels: dict[str, Any] | None) -> ChannelList:
+    """Read the `channels` topic, every bouquet with its list, as a channel list."""
+    if channels is None:
+        return ChannelList()
+    bouquets = channels.get("bouquets")
+    if not isinstance(bouquets, list):
+        return ChannelList(source=CHANNEL_SOURCE_COMBINED, generated=channels.get("generated"))
+    return ChannelList(
+        source=CHANNEL_SOURCE_COMBINED,
+        bouquets=tuple(
+            bouquet
+            for bouquet in bouquets
+            if isinstance(bouquet, dict) and isinstance(bouquet.get("channels"), list)
+        ),
+        names=tuple(
+            name
+            for bouquet in bouquets
+            if isinstance(bouquet, dict) and isinstance(name := bouquet.get("name"), str)
+        ),
+        generated=channels.get("generated"),
+    )
+
+
+def _normalise_bouquet_index(payload: dict[str, Any]) -> dict[str, Any]:
+    """Strip the `bouquets` index to what the contract names, in the receiver's order.
+
+    A bouquet is kept when it has a name. Its slug is the address of its
+    `channels/<slug>` topic and `""` when it has none; a slug that could not be a single
+    topic level, or one an earlier bouquet already owns, is read as none, because two
+    bouquets cannot be given one list.
+    """
+    raw = payload.get("bouquets")
+    bouquets: list[dict[str, Any]] = []
+    slugs: set[str] = set()
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        sref = item.get("sref")
+        slug = item.get("slug")
+        if not isinstance(slug, str) or "/" in slug or "+" in slug or "#" in slug or slug in slugs:
+            slug = ""
+        if slug:
+            slugs.add(slug)
+        count = item.get("count")
+        bouquets.append(
+            {
+                "name": name,
+                "sref": sref if isinstance(sref, str) else "",
+                "slug": slug,
+                "count": (
+                    count
+                    if isinstance(count, int) and not isinstance(count, bool) and count >= 0
+                    else None
+                ),
+            }
+        )
+    return {"generated": payload.get("generated"), "bouquets": bouquets}
+
+
 def picon_url(ip_address: str | None, sref: str | None) -> str | None:
     """Return the URL OpenWebif serves a channel's picon at, if it can be built.
 
@@ -651,7 +807,18 @@ class Enigma2State:
     # never the answer to a press - the same reading `last_error_retained` gives.
     epg_import_retained: bool = False
     bouquet: dict[str, Any] | None = None
+    # The combined `channels` topic. None when it has not arrived, was retracted - or was
+    # let go because the per-bouquet topics carry the same lists; `channels_released` says
+    # which, and readers go through `Enigma2Box.channel_list` rather than through this.
     channels: dict[str, Any] | None = None
+    channels_released: bool = False
+    # The `bouquets` index, normalised (`_normalise_bouquet_index`), and each bouquet's
+    # `channels/<slug>` payload by slug. Kept as they arrive, whatever the capability list
+    # says so far: `info` can land after them.
+    bouquet_index: dict[str, Any] | None = None
+    bouquet_channels: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # `info.not_published`, normalised: None for a plugin that does not report it.
+    not_published: list[dict[str, Any]] | None = None
     # The receiver's zap history, normalised; see `_normalize_zap_history`.
     zap_history: dict[str, Any] | None = None
     # Whether the last `zap_history` arrived retained: a replay of what the broker held,
@@ -715,6 +882,28 @@ class Enigma2Box:
         self._hidden_missing_warned: set[str] = set()
         # Who answers the receiver's `relay_request`: set when the entry is set up.
         self.relay_request_handler: Callable[[Any], None] | None = None
+        # The channel list last shown from the per-bouquet topics; None while the combined
+        # `channels` topic is the source. See `channel_list`.
+        self._topic_list: ChannelList | None = None
+        # The combined topic read as a channel list, and the payload it was read from.
+        self._combined_list: ChannelList = ChannelList()
+        self._combined_from: dict[str, Any] | None = None
+        # Counts every change of the channel list, so what is derived from it - the
+        # members of the hidden bouquets - is rebuilt when it moved and not per message.
+        self._channel_generation: int = 0
+        self._hidden_members: tuple[tuple[int, frozenset[str]], set[str] | None] | None = None
+        # What `info` last said that the per-bouquet list depends on: whether the
+        # capability is claimed, and which bouquets' lists the receiver withheld.
+        self._channel_topics_inputs: tuple[bool, frozenset[str], bool] | None = None
+        self._withheld_lists: frozenset[str] = frozenset()
+        self._withheld_combined: bool = False
+        self._settle_cancel: CALLBACK_TYPE | None = None
+        # Ends the request that asks the broker for the retained `channels` again:
+        # its subscription, its confirmation tracker and its timer.
+        self._refetch: CALLBACK_TYPE | None = None
+        # When the broker's answer to that request arrived, to know the same delivery
+        # again should the wildcard subscription be handed it too.
+        self._refetch_answered: float | None = None
 
     # ------------------------------------------------------------------ properties
 
@@ -909,7 +1098,7 @@ class Enigma2Box:
 
     @property
     def bouquets(self) -> list[dict[str, Any]]:
-        """Return the bouquets of the `channels` topic, filtered by the options.
+        """Return the bouquets of the channel list, filtered by the options.
 
         An empty or absent option means every bouquet the plugin published, which is
         already the plugin's own `bouquets_for_select` selection: the option narrows
@@ -922,17 +1111,44 @@ class Enigma2Box:
         return [bouquet for bouquet in usable if bouquet.get("name") in wanted]
 
     @property
+    def channel_list(self) -> ChannelList:
+        """Return the receiver's bouquets and channels, from whichever topics carry them.
+
+        The one model behind every reader. It has three sources and they are told apart
+        here and nowhere else:
+
+        - **`channels`**, every bouquet with its list in one payload - the only source of a
+          plugin up to 0.4.0, and of a later one until its index has arrived.
+        - **the per-bouquet topics** - the `bouquets` index and one `channels/<slug>` for
+          each bouquet - while the receiver claims `channel_topics` and the index is here.
+          They win over `channels` then, which a receiver with a very large channel list
+          does not publish at all.
+        - **nothing**, before either has arrived or after a retraction.
+
+        The per-bouquet list is a snapshot, replaced as a whole (`_async_show_topic_list`):
+        retained topics arrive one by one, and a list that grew by a bouquet per message
+        would rewrite every select once per bouquet. So while the index names a bouquet
+        whose topic has not arrived, readers keep what they had - the `channels` list,
+        the previous snapshot, or nothing - until the last one lands or the burst is over.
+        """
+        if self._topic_list is not None:
+            return self._topic_list
+        channels = self.state.channels
+        if channels is not self._combined_from:
+            self._combined_from = channels
+            self._combined_list = _combined_channel_list(channels)
+            self._channel_generation += 1
+        return self._combined_list
+
+    @property
     def published_bouquets(self) -> list[dict[str, Any]]:
-        """Return every bouquet on the `channels` topic that lists channels, options ignored."""
-        channels = self.state.channels or {}
-        bouquets = channels.get("bouquets")
-        if not isinstance(bouquets, list):
-            return []
-        return [
-            bouquet
-            for bouquet in bouquets
-            if isinstance(bouquet, dict) and isinstance(bouquet.get("channels"), list)
-        ]
+        """Return every bouquet the receiver published a place for, options ignored.
+
+        From `channels` that is every bouquet that lists channels. From the per-bouquet
+        topics it is every bouquet of the index: one whose own topic the receiver withheld
+        is still a bouquet of this receiver, with its name and no channels.
+        """
+        return list(self.channel_list.bouquets)
 
     @property
     def bouquet_names(self) -> list[str]:
@@ -941,14 +1157,30 @@ class Enigma2Box:
         The options flow offers this: a user cannot choose from a list that has already
         been filtered by the choice they are about to change.
         """
-        channels = self.state.channels or {}
-        bouquets = channels.get("bouquets")
-        if not isinstance(bouquets, list):
-            return []
+        return list(self.channel_list.names)
+
+    @property
+    def channel_topics_claimed(self) -> bool:
+        """Return whether the receiver says it publishes the per-bouquet channel topics."""
+        return CAPABILITY_CHANNEL_TOPICS in self.capabilities
+
+    def bouquet_name_for_slug(self, slug: str) -> str | None:
+        """Return the name the index gives the bouquet whose channel topic has this slug."""
+        for entry in (self.state.bouquet_index or {}).get("bouquets") or []:
+            if entry["slug"] == slug:
+                return entry["name"]
+        return None
+
+    def bouquet_names_without_topic(self) -> list[str]:
+        """Return the bouquets of the index that have no channel topic of their own.
+
+        Their channels are published on `channels` only, so they are what a withheld
+        `channels` takes away that the receiver's own list of withheld topics cannot name.
+        """
         return [
-            name
-            for bouquet in bouquets
-            if isinstance(bouquet, dict) and isinstance(name := bouquet.get("name"), str)
+            entry["name"]
+            for entry in (self.state.bouquet_index or {}).get("bouquets") or []
+            if not entry["slug"]
         ]
 
     @property
@@ -1163,6 +1395,8 @@ class Enigma2Box:
         """Unsubscribe from everything this box subscribed to."""
         while self._unsubscribes:
             self._unsubscribes.pop()()
+        self._cancel_settle()
+        self._cancel_refetch()
         for pending in self._pending:
             pending.fail("the receiver was removed from Home Assistant")
         self._pending.clear()
@@ -1306,7 +1540,6 @@ class Enigma2Box:
         TOPIC_RECORDING: "recording",
         TOPIC_VOLUME: "volume",
         TOPIC_HDD: "hdd",
-        TOPIC_CHANNELS: "channels",
         TOPIC_BOUQUET: "bouquet",
     }
 
@@ -1335,6 +1568,14 @@ class Enigma2Box:
             self._zap_history_received(msg)
         elif suffix.startswith(f"{TOPIC_EPG_GRID}/"):
             self._epg_grid_received(suffix[len(TOPIC_EPG_GRID) + 1 :], msg.payload)
+        elif suffix == TOPIC_CHANNELS:
+            self._channels_received(msg)
+        elif suffix.startswith(f"{TOPIC_CHANNELS}/"):
+            self._bouquet_channels_received(suffix[len(TOPIC_CHANNELS) + 1 :], msg)
+        elif suffix == TOPIC_BOUQUETS:
+            # The index of every bouquet. `bouquet`, in the singular, is the one the
+            # receiver's channel keys are walking, and is stored by name below.
+            self._bouquet_index_received(msg)
         elif (attribute := self._OBJECT_TOPICS.get(suffix)) is not None:
             setattr(self.state, attribute, parse_json_payload(msg.payload))
             self._async_updated(suffix)
@@ -1425,6 +1666,8 @@ class Enigma2Box:
             return
         self.info_retracted = False
         self.state.info = info
+        self.state.not_published = normalise_not_published(info)
+        self._async_channel_topics_reviewed()
         if self.cam_enabled and self._pending_cam is not _NO_PENDING_CAM:
             pending, self._pending_cam = self._pending_cam, _NO_PENDING_CAM
             if pending is _CAM_TOMBSTONE:
@@ -1968,11 +2211,15 @@ class Enigma2Box:
 
         **It fails toward hiding.** An entry with no path, a radio bouquet or a bouquet
         the plugin does not publish cannot be checked against the option, so while the
-        option is set it is left out. The unfiltered select still shows it.
+        option is set it is left out. The unfiltered select still shows it. And while a
+        hidden bouquet is on the receiver's list of bouquets without its channels - its
+        `channels/<slug>` topic was withheld, retracted, or has not arrived - rule 2
+        cannot be checked for any entry, so every entry is left out: which channels to
+        hide is exactly what is not known.
 
         This hides entries from one Home Assistant entity and nothing else. The receiver
         publishes every entry on `zap_history`, and every channel of every bouquet on
-        `channels`, to anybody on the broker.
+        `channels` or `channels/<slug>`, to anybody on the broker.
         """
         entries = list((self.state.zap_history or {}).get("entries") or [])
         if not filtered:
@@ -1986,13 +2233,8 @@ class Enigma2Box:
             return entries
         published = self.published_bouquets
         self._warn_missing_hidden(hidden, published)
-        hidden_members = {
-            service_identity(channel.get("sref"))
-            for bouquet in published
-            if bouquet.get("name") in hidden
-            for channel in bouquet["channels"]
-            if isinstance(channel, dict)
-        } - {""}
+        if (hidden_members := self._members_of_hidden(hidden, published)) is None:
+            return []
         visible: list[dict[str, Any]] = []
         for entry in entries:
             bouquet = next(
@@ -2010,18 +2252,48 @@ class Enigma2Box:
             visible.append(entry)
         return visible
 
+    def _members_of_hidden(
+        self, hidden: set[str], published: list[dict[str, Any]]
+    ) -> set[str] | None:
+        """Return the identity of every channel of the hidden bouquets, or None.
+
+        None is "cannot be known": a hidden bouquet is on the list without its channels.
+        The set is kept until the channel list or the option changes, because the filter
+        runs on every payload of three topics and a hidden bouquet can hold thousands of
+        channels.
+        """
+        key = (self._channel_generation, frozenset(hidden))
+        if self._hidden_members is not None and self._hidden_members[0] == key:
+            return self._hidden_members[1]
+        members: set[str] | None = set()
+        for bouquet in published:
+            if bouquet.get("name") not in hidden:
+                continue
+            if not bouquet.get("listed", True):
+                members = None
+                break
+            members.update(
+                service_identity(channel.get("sref"))
+                for channel in bouquet["channels"]
+                if isinstance(channel, dict)
+            )
+        if members is not None:
+            members.discard("")
+        self._hidden_members = (key, members)
+        return members
+
     @callback
     def _warn_missing_hidden(
         self, hidden: set[str], published: list[dict[str, Any]]
     ) -> None:
         """Say once, per name, that a hidden bouquet is not on the channel list.
 
-        Nothing is said before `channels` has arrived at all: every name is missing from
-        a list nobody has sent yet. A renamed or deleted bouquet is the usual cause, and
-        its channels are then no longer recognised as hidden when reached through
+        Nothing is said before a channel list has arrived at all: every name is missing
+        from a list nobody has sent yet. A renamed or deleted bouquet is the usual cause,
+        and its channels are then no longer recognised as hidden when reached through
         another bouquet - which is what the log line is for.
         """
-        if self.state.channels is None:
+        if self.channel_list.source == CHANNEL_SOURCE_NONE:
             return
         names = {bouquet.get("name") for bouquet in published}
         for name in sorted(hidden - names - self._hidden_missing_warned):
@@ -2040,6 +2312,8 @@ class Enigma2Box:
         if (announcement := parse_json_payload(msg.payload)) is None:
             return
         self.state.announcement = announcement
+        # The capability list is read from here while `info` has not arrived.
+        self._async_channel_topics_reviewed()
         self.async_register_device()
         self._async_updated(TOPIC_INFO)
 
@@ -2130,6 +2404,437 @@ class Enigma2Box:
                 if pending.cmd == cmd:
                     pending.fail(text, reason)
         self._async_updated(TOPIC_LAST_ERROR)
+
+    # ------------------------------------------------------------ channel list
+
+    @property
+    def _channel_topics_live(self) -> bool:
+        """Return whether the per-bouquet topics are what the channel list is read from."""
+        return self.channel_topics_claimed and self.state.bouquet_index is not None
+
+    def _index_bouquets(self) -> list[dict[str, Any]]:
+        """Return the bouquets of the index, or none while there is no index."""
+        return (self.state.bouquet_index or {}).get("bouquets") or []
+
+    def _index_needs_channels(self) -> bool:
+        """Return whether the index names a bouquet that has no topic of its own.
+
+        A bouquet whose name has no ASCII letter or digit in it - one written in Cyrillic,
+        Greek, Arabic, Hebrew or CJK - has no slug, so the plugin publishes no
+        `channels/<slug>` for it. It is in the index, with `slug` empty, and its channels
+        are in `channels` and nowhere else.
+        """
+        return any(not entry["slug"] for entry in self._index_bouquets())
+
+    @callback
+    def _channels_received(self, msg: ReceiveMessage) -> None:
+        """Track the combined `channels` topic, unless the per-bouquet topics have it all.
+
+        While it is the source it is read as it always was: an empty payload, or one that
+        is not a JSON object, is no channel list. While the list on show comes from the
+        per-bouquet topics it is not kept - it would be a second copy of every list they
+        carry, and they win where the two differ - and `channels_released` remembers that
+        it is on the broker, so it can be asked for again (`_async_leave_topic_list`).
+
+        The exception is an index with a bouquet that has no topic of its own: `channels`
+        is then the only place that bouquet's list is, so it is kept, and read for that
+        bouquet alone.
+        """
+        if msg.retain and msg.timestamp == self._refetch_answered:
+            # The broker's answer to the request below, handed to the wildcard
+            # subscription as well because it never had a retained `channels`: read once.
+            self._refetch_answered = None
+            return
+        channels = parse_json_payload(msg.payload)
+        self._cancel_refetch()
+        if self._topic_list is not None and self._channel_topics_live:
+            if not self._index_needs_channels():
+                self.state.channels = None
+                self.state.channels_released = channels is not None
+                return
+            self.state.channels_released = False
+            if channels == self.state.channels:
+                # Published again as it was: the payload in hand stays the one copy.
+                return
+            self.state.channels = channels
+            self._async_channel_topics_changed(adopt=True)
+            return
+        self.state.channels = channels
+        self.state.channels_released = False
+        if self._topic_list is not None:
+            # A list kept on show after the receiver stopped claiming the per-bouquet
+            # topics. `channels` has spoken, so it is the source again.
+            self._topic_list = None
+            self._channel_generation += 1
+        elif self._channel_topics_live:
+            # The per-bouquet list was being waited for. `channels` may be what it was
+            # waiting for - a bouquet with no topic of its own - and then that list is
+            # shown, and has woken everybody.
+            self._async_channel_topics_changed()
+            if self._topic_list is not None:
+                return
+        self._async_updated(TOPIC_CHANNELS)
+
+    @callback
+    def _bouquet_index_received(self, msg: ReceiveMessage) -> None:
+        """Track the `bouquets` index of the per-bouquet channel topics.
+
+        The answers every retained topic here gets: an empty payload is a retraction and
+        clears it, a payload that is not a JSON object leaves the last good one alone. An
+        index equal to the one held - which is what every reconnect sends - changes
+        nothing and wakes nobody.
+        """
+        if _retracted(msg.payload):
+            if self.state.bouquet_index is None:
+                return
+            self.state.bouquet_index = None
+        elif (payload := parse_json_payload(msg.payload)) is None:
+            return
+        else:
+            index = _normalise_bouquet_index(payload)
+            if index == self.state.bouquet_index:
+                return
+            self.state.bouquet_index = index
+        self._async_updated(TOPIC_BOUQUETS)
+        self._async_channel_topics_changed()
+
+    @callback
+    def _bouquet_channels_received(self, slug: str, msg: ReceiveMessage) -> None:
+        """Track one bouquet's `channels/<slug>`, or forget it when it is retracted.
+
+        Kept whatever the capability list says so far, because `info` can arrive after
+        it; whether it is read is `channel_list`'s decision. Listeners are not woken per
+        topic: the list they read is replaced as a whole.
+
+        A payload that differs from the one held only in `generated` is the same list
+        with a new stamp - a restart of the plugin stamps every bouquet anew - so the
+        stamp is taken and nothing is rebuilt.
+        """
+        if not slug or "/" in slug:
+            return
+        lists = self.state.bouquet_channels
+        if _retracted(msg.payload):
+            if lists.pop(slug, None) is None:
+                return
+        elif (payload := parse_json_payload(msg.payload)) is None:
+            return
+        else:
+            channels = payload.get("channels")
+            if not isinstance(channels, list):
+                return
+            sref = payload.get("sref")
+            received = {
+                "bouquet": payload.get("bouquet"),
+                "sref": sref if isinstance(sref, str) else None,
+                "generated": payload.get("generated"),
+                "channels": channels,
+            }
+            held = lists.get(slug)
+            if (
+                held is not None
+                and held["sref"] == received["sref"]
+                and held["bouquet"] == received["bouquet"]
+                and held["channels"] == channels
+            ):
+                held["generated"] = received["generated"]
+                return
+            lists[slug] = received
+        self.seen.add(TOPIC_BOUQUET_CHANNELS)
+        self.updates[TOPIC_BOUQUET_CHANNELS] = self.updates.get(TOPIC_BOUQUET_CHANNELS, 0) + 1
+        self._async_channel_topics_changed()
+
+    @callback
+    def _async_channel_topics_reviewed(self) -> None:
+        """Re-read what `info` says about the per-bouquet topics, and act if it moved.
+
+        Three things: whether `channel_topics` is claimed, which bouquets' lists the
+        receiver says it withheld, and whether it withheld `channels` - a topic that will
+        never arrive, which is not the same as one that has not arrived yet. `info` is
+        published far more often than any of them changes, so nothing is recomputed
+        unless one did. The capability is read from the announcement while `info` has not
+        arrived, which is why the announcement is reviewed too.
+        """
+        topics = {entry["topic"] for entry in self.state.not_published or []}
+        withheld = frozenset(
+            topic[len(TOPIC_CHANNELS) + 1 :]
+            for topic in topics
+            if topic.startswith(f"{TOPIC_CHANNELS}/")
+        )
+        inputs = (self.channel_topics_claimed, withheld, TOPIC_CHANNELS in topics)
+        if inputs == self._channel_topics_inputs:
+            return
+        self._channel_topics_inputs = inputs
+        self._withheld_lists = withheld
+        self._withheld_combined = TOPIC_CHANNELS in topics
+        self._async_channel_topics_changed()
+
+    def _bouquet_list(self, entry: dict[str, Any]) -> list[Any] | None:
+        """Return the channels of one bouquet of the index, when a topic has them.
+
+        From the bouquet's own topic, and the payload counts only when it says it is this
+        bouquet's: two bouquets that slug alike swap topics when the receiver's order
+        changes, and between the index and the two payloads arriving the topic still
+        holds the other bouquet's list.
+
+        A bouquet with no topic of its own is read from `channels`, by its reference and
+        its name, when `channels` is here and lists it.
+        """
+        if not entry["slug"]:
+            bouquets = (self.state.channels or {}).get("bouquets")
+            for bouquet in bouquets if isinstance(bouquets, list) else []:
+                if (
+                    isinstance(bouquet, dict)
+                    and bouquet.get("sref") == entry["sref"]
+                    and bouquet.get("name") == entry["name"]
+                ):
+                    channels = bouquet.get("channels")
+                    return channels if isinstance(channels, list) else None
+            return None
+        received = self.state.bouquet_channels.get(entry["slug"])
+        if received is None or received["sref"] != entry["sref"]:
+            return None
+        return received["channels"]
+
+    def _bouquet_list_awaited(self, entry: dict[str, Any]) -> bool:
+        """Return whether a bouquet's missing list may still arrive.
+
+        Not when the receiver says it withheld the topic the list would be on. For a
+        bouquet with no topic of its own that topic is `channels`, and a `channels` that
+        is here without the bouquet has nothing more to say about it either.
+        """
+        if entry["slug"]:
+            return entry["slug"] not in self._withheld_lists
+        return self.state.channels is None and not self._withheld_combined
+
+    def _bouquet_lists_awaited(self) -> list[str]:
+        """Return the bouquets whose list may still arrive: by slug, or by name without one."""
+        return [
+            entry["slug"] or entry["name"]
+            for entry in self._index_bouquets()
+            if self._bouquet_list(entry) is None and self._bouquet_list_awaited(entry)
+        ]
+
+    @callback
+    def _async_channel_topics_changed(self, *, adopt: bool = False) -> None:
+        """Decide what the channel list is after anything about the per-bouquet topics moved.
+
+        Complete - every bouquet of the index has its list, or is one the receiver says it
+        withheld - and it is shown at once. Incomplete, and what is on show stays until
+        `CHANNEL_TOPICS_SETTLE` seconds pass without another message; then the list is
+        shown as far as it goes. Not the source at all - no capability, or no index - and
+        `channels` is.
+        """
+        if not self._channel_topics_live:
+            self._async_leave_topic_list()
+            return
+        if self._index_needs_channels() and self.state.channels is None:
+            if self.state.channels_released:
+                # Let go while every bouquet had a topic of its own; one of them has
+                # none now, so the broker is asked for `channels` again.
+                self._async_refetch_channels()
+        if self._bouquet_lists_awaited():
+            self._cancel_settle()
+            self._settle_cancel = async_call_later(
+                self.hass, CHANNEL_TOPICS_SETTLE, self._settled
+            )
+            return
+        self._async_show_topic_list(adopt=adopt)
+
+    @callback
+    def _settled(self, _now: datetime) -> None:
+        """The burst is over and a bouquet's list is still missing: show what there is."""
+        self._settle_cancel = None
+        if self._channel_topics_live:
+            self._async_show_topic_list()
+
+    @callback
+    def _cancel_settle(self) -> None:
+        if self._settle_cancel is not None:
+            self._settle_cancel()
+            self._settle_cancel = None
+
+    @callback
+    def _async_show_topic_list(self, *, adopt: bool = False) -> None:
+        """Replace the channel list with one built from the index and the per-bouquet topics.
+
+        The lists are the payloads' own - nothing is copied - and the combined `channels`
+        payload is let go, so a receiver's channels are held once. It is kept only while
+        the index names a bouquet with no topic of its own, whose list is nowhere else.
+        Listeners are woken once, and not at all when the list is the one already on
+        show; `adopt` then still takes the new list in place of the equal one, so that an
+        old `channels` payload is not kept alive by the list that was read from it.
+        """
+        self._cancel_settle()
+        index = self.state.bouquet_index or {}
+        bouquets: list[dict[str, Any]] = []
+        awaited = False
+        for entry in self._index_bouquets():
+            channels = self._bouquet_list(entry)
+            if channels is None and self._bouquet_list_awaited(entry):
+                awaited = True
+            bouquets.append(
+                {
+                    "name": entry["name"],
+                    "sref": entry["sref"],
+                    "channels": channels if channels is not None else [],
+                    "slug": entry["slug"],
+                    "count": entry["count"],
+                    "listed": channels is not None,
+                }
+            )
+        shown = ChannelList(
+            source=CHANNEL_SOURCE_BOUQUET_TOPICS,
+            bouquets=tuple(bouquets),
+            names=tuple(bouquet["name"] for bouquet in bouquets),
+            generated=index.get("generated"),
+            complete=not awaited,
+        )
+        if not self._index_needs_channels():
+            if self.state.channels is not None:
+                self.state.channels = None
+                self.state.channels_released = True
+            # And what was read from it, which holds the payload as well.
+            self._combined_from = None
+            self._combined_list = ChannelList()
+            self._cancel_refetch()
+        elif self.state.channels is not None:
+            self._cancel_refetch()
+        if shown == self._topic_list:
+            if adopt:
+                self._topic_list = shown
+            return
+        if awaited:
+            _LOGGER.debug(
+                "Receiver %s: showing the channel list without %s, whose topics have not arrived",
+                self.node_id,
+                ", ".join(self._bouquet_lists_awaited()),
+            )
+        self._topic_list = shown
+        self._channel_generation += 1
+        self._async_updated(TOPIC_CHANNELS)
+
+    @callback
+    def _async_leave_topic_list(self) -> None:
+        """Go back to `channels` after the per-bouquet topics stopped being the source.
+
+        That is a receiver that no longer claims `channel_topics` - a plugin put back to
+        0.4.0 - or an index that was retracted. With the `channels` payload in hand, or
+        none on the broker, the list is simply what `channels` holds. When it was let go,
+        the list on show stays - it is the same lists - and the broker is asked for
+        `channels` again by a subscription of its own, which is answered with the retained
+        payload; `_channels_received` then makes it the source. A broker that does not
+        answer ends the wait (`_async_refetch_unanswered`).
+        """
+        self._cancel_settle()
+        if self._topic_list is None:
+            return
+        if self.state.channels_released:
+            self._async_refetch_channels()
+            return
+        self._topic_list = None
+        self._channel_generation += 1
+        self._async_updated(TOPIC_CHANNELS)
+
+    @callback
+    def _async_refetch_channels(self) -> None:
+        """Ask the broker for the retained `channels` again, once, and not for ever.
+
+        A subscription of its own, because a broker answers a subscribe with the retained
+        message and the wildcard subscription has had its answer. Only that retained
+        answer is taken from it; a `channels` published meanwhile arrives on the wildcard
+        like any other, and either one ends the request.
+
+        `channels_released` can be out of date: a `channels` retracted while Home
+        Assistant was not connected leaves nothing to answer with. So the wait is bound -
+        `CHANNELS_REFETCH_GRACE` seconds from the broker confirming the subscription, and
+        `SUBSCRIBE_TIMEOUT` more than that when the confirmation never comes - and an
+        unanswered request is read as "there is no `channels`".
+        """
+        if self._refetch is not None:
+            return
+        topic = self.state_topic(TOPIC_CHANNELS)
+        cleanups: list[CALLBACK_TYPE] = []
+        timer: list[CALLBACK_TYPE] = []
+
+        @callback
+        def _cancel() -> None:
+            while cleanups:
+                cleanups.pop()()
+
+        @callback
+        def _disarm() -> None:
+            while timer:
+                timer.pop()()
+
+        @callback
+        def _unanswered(_now: datetime) -> None:
+            timer.clear()
+            if self._refetch is _cancel:
+                self._async_refetch_unanswered()
+
+        @callback
+        def _arm(seconds: float) -> None:
+            _disarm()
+            timer.append(async_call_later(self.hass, seconds, _unanswered))
+
+        @callback
+        def _established() -> None:
+            if self._refetch is _cancel:
+                _arm(CHANNELS_REFETCH_GRACE)
+
+        @callback
+        def _answered(answer: ReceiveMessage) -> None:
+            if self._refetch is _cancel and answer.retain:
+                self._channels_received(answer)
+                self._refetch_answered = answer.timestamp
+
+        async def _subscribe() -> None:
+            try:
+                unsubscribe = await mqtt.async_subscribe(
+                    self.hass, topic, _answered, encoding=None
+                )
+            except HomeAssistantError:
+                # No broker to ask; the bound above still ends the wait.
+                return
+            if self._refetch is _cancel:
+                cleanups.append(unsubscribe)
+            else:
+                # Answered, or stopped, while the subscription was being made.
+                unsubscribe()
+
+        self._refetch = _cancel
+        cleanups.append(_disarm)
+        # Registered before subscribing, as everywhere here, so a subscription that
+        # completes at once cannot land between the two calls and go unnoticed.
+        cleanups.append(
+            mqtt.async_on_subscribe_done(self.hass, topic, mqtt.DEFAULT_QOS, _established)
+        )
+        _arm(SUBSCRIBE_TIMEOUT + CHANNELS_REFETCH_GRACE)
+        self.entry.async_create_task(
+            self.hass, _subscribe(), f"{DOMAIN} channels {self.node_id}"
+        )
+
+    @callback
+    def _async_refetch_unanswered(self) -> None:
+        """The broker had no `channels` to answer with: stop waiting for one.
+
+        The list kept on show for the wait goes, because there is nothing to go back to.
+        A receiver still read from the per-bouquet topics needs nothing done here: it
+        asked for the sake of a bouquet with no topic of its own, which is already being
+        waited for and is shown without its list when that wait is over.
+        """
+        self._cancel_refetch()
+        self.state.channels_released = False
+        if not self._channel_topics_live and self._topic_list is not None:
+            self._topic_list = None
+            self._channel_generation += 1
+            self._async_updated(TOPIC_CHANNELS)
+
+    @callback
+    def _cancel_refetch(self) -> None:
+        if self._refetch is not None:
+            refetch, self._refetch = self._refetch, None
+            refetch()
 
     @callback
     def _epg_grid_received(self, slug: str, payload: Any) -> None:

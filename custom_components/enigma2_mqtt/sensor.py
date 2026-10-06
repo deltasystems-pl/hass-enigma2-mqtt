@@ -80,6 +80,7 @@ from .const import (
     TOPIC_SERVICE,
     TOPIC_SOFTCAM,
     TOPIC_TUNER,
+    WITHHELD_ATTRIBUTE_MAX,
 )
 from .entity import Enigma2Entity, OptionalEntities
 
@@ -541,6 +542,40 @@ EPG_IMPORT_SENSORS: tuple[Enigma2SensorDescription, ...] = (
     ),
 )
 
+
+def _withheld_attributes(state: Enigma2State) -> dict[str, Any]:
+    """Return which payloads the receiver withheld, as far as an attribute should go.
+
+    The first `WITHHELD_ATTRIBUTE_MAX` entries, each `topic`, `bytes` and `limit` as the
+    receiver reported them, and how many more there are. A receiver has an entry for every
+    bouquet that is too big, so the list has no natural limit, and a state attribute has
+    to have one.
+    """
+    entries = state.not_published or []
+    return {
+        "topics": [dict(entry) for entry in entries[:WITHHELD_ATTRIBUTE_MAX]],
+        "not_shown": max(0, len(entries) - WITHHELD_ATTRIBUTE_MAX),
+    }
+
+
+# "Withheld payloads": how many topics the receiver did not publish because their payload
+# would not fit one MQTT packet, and which. Enabled by default, like "Last error": it is
+# what explains a channel list or a programme guide that is missing, it changes about as
+# often as the receiver's bouquets do, and the repair that says the same in words goes
+# away the moment somebody dismisses it.
+WITHHELD_SENSORS: tuple[Enigma2SensorDescription, ...] = (
+    Enigma2SensorDescription(
+        key="withheld_payloads",
+        topics=(TOPIC_INFO,),
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda state: (
+            None if state.not_published is None else len(state.not_published)
+        ),
+        attributes_fn=_withheld_attributes,
+    ),
+)
+
 KEY_EPG_ACTIVE_BOUQUET = "epg_active_bouquet"
 
 # The grids to read, and the context that says which one is in use. A box that publishes
@@ -640,6 +675,34 @@ async def async_setup_entry(
             # Never removed, for the reason the softcam sensor above gives: a capability
             # that goes quiet is not a decision, and the history of a diagnostic is not
             # the price of a downgrade or a receiver that has not answered yet.
+            lambda: False,
+            async_add_entities,
+        ).start()
+    )
+
+    withheld = {description.key: description for description in WITHHELD_SENSORS}
+    # Whether this receiver has had the sensor before. Read once: the registry entry is
+    # made by the first creation and nothing here ever removes it.
+    registry = er.async_get(hass)
+    had_withheld = any(
+        registry.async_get_entity_id("sensor", DOMAIN, f"{box.node_id}_{key}") is not None
+        for key in withheld
+    )
+    entry.async_on_unload(
+        OptionalEntities(
+            hass,
+            box,
+            "sensor",
+            list(withheld),
+            lambda key: Enigma2Sensor(box, withheld[key]),
+            # A receiver whose `info` carries `not_published` at all - a plugin after
+            # 0.4.0. An older one never gets the sensor: it withholds nothing and would
+            # only ever show a diagnostic that cannot say anything. A receiver that has
+            # had it keeps it, also across a restart: a plugin put back to an older
+            # version is then a sensor that says `unknown`, which is the truth, rather
+            # than a registry entry with no entity behind it.
+            lambda: had_withheld or box.state.not_published is not None,
+            # Never removed, for the reason the softcam sensor above gives.
             lambda: False,
             async_add_entities,
         ).start()
@@ -820,6 +883,13 @@ class Enigma2EpgActiveBouquetSensor(Enigma2Entity, SensorEntity):
             )
         self._attr_native_value = with_data
         self._attr_extra_state_attributes = {"channels": channels}
+        # How many events a channel carries in this grid at most, from a plugin that
+        # says so: lower than the receiver's `epg_grid_events` when the grid was cut to
+        # fit one packet, which is how "two programmes left today" is told from "cut to
+        # two". A plugin that does not report it leaves the attribute out.
+        per_channel = (grid or {}).get("events_per_channel")
+        if isinstance(per_channel, int) and not isinstance(per_channel, bool) and per_channel > 0:
+            self._attr_extra_state_attributes["events_per_channel"] = per_channel
         if wake is not None:
             self._cancel_clock = async_track_point_in_utc_time(
                 self.hass, self._clock_moved, dt_util.utc_from_timestamp(wake)

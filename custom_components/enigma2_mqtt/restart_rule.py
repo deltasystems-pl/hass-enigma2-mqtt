@@ -53,11 +53,13 @@ SETTLE_POLL_SECONDS = 2.0
 # How long a zap back, or a return to standby, may take to show in OpenWebif's state.
 EFFECT_TIMEOUT = 10.0
 EFFECT_POLL_SECONDS = 1.0
-# How long the retained `bouquet` and `channels` topics are given to replay.
+# How long the retained `bouquet` and `channels` topics are given to replay - and, on a
+# receiver that does not publish `channels`, the index and the bouquet's own topic.
 BOUQUET_REPLAY_SECONDS = 3.0
 # How long a `cmd/bouquet` is given to be answered by a fresh `bouquet` state.
 BOUQUET_ACK_SECONDS = 10.0
 TOPIC_CHANNELS = "channels"
+TOPIC_BOUQUETS = "bouquets"
 COMMAND_BOUQUET = "bouquet"
 # The restart record's `channel` when the image started on another channel and somebody
 # chose one before the zap back: not "lost" - the household decided - and never zapped.
@@ -239,6 +241,16 @@ def _bouquet_sref(payload: Any) -> str | None:
     return sref if isinstance(sref, str) and sref else None
 
 
+def _holds(members: Any, service: str) -> bool:
+    """Return whether a bouquet's published list of channels has `service` in it."""
+    if not isinstance(members, list):
+        return False
+    return any(
+        isinstance(member, dict) and same_service(member.get("sref"), service)
+        for member in members
+    )
+
+
 def _bouquet_holds(channels: Any, bouquet: str, service: str | None) -> bool:
     """Return whether the plugin's published `channels` put `service` in `bouquet`."""
     if service is None:
@@ -249,14 +261,69 @@ def _bouquet_holds(channels: Any, bouquet: str, service: str | None) -> bool:
     for entry in document["bouquets"]:
         if not isinstance(entry, dict) or entry.get("sref") != bouquet:
             continue
-        members = entry.get("channels")
-        if not isinstance(members, list):
-            return False
-        return any(
-            isinstance(member, dict) and same_service(member.get("sref"), service)
-            for member in members
-        )
+        return _holds(entry.get("channels"), service)
     return False
+
+
+def _has_channel_list(channels: Any) -> bool:
+    """Return whether the retained `channels` is a channel list at all.
+
+    A plugin after 0.4.0 does not publish `channels` on a receiver whose bouquets do not
+    fit one packet together, and retracts an older copy: nothing arrives, or an empty
+    payload. Its lists are then on `channels/<slug>`, one bouquet a topic.
+    """
+    document = parse_json_payload(channels)
+    return isinstance(document, dict) and isinstance(document.get("bouquets"), list)
+
+
+def _channel_topic_slug(index: Any, bouquet: str) -> str | None:
+    """Return the slug of `bouquet`'s own channel topic, as the `bouquets` index names it.
+
+    Taken from the index and never worked out from the name: two bouquets that slug alike
+    are numbered there, and only the index says which topic is whose.
+    """
+    document = parse_json_payload(index)
+    if not isinstance(document, dict) or not isinstance(document.get("bouquets"), list):
+        return None
+    for entry in document["bouquets"]:
+        if not isinstance(entry, dict) or entry.get("sref") != bouquet:
+            continue
+        slug = entry.get("slug")
+        if isinstance(slug, str) and slug and not set(slug) & set("/+#"):
+            return slug
+        return None
+    return None
+
+
+def _bouquet_topic_holds(payload: Any, bouquet: str, service: str | None) -> bool:
+    """Return whether `bouquet`'s own `channels/<slug>` puts `service` in it.
+
+    The payload has to say it is this bouquet's list: numbered slugs swap topics when the
+    receiver's order changes, and a list read from the other bouquet's topic would answer
+    for the wrong one. A topic that is not there - withheld, or retracted - answers no,
+    which leaves the bouquet alone rather than risk the channel.
+    """
+    if service is None:
+        return False
+    document = parse_json_payload(payload)
+    if not isinstance(document, dict) or document.get("sref") != bouquet:
+        return False
+    return _holds(document.get("channels"), service)
+
+
+async def _async_bouquet_topic(
+    hass: HomeAssistant, base_topic: str, node_id: str, bouquet: str
+) -> Any:
+    """Return the retained `channels/<slug>` of `bouquet`, or None when it has none.
+
+    Two reads, one after the other, because the topic's name is in the index.
+    """
+    index_topic = state_topic(base_topic, node_id, TOPIC_BOUQUETS)
+    index = (await _async_retained(hass, [index_topic], BOUQUET_REPLAY_SECONDS)).get(index_topic)
+    if (slug := _channel_topic_slug(index, bouquet)) is None:
+        return None
+    list_topic = state_topic(base_topic, node_id, f"{TOPIC_CHANNELS}/{slug}")
+    return (await _async_retained(hass, [list_topic], BOUQUET_REPLAY_SECONDS)).get(list_topic)
 
 
 async def _async_retained(
@@ -317,7 +384,8 @@ async def async_record(
     would see it differ from an earlier reading and zap back over the household's choice.
     """
     bouquet = None
-    retained: dict[str, Any] = {}
+    channels: Any = None
+    listed: Any = None
     try:
         retained = await _async_retained(
             hass,
@@ -328,11 +396,26 @@ async def async_record(
             BOUQUET_REPLAY_SECONDS,
         )
         bouquet = _bouquet_sref(retained.get(state_topic(base_topic, node_id, TOPIC_BOUQUET)))
+        channels = retained.get(state_topic(base_topic, node_id, TOPIC_CHANNELS))
+        if bouquet is not None and not _has_channel_list(channels):
+            # A receiver that does not publish `channels`: the bouquet's own topic says
+            # what is in it. Read here, before the channel, for the reason above.
+            #
+            # Whether the plugin publishes such topics at all is on `info`, which this
+            # does not read: the record is taken where no receiver is set up yet, and one
+            # more retained topic is one more wait. So a plugin up to 0.4.0 whose
+            # `channels` is absent, or late, costs one read of an index that is not there
+            # - `BOUQUET_REPLAY_SECONDS` at most - before it answers what it always did.
+            listed = await _async_bouquet_topic(hass, base_topic, node_id, bouquet)
     except Exception:  # noqa: BLE001 - a record without a bouquet is still a record
         _LOGGER.debug("The receiver's bouquet could not be recorded", exc_info=True)
     service, standby = await async_read_state(session, helper)
-    holds = bouquet is not None and _bouquet_holds(
-        retained.get(state_topic(base_topic, node_id, TOPIC_CHANNELS)), bouquet, service
+    # From `channels` when the receiver publishes it, exactly as before: both ways of
+    # publishing carry the same lists, and that one is already in hand.
+    holds = bouquet is not None and (
+        _bouquet_holds(channels, bouquet, service)
+        if _has_channel_list(channels)
+        else _bouquet_topic_holds(listed, bouquet, service)
     )
     return RestartRecord(service, standby, bouquet, holds)
 

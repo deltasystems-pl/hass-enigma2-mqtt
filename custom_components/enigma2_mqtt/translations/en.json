@@ -495,7 +495,8 @@
         "name": "EPG import",
         "state": {"idle": "Idle", "running": "Running", "done": "Done", "failed": "Failed"}
       },
-      "last_error": {"name": "Last error"}
+      "last_error": {"name": "Last error"},
+      "withheld_payloads": {"name": "Withheld payloads"}
     },
     "switch": {
       "power": {
@@ -713,6 +714,12 @@
         "active_bouquet": "The active bouquet",
         "all": "Every bouquet on offer"
       }
+    }
+  },
+  "issues": {
+    "payloads_withheld": {
+      "title": "{name}: the receiver is not publishing everything",
+      "description": "The plugin on {name} did not publish the following, because each of these messages would exceed the size one MQTT message may have and the broker would close the connection:\n\n{withheld}\n\nIn Home Assistant this means: the channels of a bouquet whose list is missing are not offered, and a bouquet without its EPG shows no programmes.\n\nTo get them back, limit the bouquets the plugin publishes with its `bouquets_for_select` setting on the receiver (the plugin's setup screen or its OpenWebif page), or split a very large bouquet into smaller ones. Lowering `epg_grid_events` does not bring a missing EPG back: the plugin already shortens it as far as it can before it gives up on it.\n\nThis notice goes away by itself once the receiver publishes everything again."
     }
   },
   "exceptions": {

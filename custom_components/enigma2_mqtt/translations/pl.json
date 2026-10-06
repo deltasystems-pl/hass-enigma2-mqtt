@@ -468,7 +468,8 @@
         "name": "Import EPG",
         "state": {"idle": "Bezczynny", "running": "Trwa", "done": "Zakończony", "failed": "Nieudany"}
       },
-      "last_error": {"name": "Ostatni błąd"}
+      "last_error": {"name": "Ostatni błąd"},
+      "withheld_payloads": {"name": "Nieopublikowane dane"}
     },
     "switch": {
       "power": {
@@ -686,6 +687,12 @@
         "active_bouquet": "Aktywny bukiet",
         "all": "Wszystkie oferowane bukiety"
       }
+    }
+  },
+  "issues": {
+    "payloads_withheld": {
+      "title": "{name}: dekoder nie publikuje wszystkich danych",
+      "description": "Wtyczka na dekoderze {name} nie opublikowała poniższych danych, bo każda z tych wiadomości przekroczyłaby dopuszczalny rozmiar jednej wiadomości MQTT i broker zerwałby połączenie:\n\n{withheld}\n\nW Home Assistant oznacza to: kanały bukietu, którego listy brakuje, nie są oferowane, a bukiet bez EPG nie ma programu.\n\nAby je odzyskać, ogranicz bukiety publikowane przez wtyczkę ustawieniem `bouquets_for_select` na dekoderze (ekran ustawień wtyczki albo jej strona w OpenWebif) lub podziel bardzo duży bukiet na mniejsze. Zmniejszenie `epg_grid_events` nie przywróci brakującego EPG: wtyczka sama skraca je, na ile się da, zanim z niego zrezygnuje.\n\nTen komunikat zniknie sam, gdy dekoder znów opublikuje wszystko."
     }
   },
   "exceptions": {

@@ -22,6 +22,12 @@ household behaviour is not something to attach to a public issue by accident.
 name and no reference in it - filtered or not. It is the channels somebody watched, in
 the order they watched them, and the hidden-bouquet option exists because some of them
 are nobody else's business.
+
+The per-bouquet channel topics of a plugin after 0.4.0 are summarised the way `channels`
+is: the index as its bouquets with their slugs and counts, each `channels/<slug>` as how
+many channels it holds, and never a channel's name or reference. `channel_list` says which
+of the two sources the entities are reading and whether every bouquet's list is in, and
+`not_published` is the receiver's own list of what it withheld, normalised.
 """
 
 from __future__ import annotations
@@ -32,7 +38,7 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 
-from .box import Enigma2MqttConfigEntry
+from .box import Enigma2Box, Enigma2MqttConfigEntry
 from .bundle import BundleError, load_bundled_plugin
 from .const import DOMAIN, SUPPORTED_PLUGIN_VERSION
 from .release_store import async_release_index_cache
@@ -98,6 +104,10 @@ async def async_get_config_entry_diagnostics(
             "capabilities": box.capabilities,
             "topics_seen": sorted(box.seen),
             "topic_updates": dict(sorted(box.updates.items())),
+            # What the receiver says it could not publish: None for a plugin that does
+            # not report it, which is not the same as an empty list.
+            "not_published": state.not_published,
+            "channel_list": _summarise_channel_list(box),
         },
         "announcement": dict(state.announcement),
         "info": dict(state.info),
@@ -148,6 +158,15 @@ async def async_get_config_entry_diagnostics(
             "epg_import": state.epg_import,
             "update": state.update,
             "channels": _summarise_channels(state.channels),
+            "bouquets": _summarise_bouquet_index(state.bouquet_index),
+            "bouquet_channels": {
+                slug: {
+                    "bouquet": received.get("bouquet"),
+                    "generated": received.get("generated"),
+                    "channels": len(received.get("channels") or []),
+                }
+                for slug, received in sorted(state.bouquet_channels.items())
+            },
             "zap_history": _summarise_zap_history(state.zap_history),
             "last_error": state.last_error,
             "screen": {
@@ -161,6 +180,9 @@ async def async_get_config_entry_diagnostics(
                     "bouquet": grid.get("bouquet"),
                     "generated": grid.get("generated"),
                     "channels": len(grid.get("channels") or []),
+                    # Lower than the receiver's `epg_grid_events` on a grid the plugin
+                    # cut to fit one packet; None from a plugin that does not report it.
+                    "events_per_channel": grid.get("events_per_channel"),
                 }
                 for slug, grid in sorted(state.epg_grid.items())
             },
@@ -203,6 +225,41 @@ def _summarise_channels(channels: dict[str, Any] | None) -> dict[str, Any] | Non
         ]
         if isinstance(bouquets, list)
         else None,
+    }
+
+
+def _summarise_channel_list(box: Enigma2Box) -> dict[str, Any]:
+    """Return which topics the channel list is read from, and its shape.
+
+    The names and the counts, never the channels: `listed` is how many channels a bouquet
+    has here, and None for a bouquet the index names whose own topic is not here.
+    """
+    listing = box.channel_list
+    return {
+        "source": listing.source,
+        "complete": listing.complete,
+        "generated": listing.generated,
+        "channels_topic_released": box.state.channels_released,
+        "bouquets": [
+            {
+                "name": bouquet.get("name"),
+                "listed": len(bouquet["channels"]) if bouquet.get("listed", True) else None,
+            }
+            for bouquet in listing.bouquets
+        ],
+    }
+
+
+def _summarise_bouquet_index(index: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Return the `bouquets` index as it is: names, slugs and counts, no references."""
+    if index is None:
+        return None
+    return {
+        "generated": index.get("generated"),
+        "bouquets": [
+            {"name": entry["name"], "slug": entry["slug"], "count": entry["count"]}
+            for entry in index["bouquets"]
+        ],
     }
 
 
