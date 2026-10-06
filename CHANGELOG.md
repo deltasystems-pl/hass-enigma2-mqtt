@@ -7,8 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+What is new here needs **plugin 0.5.0** on the receiver. A receiver on plugin 0.4.0 or older is
+read as before: it does not claim `channel_topics`, so its channel list comes from `channels`.
+
+### Added
+
+- **The channel list is read one bouquet a topic.** From plugin 0.5.0 on a receiver publishes
+  its bouquets on `bouquets` and each bouquet's channels on `channels/<bouquet_slug>`, and says so
+  with the capability `channel_topics`. A receiver whose channel list is too big for one MQTT
+  packet no longer publishes `channels` at all, and until now it had empty „Bukiet" and „Kanał"
+  selects and a media player without sources here. The integration reads the per-bouquet topics
+  whenever the receiver claims the capability, and everything that offers or resolves a channel -
+  the two selects, the media player's sources and browser, zapping by name, the options form,
+  the filter behind „Ostatnio oglądane", and the installer's restore of the channel-list bouquet
+  after a restart - reads one model built from either source. The list is shown whole: retained
+  topics arrive one by one, and no entity is rewritten once per bouquet. A bouquet whose own
+  topic the receiver did not publish stays on the list of bouquets, with no channels
+  (DOCUMENTATION.md §4.6).
+- **„EPG &ndash; aktywny bukiet" has the attribute `events_per_channel`** when the plugin
+  reports it: how many programmes a channel carries in that guide at most, which is lower than
+  the receiver's `epg_grid_events` on a guide the plugin shortened to fit one packet.
+- The diagnostics download says which topics the channel list is read from, summarises the index
+  and each per-bouquet topic as names and counts - never a channel - and carries the receiver's
+  list of what it did not publish (DOCUMENTATION.md §7).
+
 ### Changed
 
+- **„Ostatnio oglądane" shows nothing while a hidden bouquet's channels are not known.** On a
+  receiver that publishes one topic per bouquet, a hidden bouquet can be on the list of bouquets
+  without its channels - its topic was not published, was retracted, or has not arrived. Which
+  channels to hide is then exactly what is missing, so every entry is left out until the list is
+  there. With `channels` as the source nothing changes.
 - **The manifest asks for `asyncssh>=2.24.0` instead of exactly `asyncssh==2.24.0`.**
   Home Assistant installs asyncssh for its own SFTP backup integration and pins it to one
   version. An exact pin in a custom integration fights that pin whenever the two versions

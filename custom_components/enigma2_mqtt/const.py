@@ -301,6 +301,29 @@ CAPABILITY_SOFTCAM: Final = "softcam"
 CAPABILITY_EPG_GRID: Final = "epg_grid"
 CAPABILITY_BOUQUET_CONTEXT: Final = "bouquet_context"
 
+# The channel list a second way, from a plugin after 0.4.0: `bouquets` is the index of the
+# receiver's bouquets - not `bouquet`, in the singular, which is the one its channel keys
+# are walking - and `channels/<slug>` carries one bouquet's list. The capability says both
+# are published, which they are whether or not the combined `channels` fits one packet.
+TOPIC_BOUQUETS: Final = "bouquets"
+CAPABILITY_CHANNEL_TOPICS: Final = "channel_topics"
+# The key the per-bouquet lists are counted under in `seen` and `updates`, one for all of
+# them, as `epg_grid` is for the grids.
+TOPIC_BOUQUET_CHANNELS: Final = "channels/+"
+# Seconds without another per-bouquet message after which a channel list that is still
+# missing some bouquet's topic is shown as far as it goes. Retained topics arrive one by
+# one and in no order, so nothing is rebuilt per message: a complete list is shown at once,
+# and an incomplete one only when the burst is over.
+CHANNEL_TOPICS_SETTLE: Final = 5.0
+
+# `info.not_published`, from a plugin after 0.4.0: the topics whose payload would not fit
+# one MQTT packet, so the receiver did not send them. A receiver cannot have more entries
+# than it has bouquets, twice over; the bounds only keep a payload that is not what the
+# contract says from growing a state attribute or a repair text without limit.
+INFO_NOT_PUBLISHED: Final = "not_published"
+NOT_PUBLISHED_MAX: Final = 200
+NOT_PUBLISHED_TOPIC_MAX: Final = 200
+
 # The on-demand EPG import. The plugin claims the capability only where it found the
 # image's own EPG-Importer already loaded and the EPG cache can import in place; the
 # topic says what the importer is doing, whoever started it.

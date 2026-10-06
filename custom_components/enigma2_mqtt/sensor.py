@@ -820,6 +820,13 @@ class Enigma2EpgActiveBouquetSensor(Enigma2Entity, SensorEntity):
             )
         self._attr_native_value = with_data
         self._attr_extra_state_attributes = {"channels": channels}
+        # How many events a channel carries in this grid at most, from a plugin that
+        # says so: lower than the receiver's `epg_grid_events` when the grid was cut to
+        # fit one packet, which is how "two programmes left today" is told from "cut to
+        # two". A plugin that does not report it leaves the attribute out.
+        per_channel = (grid or {}).get("events_per_channel")
+        if isinstance(per_channel, int) and not isinstance(per_channel, bool) and per_channel > 0:
+            self._attr_extra_state_attributes["events_per_channel"] = per_channel
         if wake is not None:
             self._cancel_clock = async_track_point_in_utc_time(
                 self.hass, self._clock_moved, dt_util.utc_from_timestamp(wake)
