@@ -1590,11 +1590,13 @@ async def test_without_channels_such_a_bouquet_is_waited_for_and_then_shown_with
     assert [bouquet["listed"] for bouquet in box.channel_list.bouquets] == [True, False, True]
     assert options(hass, HISTORY_SELECT) == []
 
+    counted = box.updates["channels"]
     await deliver(hass, *THREE_MESSAGES["channels"])
 
     assert box.channel_list.complete is True
     assert three_readers(hass, box) == three_expected(NO_SLUG_NAME)
     assert box.state.channels == THREE
+    assert box.updates["channels"] == counted + 1, "woken once, by the list it completed"
 
 
 async def test_channels_retracted_takes_that_bouquets_list_and_nobody_elses(
@@ -1641,6 +1643,17 @@ async def test_a_republished_channels_is_not_a_second_copy_and_a_changed_one_is_
     assert box.state.channels is kept
     assert box.updates["channels"] == counted
     assert changes == []
+
+    # Another bouquet's list moves in `channels` - which is not where it is read from -
+    # and this one's does not: nothing an entity shows moves, and the list on show is
+    # the new payload's, so that the old payload is not kept alive by it.
+    elsewhere = {**THREE, "bouquets": [{**ULUBIONE, "channels": []}, NO_SLUG, SPORT]}
+    await publish(hass, CHANNELS_TOPIC, json.dumps(elsewhere))
+
+    assert changes == []
+    assert box.updates["channels"] == counted
+    assert box.state.channels is not kept
+    assert box.published_bouquets[1]["channels"] is box.state.channels["bouquets"][1]["channels"]
 
     # The bouquet without a topic is edited on the receiver; the others' lists in
     # `channels` say something else than their own topics, and are not read.
@@ -1914,6 +1927,122 @@ async def test_a_broker_that_never_answers_ends_the_wait_with_no_list(
         await publish(hass, CHANNELS_TOPIC, json.dumps(CHANNELS))
 
         assert await readers(hass, box) == EXPECTED
+
+
+@pytest.mark.parametrize(
+    "listed_as",
+    [
+        # Not in `channels` at all: it has nothing more to say about the bouquet.
+        None,
+        # The same name on another bouquet, and the same reference under another name.
+        {"sref": "1:7:1:0:0:0:0:0:0:0:another"},
+        {"name": "Renamed since"},
+        # In it, without a list.
+        {"channels": "none"},
+    ],
+)
+async def test_a_channels_that_does_not_list_such_a_bouquet_is_not_waited_on_or_borrowed_from(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    listed_as: dict[str, Any] | None,
+) -> None:
+    """`channels` is here and the bouquet's own entry is not: complete, without its list.
+
+    A list is taken only from the entry with this bouquet's reference and its name. One
+    of them alone is another bouquet, and another bouquet's channels are not this one's -
+    which matters most when this is the hidden one.
+    """
+    bouquets = [ULUBIONE, SPORT]
+    if listed_as is not None:
+        bouquets.insert(1, {**NO_SLUG, **listed_as})
+    box, _changes = await _three(hass, retained, config_entry, "index", "ulubione", "sport")
+    assert box.channel_list.source == "none"
+
+    await deliver(hass, CHANNELS_TOPIC, json.dumps({**THREE, "bouquets": bouquets}))
+
+    listing = box.channel_list
+    assert listing.source == "bouquet_topics"
+    assert listing.complete is True, "nothing more can arrive for it"
+    assert [bouquet["listed"] for bouquet in listing.bouquets] == [True, False, True]
+    assert box.bouquet_by_sref(NO_SLUG["sref"])["channels"] == []
+    assert options(hass, HISTORY_SELECT) == []
+
+
+async def test_the_same_channels_under_another_reference_is_another_list(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Only a new stamp is skipped. Whose list it is, is not a stamp."""
+    box, _changes = await _complete(hass, retained, config_entry, combined=False)
+
+    await publish(
+        hass, list_topic("sport"), list_of({**SPORT, "sref": "1:7:1:0:0:0:0:0:0:0:other"})
+    )
+    await publish(hass, list_topic("ulubione_tv"), list_of({**ULUBIONE, "name": "Other"}))
+    await settle(hass)
+
+    assert box.state.bouquet_channels["sport"]["sref"] == "1:7:1:0:0:0:0:0:0:0:other"
+    assert box.state.bouquet_channels["ulubione_tv"]["bouquet"] == "Other"
+    assert [bouquet["listed"] for bouquet in box.channel_list.bouquets] == [True, False]
+
+
+async def test_the_wait_is_five_seconds_from_the_brokers_confirmation(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Confirmed, and then silence: the shorter bound, not the one for no confirmation."""
+    box, _changes = await _complete(hass, retained, config_entry, combined=True)
+    confirm: list[Any] = []
+    real_tracker = mqtt.async_on_subscribe_done
+
+    def _tracker(hass_: HomeAssistant, topic: str, qos: int, done: Any) -> Any:
+        if topic != CHANNELS_TOPIC:
+            return real_tracker(hass_, topic, qos, done)
+        confirm.append(done)
+        return lambda: confirm.remove(done) if done in confirm else None
+
+    with patch("homeassistant.components.mqtt.async_on_subscribe_done", _tracker):
+        await publish(hass, INFO_TOPIC, info(claims=False))
+        assert len(confirm) == 1
+
+        # Never confirmed so far: the longer bound has not run out at six seconds.
+        await elapse(hass, REFETCH_GRACE + 1)
+        assert box.channel_list.source == "bouquet_topics"
+
+        confirm[0]()
+        await elapse(hass, REFETCH_GRACE - 1)
+        assert box.channel_list.source == "bouquet_topics"
+        await elapse(hass, REFETCH_GRACE + 1)
+
+        assert box.channel_list.source == "none"
+        assert confirm == [], "the tracker went with the request"
+
+
+async def test_without_a_confirmation_the_wait_still_ends(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """No broker to confirm anything: degrades rather than hangs, as the commands do."""
+    box, _changes = await _complete(hass, retained, config_entry, combined=True)
+    with patch(
+        "homeassistant.components.mqtt.async_on_subscribe_done",
+        lambda *args: lambda: None,
+    ):
+        await publish(hass, INFO_TOPIC, info(claims=False))
+        await elapse(hass, REFETCH_BOUND - 1)
+        assert box.channel_list.source == "bouquet_topics"
+
+        await elapse(hass, REFETCH_BOUND + 1)
+
+        assert box.channel_list.source == "none"
 
 
 # ------------------------------------------------------------ smaller things
