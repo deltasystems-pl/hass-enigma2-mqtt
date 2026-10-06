@@ -617,7 +617,9 @@ the four, a time of zero, `true` as a count - is `unknown` rather than guessed a
 A broker closes the connection on an MQTT packet over its limit, so plugin 0.5.0 does not send
 a payload that would need one: it leaves the topic out, retracts an older copy of it, and names
 it in `info.not_published`. The state is the length of that list - `0` on nearly every
-receiver - and `unknown` if the plugin stops reporting it. The attribute `topics` holds up to
+receiver - and `unknown` if the plugin stops reporting it: a receiver that has had the sensor
+keeps it, also after a restart of Home Assistant, so a plugin put back to an older version
+leaves a sensor that says `unknown` rather than one that is gone. The attribute `topics` holds up to
 twenty entries, each `topic`, `bytes` (the size the packet would have needed when the plugin
 first withheld it) and `limit`; `not_shown` is how many more there are. A topic under the
 receiver's own tree is named without its prefix: `channels`, `channels/<bouquet_slug>`,

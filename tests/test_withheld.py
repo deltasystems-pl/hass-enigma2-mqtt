@@ -910,6 +910,46 @@ async def test_the_sensor_stays_and_says_unknown_when_the_member_goes(
     assert state.attributes["topics"] == []
 
 
+async def test_a_receiver_that_has_had_the_sensor_keeps_it_after_a_restart(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The plugin was put back to an older one, and Home Assistant restarted since.
+
+    The registry still has the sensor. Without an entity behind it that is an orphan
+    nobody can explain; with one it says `unknown`, and says a number again the day the
+    newer plugin is back.
+    """
+    config_entry.add_to_hass(hass)
+    er.async_get(hass).async_get_or_create(
+        "sensor",
+        "enigma2_mqtt",
+        SENSOR_UNIQUE_ID,
+        config_entry=config_entry,
+        suggested_object_id=f"{SLUG}_withheld_payloads",
+    )
+    burst = dict(box_on_the_broker)
+    box_on_the_broker.clear()
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+    for topic, payload in burst.items():
+        async_fire_mqtt_message(hass, topic, payload, retain=True)
+    await hass.async_block_till_done()
+
+    state = hass.states.get(SENSOR)
+    assert state is not None
+    assert state.state == STATE_UNKNOWN
+    assert state.attributes["topics"] == []
+    assert state.attributes.get("restored") is None
+
+    await publish(hass, INFO_TOPIC, info([CHANNELS_ENTRY]))
+
+    assert hass.states.get(SENSOR).state == "1"
+    assert len(_registered(hass, config_entry)) == len(set(_registered(hass, config_entry)))
+
+
 def test_the_sensor_has_a_name_of_its_own_in_every_language() -> None:
     """ADR-0007: the name is the entity id, so it may not collide with another sensor's."""
     for language in ("en", "pl", "de"):

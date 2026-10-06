@@ -681,6 +681,13 @@ async def async_setup_entry(
     )
 
     withheld = {description.key: description for description in WITHHELD_SENSORS}
+    # Whether this receiver has had the sensor before. Read once: the registry entry is
+    # made by the first creation and nothing here ever removes it.
+    registry = er.async_get(hass)
+    had_withheld = any(
+        registry.async_get_entity_id("sensor", DOMAIN, f"{box.node_id}_{key}") is not None
+        for key in withheld
+    )
     entry.async_on_unload(
         OptionalEntities(
             hass,
@@ -690,11 +697,12 @@ async def async_setup_entry(
             lambda key: Enigma2Sensor(box, withheld[key]),
             # A receiver whose `info` carries `not_published` at all - a plugin after
             # 0.4.0. An older one never gets the sensor: it withholds nothing and would
-            # only ever show a diagnostic that cannot say anything.
-            lambda: box.state.not_published is not None,
-            # Never removed, for the reason the softcam sensor above gives: a member
-            # that stops being reported is a plugin put back to an older version, and
-            # the sensor then says `unknown`, which is the truth.
+            # only ever show a diagnostic that cannot say anything. A receiver that has
+            # had it keeps it, also across a restart: a plugin put back to an older
+            # version is then a sensor that says `unknown`, which is the truth, rather
+            # than a registry entry with no entity behind it.
+            lambda: had_withheld or box.state.not_published is not None,
+            # Never removed, for the reason the softcam sensor above gives.
             lambda: False,
             async_add_entities,
         ).start()
