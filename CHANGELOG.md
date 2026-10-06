@@ -23,8 +23,10 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   the filter behind „Ostatnio oglądane", and the installer's restore of the channel-list bouquet
   after a restart - reads one model built from either source. The list is shown whole: retained
   topics arrive one by one, and no entity is rewritten once per bouquet. A bouquet whose own
-  topic the receiver did not publish stays on the list of bouquets, with no channels
-  (DOCUMENTATION.md §4.6).
+  topic the receiver did not publish stays on the list of bouquets, with no channels. A bouquet
+  whose name has no ASCII letter or digit - one written only in Cyrillic, Greek, Arabic, Hebrew
+  or CJK characters - has no topic of its own: it is read from `channels`, and is listed without
+  channels on a receiver whose `channels` is not published either (DOCUMENTATION.md §4.6).
 - **A repair and a diagnostic sensor say what the receiver did not publish.** Plugin 0.5.0 does
   not send a payload that would not fit one MQTT packet, and names its topic in
   `info.not_published`. While that list has an entry, Home Assistant shows one repair for the

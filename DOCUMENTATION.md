@@ -1127,11 +1127,23 @@ exactly as before. Three things follow from topics that arrive one at a time:
 - **A bouquet without its own topic stays a bouquet.** When the receiver could not publish one
   bouquet's list - it is too big for a packet by itself, and named in the repair - „Bukiet"
   still offers the bouquet and „Kanał" is empty while the receiver is on it.
+- **A bouquet whose name has no ASCII letter or digit has no topic of its own.** The topic's
+  name is made from the bouquet's name, and a name written only in Cyrillic, Greek, Arabic,
+  Hebrew or CJK characters leaves nothing to make it from. The plugin lists such a bouquet in
+  the index and publishes its channels on `channels` only, so the integration reads that one
+  bouquet from `channels` - and keeps `channels` in memory for it, beside the per-bouquet
+  lists. On a receiver whose `channels` is too big to be published there is nowhere to read it
+  from: the bouquet is offered without channels. The way out is on the receiver - narrow
+  `bouquets_for_select` until `channels` fits one packet again, or give the bouquet a name with
+  a Latin letter or a digit in it.
 - **„Ostatnio oglądane" fails toward hiding.** While a bouquet named in the hide option is on
   the list without its channels, the filtered list shows nothing at all.
 
 After a plugin is put back to 0.4.0 the capability is gone and `channels` is read again; the
-per-bouquet topics the newer plugin left on the broker are ignored.
+per-bouquet topics the newer plugin left on the broker are ignored. The integration asks the
+broker for `channels` once more at that point and keeps the list it was showing meanwhile; a
+broker that has no `channels` to answer with ends that after about ten seconds, and the list
+is then empty until the receiver publishes one.
 
 - **„Bukiet"** lists the bouquets on the `channels` topic, in the order the receiver published
   them and narrowed by the [bouquets option](#options), and points at the one the `bouquet`

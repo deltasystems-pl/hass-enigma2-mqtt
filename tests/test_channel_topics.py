@@ -21,13 +21,17 @@ exist first and the topics land on them, which is the order a broker produces.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import timedelta
 import gc
 import itertools
 import json
 import logging
 from typing import Any
+from unittest.mock import patch
 
+from homeassistant.components import mqtt
 from homeassistant.components.media_player import DATA_COMPONENT
 from homeassistant.const import EVENT_STATE_CHANGED, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
@@ -886,9 +890,9 @@ async def test_an_info_that_changes_nothing_about_the_topics_rebuilds_nothing(
     built: list[int] = []
     build = Enigma2Box._async_show_topic_list
 
-    def _counting(self: Enigma2Box) -> None:
+    def _counting(self: Enigma2Box, **kwargs: Any) -> None:
         built.append(1)
-        build(self)
+        build(self, **kwargs)
 
     monkeypatch.setattr(Enigma2Box, "_async_show_topic_list", _counting)
 
@@ -1248,7 +1252,9 @@ async def test_an_index_that_is_not_what_the_contract_says_is_read_as_far_as_it_
 ) -> None:
     """Entries without a name are dropped; a slug that cannot be a topic level is none."""
     store = base(retained)
-    store[INFO_TOPIC] = info(claims=True)
+    # `channels` is withheld, so the bouquets with no topic of their own - whose lists
+    # are only ever there - are not waited for.
+    store[INFO_TOPIC] = info(claims=True, not_published=[{"topic": "channels"}])
     store[BOUQUETS_TOPIC] = json.dumps(
         {
             "generated": "soon",
@@ -1269,7 +1275,7 @@ async def test_an_index_that_is_not_what_the_contract_says_is_read_as_far_as_it_
     box: Enigma2Box = config_entry.runtime_data
 
     listing = box.channel_list
-    assert listing.complete is True, "a bouquet with no topic of its own is not waited for"
+    assert listing.complete is True
     assert [
         (bouquet["name"], bouquet["slug"], bouquet["count"], bouquet["listed"])
         for bouquet in listing.bouquets
@@ -1331,6 +1337,658 @@ async def test_unloading_leaves_no_timer_and_no_subscription_behind(
 
     assert box.channel_list.source == "none"
     assert "channels" not in box.updates
+
+
+# ------------------------------------------- a bouquet with no topic of its own
+#
+# A bouquet whose name has no ASCII letter or digit has no slug: the plugin lists it in
+# the index with `slug` empty and publishes no `channels/<slug>` for it. Its channels are
+# in `channels` and nowhere else.
+
+NO_SLUG_NAME = "".join(map(chr, (0x420, 0x443, 0x441, 0x441, 0x43A, 0x438, 0x435)))
+NO_SLUG = {
+    "name": NO_SLUG_NAME,
+    "sref": '1:7:1:0:0:0:0:0:0:0:FROM BOUQUET "userbouquet.ru.tv"',
+    "channels": [
+        {"sref": "1:0:19:AAAA:3F3:1:C00000:0:0:0:", "name": "Pervyi kanal"},
+        {"sref": "1:0:19:BBBB:3F3:1:C00000:0:0:0:", "name": "Rossiya 1"},
+    ],
+}
+THREE = {"generated": 1789459200, "bouquets": [ULUBIONE, NO_SLUG, SPORT]}
+THREE_SLUGS = {**SLUGS, NO_SLUG_NAME: ""}
+THREE_HISTORY = json.dumps(
+    {
+        "entries": [
+            _history_entry(SREF, "TVP 1 HD", ULUBIONE),
+            _history_entry(NO_SLUG["channels"][0]["sref"], "Pervyi kanal", NO_SLUG),
+            _history_entry(EUROSPORT, "Eurosport 1", SPORT),
+        ],
+        "current": 0,
+        "limit": 20,
+        "panic_button": True,
+    }
+)
+THREE_MESSAGES: dict[str, tuple[str, str]] = {
+    "info": (INFO_TOPIC, info(claims=True)),
+    "index": (BOUQUETS_TOPIC, index_of(THREE, THREE_SLUGS)),
+    "ulubione": (list_topic("ulubione_tv"), list_of(ULUBIONE)),
+    "sport": (list_topic("sport"), list_of(SPORT)),
+    "channels": (CHANNELS_TOPIC, json.dumps(THREE)),
+}
+# What the filtered history may show, by which bouquet is the hidden one.
+THREE_FILTERED = {
+    NO_SLUG_NAME: ["TVP 1 HD", "Eurosport 1"],
+    "Sport": ["TVP 1 HD", "Pervyi kanal"],
+}
+
+
+def three_expected(hidden: str) -> dict[str, Any]:
+    """Return what every reader says about the receiver with the slug-less bouquet."""
+    names = ["Ulubione TV", NO_SLUG_NAME, "Sport"]
+    return {
+        "bouquet_select": (names, "Ulubione TV"),
+        "channel_select": (["TVP 1 HD", "TVN HD"], "TVP 1 HD"),
+        "history_select": (THREE_FILTERED[hidden], "TVP 1 HD"),
+        "sources": ["TVP 1 HD", "TVN HD", "Pervyi kanal", "Rossiya 1", "Eurosport 1"],
+        "bouquet_names": names,
+        "published": [
+            (bouquet["name"], bouquet["sref"], bouquet["channels"])
+            for bouquet in THREE["bouquets"]
+        ],
+        "named": [NO_SLUG["channels"][0]["sref"]],
+        "by_sref": NO_SLUG["channels"],
+        "name_of": "Rossiya 1",
+    }
+
+
+def three_readers(hass: HomeAssistant, box: Enigma2Box) -> dict[str, Any]:
+    return {
+        "bouquet_select": (options(hass, BOUQUET_SELECT), hass.states.get(BOUQUET_SELECT).state),
+        "channel_select": (options(hass, CHANNEL_SELECT), hass.states.get(CHANNEL_SELECT).state),
+        "history_select": (options(hass, HISTORY_SELECT), hass.states.get(HISTORY_SELECT).state),
+        "sources": hass.states.get(PLAYER).attributes.get("source_list"),
+        "bouquet_names": box.bouquet_names,
+        "published": [
+            (bouquet["name"], bouquet["sref"], bouquet["channels"])
+            for bouquet in box.published_bouquets
+        ],
+        "named": [channel["sref"] for channel in box.channels_named("Pervyi kanal")],
+        "by_sref": (box.bouquet_by_sref(NO_SLUG["sref"]) or {}).get("channels"),
+        "name_of": box.published_channel_name(NO_SLUG["channels"][1]["sref"]),
+    }
+
+
+def three_base(store: dict[str, str | bytes]) -> dict[str, str | bytes]:
+    base(store)
+    store[ZAP_HISTORY_TOPIC] = THREE_HISTORY
+    return store
+
+
+@pytest.mark.parametrize("hidden", list(THREE_FILTERED))
+@pytest.mark.parametrize("source", ["channels", "both"])
+async def test_a_bouquet_with_no_topic_of_its_own_reads_the_same_from_either_source(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    source: str,
+    hidden: str,
+) -> None:
+    """`channels` alone - the older plugin, and `origin/main` - and both ways together.
+
+    With both, the per-bouquet topics are the source and `channels` is kept for the one
+    bouquet whose list is nowhere else.
+    """
+    store = three_base(retained)
+    store[INFO_TOPIC] = info(claims=source == "both")
+    store[CHANNELS_TOPIC] = json.dumps(THREE)
+    if source == "both":
+        store[BOUQUETS_TOPIC] = index_of(THREE, THREE_SLUGS)
+        store[list_topic("ulubione_tv")] = list_of(ULUBIONE)
+        store[list_topic("sport")] = list_of(SPORT)
+    entry = hiding(config_entry, hidden)
+    await async_setup_box_then_retained(hass, entry, store)
+    box: Enigma2Box = entry.runtime_data
+
+    assert three_readers(hass, box) == three_expected(hidden)
+    assert box.channel_list.complete is True
+    if source == "both":
+        assert box.channel_list.source == "bouquet_topics"
+        assert [bouquet["listed"] for bouquet in box.channel_list.bouquets] == [True] * 3
+        assert box.state.channels == THREE, "kept: nothing else has that bouquet's list"
+        assert box.state.channels_released is False
+        # The list is the payload's own, not a copy of it.
+        kept = box.state.channels["bouquets"][1]["channels"]
+        assert box.published_bouquets[1]["channels"] is kept
+
+
+@pytest.mark.parametrize("hidden", list(THREE_FILTERED))
+@pytest.mark.parametrize("order", list(itertools.permutations(THREE_MESSAGES)), ids="-".join)
+async def test_every_arrival_order_with_a_bouquet_that_has_no_topic_of_its_own(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    order: tuple[str, ...],
+    hidden: str,
+) -> None:
+    """The index, `channels`, the two bouquet topics and `info`, in every order.
+
+    Whole at the end, never shown in part, and at no step does the filtered history
+    hold a channel of the hidden bouquet - whether that is the bouquet without a topic
+    or another one.
+    """
+    store = three_base(retained)
+    entry = hiding(config_entry, hidden)
+    changes = watch(hass)
+    await async_setup_box_then_retained(hass, entry, store)
+    box: Enigma2Box = entry.runtime_data
+    expected = three_expected(hidden)
+    whole = {
+        BOUQUET_SELECT: expected["bouquet_select"][0],
+        CHANNEL_SELECT: expected["channel_select"][0],
+        HISTORY_SELECT: expected["history_select"][0],
+        PLAYER: expected["sources"],
+    }
+
+    for name in order:
+        await deliver(hass, *THREE_MESSAGES[name])
+        assert set(options(hass, HISTORY_SELECT) or []) <= set(THREE_FILTERED[hidden]), name
+
+    assert three_readers(hass, box) == expected
+    assert box.channel_list.source == "bouquet_topics"
+    assert box.channel_list.complete is True
+    assert box.state.channels == THREE
+    for entity_id in ENTITIES:
+        shown = [lists for changed, _state, lists in changes if changed == entity_id]
+        assert all(lists in (None, [], whole[entity_id]) for lists in shown), (entity_id, shown)
+        assert shown.count(whole[entity_id]) == 1, (entity_id, shown)
+
+
+async def _three(
+    hass: HomeAssistant,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    *names: str,
+    hidden: str = NO_SLUG_NAME,
+    not_published: Any = ...,
+) -> tuple[Enigma2Box, list[tuple[str, str, Any]]]:
+    store = three_base(retained)
+    store[INFO_TOPIC] = info(claims=True, not_published=not_published)
+    entry = hiding(config_entry, hidden)
+    await async_setup_box_then_retained(hass, entry, store)
+    changes = watch(hass)
+    for name in names:
+        await deliver(hass, *THREE_MESSAGES[name])
+    return entry.runtime_data, changes
+
+
+@pytest.mark.parametrize(
+    ("hidden", "filtered"),
+    [
+        # The hidden bouquet is the one without its list: nothing can be told apart.
+        (NO_SLUG_NAME, []),
+        # Another bouquet is hidden, and its list is here: only the entry whose own
+        # bouquet has no list is still shown or hidden by the usual rules.
+        ("Sport", ["TVP 1 HD", "Pervyi kanal"]),
+    ],
+)
+async def test_with_channels_withheld_such_a_bouquet_has_no_list_and_nothing_waits_for_one(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    hidden: str,
+    filtered: list[str],
+) -> None:
+    """The receiver says `channels` will not come, so the list is complete as it stands.
+
+    The bouquet stays a bouquet, by its name and its count, with no channels; and while
+    it is the hidden one, the filtered history fails toward hiding.
+    """
+    box, _changes = await _three(
+        hass,
+        retained,
+        config_entry,
+        "index",
+        "ulubione",
+        "sport",
+        hidden=hidden,
+        not_published=[{"topic": "channels", "bytes": 2315478, "limit": 1000000}],
+    )
+
+    listing = box.channel_list
+    assert listing.source == "bouquet_topics"
+    assert listing.complete is True
+    assert [bouquet["listed"] for bouquet in listing.bouquets] == [True, False, True]
+    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV", NO_SLUG_NAME, "Sport"]
+    assert box.bouquet_by_sref(NO_SLUG["sref"])["channels"] == []
+    assert box.bouquet_by_sref(NO_SLUG["sref"])["count"] == 2
+    assert hass.states.get(PLAYER).attributes["source_list"] == [
+        "TVP 1 HD",
+        "TVN HD",
+        "Eurosport 1",
+    ]
+    assert options(hass, HISTORY_SELECT) == filtered
+
+
+async def test_without_channels_such_a_bouquet_is_waited_for_and_then_shown_without_its_list(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Not arrived and not reported withheld: held back, then shown as far as it goes."""
+    box, changes = await _three(hass, retained, config_entry, "index", "ulubione", "sport")
+
+    assert box.channel_list.source == "none"
+    assert changes == []
+
+    await settle(hass)
+
+    assert box.channel_list.complete is False
+    assert [bouquet["listed"] for bouquet in box.channel_list.bouquets] == [True, False, True]
+    assert options(hass, HISTORY_SELECT) == []
+
+    await deliver(hass, *THREE_MESSAGES["channels"])
+
+    assert box.channel_list.complete is True
+    assert three_readers(hass, box) == three_expected(NO_SLUG_NAME)
+    assert box.state.channels == THREE
+
+
+async def test_channels_retracted_takes_that_bouquets_list_and_nobody_elses(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The list outgrew one packet: `channels` is retracted, then named in `info`."""
+    box, changes = await _three(
+        hass, retained, config_entry, "index", "ulubione", "sport", "channels", hidden="Sport"
+    )
+    assert three_readers(hass, box) == three_expected("Sport")
+
+    await publish(hass, CHANNELS_TOPIC, "")
+
+    # Held back: `info` usually follows, and until then the list on show is still right.
+    assert box.state.channels is None
+    assert three_readers(hass, box) == three_expected("Sport")
+
+    await publish(hass, INFO_TOPIC, info(claims=True, not_published=[{"topic": "channels"}]))
+
+    assert box.channel_list.complete is True
+    assert [bouquet["listed"] for bouquet in box.channel_list.bouquets] == [True, False, True]
+    assert box.channels_named("Pervyi kanal") == []
+    assert options(hass, CHANNEL_SELECT) == ["TVP 1 HD", "TVN HD"]
+
+
+async def test_a_republished_channels_is_not_a_second_copy_and_a_changed_one_is_read(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    box, changes = await _three(
+        hass, retained, config_entry, "index", "ulubione", "sport", "channels"
+    )
+    kept = box.state.channels
+    counted = box.updates["channels"]
+    del changes[:]
+
+    await publish(hass, *THREE_MESSAGES["channels"])
+
+    assert box.state.channels is kept
+    assert box.updates["channels"] == counted
+    assert changes == []
+
+    # The bouquet without a topic is edited on the receiver; the others' lists in
+    # `channels` say something else than their own topics, and are not read.
+    edited = {
+        **THREE,
+        "bouquets": [
+            {**ULUBIONE, "channels": []},
+            {**NO_SLUG, "channels": NO_SLUG["channels"][:1]},
+            SPORT,
+        ],
+    }
+    await publish(hass, CHANNELS_TOPIC, json.dumps(edited))
+
+    assert box.state.channels == edited
+    assert [channel["name"] for channel in box.bouquet_by_sref(NO_SLUG["sref"])["channels"]] == [
+        "Pervyi kanal"
+    ]
+    assert options(hass, CHANNEL_SELECT) == ["TVP 1 HD", "TVN HD"]
+    assert box.published_bouquets[1]["channels"] is box.state.channels["bouquets"][1]["channels"]
+
+
+async def test_channels_is_kept_only_while_a_bouquet_needs_it(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The bouquet is renamed to something with a slug: `channels` is let go again.
+
+    And when a bouquet without a topic appears on a receiver whose `channels` was let
+    go, the broker is asked for it.
+    """
+    box, _changes = await _three(
+        hass, retained, config_entry, "index", "ulubione", "sport", "channels"
+    )
+    assert box.state.channels is not None
+
+    await publish(hass, BOUQUETS_TOPIC, index_of(CHANNELS))
+
+    assert box.state.channels is None
+    assert box.state.channels_released is True
+    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV", "Sport"]
+
+    retained[CHANNELS_TOPIC] = json.dumps(THREE)
+    await publish(hass, BOUQUETS_TOPIC, index_of(THREE, THREE_SLUGS))
+
+    assert box.state.channels == THREE
+    assert box.channel_list.complete is True
+    assert three_readers(hass, box) == three_expected(NO_SLUG_NAME)
+
+
+async def test_a_bouquet_without_a_topic_appearing_when_the_broker_has_no_channels(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Asked for, not answered: after the bound the bouquet is one without its list."""
+    box, _changes = await _three(
+        hass, retained, config_entry, "index", "ulubione", "sport", "channels"
+    )
+    await publish(hass, BOUQUETS_TOPIC, index_of(CHANNELS))
+    assert box.state.channels_released is True
+
+    await publish(hass, BOUQUETS_TOPIC, index_of(THREE, THREE_SLUGS))
+
+    # Still the list that was on show.
+    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV", "Sport"]
+
+    await elapse(hass, REFETCH_BOUND + 1)
+    await settle(hass)
+
+    assert box.state.channels_released is False
+    assert box.channel_list.complete is False
+    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV", NO_SLUG_NAME, "Sport"]
+    assert box.bouquet_by_sref(NO_SLUG["sref"])["channels"] == []
+    assert options(hass, HISTORY_SELECT) == []
+
+
+async def test_capability_loss_with_channels_kept_needs_no_question(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    box, changes = await _three(
+        hass, retained, config_entry, "index", "ulubione", "sport", "channels"
+    )
+    del changes[:]
+    with spying(CHANNELS_TOPIC) as subscriptions:
+        await publish(hass, INFO_TOPIC, info(claims=False))
+
+    assert subscriptions == []
+    assert box.channel_list.source == "channels"
+    assert three_readers(hass, box) == three_expected(NO_SLUG_NAME)
+    assert changes == []
+
+
+# ------------------------------------------------ asking for `channels` again
+#
+# The broker's answer to the request arrives inside `mqtt.async_subscribe` in the
+# `retained` fixture, before the unsubscribe handle exists. A broker answers later, so
+# these deliver the retained answer by hand, to a subscription that is live.
+
+SUBSCRIBE_TIMEOUT = 5
+REFETCH_GRACE = 5.0
+REFETCH_BOUND = SUBSCRIBE_TIMEOUT + REFETCH_GRACE
+
+
+async def elapse(hass: HomeAssistant, seconds: float) -> None:
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=seconds))
+    await hass.async_block_till_done()
+
+
+@contextmanager
+def spying(topic: str) -> Iterator[list[dict[str, bool]]]:
+    """Record every subscription made to one topic, and whether it is still live."""
+    made: list[dict[str, bool]] = []
+    real_subscribe = mqtt.async_subscribe
+
+    async def _subscribe(hass_: HomeAssistant, wanted: str, *args: Any, **kwargs: Any) -> Any:
+        unsubscribe = await real_subscribe(hass_, wanted, *args, **kwargs)
+        if wanted != topic:
+            return unsubscribe
+        record = {"live": True}
+        made.append(record)
+
+        def _unsubscribe() -> None:
+            record["live"] = False
+            unsubscribe()
+
+        return _unsubscribe
+
+    with patch("homeassistant.components.mqtt.async_subscribe", _subscribe):
+        yield made
+
+
+async def test_the_answer_ends_the_request_and_is_read_once(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    box, changes = await _complete(hass, retained, config_entry, combined=True)
+    with spying(CHANNELS_TOPIC) as subscriptions:
+        await publish(hass, INFO_TOPIC, info(claims=False))
+        assert subscriptions == [{"live": True}]
+        assert box.channel_list.source == "bouquet_topics"
+        counted = box.updates["channels"]
+
+        # The broker's retained answer, to the subscription that asked.
+        await deliver(hass, CHANNELS_TOPIC, json.dumps(CHANNELS))
+
+        assert subscriptions == [{"live": False}]
+        assert box.channel_list.source == "channels"
+        assert box.updates["channels"] == counted + 1
+        assert changes == []
+
+        await publish(hass, CHANNELS_TOPIC, json.dumps(CHANNELS))
+
+        assert box.updates["channels"] == counted + 2
+        assert subscriptions == [{"live": False}]
+
+
+async def test_a_channels_published_meanwhile_ends_the_request_too(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Not retained, so it is the wildcard's to read - once, not once per subscription."""
+    box, _changes = await _complete(hass, retained, config_entry, combined=True)
+    with spying(CHANNELS_TOPIC) as subscriptions:
+        await publish(hass, INFO_TOPIC, info(claims=False))
+        counted = box.updates["channels"]
+
+        await publish(hass, CHANNELS_TOPIC, json.dumps(CHANNELS))
+
+        assert subscriptions == [{"live": False}]
+        assert box.updates["channels"] == counted + 1
+        assert box.channel_list.source == "channels"
+
+
+async def test_unloading_ends_the_request_and_a_late_answer_reaches_nobody(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    box, _changes = await _complete(hass, retained, config_entry, combined=True)
+    entry = hass.config_entries.async_entries("enigma2_mqtt")[0]
+    with spying(CHANNELS_TOPIC) as subscriptions:
+        await publish(hass, INFO_TOPIC, info(claims=False))
+        assert subscriptions == [{"live": True}]
+        counted = dict(box.updates)
+
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+        assert subscriptions == [{"live": False}]
+
+        await deliver(hass, CHANNELS_TOPIC, json.dumps(CHANNELS))
+        await elapse(hass, REFETCH_BOUND + 1)
+
+        assert box.state.channels is None
+        assert box.updates == counted
+        assert box.channel_list.source == "bouquet_topics"
+
+
+async def test_a_second_request_does_not_leave_the_first_behind(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The capability comes back before the broker answered, and goes again."""
+    box, changes = await _complete(hass, retained, config_entry, combined=True)
+    with spying(CHANNELS_TOPIC) as subscriptions:
+        await publish(hass, INFO_TOPIC, info(claims=False))
+        assert subscriptions == [{"live": True}]
+
+        await publish(hass, INFO_TOPIC, info(claims=True))
+
+        assert subscriptions == [{"live": False}]
+        assert box.channel_list.source == "bouquet_topics"
+
+        await publish(hass, INFO_TOPIC, info(claims=False))
+
+        assert subscriptions == [{"live": False}, {"live": True}]
+
+        await deliver(hass, CHANNELS_TOPIC, json.dumps(CHANNELS))
+
+        assert subscriptions == [{"live": False}, {"live": False}]
+        assert box.channel_list.source == "channels"
+        assert changes == []
+        # Nothing of the first request is left to fire.
+        await elapse(hass, REFETCH_BOUND + 1)
+        assert box.channel_list.source == "channels"
+        assert await readers(hass, box) == EXPECTED
+
+
+async def test_a_broker_that_never_answers_ends_the_wait_with_no_list(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """`channels` was retracted while Home Assistant was away: nothing is retained.
+
+    The list is kept on show for the wait and no longer; a stale snapshot is not a
+    channel list.
+    """
+    box, changes = await _complete(hass, retained, config_entry, combined=True)
+    with spying(CHANNELS_TOPIC) as subscriptions:
+        await publish(hass, INFO_TOPIC, info(claims=False))
+
+        await elapse(hass, 2)
+
+        assert box.channel_list.source == "bouquet_topics"
+        assert changes == []
+
+        await elapse(hass, REFETCH_BOUND + 1)
+
+        assert subscriptions == [{"live": False}]
+        assert box.channel_list.source == "none"
+        assert box.state.channels_released is False
+        assert options(hass, BOUQUET_SELECT) == []
+        assert hass.states.get(PLAYER).attributes.get("source_list") is None
+
+        # And a `channels` that does come, later, is read like any other.
+        await publish(hass, CHANNELS_TOPIC, json.dumps(CHANNELS))
+
+        assert await readers(hass, box) == EXPECTED
+
+
+# ------------------------------------------------------------ smaller things
+
+
+async def test_a_new_stamp_on_the_same_list_rebuilds_nothing(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A restart of the plugin stamps every bouquet's `generated` anew."""
+    box, changes = await _complete(hass, retained, config_entry, combined=False)
+    held = box.state.bouquet_channels["sport"]["channels"]
+    counted = dict(box.updates)
+    built: list[int] = []
+    build = Enigma2Box._async_show_topic_list
+
+    def _counting(self: Enigma2Box, **kwargs: Any) -> None:
+        built.append(1)
+        build(self, **kwargs)
+
+    monkeypatch.setattr(Enigma2Box, "_async_show_topic_list", _counting)
+
+    await publish(hass, list_topic("sport"), list_of(SPORT, generated=1789999999))
+
+    assert built == []
+    assert changes == []
+    assert box.updates == counted
+    assert box.state.bouquet_channels["sport"]["channels"] is held
+    assert box.state.bouquet_channels["sport"]["generated"] == 1789999999
+
+    # A list that did change is still taken.
+    await publish(
+        hass, list_topic("sport"), list_of({**SPORT, "channels": SPORT["channels"][:1]})
+    )
+
+    assert built == [1]
+    assert hass.states.get(PLAYER).attributes["source_list"] == [
+        "TVP 1 HD",
+        "TVN HD",
+        "Eurosport 1",
+    ]
+
+
+async def test_the_capability_is_taken_from_an_announcement_that_arrives_last(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """No `info` yet, and the announcement lands after the index and every list."""
+    store = base(retained)
+    announcement = store.pop(ANNOUNCEMENT_TOPIC)
+    await async_setup_box_then_retained(hass, config_entry, store)
+    box: Enigma2Box = config_entry.runtime_data
+    for name in ("index", "ulubione", "sport"):
+        await deliver(hass, *MESSAGES[name])
+    await settle(hass)
+    assert box.channel_list.source == "none"
+
+    await deliver(
+        hass,
+        ANNOUNCEMENT_TOPIC,
+        json.dumps(
+            {
+                **json.loads(announcement),
+                "capabilities": json.loads(info(claims=True))["capabilities"],
+            }
+        ),
+    )
+
+    assert box.channel_list.source == "bouquet_topics"
+    assert hass.states.get(PLAYER).attributes["source_list"] == EXPECTED["sources"]
 
 
 # ------------------------------------------------------------------- diagnostics

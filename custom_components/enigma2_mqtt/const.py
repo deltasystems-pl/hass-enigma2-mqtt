@@ -315,6 +315,10 @@ TOPIC_BOUQUET_CHANNELS: Final = "channels/+"
 # one and in no order, so nothing is rebuilt per message: a complete list is shown at once,
 # and an incomplete one only when the burst is over.
 CHANNEL_TOPICS_SETTLE: Final = 5.0
+# Seconds the broker is given, once it has confirmed the subscription, to answer a
+# request for the retained `channels` that was let go. A retained message arrives with
+# the subscription, so silence this long is a broker that has none.
+CHANNELS_REFETCH_GRACE: Final = 5.0
 
 # `info.not_published`, from a plugin after 0.4.0: the topics whose payload would not fit
 # one MQTT packet, so the receiver did not send them. A receiver cannot have more entries
