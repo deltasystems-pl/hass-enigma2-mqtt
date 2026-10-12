@@ -1363,11 +1363,104 @@ async def test_the_receiver_is_asked_one_thing_at_a_time(
     assert session.peak == 1
     assert session.active == 0
     paths = [url.path for url, _ in session.calls]
-    # The channel that is on came first, and both bouquets were still asked about.
-    assert paths[-4:-2] == ["/api/getpicon", LINK_OTHER]
-    assert paths.count("/api/getservices") >= 2
+    # The channel that is on came first, and what was waiting behind it came after.
+    assert paths.index(LINK_OTHER) < len(paths) - 1
+    assert paths[-1] == "/api/getservices"
+    assert 1 <= paths.count("/api/getservices") <= 3
     assert await _player(hass).async_get_media_image() == (JPEG_OTHER, "image/jpeg")
-    assert config_entry.runtime_data.picons.async_status()["bouquets_cached"] == 2
+    assert config_entry.runtime_data.picons.async_status()["bouquets_cached"] >= 1
+
+
+async def test_a_bouquet_is_listed_once_per_time_it_is_opened_whatever_the_zapping(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A list interrupted by a channel change is dropped, not started again.
+
+    Listing a bouquet is the expensive request, and a channel change interrupts it for
+    the channel that is on. If the interrupted list went back into the queue, every
+    channel change while it runs would start it over: twenty of them, twenty-one lists,
+    none finished. So it is asked for once per time the bouquet is opened in the media
+    browser, and its thumbnails come with the next opening.
+    """
+    listed: list[str] = []
+    finished: list[str] = []
+
+    async def _slow_list(url: Any) -> _FakeResponse:
+        if url.path == "/api/getservices":
+            listed.append(url.query["sRef"])
+            await asyncio.sleep(0.2)
+            finished.append(url.query["sRef"])
+            return _FakeResponse(200, FAVOURITES_ANSWER.encode())
+        return await _openwebif(url)
+
+    session = _FakeSession(_slow_list)
+    monkeypatch.setattr(picture, "async_get_clientsession", lambda _hass: session)
+    await _setup(hass, config_entry)
+    resolver = config_entry.runtime_data.picons
+
+    await _browse(hass)
+    await asyncio.sleep(0.02)
+    assert listed == [FAVOURITES["sref"]]
+    for number in range(8):
+        # Eight channels never seen before, each one a lookup of its own.
+        sref = f"1:0:19:{0x4000 + number:X}:640:13E:820000:0:0:0:"
+        async_fire_mqtt_message(hass, SERVICE_TOPIC, json.dumps({**POLSAT, "sref": sref}))
+        await hass.async_block_till_done()
+        await asyncio.sleep(0.03)
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert listed == [FAVOURITES["sref"]]
+    assert finished == []
+    assert not resolver._scans
+    assert resolver.async_status()["bouquets_cached"] == 0
+    assert session.peak == 1
+
+    # Opened again, it is listed again - once - and this time nothing interrupts it.
+    again = await _browse(hass)
+    assert again.children[1].thumbnail == f"{BASE}{LEGACY_TWO}"
+    await _browse(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert listed == finished + [FAVOURITES["sref"]] == [FAVOURITES["sref"]] * 2
+    assert (await _browse(hass)).children[1].thumbnail == f"{BASE}{LINK_TWO}"
+    assert len(listed) == 2
+
+
+async def test_a_bouquet_waiting_its_turn_is_listed_once_after_the_channel(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the list in flight is dropped: one that had not started is not interrupted."""
+    listed: list[str] = []
+
+    async def _counting(url: Any) -> _FakeResponse:
+        if url.path == "/api/getservices":
+            listed.append(url.query["sRef"])
+            await asyncio.sleep(0.1)
+        return await _openwebif(url)
+
+    session = _FakeSession(_counting)
+    monkeypatch.setattr(picture, "async_get_clientsession", lambda _hass: session)
+    await _setup(hass, config_entry)
+
+    await _browse(hass)
+    await _browse(hass, SPORT)
+    await asyncio.sleep(0.02)
+    await _publish(hass, SERVICE_TOPIC, TVN)
+
+    # "Ulubione TV" was being listed and is dropped; "Sport" was waiting and is listed.
+    assert listed == [FAVOURITES["sref"], SPORT["sref"]]
+    assert config_entry.runtime_data.picons.async_status()["bouquets_cached"] == 1
+    assert await _player(hass).async_get_media_image() == (PNG_TWO, "image/png")
 
 
 async def test_what_was_queued_behind_a_failure_is_not_asked(

@@ -433,6 +433,8 @@ class PiconResolver:
         self._task: asyncio.Task[None] | None = None
         self._wanted: str | None = None
         self._scans: dict[str, dict[str, Any]] = {}
+        # The bouquet whose list is being fetched right now, if one is.
+        self._scanning: str | None = None
         # Per service reference: when the answer expires, and the picon or None.
         self._pictures: OrderedDict[str, tuple[float, Picture | None]] = OrderedDict()
         self._bouquets: OrderedDict[str, _BouquetLinks] = OrderedDict()
@@ -569,13 +571,19 @@ class PiconResolver:
     def _start(self, *, abandon: bool) -> None:
         """Make sure the task runs; with `abandon`, drop what it is doing for a new one.
 
-        The request in flight is cancelled with it. A bouquet it was asking about stays
-        queued and is asked about again afterwards.
+        The request in flight is cancelled with it. A bouquet whose list was being
+        fetched is dropped, not put back: listing is the expensive request, and one that
+        started over after every channel change would never finish. It is asked for
+        again when the bouquet is next opened in the media browser. Bouquets that were
+        still waiting keep their turn.
         """
         if self._working():
             if not abandon or asyncio.current_task() is self._task:
                 # Called from the task itself, by a listener: its loop takes it from here.
                 return
+            if self._scanning is not None:
+                self._scans.pop(self._scanning, None)
+                self._scanning = None
             self._task.cancel()
         # Not started eagerly: the caller is in the middle of reading its state, and a
         # lookup answered without a wait would report back into that read.
@@ -613,7 +621,11 @@ class PiconResolver:
                             return
                         self._remember(sref, picture)
                     elif bouquet is not None:
-                        await self._async_scan(bouquet)
+                        self._scanning = _bouquet_sref(bouquet)
+                        try:
+                            await self._async_scan(bouquet)
+                        finally:
+                            self._scanning = None
                 except _Unavailable as error:
                     self._async_unavailable(error.problem, sref=sref, bouquet=bouquet)
                 except Exception:
