@@ -942,6 +942,9 @@ class Enigma2Box:
         # cannot say: an `info` of `{}` is as false as none at all, and the topic's place
         # in `seen` cannot either, because the announcement wakes the same listeners.
         self.info_received: bool = False
+        # The last install of the plugin this entry ran to a proven end, as
+        # `async_record_install` keeps it. None until there has been one in this run.
+        self.last_install: dict[str, str] | None = None
         # The bouquet the source list scope last complained about, so that it is said
         # once rather than on every republished channel list.
         self._scope_fallback_warned: str | None = None
@@ -2491,6 +2494,22 @@ class Enigma2Box:
         )
         for listener in list(self._key_listeners):
             listener(key, press)
+
+    @callback
+    def async_record_install(self, path: str, version: str, proof: str) -> None:
+        """Keep how the last install of the plugin from here was proven, for diagnostics.
+
+        `path` is how it was installed - `mqtt`, `ssh`, `ssh_forced` or `ssh_downgrade` -
+        and `proof` the one that passed (`installer.PROOF_*`, `mqtt_update.PROOF_*`). Held
+        for this run of the entry only: it is a note beside the log line, not a state, and
+        the receiver reports the version it runs by itself.
+        """
+        self.last_install = {
+            "path": path,
+            "version": version,
+            "proof": proof,
+            "time": dt_util.utcnow().isoformat(),
+        }
 
     @callback
     def async_record_local_error(self, command: str, error: str) -> None:

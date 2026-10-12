@@ -873,6 +873,8 @@ async def test_a_phase_the_card_cannot_draw_moves_no_bar(
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
+    from custom_components.enigma2_mqtt.installer import InstallResult
+
     percentages: list[int | None] = []
 
     async def _install(hass_, request, progress_cb=None, **kwargs):
@@ -881,6 +883,8 @@ async def test_a_phase_the_card_cannot_draw_moves_no_bar(
         percentages.append(hass.states.get(PLUGIN).attributes["update_percentage"])
         progress_cb("upload")
         percentages.append(hass.states.get(PLUGIN).attributes["update_percentage"])
+        # What the installer returns from an install that got to its end.
+        return InstallResult(PLUGIN_VERSION, True, True)
 
     await _setup(hass, config_entry, credentials=True)
     await _report(hass, "0.0.9")

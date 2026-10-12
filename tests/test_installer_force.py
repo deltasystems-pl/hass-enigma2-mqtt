@@ -577,6 +577,44 @@ async def test_a_switched_on_plugin_proved_both_ways_is_enabled(
     assert result.plugin_enabled is True
     assert created == [True]
     assert any(" logfd " in command for command in receiver.commands)
+    # Both proofs passed, and the result says so.
+    assert result.proof == "log_open+announcement"
+
+
+async def test_the_proof_that_passed_is_named_in_the_result_and_in_the_log(
+    hass: HomeAssistant,
+    credentials: SshCredentials,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Three installs, three proofs: an update by the announcement, a forced reinstall of a
+    switched-off plugin by its open log alone, and one of a switched-on plugin by both."""
+    with caplog.at_level(logging.INFO, logger="custom_components.enigma2_mqtt.installer"):
+        updated = await _install(
+            hass,
+            _request(credentials, force=False, expect_running=True, running_version="0.1.0"),
+            tmp_path,
+            _receiver(installed_version="0.1.0"),
+        )
+        assert "Proof: announcement" in caplog.text
+        assert "log_open" not in caplog.text
+        caplog.clear()
+        off = await _install(
+            hass, _request(credentials), tmp_path, _receiver(enabled=False), announces=False
+        )
+        assert caplog.text.count("Proof: log_open") == 1
+        assert "announcement" not in caplog.text.split("Proof: ", 1)[1].splitlines()[0]
+        caplog.clear()
+        on = await _install(hass, _request(credentials), tmp_path, _receiver())
+        assert "Proof: log_open+announcement" in caplog.text
+
+    assert (updated.proof, off.proof, on.proof) == (
+        "announcement",
+        "log_open",
+        "log_open+announcement",
+    )
+    records = [r for r in caplog.records if "Proof:" in r.getMessage()]
+    assert records and all(record.levelno == logging.INFO for record in records)
 
 
 async def test_a_switched_off_plugin_is_still_refused_by_an_update(

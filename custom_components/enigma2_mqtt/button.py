@@ -801,6 +801,7 @@ class Enigma2ForceReinstallButton(Enigma2Entity, ButtonEntity):
             self._running = False
             persistent_notification.async_dismiss(self.hass, f"{self._notice_id}_running")
             async_dispatcher_send(self.hass, signal, None)
+        self.box.async_record_install("ssh_forced", result.version, result.proof)
         persistent_notification.async_create(
             self.hass,
             await self._async_common(

@@ -834,6 +834,7 @@
     "update_mqtt_interrupted_signal": {"message": "Aktualizację przerwano na dekoderze i została poprzednia wersja wtyczki: jej pliki nie zostały zmienione albo przywrócono je w całości. Nic nie trzeba robić."},
     "update_mqtt_interrupted_lock": {"message": "Aktualizację przerwano na dekoderze, bo inny proces przejął jej blokadę. Pliki wtyczki są kompletne — to poprzednia albo nowa wersja. Jeśli czujnik „Ostatni błąd” dekodera o to prosi, uruchom ponownie interfejs dekodera."},
     "update_mqtt_reloaded": {"message": "Home Assistant przeładował integrację w trakcie aktualizacji, więc to zlecenie już jej nie śledzi. Przebieg aktualizacji na dekoderze pokazuje karta."},
+    "update_mqtt_replaced": {"message": "Dekoder przestał zgłaszać tę aktualizację, a wtyczkę, która teraz na nim działa ({running}), zainstalowało w międzyczasie coś innego. Nie wiadomo, czy ta aktualizacja cokolwiek zmieniła. Sprawdź wersję wtyczki na dekoderze i zaktualizuj ponownie, jeśli nadal chcesz wersję {version}."},
     "update_mqtt_download": {"message": "Dekoder nie mógł pobrać wtyczki z Home Assistant ({url}). Sprawdź, czy dekoder ma dostęp do Home Assistant w sieci lokalnej."},
     "update_mqtt_question": {"message": "Dekoder nie uruchomił ponownie interfejsu (na ekranie odpowiedziano „nie” albo nikt nie odpowiedział). Aktualizację wycofano."},
     "update_mqtt_retraction": {"message": "Aktualizację wycofano przed ponownym uruchomieniem, bo nie udało się na czas wyczyścić tematów dekodera. Działa poprzednia wersja wtyczki."},

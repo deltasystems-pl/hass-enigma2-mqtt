@@ -60,6 +60,7 @@ from . import mqtt_update, release_package
 from .box import Enigma2Box, Enigma2MqttConfigEntry
 from .buildid import Build, base_version, is_newer
 from .const import (
+    CAPABILITY_SELF_UPDATE,
     CONF_BASE_TOPIC,
     CONF_CHECK_GITHUB_RELEASES,
     CONF_NODE_ID,
@@ -595,6 +596,20 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         self._receiver_transaction = transaction
         self._reached = mqtt_update.reached(self._reached, transaction)
         self._receiver_state = mqtt_update.transaction_state(transaction, now)
+        if (
+            self._receiver_state == mqtt_update.STATE_IN_PROGRESS
+            and not self.box.info_retracted
+            and isinstance(self.box.info.get("capabilities"), list)
+            and CAPABILITY_SELF_UPDATE not in self.box.info["capabilities"]
+        ):
+            # The plugin that runs now says it cannot update itself - an older plugin, or
+            # one the package manager did not install. It starts no transaction, follows
+            # none and finishes none (`cmd/update` is refused `no_capability`), so the
+            # phase still retained on `update` is the plugin's before it - after a
+            # downgrade chosen on the receiver the topic stands still - and would hold the
+            # card busy until its window closed. A plugin that has not said either way
+            # leaves the window to decide, as before.
+            self._receiver_state = mqtt_update.STATE_STALE
         self._schedule_window_timer(mqtt_update.window_edge(transaction, now))
         if transaction is None:
             return None
@@ -845,7 +860,8 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
                 # restore that did not complete name a version that is not on disk.
                 running_version=installed.version if installed is not None else None,
             )
-            await async_install(self.hass, request, self._async_installer_phase)
+            result = await async_install(self.hass, request, self._async_installer_phase)
+            self.box.async_record_install("ssh", result.version, result.proof)
         except PackageError as err:
             raise _not_fetched(err) from err
         except InstallerError as err:
@@ -902,7 +918,7 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         try:
             # Downloaded and held to its signed entry before anything reaches the receiver.
             package = await async_fetch_release(self.hass, target.version)
-            await mqtt_update.async_install_over_mqtt(
+            proof = await mqtt_update.async_install_over_mqtt(
                 self.hass,
                 self.box,
                 self._entry.title,
@@ -911,6 +927,7 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
                 repair_by_ssh=has_credentials(self._entry),
                 on_follow=self._set_abandon_follow,
             )
+            self.box.async_record_install("mqtt", package.version, proof)
         except PackageError as err:
             raise _not_fetched(err) from err
         finally:

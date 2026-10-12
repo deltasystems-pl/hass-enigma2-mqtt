@@ -955,7 +955,7 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
             return
         try:
             package = await async_fetch_release(self.hass, version)
-            await async_install(
+            result = await async_install(
                 self.hass,
                 InstallRequest(
                     credentials,
@@ -968,6 +968,7 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                 ),
                 self._async_downgrade_progress,
             )
+            box.async_record_install("ssh_downgrade", result.version, result.proof)
         except PackageError as err:
             self._downgrade_error = _PACKAGE_ABORTS.get(err.code, "downgrade_not_offered")
             self._downgrade_placeholders = err.placeholders

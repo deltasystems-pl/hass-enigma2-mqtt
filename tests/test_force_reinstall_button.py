@@ -1396,6 +1396,48 @@ async def test_another_installation_s_lock_says_how_long_is_left_in_every_langua
     assert hass.states.get(LAST_ERROR).attributes["error"] == reason
 
 
+async def test_a_forced_reinstall_records_the_proof_that_passed(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+    hass_admin_user,
+) -> None:
+    """A switched-off plugin is proven by its open log alone; the diagnostics say so."""
+    await _ready(hass, config_entry, box_on_the_broker)
+    done = InstallResult("0.3.0", True, True, "", False, "log_open")
+
+    with patch(INSTALL, AsyncMock(return_value=done)):
+        await _press(hass, hass_admin_user.id)
+        await _press(hass, hass_admin_user.id)
+
+    record = config_entry.runtime_data.last_install
+    assert (record["path"], record["version"], record["proof"]) == (
+        "ssh_forced",
+        "0.3.0",
+        "log_open",
+    )
+
+
+async def test_a_forced_reinstall_that_failed_records_no_proof(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+    hass_admin_user,
+) -> None:
+    await _ready(hass, config_entry, box_on_the_broker)
+    failed = InstallerError(InstallerErrorCode.PLUGIN_NOT_STARTED)
+
+    with patch(INSTALL, AsyncMock(side_effect=failed)), pytest.raises(HomeAssistantError):
+        await _press(hass, hass_admin_user.id)
+        await _press(hass, hass_admin_user.id)
+
+    assert config_entry.runtime_data.last_install is None
+
+
 async def test_credentials_gone_between_the_two_presses_are_a_refusal(
     hass: HomeAssistant,
     mqtt_mock,

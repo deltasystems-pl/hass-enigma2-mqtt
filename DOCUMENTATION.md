@@ -1471,6 +1471,25 @@ running a *newer* plugin reads "up to date" everywhere in the UI, because the ve
 refuses to offer a downgrade; that is right for a household and useless in a bug report, and a
 plugin mismatch is where a missing entity or an unrecognised command usually ends up.
 
+`plugin.last_install` is the last install of the plugin this Home Assistant ran to its end
+since the entry was loaded, `null` when there was none: `path` (`mqtt`, `ssh`, `ssh_forced` for
+the forced reinstall, `ssh_downgrade` for the options flow's older version), `version`, `time`,
+and `proof` - which of the proofs that the new plugin runs it passed. The installer accepts
+more than one, and afterwards the outcome alone does not say which:
+
+| `proof` | What was seen |
+|---|---|
+| `announcement` | a fresh `online` - after an `offline` when a plugin ran before - and a fresh `info` naming the installed version in `integration` mode |
+| `announcement_build` | the same, and that `info` named the package's own build commit |
+| `log_open` | the forced reinstall of a plugin that is switched off: a new interface process holding the plugin's log open, and nothing the plugin said |
+| `log_open+announcement`, `log_open+announcement_build` | the forced reinstall of a plugin that is switched on, which has to pass both |
+| `info_build` | an update over MQTT: the transaction ended `installed` - or the plugin was replaced under it - and `info` names the version and the signed entry's build commit |
+| `info_version` | the same for a signed entry that names no commit: the version alone |
+
+The same proof is in the Home Assistant log at INFO, on the line that says the plugin is
+running. It is kept for this run only and is not a state: the receiver reports the version
+it runs by itself.
+
 ## 8. Troubleshooting
 
 *Filled in as failure modes are found on real boxes, from M2 on.* These are already clear:

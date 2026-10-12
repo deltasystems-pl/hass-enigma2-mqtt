@@ -130,6 +130,10 @@ async def async_get_config_entry_diagnostics(
                 installed_plugin if isinstance(installed_plugin, str) else None,
                 bundled_version or SUPPORTED_PLUGIN_VERSION,
             ),
+            # The last install this entry ran to its end since it was loaded: which path,
+            # which version, and which of the accepted proofs said the new plugin runs.
+            # None when there was none in this run.
+            "last_install": box.last_install,
         },
         # The signed release index as this Home Assistant knows it: which one, from which
         # key, and what went wrong with the last check. The index itself is public and

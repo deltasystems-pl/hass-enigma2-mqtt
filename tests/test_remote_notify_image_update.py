@@ -42,7 +42,11 @@ from custom_components.enigma2_mqtt.const import (
     DOMAIN,
     MESSAGE_MAX_LENGTH,
 )
-from custom_components.enigma2_mqtt.installer import InstallerError, InstallerErrorCode
+from custom_components.enigma2_mqtt.installer import (
+    InstallerError,
+    InstallerErrorCode,
+    InstallResult,
+)
 
 from .conftest import (
     INFO,
@@ -651,6 +655,7 @@ async def test_a_refused_second_install_does_not_stop_the_first_one_s_spinner(
         progress_cb("install")
         running.set()
         await release.wait()
+        return InstallResult("0.4.0", True, True)
 
     with patch("custom_components.enigma2_mqtt.update.async_install", first_install):
         assert await hass.config_entries.async_setup(config_entry.entry_id)

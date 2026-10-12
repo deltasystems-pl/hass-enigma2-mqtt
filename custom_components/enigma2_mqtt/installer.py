@@ -502,6 +502,9 @@ class InstallResult:
     # Whether the plugin is switched on in its own settings. A forced reinstall installs
     # and proves a switched-off plugin, changes no setting, and says so.
     plugin_enabled: bool = True
+    # Which proof that the new plugin runs this transaction passed (`PROOF_*`). The
+    # installer accepts more than one, and afterwards the outcome alone does not say which.
+    proof: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -1218,11 +1221,42 @@ async def _async_progress(callback_fn: ProgressCallback | None, step: str) -> No
         await result
 
 
+# The proofs that a newly installed plugin runs, as an install's result names them.
+#
+# - `announcement`: a fresh `online` - after an `offline` when a plugin ran before - and a
+#   fresh `info` naming the installed version in `integration` mode;
+# - `announcement_build`: the same, and that `info` named the package's build commit;
+# - `log_open`: the forced reinstall of a plugin that is switched off - a new interface
+#   process holding the plugin's log open, and nothing the plugin said;
+# - `log_open+announcement`, `log_open+announcement_build`: the forced reinstall of a plugin
+#   that is switched on, which has to pass both.
+PROOF_ANNOUNCEMENT: Final = "announcement"
+PROOF_ANNOUNCEMENT_BUILD: Final = "announcement_build"
+PROOF_LOG_OPEN: Final = "log_open"
+
+
+def _proof(forced: bool, watch: _RestartWatch | None) -> str:
+    """Name the proof a transaction that got this far has passed."""
+    said = None
+    if watch is not None:
+        # The announcement's own future says what it rested on (`_RestartWatch`).
+        named_build = watch.completed.done() and watch.completed.result() is True
+        said = PROOF_ANNOUNCEMENT_BUILD if named_build else PROOF_ANNOUNCEMENT
+    if not forced:
+        return said or ""
+    return PROOF_LOG_OPEN if said is None else f"{PROOF_LOG_OPEN}+{said}"
+
+
 @dataclass(slots=True)
 class _RestartWatch:
-    """Fresh post-restart MQTT proof; retained state can never satisfy it."""
+    """Fresh post-restart MQTT proof; retained state can never satisfy it.
 
-    completed: asyncio.Future[None]
+    `completed` resolves when the proof is in, and its result is the one thing the proof
+    can differ in: True when the announcing `info` named the package's own build commit,
+    and not merely no other commit.
+    """
+
+    completed: asyncio.Future[bool]
     established: asyncio.Future[None]
     cancel_callbacks: list[Callable[[], None]]
     arm: Callable[[], None]
@@ -1254,18 +1288,19 @@ async def _async_watch_restart(
     installed is not the proof of this install. A plugin that predates build ids proves by its
     version alone.
     """
-    completed: asyncio.Future[None] = hass.loop.create_future()
+    completed: asyncio.Future[bool] = hass.loop.create_future()
     established: asyncio.Future[None] = hass.loop.create_future()
     offline_seen = False
     online_seen = False
     version_seen = False
+    build_named = False
     armed = False
     subscriptions_ready = 0
 
     def _finish_if_ready() -> None:
         offline_ready = offline_seen or not require_offline
         if offline_ready and online_seen and version_seen and not completed.done():
-            completed.set_result(None)
+            completed.set_result(build_named)
 
     @callback
     def _availability(message: ReceiveMessage) -> None:
@@ -1283,7 +1318,7 @@ async def _async_watch_restart(
 
     @callback
     def _info(message: ReceiveMessage) -> None:
-        nonlocal version_seen
+        nonlocal version_seen, build_named
         if message.retain or not armed or not online_seen:
             return
         info = parse_json_payload(message.payload)
@@ -1294,6 +1329,10 @@ async def _async_watch_restart(
             and _same_build(info.get("build"), commit)
         ):
             version_seen = True
+            build = info.get("build")
+            build_named = bool(
+                commit and isinstance(build, dict) and build.get("commit") == commit
+            )
         _finish_if_ready()
 
     @callback
@@ -3046,6 +3085,7 @@ async def _async_install_locked(
 ) -> InstallResult:
     """Install or update the plugin as a rollback-safe transaction."""
     request.validate()
+    proof = ""
     if request.force and request.package is not None:
         # The forced reinstall installs the bytes CI reproduced, and nothing fetched.
         raise InstallerError(
@@ -3516,6 +3556,12 @@ async def _async_install_locked(
                     await watch.completed
             except TimeoutError as err:
                 raise InstallerError(InstallerErrorCode.ANNOUNCEMENT_TIMEOUT) from err
+        # More than one proof is accepted, and once the transaction is over nothing else
+        # says which one it was: named here, for the log and for whoever records the result.
+        proof = _proof(request.force, watch)
+        _LOGGER.info(
+            "Installer: plugin %s is running on %s. Proof: %s", source.version, node_id, proof
+        )
 
         cleanup = await connector(request.credentials)
         try:
@@ -3584,7 +3630,7 @@ async def _async_install_locked(
         except BaseException:
             _LOGGER.warning("Installed plugin verified; final progress callback failed")
         return InstallResult(
-            source.version, backup_created, True, provisioned_name, plugin_enabled
+            source.version, backup_created, True, provisioned_name, plugin_enabled, proof
         )
     except BaseException as err:
         if committed:
@@ -3594,7 +3640,7 @@ async def _async_install_locked(
                 raise
             _LOGGER.warning("Installed plugin verified; ignoring post-commit cleanup failure")
             return InstallResult(
-                source.version, backup_created, True, provisioned_name, plugin_enabled
+                source.version, backup_created, True, provisioned_name, plugin_enabled, proof
             )
         if no_rollback:
             # A restart was asked for and no new enigma2 has been seen. Whatever
