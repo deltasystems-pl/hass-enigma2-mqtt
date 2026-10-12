@@ -76,6 +76,12 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
 
 ### Changed
 
+- **Shorter help texts on the options form.** Six options carried a paragraph under their
+  field: the deep standby and reboot buttons, the softcam auto-restart and its wait, the daily
+  check for plugin versions, the media player's source list and the bouquets hidden from
+  "Ostatnio oglądane". Each now says in one or two sentences what the option does and what it
+  costs, in English, Polish and German. No option, default or name changes; the full
+  explanations stay in DOCUMENTATION.md §3, "Options".
 - **„Ostatnio oglądane" shows nothing while a hidden bouquet's channels are not known.** On a
   receiver that publishes one topic per bouquet, a hidden bouquet can be on the list of bouquets
   without its channels - its topic was not published, was retracted, or has not arrived. Which
