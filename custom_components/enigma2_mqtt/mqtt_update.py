@@ -69,7 +69,6 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
-    DOMAIN,
     MQTT_UPDATE_ANSWER_TIMEOUT,
     MQTT_UPDATE_END_WAIT,
     MQTT_UPDATE_FOLLOW,
@@ -79,6 +78,7 @@ from .const import (
     TOPIC_LAST_ERROR,
     TOPIC_UPDATE,
 )
+from .errors import service_error
 from .relay import RELAY_PATH, RelayError, async_get_relay, async_relay_base, receiver_address
 from .release_package import PackageSource
 
@@ -145,6 +145,12 @@ _PERCENT = {
 }
 
 STARTED_BY_HOME_ASSISTANT = "home_assistant"
+
+# Which proof ended an update over MQTT as installed (`async_install_over_mqtt` returns it):
+# `info` naming the target version and the signed entry's build commit, or - for an entry
+# that names no commit - the version alone.
+PROOF_INFO_BUILD = "info_build"
+PROOF_INFO_VERSION = "info_version"
 
 # How the card reads a transaction.
 STATE_IN_PROGRESS = "in_progress"
@@ -541,12 +547,38 @@ def sentence_placeholders(
     }
 
 
-def _error(key: str, placeholders: dict[str, str]) -> HomeAssistantError:
-    return HomeAssistantError(
-        translation_domain=DOMAIN,
-        translation_key=key,
-        translation_placeholders=placeholders,
-    )
+# The refusals of `cmd/update` that the household can act on or wait out: the receiver's
+# own setting, the moment, or the version asked for. They are raised as a refusal; the
+# rest - a request the receiver could not read, an image that cannot restart its
+# interface, a reason from a newer plugin - as a failure, like every end of a transaction.
+_CALLER_CAN_ACT = frozenset(
+    {
+        "not_permitted",
+        "no_capability",
+        "busy",
+        "opkg_busy",
+        "standby",
+        "recording",
+        "recording_due",
+        "recording_unknown",
+        "epg_import",
+        "unknown_version",
+        "withdrawn",
+        "below_floor",
+        "incompatible",
+        "depends",
+        "downgrade",
+        "current",
+        "no_space",
+        "rate_limited",
+    }
+)
+
+
+def _error(
+    key: str, placeholders: dict[str, str], *, refused: bool = False
+) -> HomeAssistantError:
+    return service_error(refused, key, placeholders)
 
 
 class _Watch:
@@ -567,6 +599,10 @@ class _Watch:
         self.transaction: dict[str, Any] | None = None
         # The furthest phase seen of the accepted transaction (`reached`).
         self.reached: tuple[str, str | None] | None = None
+        # What the receiver said it ran when it accepted the request, as `_running` reads
+        # it, and whether its latest `update` no longer carries the followed transaction.
+        self.accepted_as: tuple[Any, Any] | None = None
+        self.dropped = False
         self.refusal: tuple[Any, Any] | None = None
         # The receiver's last complaint about `cmd/update` after the acceptance: the end's
         # repeat, once it comes (`end_said`); one about another command leaves it.
@@ -620,12 +656,48 @@ class _Watch:
                         and transaction["started_by"] == STARTED_BY_HOME_ASSISTANT
                     ):
                         self.ident = transaction["id"]
+                        self.accepted_as = _running(box)
                 if transaction["id"] == self.ident:
                     self.transaction = transaction
                     self.reached = reached(self.reached, transaction)
                     if self.phase_callback is not None:
                         self.phase_callback(transaction["phase"])
+            if self.ident is not None and isinstance(state.update, dict):
+                # The receiver's own word, whichever way it goes: `update` is published
+                # whole, with the transaction in progress or the last one that ended, so a
+                # payload without the followed one says this plugin has no record of it.
+                self.dropped = transaction is None or transaction["id"] != self.ident
         self.changed.set()
+
+    @property
+    def finished(self) -> bool:
+        """Whether the followed transaction has ended."""
+        return self.transaction is not None and self.transaction["phase"] == "finished"
+
+    @property
+    def replaced(self) -> bool:
+        """Whether the plugin that accepted the request has been replaced under the follow.
+
+        Two things together, both the receiver's own: its `update` no longer carries the
+        followed transaction, and `info` names another plugin - version or build commit -
+        than the one that accepted it. An install this integration did not start does
+        that: the release put over a development build of the same number by hand, an
+        install over SSH, the receiver's own package manager. The new plugin has no record
+        of the transaction and will never report its end, so the follow would otherwise
+        run to its 25-minute bound and say "still running" of an update that is not.
+
+        Neither alone is enough. Another transaction's `update` with the same plugin
+        running is a leftover or a broker client's, and does not end the follow; `info`
+        changes in every update that works, while `update` still carries the transaction.
+        A replacement by the very same build cannot be told from no replacement at all,
+        and is followed to the bound as before.
+        """
+        return (
+            self.ident is not None
+            and not self.finished
+            and self.dropped
+            and _running(self.box) != self.accepted_as
+        )
 
     def end_said(self) -> str | None:
         """The followed transaction's end as repeated on `last_error`, once it is there."""
@@ -651,6 +723,13 @@ class _Watch:
         return until()
 
 
+def _running(box: Any) -> tuple[Any, Any]:
+    """The plugin the receiver says it runs: `info.plugin` and `info.build.commit`."""
+    info = box.info
+    build = info.get("build")
+    return info.get("plugin"), build.get("commit") if isinstance(build, dict) else None
+
+
 def _proven(box: Any, version: str, commit: str | None) -> bool:
     """Whether the receiver reports the target on `info`, with the signed commit if there is one."""
     info = box.info
@@ -671,15 +750,21 @@ async def async_install_over_mqtt(
     *,
     repair_by_ssh: bool = True,
     on_follow: Callable[[Callable[[], None]], None] | None = None,
-) -> None:
+) -> str:
     """Install the verified release `package` with `cmd/update`, and follow it to its end.
 
-    Returns when the receiver runs the release; raises HomeAssistantError, in the household's
+    Returns when the receiver runs the release, with the proof that said so (`PROOF_INFO_BUILD`
+    or `PROOF_INFO_VERSION`); raises HomeAssistantError, in the household's
     words, for everything else - including "still running" at the 25-minute bound, which is not a
     failure. Never falls back to SSH. `repair_by_ssh` says whether the forced reinstall is there
     to name when the files may be a mix; `on_follow` is handed the function that abandons the
     follow, for the card to call when it goes away.
+
+    A follow whose plugin was replaced under it (`_Watch.replaced`) ends at once: as a success
+    when the receiver runs the release that was asked for, whoever installed it, and with a
+    sentence that says the update is no longer reported otherwise.
     """
+    proof = PROOF_INFO_BUILD if package.commit else PROOF_INFO_VERSION
     version = package.version
     placeholders = sentence_placeholders(None, version, {})
     address = receiver_address(box.ip_address)
@@ -733,7 +818,11 @@ async def async_install_over_mqtt(
                     reason,
                     error,
                 )
-                raise _error(key, sentence_placeholders(None, version, extra))
+                raise _error(
+                    key,
+                    sentence_placeholders(None, version, extra),
+                    refused=reason in _CALLER_CAN_ACT,
+                )
             # Silence is not a refusal: the receiver may still start, late, and download from
             # the address it was given - which stays until its own ten minutes are over.
             raise _error("update_mqtt_no_answer", placeholders)
@@ -745,11 +834,32 @@ async def async_install_over_mqtt(
         )
         watch.phase_callback = on_phase
         on_phase((watch.transaction or {}).get("phase"))
-        ended = await watch.wait(
-            lambda: watch.transaction is not None and watch.transaction["phase"] == "finished",
-            MQTT_UPDATE_FOLLOW,
-        )
+        ended = await watch.wait(lambda: watch.finished or watch.replaced, MQTT_UPDATE_FOLLOW)
         _raise_if_abandoned(watch, box, placeholders)
+        if ended and not watch.finished:
+            running = box.info.get("plugin")
+            if _proven(box, version, package.commit):
+                _LOGGER.info(
+                    "Plugin update over MQTT: %s no longer reports transaction %s, and runs "
+                    "%s - installed by something other than this update. Proof: %s",
+                    box.node_id,
+                    watch.ident,
+                    version,
+                    _PROOF_WORDS[proof],
+                )
+                return proof
+            _LOGGER.warning(
+                "Plugin update over MQTT: %s no longer reports transaction %s; its plugin "
+                "was replaced while the update was followed, and it runs %s, not %s",
+                box.node_id,
+                watch.ident,
+                running,
+                version,
+            )
+            raise _error(
+                "update_mqtt_replaced",
+                sentence_placeholders(None, version, {"running": str(running or "?")}),
+            )
         if not ended:
             _LOGGER.warning(
                 "Plugin update over MQTT: transaction %s on %s has not finished after %d "
@@ -811,7 +921,13 @@ async def async_install_over_mqtt(
                 "update_mqtt_unproven",
                 sentence_placeholders(transaction, version, {"running": str(running or "?")}),
             )
-        _LOGGER.info("Plugin update over MQTT: %s runs %s", box.node_id, version)
+        _LOGGER.info(
+            "Plugin update over MQTT: %s runs %s. Proof: %s",
+            box.node_id,
+            version,
+            _PROOF_WORDS[proof],
+        )
+        return proof
     finally:
         watch.stop()
         # An abandoned follow leaves the grant held: nobody here follows the transaction any
@@ -832,6 +948,15 @@ async def async_install_over_mqtt(
                 # was "not downloaded" would only repeat it worse. Silence and a follow that ran
                 # out keep it: the receiver may still come for it.
                 relay.drop(grant)
+
+
+# The proofs in a log line's words.
+_PROOF_WORDS = {
+    PROOF_INFO_BUILD: "the receiver reports the version and the signed build commit on info",
+    PROOF_INFO_VERSION: (
+        "the receiver reports the version on info; the signed entry names no build commit"
+    ),
+}
 
 
 def _raise_if_abandoned(watch: _Watch, box: Any, placeholders: dict[str, str]) -> None:

@@ -577,6 +577,44 @@ async def test_a_switched_on_plugin_proved_both_ways_is_enabled(
     assert result.plugin_enabled is True
     assert created == [True]
     assert any(" logfd " in command for command in receiver.commands)
+    # Both proofs passed, and the result says so.
+    assert result.proof == "log_open+announcement"
+
+
+async def test_the_proof_that_passed_is_named_in_the_result_and_in_the_log(
+    hass: HomeAssistant,
+    credentials: SshCredentials,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Three installs, three proofs: an update by the announcement, a forced reinstall of a
+    switched-off plugin by its open log alone, and one of a switched-on plugin by both."""
+    with caplog.at_level(logging.INFO, logger="custom_components.enigma2_mqtt.installer"):
+        updated = await _install(
+            hass,
+            _request(credentials, force=False, expect_running=True, running_version="0.1.0"),
+            tmp_path,
+            _receiver(installed_version="0.1.0"),
+        )
+        assert "Proof: announcement" in caplog.text
+        assert "log_open" not in caplog.text
+        caplog.clear()
+        off = await _install(
+            hass, _request(credentials), tmp_path, _receiver(enabled=False), announces=False
+        )
+        assert caplog.text.count("Proof: log_open") == 1
+        assert "announcement" not in caplog.text.split("Proof: ", 1)[1].splitlines()[0]
+        caplog.clear()
+        on = await _install(hass, _request(credentials), tmp_path, _receiver())
+        assert "Proof: log_open+announcement" in caplog.text
+
+    assert (updated.proof, off.proof, on.proof) == (
+        "announcement",
+        "log_open",
+        "log_open+announcement",
+    )
+    records = [r for r in caplog.records if "Proof:" in r.getMessage()]
+    assert records and all(record.levelno == logging.INFO for record in records)
 
 
 async def test_a_switched_off_plugin_is_still_refused_by_an_update(
@@ -647,17 +685,64 @@ async def test_a_stalled_self_update_says_when_the_reinstall_can_run(
     assert _opkg(receiver) == []
 
 
-async def test_an_installer_lock_has_no_heartbeat_to_judge_and_is_plain_busy(
-    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path
+@pytest.mark.parametrize(
+    ("remaining", "minutes"),
+    [
+        (900, "15"), (901, "16"), (61, "2"), (60, "1"), (1, "1"), (1800, "30"),
+        # A clock set back on the receiver makes the lock look younger than it can be:
+        # never more than the thirty minutes it is honoured for.
+        (1801, "30"), (10**9, "30"),
+    ],
+)
+async def test_an_installer_lock_has_no_heartbeat_to_judge_and_says_when_it_expires(
+    hass: HomeAssistant,
+    credentials: SshCredentials,
+    tmp_path: Path,
+    remaining: int,
+    minutes: str,
 ) -> None:
+    """Running, or dead and ageing out: its record cannot say which, and "another
+    installation is running" with no end was all a household heard for up to half an hour.
+    The lock is still not taken back; the refusal says the latest moment it frees itself,
+    rounded up so that nobody is sent back a minute early."""
     receiver = _receiver(
-        claim_busy=True, lock={"held": True, "origin": None, "silent": 900, "remaining": 900}
+        claim_busy=True,
+        lock={"held": True, "origin": None, "silent": 1800 - remaining, "remaining": remaining},
     )
 
     with pytest.raises(InstallerError) as raised:
         await _install(hass, _request(credentials), tmp_path, receiver)
 
+    assert raised.value.code is InstallerErrorCode.BUSY_UNTIL
+    assert raised.value.placeholders == {"minutes": minutes}
+    assert raised.value.interface_stopped is False
+    assert _opkg(receiver) == []
+    assert not any(" snapshot " in command for command in receiver.commands)
+
+
+@pytest.mark.parametrize(
+    "lock",
+    [
+        # Stale by now: the next claim takes it, and there is no time to name.
+        {"held": True, "origin": None, "silent": 1900, "remaining": 0},
+        # A record that cannot be read has no time either.
+        {"held": True, "origin": None, "silent": None, "remaining": None},
+        {"held": True, "origin": None, "silent": 5, "remaining": "soon"},
+        {"held": True, "origin": None, "silent": 5, "remaining": True},
+        "not a record",
+    ],
+    ids=["stale", "unreadable", "not a number", "a boolean", "not a record"],
+)
+async def test_a_lock_whose_time_cannot_be_named_is_plain_busy(
+    hass: HomeAssistant, credentials: SshCredentials, tmp_path: Path, lock: Any
+) -> None:
+    receiver = _receiver(claim_busy=True, lock=lock)
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
     assert raised.value.code is InstallerErrorCode.BUSY
+    assert raised.value.placeholders == {}
 
 
 # ---------------------------------------------- opkg's records are not the running plugin
@@ -722,6 +807,7 @@ def test_every_new_code_is_a_stable_string() -> None:
     assert InstallerErrorCode.GUI_NOT_ANSWERING.value == "gui_not_answering"
     assert InstallerErrorCode.GUI_STOPPED.value == "gui_stopped"
     assert InstallerErrorCode.BUSY_STALLED.value == "busy_stalled"
+    assert InstallerErrorCode.BUSY_UNTIL.value == "busy_until"
     assert InstallerErrorCode.RECORDS_MISMATCH.value == "records_mismatch"
     assert InstallerErrorCode.PLUGIN_NOT_STARTED.value == "plugin_not_started"
     assert WATCHED
@@ -1348,7 +1434,9 @@ async def test_the_same_refusal_in_another_row_is_not_marked(
     with pytest.raises(InstallerError) as raised:
         await _install(hass, _request(credentials), tmp_path, receiver)
 
-    assert raised.value.code is (InstallerErrorCode.BUSY if busy else InstallerErrorCode.NO_SPACE)
+    assert raised.value.code is (
+        InstallerErrorCode.BUSY_UNTIL if busy else InstallerErrorCode.NO_SPACE
+    )
     assert raised.value.interface_stopped is False
 
 

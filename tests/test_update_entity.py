@@ -304,6 +304,7 @@ async def test_a_bundle_the_index_withdrew_is_not_offered_or_installed(
             blocking=True,
         )
     assert raised.value.translation_key == "update_version_withdrawn"
+    assert isinstance(raised.value, ServiceValidationError)
     assert raised.value.translation_placeholders == {
         "version": PLUGIN_VERSION,
         "reason": "it breaks EPG",
@@ -872,6 +873,8 @@ async def test_a_phase_the_card_cannot_draw_moves_no_bar(
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
+    from custom_components.enigma2_mqtt.installer import InstallResult
+
     percentages: list[int | None] = []
 
     async def _install(hass_, request, progress_cb=None, **kwargs):
@@ -880,6 +883,8 @@ async def test_a_phase_the_card_cannot_draw_moves_no_bar(
         percentages.append(hass.states.get(PLUGIN).attributes["update_percentage"])
         progress_cb("upload")
         percentages.append(hass.states.get(PLUGIN).attributes["update_percentage"])
+        # What the installer returns from an install that got to its end.
+        return InstallResult(PLUGIN_VERSION, True, True)
 
     await _setup(hass, config_entry, credentials=True)
     await _report(hass, "0.0.9")
@@ -1018,6 +1023,7 @@ async def test_a_bundle_below_the_index_floor_is_not_offered_or_installed(
             blocking=True,
         )
     assert raised.value.translation_key == "update_version_below_floor"
+    assert isinstance(raised.value, ServiceValidationError)
     assert raised.value.translation_placeholders == {
         "version": PLUGIN_VERSION,
         "floor": "0.3.1",
@@ -1143,6 +1149,11 @@ async def test_a_bundle_at_the_floor_is_offered(
             "update_busy_stalled",
         ),
         (
+            "BUSY_UNTIL",
+            {"minutes": "17"},
+            "update_busy_until",
+        ),
+        (
             "RECORDS_MISMATCH",
             {"recorded": "0.9.0", "running": "0.2.0"},
             "update_records_mismatch",
@@ -1157,6 +1168,7 @@ async def test_a_bundle_at_the_floor_is_offered(
         "missing dependencies",
         "bytes that changed",
         "a stalled self-update's lock",
+        "another installation's lock",
         "opkg's records naming another version",
     ],
 )
@@ -1188,6 +1200,12 @@ async def test_the_installer_s_own_refusal_reads_as_the_card_s(
         )
     assert raised.value.translation_key == sentence
     assert raised.value.translation_placeholders == placeholders
+    # The rule's refusals and a lock that is held are refusals; a package the receiver
+    # lacks, bytes that changed and records that disagree are the receiver's or the
+    # download's, and are failures.
+    assert isinstance(raised.value, ServiceValidationError) is (
+        refusal not in ("DEPENDS_MISSING", "PACKAGE_INVALID", "RECORDS_MISMATCH")
+    )
 
 
 # --------------------------------------------- a release of the index, downloaded --
@@ -1335,6 +1353,10 @@ async def test_a_release_that_cannot_be_had_is_said_and_nothing_is_installed(
 
     assert raised.value.translation_key == sentence
     assert raised.value.translation_placeholders == placeholders
+    # A version the rule does not allow is a refusal; a download that failed is a failure.
+    assert isinstance(raised.value, ServiceValidationError) is (
+        code not in (release_package.DOWNLOAD, release_package.DIGEST)
+    )
     install.assert_not_called()
     state = hass.states.get(PLUGIN)
     assert state.attributes["in_progress"] is False
@@ -1361,7 +1383,53 @@ async def test_an_older_release_of_the_index_is_never_installed_from_the_card(
         )
 
     assert raised.value.translation_key in ("update_downgrade", "update_version_unavailable")
+    # What was asked for cannot be had: a refusal, whichever of the two sentences says it.
+    assert isinstance(raised.value, ServiceValidationError)
     fetch.assert_not_called()
+    install.assert_not_called()
+
+
+async def test_a_version_the_card_cannot_install_is_a_refusal(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Asked for by name, and neither the bundle nor a release the index lists."""
+    await _setup(hass, config_entry, credentials=True)
+    await _report(hass, "0.2.0")
+
+    with (
+        patch("custom_components.enigma2_mqtt.update.async_install") as install,
+        pytest.raises(HomeAssistantError) as raised,
+    ):
+        await hass.services.async_call(
+            "update", "install", {ATTR_ENTITY_ID: PLUGIN, ATTR_VERSION: "9.9.9"}, blocking=True
+        )
+
+    assert raised.value.translation_key == "update_version_unavailable"
+    assert isinstance(raised.value, ServiceValidationError)
+    install.assert_not_called()
+
+
+async def test_an_install_before_the_receiver_named_its_plugin_is_a_refusal(
+    hass: HomeAssistant,
+    mqtt_mock,
+    retained: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Without the running version an upgrade cannot be told from a downgrade: not yet."""
+    await _setup(hass, config_entry, credentials=True)
+    entity = hass.data["entity_components"]["update"].get_entity(PLUGIN)
+
+    with (
+        patch("custom_components.enigma2_mqtt.update.async_install") as install,
+        pytest.raises(HomeAssistantError) as raised,
+    ):
+        await entity.async_install(version=None, backup=False)
+
+    assert raised.value.translation_key == "update_version_unknown"
+    assert isinstance(raised.value, ServiceValidationError)
     install.assert_not_called()
 
 

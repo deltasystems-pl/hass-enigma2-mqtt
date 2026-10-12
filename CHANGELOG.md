@@ -104,6 +104,67 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   Home Assistant brings. Home Assistant's manifest check (hassfest) now refuses the exact pin.
   The tests still run against 2.24.0.
 
+### Fixed
+
+- **A refusal is no longer shown as an action that failed.** Every refused or failed call
+  raised `HomeAssistantError`, so the frontend put "Failed to perform the action" in front of
+  sentences that say nothing failed - *Sprawdź aktualizacje wtyczki* pressed again inside its
+  ten minutes, a zap history that will not clear in standby. A refusal - the moment or the
+  request was wrong, and nothing was done - now raises `ServiceValidationError`: the receiver's
+  refusals that carry a reason code, the check button's limit, the update card's refusals
+  before and during an install, the refusals of an update over MQTT, and the forced reinstall
+  refused for a recording, standby, another install or the package manager running. A failure,
+  no answer, and a refusal in the receiver's own words without a code stay `HomeAssistantError`.
+  Sentences and translation keys are unchanged, with one exception: a refused forced reinstall,
+  and an update the installer refused without a sentence of its own, said "failed" in front of
+  the reason, and now say that the plugin was not reinstalled or not updated
+  (`force_reinstall_refused`, `update_refused`). **The REST API still answers 500 for both**:
+  Home Assistant 2026.9 turns only a schema error and an unknown service into a client error,
+  and nothing an integration raises changes that; the WebSocket API carries the sentence
+  (DOCUMENTATION.md §5).
+- **"Another installation is running" says how long its lock has left.** An installer's lock
+  is honoured for thirty minutes after its claim, and its record cannot say whether that
+  installation still runs or stopped without releasing it - a helper that died with a Home
+  Assistant restart left the forced reinstall refused for all of that time with no end named.
+  The refusal now says "The lock expires in about N min at the latest", in the guided
+  installer, the options flow, the update card and the forced reinstall, in English, Polish
+  and German. The lock is still never taken back (DOCUMENTATION.md §3).
+- **An update over MQTT whose plugin was replaced under it ends at once.** When something else
+  installed a plugin while the card was following its own update - the release put over a
+  development build of the same number by hand, an install over SSH - the new plugin has no
+  record of the transaction, and the card stayed busy for up to 25 minutes and then said the
+  update was still running. Now the call ends as soon as the receiver's `update` no longer
+  carries the transaction **and** `info` names another version or build than the one that
+  accepted it: as installed when the receiver runs the release that was asked for, and
+  otherwise with a sentence that says the update is no longer reported and what runs instead.
+  A transaction started on the receiver and left on `update` by a plugin that has since been
+  replaced by one that cannot update itself - after a downgrade chosen on the receiver - no
+  longer holds the card busy either.
+- **Two outcome sentences of a withdrawn install say what holds in every case.** After a
+  withdrawal that could not put the previous files back, the sentence said the new files are
+  still on the receiver; after a restore that failed part-way they may be partly new and
+  partly the previous ones, and it says so now. After a restart request the receiver never
+  confirmed, the sentence now adds that if the television shows a question about restarting,
+  either answer is safe.
+- **The repair for withheld payloads cannot be bent by a name.** Direction controls, zero-width
+  characters and other characters that are not seen are removed from a bouquet's name, the
+  device's name and a topic before they are put into the repair's text; a name of which
+  nothing is left is replaced by the bouquet's slug, the entry's title or the node id, and by
+  "?" when none is left. An `info` of `{}` now takes the repair away like any `info` that
+  does not report withheld payloads. A superseded `channels` payload is no longer kept in
+  memory beside the current one on a receiver with a bouquet that has no topic of its own.
+- **Which proof passed is recorded.** The installer accepts more than one proof that the new
+  plugin runs - its announcement, with or without the package's build commit, and for the
+  forced reinstall a new interface process holding the plugin's log open - and an update over
+  MQTT is proven by `info`. The log now names the proof at INFO, and the diagnostics download
+  carries the last install of this run under `plugin.last_install`: its path, version, proof
+  and time (DOCUMENTATION.md §7).
+- Checked against plugin 0.5.0, which clears a retained `last_error` left by an earlier run
+  when a new plugin process starts: „Ostatni błąd" keeps its record, the update card drops a
+  refusal that is no longer on the topic, and a followed update, a waiting command and the
+  uninstall flow read the empty payload as nothing. No change was needed; tests now play the
+  sequence.
+
 ### Documentation
 
 - The update card's path in short: `update_allowed` is off as the plugin ships, so with SSH

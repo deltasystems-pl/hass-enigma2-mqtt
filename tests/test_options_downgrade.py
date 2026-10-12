@@ -28,7 +28,11 @@ from custom_components.enigma2_mqtt.const import (
     CONF_DOWNGRADE_VERSION,
 )
 from custom_components.enigma2_mqtt.downgrade import CAPABILITY_SINCE, downgrade_candidates
-from custom_components.enigma2_mqtt.installer import InstallerError, InstallerErrorCode
+from custom_components.enigma2_mqtt.installer import (
+    InstallerError,
+    InstallerErrorCode,
+    InstallResult,
+)
 from custom_components.enigma2_mqtt.release_package import (
     ORIGIN_DOWNLOAD,
     PackageError,
@@ -272,12 +276,20 @@ async def test_a_confirmed_downgrade_fetches_then_installs_it_as_a_downgrade(
     source = _source("0.3.0")
     options_before = dict(config_entry.options)
 
+    done = InstallResult("0.3.0", True, True, proof="announcement")
     with (
         patch(FETCH, AsyncMock(return_value=source)) as fetch,
-        patch(INSTALL, AsyncMock()) as install,
+        patch(INSTALL, AsyncMock(return_value=done)) as install,
     ):
         result = await _confirm(hass, result)
 
+    # The diagnostics keep which path it was and which proof passed.
+    record = config_entry.runtime_data.last_install
+    assert (record["path"], record["version"], record["proof"]) == (
+        "ssh_downgrade",
+        "0.3.0",
+        "announcement",
+    )
     fetch.assert_awaited_once_with(hass, "0.3.0")
     request = install.await_args.args[1]
     assert request.package is source

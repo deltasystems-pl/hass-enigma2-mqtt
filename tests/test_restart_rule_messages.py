@@ -119,3 +119,95 @@ def test_the_polish_sentence_is_the_one_the_operator_chose() -> None:
         texts = json.loads((TRANSLATIONS / f"{language}.json").read_text(encoding="utf-8"))
         assert texts["config"]["abort"]["restart_withdrawn"]
         assert texts["exceptions"]["update_withdrawn"]["message"]
+
+
+# What each language says where the sentences were wrong, and what it may no longer say.
+#
+# `withdraw_failed` is every withdrawal that did not end with the old files back: opkg's
+# lock held (nothing was put back), a restore that failed part-way (the package records are
+# written first and the plugin directory after them, so some of it is back), and one whose
+# end was not seen. "The new ones are still on the receiver" is true of the first only.
+#
+# `restart_unconfirmed` is a withdrawal that did put the old files back, after a restart
+# request OpenWebif never confirmed. Whether the image is asking on the television is not
+# known - so the sentence may not say it asked, and has to say what holds if it did: the
+# files are as before, so either answer is safe.
+WITHDRAWAL_WORDS = {
+    "en": {
+        "partly": "partly the new ones and partly the previous ones",
+        "whole": "the new ones are still on the receiver",
+        "restarts": "restarts the interface on the files that are there now",
+        "if_asked": 'If the television shows a question about restarting, answering "yes" '
+        'or "no" is safe.',
+    },
+    "pl": {
+        "partly": "częściowo nowe, a częściowo poprzednie",
+        "whole": "więc na dekoderze są nowe",
+        "restarts": "uruchomi interfejs na plikach, które są tam teraz",
+        "if_asked": "Jeśli na ekranie telewizora widać pytanie o ponowne uruchomienie, "
+        "odpowiedź „tak” albo „nie” jest bezpieczna.",
+    },
+    "de": {
+        "partly": "teils die neuen und teils die bisherigen",
+        "whole": "die neuen liegen noch auf dem Receiver",
+        "restarts": "startet die Oberfläche mit den Dateien, die jetzt dort liegen",
+        "if_asked": "Zeigt der Fernseher eine Frage zum Neustart, sind „Ja“ und „Nein“ "
+        "beide unbedenklich.",
+    },
+}
+
+
+@pytest.mark.parametrize("language", ["en", "pl", "de"])
+def test_a_withdrawal_that_did_not_complete_does_not_say_which_files_are_there(
+    language: str,
+) -> None:
+    texts = json.loads((TRANSLATIONS / f"{language}.json").read_text(encoding="utf-8"))
+    words = WITHDRAWAL_WORDS[language]
+
+    for sentence in (
+        texts["config"]["abort"]["withdraw_failed"],
+        texts["options"]["abort"]["withdraw_failed"],
+        texts["exceptions"]["update_withdraw_failed"]["message"],
+    ):
+        assert words["partly"] in sentence
+        assert words["whole"] not in sentence
+        # "Yes" starts what is on the receiver, which need not be the new version whole.
+        assert words["restarts"] in sentence
+
+
+@pytest.mark.parametrize("language", ["en", "pl", "de"])
+def test_an_unconfirmed_restart_says_what_holds_if_a_question_is_on_screen(
+    language: str,
+) -> None:
+    texts = json.loads((TRANSLATIONS / f"{language}.json").read_text(encoding="utf-8"))
+    words = WITHDRAWAL_WORDS[language]
+
+    for sentence in (
+        texts["config"]["abort"]["restart_unconfirmed"],
+        texts["options"]["abort"]["restart_unconfirmed"],
+        texts["exceptions"]["update_restart_unconfirmed"]["message"],
+    ):
+        assert sentence.endswith(words["if_asked"])
+    # The confirmed question keeps its own sentence: there the image did ask.
+    assert words["if_asked"] not in texts["config"]["abort"]["restart_withdrawn"]
+
+
+def test_the_two_withdrawal_codes_are_told_apart_by_whether_the_files_went_back() -> None:
+    """The code path the sentences describe, pinned: only `done` and `overlap` are "back"."""
+    from custom_components.enigma2_mqtt import installer  # noqa: PLC0415
+
+    for withdrawal in ("done", "overlap"):
+        assert (
+            installer._withdrawn_code(installer._UNCONFIRMED, withdrawal)
+            is InstallerErrorCode.RESTART_UNCONFIRMED
+        )
+        assert (
+            installer._withdrawn_code(installer._QUESTION, withdrawal)
+            is InstallerErrorCode.RESTART_WITHDRAWN
+        )
+    for withdrawal in ("busy", "failed", installer._UNOBSERVED):
+        for outcome in (installer._QUESTION, installer._UNCONFIRMED):
+            assert (
+                installer._withdrawn_code(outcome, withdrawal)
+                is InstallerErrorCode.WITHDRAW_FAILED
+            )

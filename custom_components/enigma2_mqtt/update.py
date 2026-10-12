@@ -60,6 +60,7 @@ from . import mqtt_update, release_package
 from .box import Enigma2Box, Enigma2MqttConfigEntry
 from .buildid import Build, base_version, is_newer
 from .const import (
+    CAPABILITY_SELF_UPDATE,
     CONF_BASE_TOPIC,
     CONF_CHECK_GITHUB_RELEASES,
     CONF_NODE_ID,
@@ -84,7 +85,9 @@ from .const import (
 )
 from .credentials import signal_ssh_credentials
 from .entity import Enigma2Entity
+from .errors import service_error
 from .installer import (
+    REFUSALS,
     InstallerError,
     InstallerErrorCode,
     InstallRequest,
@@ -185,6 +188,7 @@ _RULED_OUT: dict[InstallerErrorCode, str] = {
     InstallerErrorCode.DEPENDS_MISSING: "update_depends_missing",
     InstallerErrorCode.PACKAGE_INVALID: "update_download_failed",
     InstallerErrorCode.BUSY_STALLED: "update_busy_stalled",
+    InstallerErrorCode.BUSY_UNTIL: "update_busy_until",
     InstallerErrorCode.RECORDS_MISMATCH: "update_records_mismatch",
 }
 
@@ -196,6 +200,20 @@ _NOT_FETCHED: dict[str, str] = {
     release_package.DOWNLOAD: "update_download_failed",
     release_package.DIGEST: "update_download_failed",
 }
+
+
+def _not_fetched(err: PackageError) -> HomeAssistantError:
+    """The card's error for a release that could not be had.
+
+    A version the rule does not allow - withdrawn, below the floor, not listed - is a
+    refusal of what was asked for. A download that failed, or bytes that are not the
+    signed ones, is a failure.
+    """
+    return service_error(
+        err.code not in (release_package.DOWNLOAD, release_package.DIGEST),
+        _NOT_FETCHED.get(err.code, "update_version_unavailable"),
+        err.placeholders,
+    )
 
 
 def _offered_release(versions: PluginVersions, version: str) -> bool:
@@ -578,6 +596,20 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         self._receiver_transaction = transaction
         self._reached = mqtt_update.reached(self._reached, transaction)
         self._receiver_state = mqtt_update.transaction_state(transaction, now)
+        if (
+            self._receiver_state == mqtt_update.STATE_IN_PROGRESS
+            and not self.box.info_retracted
+            and isinstance(self.box.info.get("capabilities"), list)
+            and CAPABILITY_SELF_UPDATE not in self.box.info["capabilities"]
+        ):
+            # The plugin that runs now says it cannot update itself - an older plugin, or
+            # one the package manager did not install. It starts no transaction, follows
+            # none and finishes none (`cmd/update` is refused `no_capability`), so the
+            # phase still retained on `update` is the plugin's before it - after a
+            # downgrade chosen on the receiver the topic stands still - and would hold the
+            # card busy until its window closed. A plugin that has not said either way
+            # leaves the window to decide, as before.
+            self._receiver_state = mqtt_update.STATE_STALE
         self._schedule_window_timer(mqtt_update.window_edge(transaction, now))
         if transaction is None:
             return None
@@ -775,45 +807,26 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         target = self._target(version)
         target_base = base_version(target.version) if target is not None else None
         if installed_base is None or (target is None and version is None):
-            raise HomeAssistantError(
-                translation_domain="enigma2_mqtt",
-                translation_key="update_version_unknown",
-            )
+            raise service_error(True, "update_version_unknown")
         if target is None or target_base is None:
-            raise HomeAssistantError(
-                translation_domain="enigma2_mqtt",
-                translation_key="update_version_unavailable",
-            )
+            raise service_error(True, "update_version_unavailable")
         if installed_base > target_base:
-            raise HomeAssistantError(
-                translation_domain="enigma2_mqtt",
-                translation_key="update_downgrade",
-            )
+            raise service_error(True, "update_downgrade")
         source = versions.source_of(target)
         if source is None:
-            raise HomeAssistantError(
-                translation_domain="enigma2_mqtt",
-                translation_key="update_version_unavailable",
-            )
+            raise service_error(True, "update_version_unavailable")
         from_bundle = source == SOURCE_BUNDLE
         if versions.path == PATH_MQTT:
             await self._async_install_over_mqtt(target, source)
             return
         if from_bundle and (refusal := versions.bundle_refusal()) is not None:
             code, placeholders = refusal
-            raise HomeAssistantError(
-                translation_domain="enigma2_mqtt",
-                translation_key=f"update_version_{code}",
-                translation_placeholders=placeholders,
-            )
+            raise service_error(True, f"update_version_{code}", placeholders)
 
         data = self._entry.data
         self._refresh_install_feature()
         if not self.supported_features & UpdateEntityFeature.INSTALL:
-            raise HomeAssistantError(
-                translation_domain="enigma2_mqtt",
-                translation_key="update_no_credentials",
-            )
+            raise service_error(True, "update_no_credentials")
         credentials = SshCredentials(
             host=data[CONF_SSH_HOST],
             port=data.get(CONF_SSH_PORT, 22),
@@ -847,37 +860,31 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
                 # restore that did not complete name a version that is not on disk.
                 running_version=installed.version if installed is not None else None,
             )
-            await async_install(self.hass, request, self._async_installer_phase)
+            result = await async_install(self.hass, request, self._async_installer_phase)
+            self.box.async_record_install("ssh", result.version, result.proof)
         except PackageError as err:
-            raise HomeAssistantError(
-                translation_domain="enigma2_mqtt",
-                translation_key=_NOT_FETCHED.get(err.code, "update_version_unavailable"),
-                translation_placeholders=err.placeholders,
-            ) from err
+            raise _not_fetched(err) from err
         except InstallerError as err:
             if err.code in (
                 InstallerErrorCode.AUTH_FAILED,
                 InstallerErrorCode.HOST_KEY_CHANGED,
             ):
                 self._entry.async_start_reauth(self.hass)
+            # A refusal - the moment or the request - or a failure, by the installer's
+            # own list; the sentence is chosen below and is the same either way.
+            refusal = err.code in REFUSALS
             if (refused := _RULED_OUT.get(err.code)) is not None:
                 # The installer holds every path to the rule; its refusal reads as the
                 # card's own, facts included.
-                raise HomeAssistantError(
-                    translation_domain="enigma2_mqtt",
-                    translation_key=refused,
-                    translation_placeholders=err.placeholders,
-                ) from err
+                raise service_error(refusal, refused, err.placeholders) from err
             if (sentence := _UPDATE_SENTENCES.get(err.code)) is not None:
                 # Outcomes a household has to be told in words: a code on the update
                 # card would not say that a question may still be on the television.
-                raise HomeAssistantError(
-                    translation_domain="enigma2_mqtt", translation_key=sentence
-                ) from err
-            raise HomeAssistantError(
-                translation_domain="enigma2_mqtt",
-                translation_key="update_failed",
-                translation_placeholders={"reason": err.code.value},
+                raise service_error(refusal, sentence) from err
+            raise service_error(
+                refusal,
+                "update_refused" if refusal else "update_failed",
+                {"reason": err.code.value},
             ) from err
         finally:
             # A spinner that never stops is worse than none: whatever happened, the
@@ -899,17 +906,13 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             or source not in (SOURCE_INDEX, SOURCE_BUNDLE)
             or not _offered_release(self._versions, target.version)
         ):
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="update_mqtt_release_only",
-                translation_placeholders={"version": target.display},
+            raise service_error(
+                True, "update_mqtt_release_only", {"version": target.display}
             )
         if self._installing:
             # The one install this card follows is already running; the receiver would
             # refuse a second one as busy, and that must not end the first one's spinner.
-            raise HomeAssistantError(
-                translation_domain=DOMAIN, translation_key="update_mqtt_busy"
-            )
+            raise service_error(True, "update_mqtt_busy")
         self._installing = True
         self._attr_in_progress = True
         self._attr_update_percentage = None
@@ -917,7 +920,7 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         try:
             # Downloaded and held to its signed entry before anything reaches the receiver.
             package = await async_fetch_release(self.hass, target.version)
-            await mqtt_update.async_install_over_mqtt(
+            proof = await mqtt_update.async_install_over_mqtt(
                 self.hass,
                 self.box,
                 self._entry.title,
@@ -926,12 +929,9 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
                 repair_by_ssh=has_credentials(self._entry),
                 on_follow=self._set_abandon_follow,
             )
+            self.box.async_record_install("mqtt", package.version, proof)
         except PackageError as err:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key=_NOT_FETCHED.get(err.code, "update_version_unavailable"),
-                translation_placeholders=err.placeholders,
-            ) from err
+            raise _not_fetched(err) from err
         finally:
             self._abandon_follow = None
             self._installing = False

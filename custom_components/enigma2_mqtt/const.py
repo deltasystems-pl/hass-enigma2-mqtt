@@ -385,6 +385,10 @@ HISTORY_CLEAR_REASONS: Final = (
     "not_cleared",
     "screen_open",
 )
+# The one of them that is not a refusal: the receiver pressed its 0 and the history was
+# still longer than one entry afterwards. Every other code says the moment was wrong and
+# nothing was tried.
+HISTORY_CLEAR_FAILURES: Final = ("not_cleared",)
 # The one reason code `cmd/zap_history` refuses with; its other refusals (the channel
 # left the history, a malformed payload) carry no code and are shown in the receiver's
 # own words. Translated as `zap_history_<reason>`.

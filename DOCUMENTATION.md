@@ -217,8 +217,13 @@ stays behind as evidence and is pruned by the next two successful installs. Two 
 - *„...but the installer's transaction lock could not be released."* The receiver is back as it
   was and the only thing left behind is the lock that keeps two installs off one box. Delete
   `/home/root/mqttbridge-backups/.ha-installer.lock` over SSH, or wait thirty minutes for it to
-  be judged stale; until then the next attempt is refused with "another installation is already
-  running".
+  be judged stale; until then the next attempt is refused with "another installation holds the
+  lock on this receiver ... The lock expires in about N min at the latest", N being what is
+  left of the thirty minutes. The same sentence answers an install - the update card's, the
+  guided installer's or the forced reinstall - while another one really is running on the
+  receiver, since the lock's record cannot say which of the two it is. A plain "another
+  installation is already running" is left for an install this Home Assistant itself is
+  running on that receiver, and for a lock whose age cannot be read.
 - *„...the receiver's package manager (opkg) is busy..."* Somebody is installing or removing a
   package from the receiver's own menu, or its update check is running. Before a snapshot this
   means nothing was changed: wait a minute and install again. During a rollback it means nothing
@@ -1392,6 +1397,30 @@ plugin that clears `last_error` on success ends the wait immediately.
 Zapping to the channel that is already on is still sent, but nothing is waited for: there is
 no change coming, and pretending otherwise would mean waiting out the whole timeout.
 
+### Which error a refused call raises
+
+Every button, select, action and the update card answer a call that did not do what was asked
+by raising, with a sentence in the household's language. There are two kinds, and both are a
+`HomeAssistantError` to anything that catches one:
+
+| Raised | When | Examples |
+|---|---|---|
+| `ServiceValidationError` | The call was **refused and nothing was done**, for a reason the caller can act on or wait out: the moment, or what was asked for | *Sprawdź aktualizacje wtyczki* pressed again inside its ten minutes; the zap history refusing to clear in standby or with one channel in it; an install refused for a recording, a timer about to start, standby, a stream, another install or the package manager running; a version the signed index withdraws or does not list; a downgrade |
+| `HomeAssistantError` | Something was **tried and failed**, the receiver did not answer, or the refusal is the receiver's own English sentence without a reason code, which can be either | no answer within ten seconds; an install, restart or rollback that failed; a download that failed; a receiver that cannot be reached over SSH; `not_cleared` after the 0 key |
+
+In the frontend a `ServiceValidationError` is shown as the sentence it carries, and a
+`HomeAssistantError` with "Failed to perform the action" in front of it. Over the WebSocket API
+the answer carries the code `service_validation_error` or `home_assistant_error` and the
+sentence's `translation_key`.
+
+**The REST API answers 500 for both.** `POST /api/services/<domain>/<service>` turns only a
+schema error and an unknown service into a client error (measured on Home Assistant 2026.9.2):
+an action that raises either kind is answered `500 Internal Server Error`, and Home Assistant's
+web server logs the traceback itself. That is Home Assistant's handling of every integration's
+errors, and nothing an integration raises changes it. A script that calls these actions over
+REST reads a 500 as "refused or failed" and finds the sentence in the Home Assistant log, or
+uses the WebSocket API.
+
 ### `get_epg_grid`
 
 Returns `{"bouquets": [...]}`, assembled from the retained `epg_grid/<bouquet_slug>` topics the
@@ -1469,6 +1498,25 @@ and the verdict - `matched`, `older_than_bundle`, `newer_than_bundle` or `unknow
 running a *newer* plugin reads "up to date" everywhere in the UI, because the version entity
 refuses to offer a downgrade; that is right for a household and useless in a bug report, and a
 plugin mismatch is where a missing entity or an unrecognised command usually ends up.
+
+`plugin.last_install` is the last install of the plugin this Home Assistant ran to its end
+since the entry was loaded, `null` when there was none: `path` (`mqtt`, `ssh`, `ssh_forced` for
+the forced reinstall, `ssh_downgrade` for the options flow's older version), `version`, `time`,
+and `proof` - which of the proofs that the new plugin runs it passed. The installer accepts
+more than one, and afterwards the outcome alone does not say which:
+
+| `proof` | What was seen |
+|---|---|
+| `announcement` | a fresh `online` - after an `offline` when a plugin ran before - and a fresh `info` naming the installed version in `integration` mode |
+| `announcement_build` | the same, and that `info` named the package's own build commit |
+| `log_open` | the forced reinstall of a plugin that is switched off: a new interface process holding the plugin's log open, and nothing the plugin said |
+| `log_open+announcement`, `log_open+announcement_build` | the forced reinstall of a plugin that is switched on, which has to pass both |
+| `info_build` | an update over MQTT: the transaction ended `installed` - or the plugin was replaced under it - and `info` names the version and the signed entry's build commit |
+| `info_version` | the same for a signed entry that names no commit: the version alone |
+
+The same proof is in the Home Assistant log at INFO, on the line that says the plugin is
+running. It is kept for this run only and is not a state: the receiver reports the version
+it runs by itself.
 
 ## 8. Troubleshooting
 

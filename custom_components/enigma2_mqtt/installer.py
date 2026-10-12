@@ -27,7 +27,7 @@ import secrets
 import shlex
 import tarfile
 import time
-from typing import Any, Protocol
+from typing import Any, Final, Protocol
 
 # asyncssh pulls in cryptography, which is slow to import and reads from disk. Importing
 # it here means that happens once, while Home Assistant is importing this module in an
@@ -189,6 +189,11 @@ class InstallerErrorCode(StrEnum):
     # The lock is held by a plugin self-update whose helper stopped beating: refused like
     # any busy lock - the released rule frees it, nothing earlier - with when that is.
     BUSY_STALLED = "busy_stalled"
+    # The lock is held by an installation of this project over SSH. Its record is written
+    # once, so nothing says whether that installation still runs or stopped without
+    # releasing it: refused like any busy lock, with when the released rule frees it at
+    # the latest.
+    BUSY_UNTIL = "busy_until"
     # opkg's records name a newer plugin than the one that runs and than the one to be
     # installed: the residue of a restore that did not complete. Not "a newer plugin is
     # installed"; the forced reinstall is the repair.
@@ -200,6 +205,34 @@ class InstallerErrorCode(StrEnum):
     GUI_STOPPED = "gui_stopped"
     # A forced reinstall's new interface never opened the plugin's log: it did not load it.
     PLUGIN_NOT_STARTED = "plugin_not_started"
+
+
+# The codes that are a refusal and not a failure: the moment was wrong - a recording, a
+# timer about to start, standby, a stream, another install or the package manager holding
+# its lock - or the request was, by the signed index's rule or because a newer plugin is
+# installed. The installer changed nothing, or put back what it had changed, and trying
+# again later or asking for something else is all there is to do. A service call that
+# ends with one of them raises Home Assistant's validation error, every other code its
+# general one (`errors.py`). A code is listed here only when every place that raises it
+# is such a refusal.
+REFUSALS: Final = frozenset(
+    {
+        InstallerErrorCode.RECORDING,
+        InstallerErrorCode.TIMER_DUE,
+        InstallerErrorCode.STANDBY,
+        InstallerErrorCode.STREAMING,
+        InstallerErrorCode.BUSY,
+        InstallerErrorCode.BUSY_STALLED,
+        InstallerErrorCode.BUSY_UNTIL,
+        InstallerErrorCode.OPKG_BUSY,
+        InstallerErrorCode.NEWER_INSTALLED,
+        InstallerErrorCode.BUNDLE_BELOW_FLOOR,
+        InstallerErrorCode.BUNDLE_WITHDRAWN,
+        InstallerErrorCode.VERSION_BELOW_FLOOR,
+        InstallerErrorCode.VERSION_WITHDRAWN,
+        InstallerErrorCode.VERSION_NOT_INSTALLABLE,
+    }
+)
 
 
 class InstallerError(Exception):
@@ -469,6 +502,9 @@ class InstallResult:
     # Whether the plugin is switched on in its own settings. A forced reinstall installs
     # and proves a switched-off plugin, changes no setting, and says so.
     plugin_enabled: bool = True
+    # Which proof that the new plugin runs this transaction passed (`PROOF_*`). The
+    # installer accepts more than one, and afterwards the outcome alone does not say which.
+    proof: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -1185,11 +1221,42 @@ async def _async_progress(callback_fn: ProgressCallback | None, step: str) -> No
         await result
 
 
+# The proofs that a newly installed plugin runs, as an install's result names them.
+#
+# - `announcement`: a fresh `online` - after an `offline` when a plugin ran before - and a
+#   fresh `info` naming the installed version in `integration` mode;
+# - `announcement_build`: the same, and that `info` named the package's build commit;
+# - `log_open`: the forced reinstall of a plugin that is switched off - a new interface
+#   process holding the plugin's log open, and nothing the plugin said;
+# - `log_open+announcement`, `log_open+announcement_build`: the forced reinstall of a plugin
+#   that is switched on, which has to pass both.
+PROOF_ANNOUNCEMENT: Final = "announcement"
+PROOF_ANNOUNCEMENT_BUILD: Final = "announcement_build"
+PROOF_LOG_OPEN: Final = "log_open"
+
+
+def _proof(forced: bool, watch: _RestartWatch | None) -> str:
+    """Name the proof a transaction that got this far has passed."""
+    said = None
+    if watch is not None:
+        # The announcement's own future says what it rested on (`_RestartWatch`).
+        named_build = watch.completed.done() and watch.completed.result() is True
+        said = PROOF_ANNOUNCEMENT_BUILD if named_build else PROOF_ANNOUNCEMENT
+    if not forced:
+        return said or ""
+    return PROOF_LOG_OPEN if said is None else f"{PROOF_LOG_OPEN}+{said}"
+
+
 @dataclass(slots=True)
 class _RestartWatch:
-    """Fresh post-restart MQTT proof; retained state can never satisfy it."""
+    """Fresh post-restart MQTT proof; retained state can never satisfy it.
 
-    completed: asyncio.Future[None]
+    `completed` resolves when the proof is in, and its result is the one thing the proof
+    can differ in: True when the announcing `info` named the package's own build commit,
+    and not merely no other commit.
+    """
+
+    completed: asyncio.Future[bool]
     established: asyncio.Future[None]
     cancel_callbacks: list[Callable[[], None]]
     arm: Callable[[], None]
@@ -1221,18 +1288,19 @@ async def _async_watch_restart(
     installed is not the proof of this install. A plugin that predates build ids proves by its
     version alone.
     """
-    completed: asyncio.Future[None] = hass.loop.create_future()
+    completed: asyncio.Future[bool] = hass.loop.create_future()
     established: asyncio.Future[None] = hass.loop.create_future()
     offline_seen = False
     online_seen = False
     version_seen = False
+    build_named = False
     armed = False
     subscriptions_ready = 0
 
     def _finish_if_ready() -> None:
         offline_ready = offline_seen or not require_offline
         if offline_ready and online_seen and version_seen and not completed.done():
-            completed.set_result(None)
+            completed.set_result(build_named)
 
     @callback
     def _availability(message: ReceiveMessage) -> None:
@@ -1250,7 +1318,7 @@ async def _async_watch_restart(
 
     @callback
     def _info(message: ReceiveMessage) -> None:
-        nonlocal version_seen
+        nonlocal version_seen, build_named
         if message.retain or not armed or not online_seen:
             return
         info = parse_json_payload(message.payload)
@@ -1261,6 +1329,10 @@ async def _async_watch_restart(
             and _same_build(info.get("build"), commit)
         ):
             version_seen = True
+            build = info.get("build")
+            build_named = bool(
+                commit and isinstance(build, dict) and build.get("commit") == commit
+            )
         _finish_if_ready()
 
     @callback
@@ -2604,6 +2676,14 @@ async def _async_busy_error(
     picture, so an installer's lock - which has no heartbeat to judge and frees itself
     30 minutes after its claim - gets the same "in about N minutes" rather than a plain
     "busy" with no end in sight.
+
+    An installer's lock met while the interface runs has an end too, and says it
+    (`BUSY_UNTIL`): the helper that claimed it may be long dead - a Home Assistant that
+    restarted mid-install, a connection that never came back - and "another installation
+    is running" was then all a household heard for up to half an hour, with nothing to
+    say when to try again. Whether that installation still runs cannot be told from its
+    record, so the sentence promises only the latest moment. A lock whose time cannot be
+    read, and a self-update that is beating, stay plain "busy".
     """
     try:
         result = await session.run(
@@ -2661,6 +2741,22 @@ async def _async_busy_error(
             )
             error.update_running = True
             return error
+        if (
+            info.get("origin") is None
+            and isinstance(remaining, int)
+            and not isinstance(remaining, bool)
+            and remaining > 0
+        ):
+            # Never more than the thirty minutes the lock is honoured for, whatever a
+            # receiver's clock that was set back makes of its age.
+            minutes = min(30, max(1, math.ceil(remaining / 60)))
+            return InstallerError(
+                InstallerErrorCode.BUSY_UNTIL,
+                "an installation of this integration holds the receiver's lock - running, "
+                "or stopped without releasing it; the released rule frees it in about "
+                f"{minutes} min at the latest",
+                {"minutes": str(minutes)},
+            )
     return InstallerError(InstallerErrorCode.BUSY)
 
 
@@ -2991,6 +3087,7 @@ async def _async_install_locked(
 ) -> InstallResult:
     """Install or update the plugin as a rollback-safe transaction."""
     request.validate()
+    proof = ""
     if request.force and request.package is not None:
         # The forced reinstall installs the bytes CI reproduced, and nothing fetched.
         raise InstallerError(
@@ -3461,6 +3558,12 @@ async def _async_install_locked(
                     await watch.completed
             except TimeoutError as err:
                 raise InstallerError(InstallerErrorCode.ANNOUNCEMENT_TIMEOUT) from err
+        # More than one proof is accepted, and once the transaction is over nothing else
+        # says which one it was: named here, for the log and for whoever records the result.
+        proof = _proof(request.force, watch)
+        _LOGGER.info(
+            "Installer: plugin %s is running on %s. Proof: %s", source.version, node_id, proof
+        )
 
         cleanup = await connector(request.credentials)
         try:
@@ -3529,7 +3632,7 @@ async def _async_install_locked(
         except BaseException:
             _LOGGER.warning("Installed plugin verified; final progress callback failed")
         return InstallResult(
-            source.version, backup_created, True, provisioned_name, plugin_enabled
+            source.version, backup_created, True, provisioned_name, plugin_enabled, proof
         )
     except BaseException as err:
         if committed:
@@ -3539,7 +3642,7 @@ async def _async_install_locked(
                 raise
             _LOGGER.warning("Installed plugin verified; ignoring post-commit cleanup failure")
             return InstallResult(
-                source.version, backup_created, True, provisioned_name, plugin_enabled
+                source.version, backup_created, True, provisioned_name, plugin_enabled, proof
             )
         if no_rollback:
             # A restart was asked for and no new enigma2 has been seen. Whatever

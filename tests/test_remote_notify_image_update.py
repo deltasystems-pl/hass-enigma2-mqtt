@@ -23,7 +23,7 @@ from homeassistant.components.remote import (
 from homeassistant.components.update import ATTR_VERSION, UpdateEntityFeature
 from homeassistant.const import ATTR_ENTITY_ID, STATE_OFF, STATE_ON, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 import pytest
 from pytest_homeassistant_custom_component.common import (
@@ -42,7 +42,11 @@ from custom_components.enigma2_mqtt.const import (
     DOMAIN,
     MESSAGE_MAX_LENGTH,
 )
-from custom_components.enigma2_mqtt.installer import InstallerError, InstallerErrorCode
+from custom_components.enigma2_mqtt.installer import (
+    InstallerError,
+    InstallerErrorCode,
+    InstallResult,
+)
 
 from .conftest import (
     INFO,
@@ -563,6 +567,7 @@ async def test_an_install_without_credentials_says_which_setting_is_missing(
         await entity.async_install(version=None, backup=False)
 
     assert raised.value.translation_key == "update_no_credentials"
+    assert isinstance(raised.value, ServiceValidationError)
 
 
 async def test_an_install_reports_progress_and_always_stops_reporting_it(
@@ -650,6 +655,7 @@ async def test_a_refused_second_install_does_not_stop_the_first_one_s_spinner(
         progress_cb("install")
         running.set()
         await release.wait()
+        return InstallResult("0.4.0", True, True)
 
     with patch("custom_components.enigma2_mqtt.update.async_install", first_install):
         assert await hass.config_entries.async_setup(config_entry.entry_id)
@@ -667,6 +673,8 @@ async def test_a_refused_second_install_does_not_stop_the_first_one_s_spinner(
             with pytest.raises(HomeAssistantError) as raised:
                 await entity.async_install(version=None, backup=False)
             refused.append(raised.value.translation_placeholders["reason"])
+            # A refusal without a sentence of its own is still not "failed".
+            assert raised.value.translation_key == "update_refused"
 
         # The refusal changed nothing about the install that is still running.
         assert entity.in_progress is True

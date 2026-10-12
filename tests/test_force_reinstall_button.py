@@ -28,7 +28,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import ATTR_ENTITY_ID, STATE_UNAVAILABLE
 from homeassistant.core import Context, Event, HomeAssistant, State, callback
 from homeassistant.data_entry_flow import FlowResultType
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_registry import EVENT_ENTITY_REGISTRY_UPDATED
 from homeassistant.setup import async_setup_component
@@ -722,6 +722,7 @@ async def test_a_withdrawn_bundle_is_refused_at_the_first_press(
         await _press(hass, hass_admin_user.id)
 
     assert raised.value.translation_key == "update_version_withdrawn"
+    assert isinstance(raised.value, ServiceValidationError)
     install.assert_not_awaited()
     assert f"{DOMAIN}_force_reinstall_{config_entry.entry_id}" not in _notices(hass)
 
@@ -1352,6 +1353,172 @@ def test_the_stopped_interface_sentence_is_written_in_all_three_languages() -> N
             assert phrase in common["force_reinstall_interface_stopped"], (language, phrase)
 
 
+@pytest.mark.parametrize(
+    ("language", "words"),
+    [
+        ("en", "The lock expires in about 17 min at the latest"),
+        ("pl", "Blokada wygaśnie najpóźniej za około 17 min"),
+        ("de", "Die Sperre läuft spätestens in etwa 17 Min. ab"),
+    ],
+)
+async def test_another_installation_s_lock_says_how_long_is_left_in_every_language(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+    hass_admin_user,
+    language: str,
+    words: str,
+) -> None:
+    """A dead helper's lock ages out for up to thirty minutes. The press is refused all that
+    time, and now says when it will not be - on the last-error sensor too."""
+    await _ready(hass, config_entry, box_on_the_broker)
+    # After the set-up: the entity ids were made from the English names.
+    hass.config.language = language
+
+    with (
+        patch(
+            INSTALL,
+            AsyncMock(
+                side_effect=InstallerError(InstallerErrorCode.BUSY_UNTIL, "", {"minutes": "17"})
+            ),
+        ),
+        pytest.raises(HomeAssistantError) as raised,
+    ):
+        await _press(hass, hass_admin_user.id)
+        await _press(hass, hass_admin_user.id)
+
+    reason = raised.value.translation_placeholders["reason"]
+    assert words in reason
+    assert "{minutes}" not in reason
+    assert isinstance(raised.value, ServiceValidationError)
+    assert hass.states.get(LAST_ERROR).attributes["error"] == reason
+
+
+async def test_a_forced_reinstall_records_the_proof_that_passed(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+    hass_admin_user,
+) -> None:
+    """A switched-off plugin is proven by its open log alone; the diagnostics say so."""
+    await _ready(hass, config_entry, box_on_the_broker)
+    done = InstallResult("0.3.0", True, True, "", False, "log_open")
+
+    with patch(INSTALL, AsyncMock(return_value=done)):
+        await _press(hass, hass_admin_user.id)
+        await _press(hass, hass_admin_user.id)
+
+    record = config_entry.runtime_data.last_install
+    assert (record["path"], record["version"], record["proof"]) == (
+        "ssh_forced",
+        "0.3.0",
+        "log_open",
+    )
+
+
+async def test_a_forced_reinstall_that_failed_records_no_proof(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+    hass_admin_user,
+) -> None:
+    await _ready(hass, config_entry, box_on_the_broker)
+    failed = InstallerError(InstallerErrorCode.PLUGIN_NOT_STARTED)
+
+    with patch(INSTALL, AsyncMock(side_effect=failed)), pytest.raises(HomeAssistantError):
+        await _press(hass, hass_admin_user.id)
+        await _press(hass, hass_admin_user.id)
+
+    assert config_entry.runtime_data.last_install is None
+
+
+async def test_credentials_gone_between_the_two_presses_are_a_refusal(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+    hass_admin_user,
+) -> None:
+    """Armed with credentials, confirmed without: nothing is tried, so nothing failed."""
+    await _ready(hass, config_entry, box_on_the_broker)
+    await _press(hass, hass_admin_user.id)
+
+    with (
+        patch("custom_components.enigma2_mqtt.button.stored_ssh_credentials", return_value=None),
+        patch(INSTALL, AsyncMock(return_value=_result())) as install,
+        pytest.raises(HomeAssistantError) as raised,
+    ):
+        await _press(hass, hass_admin_user.id)
+
+    assert raised.value.translation_key == "update_no_credentials"
+    assert isinstance(raised.value, ServiceValidationError)
+    install.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("code", "refusal"),
+    [
+        ("BUSY", True),
+        ("BUSY_STALLED", True),
+        ("BUSY_UNTIL", True),
+        ("OPKG_BUSY", True),
+        ("RECORDING", True),
+        ("TIMER_DUE", True),
+        ("STANDBY", True),
+        ("STREAMING", True),
+        ("NEWER_INSTALLED", True),
+        ("INSTALL_FAILED", False),
+        ("SSH_UNAVAILABLE", False),
+        ("GUI_STOPPED", False),
+        ("ROLLBACK_FAILED", False),
+        ("PLUGIN_NOT_STARTED", False),
+    ],
+)
+async def test_a_refusal_is_raised_as_a_refusal_and_a_failure_as_a_failure(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    enabled: None,
+    hass_admin_user,
+    code: str,
+    refusal: bool,
+) -> None:
+    """Another install running, a recording, standby: nothing failed, the moment was wrong.
+
+    Home Assistant shows a validation error as the sentence it carries, and a general
+    error as an action that failed. The sentence and its key are the same either way, and
+    both are recorded on the last-error sensor.
+    """
+    await _ready(hass, config_entry, box_on_the_broker)
+
+    with (
+        patch(
+            INSTALL,
+            AsyncMock(
+                side_effect=InstallerError(InstallerErrorCode[code], "why", {"minutes": "20"})
+            ),
+        ),
+        pytest.raises(HomeAssistantError) as raised,
+    ):
+        await _press(hass, hass_admin_user.id)
+        await _press(hass, hass_admin_user.id)
+
+    # The sentence follows the type: a refusal is not a reinstall that failed.
+    assert raised.value.translation_key == (
+        "force_reinstall_refused" if refusal else "force_reinstall_failed"
+    )
+    assert isinstance(raised.value, ServiceValidationError) is refusal
+    assert hass.states.get(LAST_ERROR).state == "force_reinstall"
+
+
 async def test_an_unexpected_failure_is_on_last_error_too(
     hass: HomeAssistant,
     mqtt_mock,
@@ -1373,6 +1540,7 @@ async def test_an_unexpected_failure_is_on_last_error_too(
         await _press(hass, hass_admin_user.id)
 
     assert raised.value.translation_key == "force_reinstall_failed"
+    assert not isinstance(raised.value, ServiceValidationError)
     reason = raised.value.translation_placeholders["reason"]
     assert "unexpected error (OSError)" in reason
     state = hass.states.get(LAST_ERROR)

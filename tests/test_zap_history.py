@@ -887,6 +887,7 @@ async def test_nothing_but_a_new_short_payload_is_the_proof(
     with pytest.raises(HomeAssistantError) as raised:
         await _press(hass)
     assert raised.value.translation_key == "command_timeout"
+    assert not isinstance(raised.value, ServiceValidationError)
 
 
 @pytest.mark.parametrize("reason", REASONS)
@@ -906,6 +907,9 @@ async def test_every_refusal_is_raised_in_its_own_translation(
     with pytest.raises(HomeAssistantError) as raised:
         await _press(hass)
     assert raised.value.translation_key == f"history_clear_{reason}"
+    # A refusal is raised as one - nothing failed, the moment was wrong - and the one code
+    # that says the receiver pressed its 0 and the history stayed is raised as a failure.
+    assert isinstance(raised.value, ServiceValidationError) is (reason != "not_cleared")
 
 
 @pytest.mark.parametrize("reason", [None, "a_code_from_a_newer_plugin", 7])
@@ -925,6 +929,8 @@ async def test_an_unknown_or_absent_reason_is_the_boxs_own_sentence(
     with pytest.raises(HomeAssistantError) as raised:
         await _press(hass)
     assert raised.value.translation_key == "command_refused"
+    # A sentence without a code this release knows can be a refusal or a failure.
+    assert not isinstance(raised.value, ServiceValidationError)
     assert raised.value.translation_placeholders == {
         "command": "history_clear",
         "reason": "the receiver said something new",

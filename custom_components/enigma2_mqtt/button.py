@@ -91,6 +91,7 @@ from .const import (
     CONF_NODE_ID,
     DEFAULT_BASE_TOPIC,
     DOMAIN,
+    HISTORY_CLEAR_FAILURES,
     HISTORY_CLEAR_REASONS,
     SIGNAL_FORCE_REINSTALL,
     TOPIC_EPG_IMPORT,
@@ -101,7 +102,14 @@ from .const import (
 )
 from .credentials import signal_ssh_credentials, stored_ssh_credentials
 from .entity import Enigma2Entity, OptionalEntities
-from .installer import InstallerError, InstallerErrorCode, InstallRequest, async_install
+from .errors import service_error
+from .installer import (
+    REFUSALS,
+    InstallerError,
+    InstallerErrorCode,
+    InstallRequest,
+    async_install,
+)
 from .plugin_versions import async_plugin_versions, has_credentials
 from .release_store import (
     ERROR_BAD_MEMORY,
@@ -237,7 +245,11 @@ async def _async_history_clear(box: Enigma2Box) -> None:
         return history is not None and len(history["entries"]) <= 1
 
     await box.async_command(
-        "history_clear", PRESS, effect=cleared, reasons=HISTORY_CLEAR_REASONS
+        "history_clear",
+        PRESS,
+        effect=cleared,
+        reasons=HISTORY_CLEAR_REASONS,
+        failures=HISTORY_CLEAR_FAILURES,
     )
 
 
@@ -639,10 +651,11 @@ class Enigma2CheckPluginUpdateButton(Enigma2Entity, ButtonEntity):
         try:
             result = await cache.async_check(manual=True)
         except CheckRateLimited as limited:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="release_check_rate_limited",
-                translation_placeholders={
+            # Nothing failed: the press came too soon, and the sentence says when to try.
+            raise service_error(
+                True,
+                "release_check_rate_limited",
+                {
                     "time": dt_util.as_local(limited.checked).strftime("%H:%M"),
                     "minutes": str(max(1, math.ceil(limited.remaining_seconds / 60))),
                 },
@@ -778,11 +791,7 @@ class Enigma2ForceReinstallButton(Enigma2Entity, ButtonEntity):
         versions = await async_plugin_versions(self.hass, self._entry)
         if (refusal := versions.bundle_refusal()) is not None:
             code, placeholders = refusal
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key=f"update_version_{code}",
-                translation_placeholders=placeholders,
-            )
+            raise service_error(True, f"update_version_{code}", placeholders)
         bundled = versions.bundled()
         installed = versions.installed()
         version = bundled.version if bundled is not None else "?"
@@ -813,9 +822,7 @@ class Enigma2ForceReinstallButton(Enigma2Entity, ButtonEntity):
         """Run the SSH installer in its forced mode, and say how it ended."""
         credentials = stored_ssh_credentials(self._entry)
         if credentials is None:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN, translation_key="update_no_credentials"
-            )
+            raise service_error(True, "update_no_credentials")
         data = self._entry.data
         request = InstallRequest(
             credentials=credentials,
@@ -839,10 +846,13 @@ class Enigma2ForceReinstallButton(Enigma2Entity, ButtonEntity):
             # On „Ostatni błąd" too, as Home Assistant's own: the plugin may never publish
             # again, and this is the one place the household looks for why.
             self.box.async_record_local_error(KEY_FORCE_REINSTALL, reason)
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="force_reinstall_failed",
-                translation_placeholders={"reason": reason},
+            # A refusal changed nothing and is not a reinstall that failed: its sentence
+            # says "not reinstalled", in front of the same reason.
+            refused = err.code in REFUSALS
+            raise service_error(
+                refused,
+                "force_reinstall_refused" if refused else "force_reinstall_failed",
+                {"reason": reason},
             ) from err
         except Exception as err:
             # Not one of the installer's refusals - a transport error from a step that
@@ -863,6 +873,7 @@ class Enigma2ForceReinstallButton(Enigma2Entity, ButtonEntity):
             self._running = False
             persistent_notification.async_dismiss(self.hass, f"{self._notice_id}_running")
             async_dispatcher_send(self.hass, signal, None)
+        self.box.async_record_install("ssh_forced", result.version, result.proof)
         persistent_notification.async_create(
             self.hass,
             await self._async_common(

@@ -27,7 +27,7 @@ from homeassistant.components.mqtt.models import DATA_MQTT
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.dispatcher import (
     async_dispatcher_connect,
     async_dispatcher_send,
@@ -636,6 +636,8 @@ async def test_the_button_checks_once_in_ten_minutes_and_says_when(
     with pytest.raises(HomeAssistantError) as raised:
         await hass.services.async_call("button", "press", {ATTR_ENTITY_ID: CHECK}, blocking=True)
     assert raised.value.translation_key == "release_check_rate_limited"
+    # Nothing failed: the press came too soon.
+    assert isinstance(raised.value, ServiceValidationError)
     assert raised.value.translation_placeholders == {"time": checked, "minutes": "7"}
     assert aioclient_mock.call_count == 2
 
@@ -703,6 +705,7 @@ async def test_a_failed_press_says_so_in_words(
     with pytest.raises(HomeAssistantError) as raised:
         await hass.services.async_call("button", "press", {ATTR_ENTITY_ID: CHECK}, blocking=True)
     assert raised.value.translation_key == "release_check_failed"
+    assert not isinstance(raised.value, ServiceValidationError)
     assert raised.value.translation_placeholders == {"reason": "unreachable"}
 
 
