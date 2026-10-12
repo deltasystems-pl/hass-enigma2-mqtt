@@ -313,7 +313,7 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
             sref = media_content_id[len(BROWSE_BOUQUET_PREFIX) :]
             if (bouquet := self.box.bouquet_by_sref(sref)) is None:
                 raise BrowseError(f"Unknown bouquet {sref}")
-            return await self._async_browse_bouquet(bouquet)
+            return self._browse_bouquet(bouquet)
 
         return BrowseMedia(
             media_class=MediaClass.DIRECTORY,
@@ -336,17 +336,21 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
             ],
         )
 
-    async def _async_browse_bouquet(self, bouquet: dict[str, Any]) -> BrowseMedia:
+    def _browse_bouquet(self, bouquet: dict[str, Any]) -> BrowseMedia:
         """Return one bouquet as a list of playable channels.
 
-        A thumbnail is the picon link the receiver's web interface gives for the channel,
-        asked once per bouquet. Where it gives none - no answer, or an older OpenWebif -
-        the name built from the service reference is used, as it always was.
+        A thumbnail is the picon link the receiver's web interface gave for the channel,
+        where one is held. The browser never waits for the receiver: a bouquet opened for
+        the first time is asked about in the background, and until the answer is in - and
+        where there is none, as with an older OpenWebif - the name built from the service
+        reference is used, as it always was.
         """
         picons = self.box.picons
-        thumbnails = await picons.async_bouquet_thumbnails(bouquet) if picons else {}
+        thumbnails = picons.async_thumbnails(bouquet) if picons else {}
 
-        def thumbnail(sref: str) -> str | None:
+        def thumbnail(sref: Any) -> str | None:
+            if not isinstance(sref, str):
+                return None
             identity = service_identity(sref)
             if identity in thumbnails:
                 return thumbnails[identity]

@@ -302,8 +302,23 @@ def quick_restart_rule(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(release_store, "RETAINED_GRACE", 0.05)
 
 
+# What the picon lookup asks the receiver's web interface, and nothing else here does.
+PICON_LOOKUP_PATHS = ("/api/getpicon", "/api/getservices")
+
+
+def unexpected_receiver_requests(aioclient_mock: AiohttpClientMocker) -> list[str]:
+    """Return every recorded request to the example receiver that is not a picon lookup."""
+    return [
+        str(url)
+        for _method, url, *_ in aioclient_mock.mock_calls
+        if url.host == IP
+        and url.path not in PICON_LOOKUP_PATHS
+        and not url.path.startswith("/picon/")
+    ]
+
+
 @pytest.fixture(autouse=True)
-def receiver_without_a_web_interface(aioclient_mock: AiohttpClientMocker) -> None:
+def receiver_without_a_web_interface(aioclient_mock: AiohttpClientMocker) -> Generator[None]:
     """Answer every request to the example receiver's web interface with 404.
 
     The media player asks the receiver's OpenWebif for a channel's picon after a channel
@@ -312,8 +327,14 @@ def receiver_without_a_web_interface(aioclient_mock: AiohttpClientMocker) -> Non
     such page: the lookup ends quietly and the picture is the screenshot, which is what
     every test that is not about picons expects. A test about picons clears this and
     serves its own OpenWebif.
+
+    A blanket answer would also hide a request nothing is meant to make, so every test
+    ends with a look at what was asked: anything sent to the receiver's web interface
+    that is not the picon lookup's fails the test that sent it.
     """
     aioclient_mock.get(re.compile(rf"^http://{re.escape(IP)}/"), status=404)
+    yield
+    assert unexpected_receiver_requests(aioclient_mock) == []
 
 
 @pytest.fixture

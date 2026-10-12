@@ -966,6 +966,38 @@ class Enigma2Box:
         )
 
     @property
+    def picon_lookup_url(self) -> str | None:
+        """Return the address Home Assistant itself asks for picons, or None for none.
+
+        Not the same rule as `web_url`, which only makes a link for a person to click.
+        This one decides where Home Assistant sends requests of its own, and the address
+        a receiver reports arrives over the broker, where anything that may publish can
+        have written it. So the host typed when the receiver was added wins whenever
+        there is one: that is the administrator's word, and it is not second-guessed.
+        Without one, the reported address is used only when it is an IP address written
+        out - never a name, which would be resolved by this machine - and not loopback,
+        link-local, unspecified, multicast or reserved: none of those is a receiver, and
+        the first two are where a machine keeps what only it should reach.
+        """
+        typed = self.entry.data.get(CONF_RECEIVER_HOST)
+        if isinstance(typed, str) and typed.strip():
+            return _configuration_url(typed.strip())
+        try:
+            address = ipaddress.ip_address(self.ip_address or "")
+        except ValueError:
+            return None
+        for candidate in (address, getattr(address, "ipv4_mapped", None)):
+            if candidate is not None and (
+                candidate.is_loopback
+                or candidate.is_link_local
+                or candidate.is_unspecified
+                or candidate.is_multicast
+                or candidate.is_reserved
+            ):
+                return None
+        return _configuration_url(str(address))
+
+    @property
     def reported_mac(self) -> str | None:
         """Return the address the box reports on `info`, normalised."""
         source = {**self.state.announcement, **self.state.info}
