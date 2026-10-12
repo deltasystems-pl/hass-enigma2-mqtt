@@ -7,7 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-What is new here needs **plugin 0.5.0** on the receiver. A receiver on plugin 0.4.0 or older is
+What is new here needs **plugin 0.5.0** on the receiver, except the picture option and the picon
+lookup, which work with any plugin. A receiver on plugin 0.4.0 or older is
 read as before: its `info` carries no `not_published` and it does not claim `channel_topics`, so
 it gets no repair and no new sensor, and its channel list comes from `channels`.
 
@@ -43,6 +44,35 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
 - The diagnostics download says which topics the channel list is read from, summarises the index
   and each per-bouquet topic as names and counts - never a channel - and carries the receiver's
   list of what it did not publish (DOCUMENTATION.md §7).
+- **The media player can show the channel's picon.** A new option, **Picture on the media
+  player card**, with two settings. **Screenshot** stays the default and gains one thing: between
+  a channel change and the next screenshot the picon of the new channel is shown - until now the
+  card kept showing the previous channel's frame for those seconds, and for good with screenshots
+  switched off. **Channel picon** always shows the picon, and the screenshot only for a channel
+  that has none. With screenshots switched off on the receiver the picon is shown from the start.
+  The picon is fitted to the card: whole, in the middle of a square, on a ground its logo stands
+  out from - the card crops its picture to a square and takes its colour from it, which cost a
+  picon its sides and left a light logo on a light card. Standby keeps the last picture, and the
+  „Ekran" image entity is the screenshot either way. Home Assistant fetches the picon from the receiver's web interface and serves it
+  itself, so the browser does not have to reach the receiver. This needs no particular plugin
+  version, only OpenWebif reachable without a login on port 80; without it the screenshot is
+  shown as before. A screenshot does not say which channel it shows, so one taken of a channel
+  that was only zapped through can replace the picon of the channel after it for a few seconds
+  (DOCUMENTATION.md §3 and §4.1,
+  [ADR-0009](docs/adr/0009-player-picture-and-picons-from-openwebif.md)).
+- **Picons are found the way OpenWebif finds them.** The player asks OpenWebif which picon the
+  current channel has (`getpicon`), and the media browser asks for a bouquet's picons when the
+  bouquet is opened (`getservices` with `picon=1`), instead of building one file name from the
+  service reference - so a picon stored under the channel's name or under another namespace is
+  found. The old name is still used where OpenWebif does not answer. Nothing is polled, answers
+  are kept, the media browser never waits for the receiver, and a receiver that cannot be
+  reached, asks for a login or does not answer as OpenWebif does is left alone for minutes.
+  Home Assistant asks the host typed when the receiver was added, and the address the receiver
+  reports only when none was typed and it is an ordinary IP address; a typed host that cannot be
+  the host of a web address means no picons. The media browser's thumbnails are at that same
+  address (SECURITY.md).
+- The diagnostics download carries the chosen picture and the state of the picon lookup, as a
+  status and counts.
 
 ### Changed
 

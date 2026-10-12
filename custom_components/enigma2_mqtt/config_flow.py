@@ -67,6 +67,7 @@ from .const import (
     CONF_NAME,
     CONF_NODE_ID,
     CONF_OSCAM_TELEMETRY,
+    CONF_PLAYER_PICTURE,
     CONF_PLUGIN_TARGET_VERSION,
     CONF_PUBLISH_KEYS,
     CONF_RECEIVER_HOST,
@@ -87,6 +88,7 @@ from .const import (
     DEFAULT_CAM_TELEMETRY,
     DEFAULT_CHECK_GITHUB_RELEASES,
     DEFAULT_OSCAM_TELEMETRY,
+    DEFAULT_PLAYER_PICTURE,
     DEFAULT_PUBLISH_KEYS,
     DEFAULT_SCREENSHOT,
     DEFAULT_SCREENSHOT_DELAY,
@@ -102,6 +104,7 @@ from .const import (
     MIN_SCREENSHOT_DELAY,
     MIN_SCREENSHOT_INTERVAL,
     MIN_SOFTCAM_AUTOHEAL_SECONDS,
+    PLAYER_PICTURES,
     PROBE_TIMEOUT,
     SCREENSHOT_MODES,
     SOURCE_LIST_SCOPES,
@@ -1058,6 +1061,7 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                 CONF_BOUQUETS: user_input.get(CONF_BOUQUETS) or [],
                 CONF_CHECK_GITHUB_RELEASES: user_input[CONF_CHECK_GITHUB_RELEASES],
                 CONF_SOURCE_LIST_SCOPE: user_input[CONF_SOURCE_LIST_SCOPE],
+                CONF_PLAYER_PICTURE: user_input[CONF_PLAYER_PICTURE],
                 CONF_HISTORY_HIDDEN_BOUQUETS: (
                     user_input.get(CONF_HISTORY_HIDDEN_BOUQUETS) or []
                 ),
@@ -1148,6 +1152,16 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                     selector.SelectSelectorConfig(
                         options=list(SOURCE_LIST_SCOPES),
                         translation_key=CONF_SOURCE_LIST_SCOPE,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                        sort=False,
+                    )
+                ),
+                vol.Required(
+                    CONF_PLAYER_PICTURE, default=DEFAULT_PLAYER_PICTURE
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=list(PLAYER_PICTURES),
+                        translation_key=CONF_PLAYER_PICTURE,
                         mode=selector.SelectSelectorMode.DROPDOWN,
                         sort=False,
                     )

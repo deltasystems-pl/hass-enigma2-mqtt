@@ -14,15 +14,19 @@ standby and a box in deep standby is not worth a state that is being removed. Wh
 household sees is the same either way - a dark television - and the „Zasilanie" switch
 and the device's availability still tell the two apart for anyone who needs it.
 
-**The picture is the screenshot.** `screen` is a retained JPEG of what is on the
-television, so it is both the media image and the entity picture, refreshed whenever
-the plugin captures a new one.
+**The picture is the screenshot or the channel's picon, by an option.** `screen` is a
+retained JPEG of what is on the television, and the receiver's web interface has a picon
+for most channels. The default shows the screenshot, with the picon of the new channel
+standing in from a channel change until a screenshot taken after it arrives; the other
+setting shows the picon all the time. Which one, where a picon comes from and how it is
+fetched are all in `picture.py`; this entity hands it the channel and the screenshot and
+shows what it answers. Home Assistant serves the picture either way, so a browser never
+has to reach the receiver for it, and standby keeps the last one.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-import hashlib
 import json
 import time
 from typing import Any
@@ -42,7 +46,12 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 import homeassistant.util.dt as dt_util
 
-from .box import Enigma2Box, Enigma2MqttConfigEntry, async_send_magic_packet
+from .box import (
+    Enigma2Box,
+    Enigma2MqttConfigEntry,
+    async_send_magic_packet,
+    service_identity,
+)
 from .const import (
     DOMAIN,
     TOPIC_BOUQUET,
@@ -54,6 +63,7 @@ from .const import (
     TOPIC_VOLUME,
 )
 from .entity import Enigma2Entity
+from .picture import PendingPicon, Picture, PlayerPicture, player_picture_mode
 from .services import Enigma2Actions, async_select_bouquet, async_setup_services
 
 PARALLEL_UPDATES = 0
@@ -123,6 +133,15 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
         # The player is named after its device, so it has no name of its own to
         # translate; the translation key would only make `hassfest` look for one.
         self._attr_translation_key = None
+        self._picture = PlayerPicture(player_picture_mode(box.entry.options))
+
+    async def async_added_to_hass(self) -> None:
+        """Start listening to the box, and to picons that were being fetched."""
+        await super().async_added_to_hass()
+        if (picons := self.box.picons) is not None:
+            # A picon arrives from a background task, after the payload that asked for
+            # it was handled, so the state is read again then.
+            self.async_on_remove(picons.async_add_listener(self._handle_box_update))
 
     @property
     def available(self) -> bool:
@@ -168,11 +187,24 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
         muted = volume.get("muted")
         self._attr_is_volume_muted = muted if isinstance(muted, bool) else None
 
-        # A new frame has to change the hash, or the frontend keeps the cached picture
-        # for as long as the entity lives.
-        self._attr_media_image_hash = (
-            hashlib.sha256(state.screen).hexdigest()[:16] if state.screen else None
+        # A new picture has to change the hash - another channel's picon, a picon giving
+        # way to a screenshot, a new frame - or the frontend keeps the cached picture for
+        # as long as the entity lives.
+        shown = self._picture.update(
+            sref=service.get("sref"),
+            screen=state.screen or None,
+            is_on=self.box.is_on,
+            picon=self._picon,
+            screenshots_off=self.box.screenshots_off,
         )
+        self._attr_media_image_hash = shown.digest if shown is not None else None
+
+    @callback
+    def _picon(self, sref: str) -> Picture | PendingPicon | None:
+        """Return a channel's picon as the lookup has it: here, pending, or none."""
+        if (picons := self.box.picons) is None:
+            return None
+        return picons.async_picon(sref)
 
     @property
     def source_list(self) -> list[str] | None:
@@ -187,10 +219,10 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
         return self.box.channel_names or None
 
     async def async_get_media_image(self) -> tuple[bytes | None, str | None]:
-        """Return the last screenshot as the picture of what is playing."""
-        if (screen := self.box.state.screen) is None:
+        """Return the picture chosen at the last payload: a screenshot or a picon."""
+        if (shown := self._picture.shown) is None:
             return None, None
-        return screen, "image/jpeg"
+        return shown.content, shown.content_type
 
     # ------------------------------------------------------------------ commands
 
@@ -306,7 +338,25 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
         )
 
     def _browse_bouquet(self, bouquet: dict[str, Any]) -> BrowseMedia:
-        """Return one bouquet as a list of playable channels."""
+        """Return one bouquet as a list of playable channels.
+
+        A thumbnail is the picon link the receiver's web interface gave for the channel,
+        where one is held. The browser never waits for the receiver: a bouquet opened for
+        the first time is asked about in the background, and until the answer is in - and
+        where there is none, as with an older OpenWebif - the name built from the service
+        reference is used, as it always was.
+        """
+        picons = self.box.picons
+        thumbnails = picons.async_thumbnails(bouquet) if picons else {}
+
+        def thumbnail(sref: Any) -> str | None:
+            if picons is None or not isinstance(sref, str):
+                return None
+            identity = service_identity(sref)
+            if identity in thumbnails:
+                return thumbnails[identity]
+            return picons.async_legacy_thumbnail(sref)
+
         children: Sequence[BrowseMedia] = [
             BrowseMedia(
                 media_class=MediaClass.CHANNEL,
@@ -315,7 +365,7 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
                 title=channel.get("name") or "",
                 can_play=True,
                 can_expand=False,
-                thumbnail=self.box.picon_url(channel.get("sref")),
+                thumbnail=thumbnail(channel["sref"]),
             )
             for channel in bouquet["channels"]
             if isinstance(channel, dict) and channel.get("sref")

@@ -28,6 +28,9 @@ is: the index as its bouquets with their slugs and counts, each `channels/<slug>
 many channels it holds, and never a channel's name or reference. `channel_list` says which
 of the two sources the entities are reading and whether every bouquet's list is in, and
 `not_published` is the receiver's own list of what it withheld, normalised.
+
+`player_picture` is the chosen picture of the media player and the state of the picon
+lookup as counts and a cause - never the address asked, a channel or a picture.
 """
 
 from __future__ import annotations
@@ -41,6 +44,7 @@ from homeassistant.helpers import device_registry as dr
 from .box import Enigma2Box, Enigma2MqttConfigEntry
 from .bundle import BundleError, load_bundled_plugin
 from .const import DOMAIN, SUPPORTED_PLUGIN_VERSION
+from .picture import player_picture_mode
 from .release_store import async_release_index_cache
 from .update import plugin_compatibility
 
@@ -108,6 +112,10 @@ async def async_get_config_entry_diagnostics(
             # not report it, which is not the same as an empty list.
             "not_published": state.not_published,
             "channel_list": _summarise_channel_list(box),
+            "player_picture": {
+                "mode": player_picture_mode(entry.options),
+                "picon_lookup": box.picons.async_status() if box.picons else None,
+            },
         },
         "announcement": dict(state.announcement),
         "info": dict(state.info),

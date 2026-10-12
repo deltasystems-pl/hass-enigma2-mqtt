@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from collections.abc import Generator
 import json
+import logging
+import re
 from typing import Any
 from unittest.mock import patch
 
@@ -26,6 +28,7 @@ from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_fire_mqtt_message,
 )
+from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
 from custom_components.enigma2_mqtt.const import (
     CONF_BASE_TOPIC,
@@ -298,6 +301,67 @@ def quick_restart_rule(monkeypatch: pytest.MonkeyPatch) -> None:
     # How long "nothing is retained on the release index topic" takes to conclude. The fake
     # broker delivers a retained message on the next turn of the loop, not seconds later.
     monkeypatch.setattr(release_store, "RETAINED_GRACE", 0.05)
+
+
+# What the picon lookup asks the receiver's web interface, and nothing else here does.
+PICON_LOOKUP_PATHS = ("/api/getpicon", "/api/getservices")
+
+
+def unexpected_receiver_requests(aioclient_mock: AiohttpClientMocker) -> list[str]:
+    """Return every recorded request to the example receiver that is not a picon lookup."""
+    return [
+        str(url)
+        for _method, url, *_ in aioclient_mock.mock_calls
+        if url.host == IP
+        and url.path not in PICON_LOOKUP_PATHS
+        and not url.path.startswith("/picon/")
+    ]
+
+
+class _LookupFaults(logging.Handler):
+    """Keeps what the picon lookup logs when it fails in a way it did not foresee."""
+
+    def __init__(self) -> None:
+        super().__init__(logging.WARNING)
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        message = record.getMessage()
+        if "failed unexpectedly" in message:
+            self.messages.append(message)
+
+
+@pytest.fixture(autouse=True)
+def receiver_without_a_web_interface(
+    aioclient_mock: AiohttpClientMocker,
+) -> Generator[list[str]]:
+    """Answer every request to the example receiver's web interface with 404.
+
+    The media player asks the receiver's OpenWebif for a channel's picon after a channel
+    change, and many tests change the channel. Without this each of them would try to
+    open a real connection to a documentation address. A 404 is a receiver that has no
+    such page: the lookup ends quietly and the picture is the screenshot, which is what
+    every test that is not about picons expects. A test about picons clears this and
+    serves its own OpenWebif.
+
+    A blanket answer would also hide a request nothing is meant to make, so every test
+    ends with two looks at what happened. Anything sent to the receiver's web interface
+    that is not the picon lookup's fails the test that sent it. And so does a fault
+    inside the lookup: a request to any other address that no test serves is refused by
+    the fake session with an AssertionError, which the lookup catches like any fault of
+    its own and logs - the one trace such a request leaves. A test that means to cause
+    a fault takes this fixture and clears the list it is given.
+    """
+    faults = _LookupFaults()
+    logger = logging.getLogger("custom_components.enigma2_mqtt.picture")
+    logger.addHandler(faults)
+    aioclient_mock.get(re.compile(rf"^http://{re.escape(IP)}/"), status=404)
+    try:
+        yield faults.messages
+    finally:
+        logger.removeHandler(faults)
+    assert unexpected_receiver_requests(aioclient_mock) == []
+    assert faults.messages == [], "the picon lookup failed in a way no test expected"
 
 
 @pytest.fixture

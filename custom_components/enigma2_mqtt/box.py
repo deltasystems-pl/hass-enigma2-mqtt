@@ -27,7 +27,7 @@ import ipaddress
 import json
 import logging
 import re
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from homeassistant.components import mqtt
 from homeassistant.components.mqtt import ReceiveMessage
@@ -38,6 +38,7 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_call_later
 import homeassistant.util.dt as dt_util
+from yarl import URL
 
 from .const import (
     ACK_TIMEOUT,
@@ -58,6 +59,7 @@ from .const import (
     CONF_NAME,
     CONF_NODE_ID,
     CONF_RECEIVER_HOST,
+    CONF_SCREENSHOT,
     CONF_SOFTCAM_RESTART_ALLOWED,
     CONF_SOURCE_LIST_SCOPE,
     CONF_UNINSTALL_ALLOWED,
@@ -89,6 +91,7 @@ from .const import (
     PRESS_LONG,
     PRESS_SHORT,
     PROBE_TIMEOUT,
+    SCREENSHOT_OFF,
     SERVICE_FIELDS,
     SOFTCAM_NAME_MAX,
     SOFTCAM_RESTART_REASONS,
@@ -122,6 +125,9 @@ from .const import (
     TOPIC_VOLUME,
     TOPIC_ZAP_HISTORY,
 )
+
+if TYPE_CHECKING:
+    from .picture import PiconResolver
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -247,6 +253,39 @@ def _configuration_url(host: Any) -> str | None:
     else:
         url_host = f"[{address}]" if address.version == 6 else str(address)
     return f"http://{url_host}/"
+
+
+# A host name as HTTP will take it, which is wider than a name a certificate may carry:
+# underscores, and the final dot of a fully qualified name. Labels still cannot begin or
+# end with a hyphen, and nothing that would end the host part of an address gets in.
+_HTTP_HOST_LABEL: Final = r"[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?"
+_HTTP_HOST_NAME: Final = re.compile(rf"(?:{_HTTP_HOST_LABEL}\.)*{_HTTP_HOST_LABEL}\.?")
+
+
+def _typed_host_url(host: Any) -> str | None:
+    """Return the HTTP address of a host somebody typed, or None if it cannot have one.
+
+    The config flow stores what was typed for SSH, which takes more than an address
+    does: `fe80::1%eth0` is a fine SSH target and no host of a URL. So this judges only
+    whether the value can be put between `http://` and `/` - an IP address without a
+    zone, or a name - and never what kind of address it is: the choice is the
+    administrator's.
+    """
+    if not isinstance(host, str) or not (host := host.strip()) or "%" in host:
+        return None
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        if len(host) > 253 or not _HTTP_HOST_NAME.fullmatch(host):
+            return None
+        try:
+            # A label that claims to be punycode and is not is refused by the URL parser,
+            # and only when the host is read.
+            _ = URL(f"http://{host}/").host
+        except ValueError:
+            return None
+        return f"http://{host}/"
+    return f"http://[{address}]/" if address.version == 6 else f"http://{address}/"
 
 
 def command_topic(base_topic: str, node_id: str, name: str) -> str:
@@ -556,6 +595,11 @@ def picon_url(ip_address: str | None, sref: str | None) -> str | None:
 
     Everything about this is best effort. No address, no picon; no picon on the box,
     a broken image the media browser simply does not draw.
+
+    This name is only the first of several OpenWebif tries, so it is the fallback: the
+    media browser and the player use the link OpenWebif itself gives for a service
+    (`picture.PiconResolver`) whenever it gives one - and the resolver builds the
+    fallback too, at the address it asks, not at whatever address is passed in here.
     """
     if not ip_address or not sref:
         return None
@@ -882,6 +926,9 @@ class Enigma2Box:
         self._hidden_missing_warned: set[str] = set()
         # Who answers the receiver's `relay_request`: set when the entry is set up.
         self.relay_request_handler: Callable[[Any], None] | None = None
+        # Finds and fetches channel picons through the receiver's web interface: set
+        # when the entry is set up, stopped with the box.
+        self.picons: PiconResolver | None = None
         # The channel list last shown from the per-bouquet topics; None while the combined
         # `channels` topic is the source. See `channel_list`.
         self._topic_list: ChannelList | None = None
@@ -942,6 +989,60 @@ class Enigma2Box:
         source = {**self.state.announcement, **self.state.info}
         ip_address = source.get("ip")
         return ip_address if isinstance(ip_address, str) and ip_address else None
+
+    @property
+    def web_url(self) -> str | None:
+        """Return the address of the receiver's web interface, or None if unknown.
+
+        The address the receiver reports, and the host typed when it was added only while
+        it has reported none. Built from a plain IP address or host name and nothing else.
+        """
+        source = {**self.state.announcement, **self.state.info}
+        return _configuration_url(source.get("ip")) or _configuration_url(
+            self.entry.data.get(CONF_RECEIVER_HOST)
+        )
+
+    @property
+    def picon_lookup_url(self) -> str | None:
+        """Return the address Home Assistant itself asks for picons, or None for none.
+
+        Not the same rule as `web_url`, which only makes a link for a person to click.
+        This one decides where Home Assistant sends requests of its own, and the address
+        a receiver reports arrives over the broker, where anything that may publish can
+        have written it. So the host typed when the receiver was added wins whenever
+        there is one: that is the administrator's word, and it is not second-guessed.
+        A typed host that cannot be the host of an address - one only SSH can use, like
+        an IPv6 address with a zone, or a host with a port - means no address and no
+        picons, never the reported one: once a host is typed, nothing on the broker
+        chooses where Home Assistant asks. Only without a typed host is the reported
+        address used, and only when it is an IP address written out - never a name,
+        which would be resolved by this machine - and not loopback, link-local,
+        unspecified, multicast or reserved: none of those is a receiver, and the first
+        two are where a machine keeps what only it should reach.
+        """
+        typed = self.entry.data.get(CONF_RECEIVER_HOST)
+        if isinstance(typed, str) and typed.strip():
+            return _typed_host_url(typed)
+        try:
+            address = ipaddress.ip_address(self.ip_address or "")
+        except ValueError:
+            return None
+        for candidate in (address, getattr(address, "ipv4_mapped", None)):
+            if candidate is not None and (
+                candidate.is_loopback
+                or candidate.is_link_local
+                or candidate.is_unspecified
+                or candidate.is_multicast
+                or candidate.is_reserved
+            ):
+                return None
+        return _configuration_url(str(address))
+
+    @property
+    def screenshots_off(self) -> bool:
+        """Return True when the receiver says it takes no screenshots."""
+        settings = self.state.info.get("settings")
+        return isinstance(settings, dict) and settings.get(CONF_SCREENSHOT) == SCREENSHOT_OFF
 
     @property
     def reported_mac(self) -> str | None:
@@ -1312,10 +1413,6 @@ class Enigma2Box:
                 return bouquet
         return None
 
-    def picon_url(self, sref: str | None) -> str | None:
-        """Return the picon URL of a service on this box."""
-        return picon_url(self.ip_address, sref)
-
     # ------------------------------------------------------------------- topics
 
     def state_topic(self, suffix: str) -> str:
@@ -1397,6 +1494,8 @@ class Enigma2Box:
             self._unsubscribes.pop()()
         self._cancel_settle()
         self._cancel_refetch()
+        if self.picons is not None:
+            self.picons.async_stop()
         for pending in self._pending:
             pending.fail("the receiver was removed from Home Assistant")
         self._pending.clear()
@@ -1504,9 +1603,6 @@ class Enigma2Box:
         source = {**self.state.announcement, **self.state.info}
         name = self.state.announcement.get("name") or self.name
         boxtype = source.get("boxtype")
-        configuration_url = _configuration_url(source.get("ip"))
-        if configuration_url is None:
-            configuration_url = _configuration_url(self.entry.data.get(CONF_RECEIVER_HOST))
         # The address the packet is actually sent to, so that everything else in Home
         # Assistant - a DHCP discovery, a router integration listing what is on the
         # network - can recognise the same box. Without it the device page knew the
@@ -1522,7 +1618,7 @@ class Enigma2Box:
             manufacturer=manufacturer_for(boxtype),
             model=boxtype,
             sw_version=software_version(source),
-            configuration_url=configuration_url,
+            configuration_url=self.web_url,
         )
         self.device_id = device.id
         return device
