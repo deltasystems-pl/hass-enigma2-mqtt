@@ -66,6 +66,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 import hashlib
+import io
 import json
 import logging
 import time
@@ -76,6 +77,7 @@ import aiohttp
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_call_later
+from PIL import Image, ImageStat
 from yarl import URL
 
 from .box import service_identity
@@ -105,6 +107,11 @@ REQUEST_TIMEOUT: Final = 5.0
 MAX_JSON_BYTES: Final = 2 * 1024 * 1024
 # A picon is a small PNG, usually well under 100 kB.
 MAX_IMAGE_BYTES: Final = 1024 * 1024
+# The longest side of a picon that is fitted to the card; a larger one is shown as it
+# came. And what a picon with transparent corners is put on.
+MAX_PICON_SIDE: Final = 1024
+CARD_BACKDROP_DARK: Final = (24, 24, 24)
+CARD_BACKDROP_LIGHT: Final = (240, 240, 240)
 # Services read from one answer, and the longest link taken from one.
 MAX_SERVICES: Final = 10000
 MAX_LINK_LENGTH: Final = 512
@@ -196,6 +203,56 @@ def picon_picture(content: bytes) -> Picture | None:
     # The kind is part of the hash, so a picon and a screenshot never share one.
     digest = hashlib.sha256(b"picon:" + content).hexdigest()[:16]
     return Picture(content, content_type, KIND_PICON, digest)
+
+
+def card_picon(content: bytes) -> Picture | None:
+    """Return fetched bytes as the picon the media player shows: whole, on a backdrop.
+
+    The media player card draws its picture into a square and crops what does not fit,
+    which costs a 220x132 picon a fifth of its width on either side; and it takes its
+    own background from the picture's colours, so a light logo on a transparent picon
+    ends up light on light. So the picon is put, whole, in the middle of a square: of
+    the picon's own corner colour when its corners are opaque, and otherwise dark behind
+    a light logo and light behind a dark one.
+
+    Blocking: it decodes and encodes an image. A picon that cannot be decoded, or that is
+    larger than a picon is, is shown as it came.
+    """
+    picture = picon_picture(content)
+    if picture is None:
+        return None
+    try:
+        with Image.open(io.BytesIO(content)) as opened:
+            if opened.format not in ("PNG", "JPEG"):
+                return picture
+            width, height = opened.size
+            if not 0 < width <= MAX_PICON_SIDE or not 0 < height <= MAX_PICON_SIDE:
+                return picture
+            image = opened.convert("RGBA")
+    except (OSError, ValueError, SyntaxError, Image.DecompressionBombError):
+        return picture
+    corners = [
+        image.getpixel(at)
+        for at in ((0, 0), (width - 1, 0), (0, height - 1), (width - 1, height - 1))
+    ]
+    if all(corner[3] == 255 for corner in corners):
+        if width == height:
+            return picture
+        backdrop = tuple(sum(corner[i] for corner in corners) // 4 for i in range(3))
+    else:
+        # The brightness of what can be seen, each pixel counted by how opaque it is.
+        alpha = image.getchannel("A")
+        seen = ImageStat.Stat(alpha).sum[0]
+        grey = ImageStat.Stat(image.convert("L"), mask=alpha).mean[0] if seen else 255.0
+        backdrop = CARD_BACKDROP_DARK if grey >= 128 else CARD_BACKDROP_LIGHT
+    side = max(width, height)
+    card = Image.new("RGBA", (side, side), (*backdrop, 255))
+    card.alpha_composite(image, ((side - width) // 2, (side - height) // 2))
+    out = io.BytesIO()
+    card.convert("RGB").save(out, "PNG")
+    fitted = out.getvalue()
+    digest = hashlib.sha256(b"picon:" + fitted).hexdigest()[:16]
+    return Picture(fitted, "image/png", KIND_PICON, digest)
 
 
 def player_picture_mode(options: Any) -> str:
@@ -342,6 +399,7 @@ class PlayerPicture:
         screen: bytes | None,
         is_on: bool,
         picon: Callable[[str], Picture | PendingPicon | None],
+        screenshots_off: bool = False,
     ) -> Picture | None:
         """Take the current channel and screenshot, and return the picture to show.
 
@@ -372,7 +430,14 @@ class PlayerPicture:
                 return self.shown
             self._held = False
 
-        if is_on and identity and (self.mode == PLAYER_PICTURE_PICON or self._awaiting):
+        # With screenshots switched off on the receiver and none held, the picon is the
+        # only picture there is, channel change or not. Not for a screenshot that is
+        # merely not here yet: at start-up the channel arrives before it.
+        if is_on and identity and (
+            self.mode == PLAYER_PICTURE_PICON
+            or self._awaiting
+            or (screenshots_off and screen is None)
+        ):
             found = picon(sref)
             if isinstance(found, Picture):
                 self.shown = found
@@ -717,7 +782,11 @@ class PiconResolver:
             if link is not None
             else None
         )
-        picture = picon_picture(body) if body is not None else None
+        picture = (
+            await self.hass.async_add_executor_job(card_picon, body)
+            if body is not None
+            else None
+        )
         if picture is not None:
             if not proven and not self._getpicon_works:
                 # The old name found a picture where `getpicon` never answered.

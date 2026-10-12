@@ -59,6 +59,7 @@ from .const import (
     CONF_NAME,
     CONF_NODE_ID,
     CONF_RECEIVER_HOST,
+    CONF_SCREENSHOT,
     CONF_SOFTCAM_RESTART_ALLOWED,
     CONF_SOURCE_LIST_SCOPE,
     CONF_UNINSTALL_ALLOWED,
@@ -90,6 +91,7 @@ from .const import (
     PRESS_LONG,
     PRESS_SHORT,
     PROBE_TIMEOUT,
+    SCREENSHOT_OFF,
     SERVICE_FIELDS,
     SOFTCAM_NAME_MAX,
     SOFTCAM_RESTART_REASONS,
@@ -1008,16 +1010,19 @@ class Enigma2Box:
         This one decides where Home Assistant sends requests of its own, and the address
         a receiver reports arrives over the broker, where anything that may publish can
         have written it. So the host typed when the receiver was added wins whenever
-        it can be the host of an address: that is the administrator's word, and it is
-        not second-guessed. Without one - or with one that only SSH can use, like an
-        IPv6 address with a zone - the reported address is used, and only when it is an
-        IP address written out - never a name, which would be resolved by this machine -
-        and not loopback, link-local, unspecified, multicast or reserved: none of those
-        is a receiver, and the first two are where a machine keeps what only it should
-        reach.
+        there is one: that is the administrator's word, and it is not second-guessed.
+        A typed host that cannot be the host of an address - one only SSH can use, like
+        an IPv6 address with a zone, or a host with a port - means no address and no
+        picons, never the reported one: once a host is typed, nothing on the broker
+        chooses where Home Assistant asks. Only without a typed host is the reported
+        address used, and only when it is an IP address written out - never a name,
+        which would be resolved by this machine - and not loopback, link-local,
+        unspecified, multicast or reserved: none of those is a receiver, and the first
+        two are where a machine keeps what only it should reach.
         """
-        if (typed := _typed_host_url(self.entry.data.get(CONF_RECEIVER_HOST))) is not None:
-            return typed
+        typed = self.entry.data.get(CONF_RECEIVER_HOST)
+        if isinstance(typed, str) and typed.strip():
+            return _typed_host_url(typed)
         try:
             address = ipaddress.ip_address(self.ip_address or "")
         except ValueError:
@@ -1032,6 +1037,12 @@ class Enigma2Box:
             ):
                 return None
         return _configuration_url(str(address))
+
+    @property
+    def screenshots_off(self) -> bool:
+        """Return True when the receiver says it takes no screenshots."""
+        settings = self.state.info.get("settings")
+        return isinstance(settings, dict) and settings.get(CONF_SCREENSHOT) == SCREENSHOT_OFF
 
     @property
     def reported_mac(self) -> str | None:

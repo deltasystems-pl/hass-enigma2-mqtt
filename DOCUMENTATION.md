@@ -481,10 +481,18 @@ while the box is unreachable, because that is precisely when somebody wants to w
     of the new channel is shown until a screenshot **taken after the change** arrives - judged by
     the picture's bytes, so the same picture delivered again after a reconnect does not count.
     If no new screenshot arrives, the picon stays. The channel a session starts on is not a
-    change: after a restart the screenshot is shown, and the receiver is asked nothing.
+    change: after a restart the screenshot is shown, and the receiver is asked nothing. With
+    screenshots switched off on the receiver and none held, the picon is shown from the start.
   - **Channel picon**: the picon of the current channel, and the screenshot only for a channel
     without one. For the moment the lookup of a channel seen for the first time takes, the
     previous channel's picon stays on the card under the new title.
+  - **The picon on the card is fitted to it.** The media player card draws its picture into a
+    square, crops what does not fit and takes its background from the picture's colours. A
+    picon is wider than it is high and often a light logo on nothing, so it would lose its
+    sides and end up light on light. Home Assistant therefore puts the picon, whole, in the
+    middle of a square: in the picon's own corner colour when its corners are not transparent,
+    and otherwise dark behind a light logo and light behind a dark one. The thumbnails in the
+    media browser are the receiver's files as they are.
   - **Standby keeps the last picture**, and a receiver that wakes keeps it until it has said
     which channel it is on. As with any media player, Home Assistant shows no picture on the
     card while the state is `off`.
@@ -498,7 +506,8 @@ while the box is unreachable, because that is precisely when somebody wants to w
     `getpicon` has never answered, the question is not asked again for an hour. OpenWebif's
     default picon counts as none.
   - **Which address is asked.** The receiver host typed when the receiver was added, if one
-    was. Otherwise the address the receiver reports on `info`, and only when it is an IP
+    was - and if that cannot be the host of a web address (it has a port, a user name or an
+    IPv6 zone), there are no picons. Only with no host typed, the address the receiver reports on `info`, and only when it is an IP
     address written out - never a host name - that is not loopback, link-local, unspecified,
     multicast or reserved. That address arrives over the broker, where anything allowed to
     publish could have written it; [SECURITY.md](SECURITY.md) says what that leaves open. With

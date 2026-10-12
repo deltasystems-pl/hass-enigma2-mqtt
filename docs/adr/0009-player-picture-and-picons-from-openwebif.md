@@ -44,7 +44,9 @@ change until a screenshot taken after it arrives, the picon of the new channel i
 a screenshot was taken after the change is decided from its bytes: the `screen` topic is retained,
 and a reconnect to the broker delivers the same picture again with a new arrival time. If no new
 screenshot arrives, the picon stays. The channel a session starts on is not a change, so after a
-restart the screenshot is shown and the receiver is asked nothing.
+restart the screenshot is shown and the receiver is asked nothing. The one exception: when the
+receiver reports screenshots switched off and none is held, there is no other picture, and the
+picon is shown without a channel change.
 
 **3. Standby keeps the last picture.** It is not blanked or swapped when the receiver goes to
 standby or its `service` payload empties, and a receiver that wakes keeps it until it has named
@@ -65,10 +67,21 @@ through Home Assistant, as the screenshot is, so it works wherever Home Assistan
 browser needs no route to the receiver. The media browser's thumbnails stay addresses on the
 receiver, with the link OpenWebif gave.
 
+The player's picon is not the receiver's file as it is. The media player card draws its picture
+into a square, crops what does not fit and takes its background colour from the picture; a picon
+is 220x132 and usually a light logo on a transparent ground, so it lost a fifth of its width on
+either side and stood light on light (seen on the first receiver it ran on). The picon is
+therefore decoded and put, whole, in the middle of a square: in its own corner colour when its
+corners are opaque, otherwise dark behind a light logo and light behind a dark one, judged by the
+brightness of its visible pixels. This uses Pillow, which Home Assistant itself depends on, in
+the executor; only a PNG or JPEG of at most 1024 pixels a side is decoded, and a picon that
+cannot be decoded is shown as it came.
+
 **6. The address asked is the typed one, and a reported one only within limits.** The host typed
 when the receiver was added is asked whenever there is one, and is not filtered: it is the
 administrator's choice. A typed value that cannot be the host of a web address - an IPv6 address
-with a zone, which only SSH can use - counts as none. Without one, the address the receiver reports on `info` is asked only when
+with a zone, a host with a port, which only SSH can use - means no address and no picons, never
+the reported one. Without a typed host, the address the receiver reports on `info` is asked only when
 it is an IP address written out - never a host name, which this machine would resolve - and not
 loopback, link-local, unspecified, multicast or reserved. Otherwise there is no address and no
 picon. The reported address arrives over the broker, where anything that may publish can have

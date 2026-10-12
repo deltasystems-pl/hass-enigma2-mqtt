@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
+import io
 import json
 import logging
 from pathlib import Path
@@ -23,6 +24,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.util.dt as dt_util
+from PIL import Image
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -1302,16 +1304,21 @@ async def test_the_typed_host_is_asked_whatever_the_receiver_reports(
         ("vu_uno.lan", "http://vu_uno.lan/"),
         ("box.lan.", "http://box.lan./"),
         ("_dmz_.box-2.lan.", "http://_dmz_.box-2.lan./"),
-        # What cannot be the host of an HTTP address at all is as good as nothing
-        # typed: the reported address is asked, by the rules for a reported address.
-        ("fe80::1%eth0", f"http://{IP}/"),
-        ("http://192.0.2.40/", f"http://{IP}/"),
-        ("192.0.2.40/../x", f"http://{IP}/"),
-        ("box lan", f"http://{IP}/"),
-        ("box.lan:8080", f"http://{IP}/"),
-        ("user@box.lan", f"http://{IP}/"),
-        ("-box.lan", f"http://{IP}/"),
-        ("a" * 254, f"http://{IP}/"),
+        # What cannot be the host of an HTTP address at all is no address - and never
+        # the reported one: once a host is typed, the broker does not choose.
+        ("fe80::1%eth0", None),
+        ("http://192.0.2.40/", None),
+        ("192.0.2.40/../x", None),
+        ("box lan", None),
+        ("box.lan:8080", None),
+        ("user@box.lan", None),
+        ("[2001:db8::40]", None),
+        ("b" + chr(0xFC) + "cher.example", None),
+        ("-box.lan", None),
+        ("a" * 254, None),
+        # Nothing typed, or only blanks, is nothing typed: the reported address.
+        ("", f"http://{IP}/"),
+        ("   ", f"http://{IP}/"),
     ],
 )
 async def test_a_typed_host_is_asked_when_it_can_be_the_host_of_an_address(
@@ -1328,16 +1335,20 @@ async def test_a_typed_host_is_asked_when_it_can_be_the_host_of_an_address(
     assert entry.runtime_data.picon_lookup_url == url
 
 
-@pytest.mark.parametrize("reported", ["127.0.0.1", "169.254.169.254", "localhost", None])
-async def test_an_unusable_typed_host_does_not_excuse_the_reported_address(
+@pytest.mark.parametrize(
+    "reported", ["192.0.2.12", "127.0.0.1", "169.254.169.254", "localhost", None]
+)
+@pytest.mark.parametrize("typed", ["fe80::1%eth0", "box.lan:8080", "user@box.lan"])
+async def test_an_unusable_typed_host_is_never_replaced_by_the_reported_address(
     hass: HomeAssistant,
     mqtt_mock,
     aioclient_mock: AiohttpClientMocker,
     box_on_the_broker: dict[str, str | bytes],
+    typed: str,
     reported: Any,
 ) -> None:
-    """Falling back on the reported address is falling back on its rules as well."""
-    entry = _entry_with_host("fe80::1%eth0")
+    """A host was typed, so nothing the broker says is asked - not even a good address."""
+    entry = _entry_with_host(typed)
     box_on_the_broker[INFO_TOPIC] = json.dumps({**INFO, "ip": reported})
     box_on_the_broker[ANNOUNCEMENT_TOPIC] = json.dumps({**ANNOUNCEMENT, "ip": reported})
     aioclient_mock.clear_requests()
@@ -2418,6 +2429,82 @@ def test_holding_a_picture_ends_when_the_receiver_names_a_channel(mode: str) -> 
     later = chosen.update(sref=None, screen=NEW_SCREEN, is_on=True, picon=_never)
 
     assert later is not None and later.content == NEW_SCREEN
+
+
+def test_with_screenshots_switched_off_the_picon_is_shown_without_a_channel_change() -> None:
+    """No screenshot will ever come, so the channel a session starts on gets its picon."""
+    one = picon_picture(PNG_ONE)
+    chosen = PlayerPicture(PLAYER_PICTURE_SCREENSHOT)
+
+    shown = chosen.update(
+        sref=SREF, screen=None, is_on=True, picon=lambda _: one, screenshots_off=True
+    )
+    assert shown is one
+
+    # A screenshot that is only not here yet is waited for, and nothing is asked.
+    waiting = PlayerPicture(PLAYER_PICTURE_SCREENSHOT)
+    assert waiting.update(sref=SREF, screen=None, is_on=True, picon=_never) is None
+
+    # And one that is held - the button was pressed - is shown, switched off or not.
+    held = PlayerPicture(PLAYER_PICTURE_SCREENSHOT)
+    kept = held.update(sref=SREF, screen=SCREEN, is_on=True, picon=_never, screenshots_off=True)
+    assert kept is not None and kept.content == SCREEN
+
+
+def _png(size: tuple[int, int], colour: tuple[int, int, int, int], logo=None) -> bytes:
+    """Return a real PNG: one colour, and a block of another in the middle if asked."""
+    image = Image.new("RGBA", size, colour)
+    if logo is not None:
+        width, height = size
+        image.paste(logo, (width // 4, height // 4, 3 * width // 4, 3 * height // 4))
+    out = io.BytesIO()
+    image.save(out, "PNG")
+    return out.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("logo", "backdrop"),
+    [
+        ((255, 255, 255, 255), picture.CARD_BACKDROP_DARK),
+        ((10, 10, 10, 255), picture.CARD_BACKDROP_LIGHT),
+    ],
+)
+def test_a_picon_is_put_whole_on_a_square_that_its_logo_stands_out_from(
+    logo: tuple[int, int, int, int], backdrop: tuple[int, int, int]
+) -> None:
+    """The card crops to a square and takes its colour from the picture: neither costs the logo."""
+    fitted = picture.card_picon(_png((220, 132), (0, 0, 0, 0), logo))
+
+    assert fitted is not None and fitted.content_type == "image/png"
+    assert fitted.kind == picture.KIND_PICON
+    image = Image.open(io.BytesIO(fitted.content))
+    assert image.size == (220, 220) and image.mode == "RGB"
+    # Bars above and below, the picon's own transparent edge, and the logo untouched.
+    assert image.getpixel((110, 5)) == backdrop
+    assert image.getpixel((2, 110)) == backdrop
+    assert image.getpixel((110, 110)) == logo[:3]
+    assert image.getpixel((56, 110)) == logo[:3] and image.getpixel((164, 110)) == logo[:3]
+    assert fitted.digest != picon_picture(_png((220, 132), (0, 0, 0, 0), logo)).digest
+
+
+def test_a_picon_with_a_background_of_its_own_is_padded_in_that_colour() -> None:
+    """An opaque picon is not put on a backdrop it was not drawn for."""
+    fitted = picture.card_picon(_png((220, 132), (200, 30, 30, 255), (255, 255, 255, 255)))
+
+    image = Image.open(io.BytesIO(fitted.content))
+    assert image.size == (220, 220)
+    assert image.getpixel((110, 5)) == (200, 30, 30)
+    assert image.getpixel((110, 110)) == (255, 255, 255)
+
+
+def test_a_picon_that_needs_nothing_or_cannot_be_read_is_shown_as_it_came() -> None:
+    """Square and opaque, not really an image, or far larger than a picon: left alone."""
+    square = _png((100, 100), (200, 30, 30, 255))
+    assert picture.card_picon(square).content == square
+    assert picture.card_picon(PNG_ONE).content == PNG_ONE
+    huge = _png((picture.MAX_PICON_SIDE + 1, 10), (0, 0, 0, 0))
+    assert picture.card_picon(huge).content == huge
+    assert picture.card_picon(b"<svg></svg>") is None
 
 
 @pytest.mark.parametrize("mode", [PLAYER_PICTURE_SCREENSHOT, PLAYER_PICTURE_PICON])

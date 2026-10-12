@@ -195,6 +195,7 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
             screen=state.screen or None,
             is_on=self.box.is_on,
             picon=self._picon,
+            screenshots_off=self.box.screenshots_off,
         )
         self._attr_media_image_hash = shown.digest if shown is not None else None
 

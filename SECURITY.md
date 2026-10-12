@@ -60,9 +60,10 @@ answer in size, and shows only a PNG or a JPEG
 ([DOCUMENTATION.md §4.1](DOCUMENTATION.md#41-media-player)).
 
 **Which host that is, and what is left open.** If a receiver host was typed when the receiver was
-added, that host is asked, whatever it is, and nothing on the broker can change it. One kind of
-typed host counts as none: a value that cannot be the host of a web address, such as an IPv6
-address with a zone (`fe80::1%eth0`), which SSH accepts and HTTP does not. If none was
+added, that host is asked, whatever it is, and nothing on the broker can change it. A typed
+host that cannot be the host of a web address - an IPv6 address with a zone (`fe80::1%eth0`), a
+host with a port or a user name, which SSH accepts and HTTP does not - means no picons at all,
+never the reported address. If none was
 typed, the address the receiver reports on its `info` topic is asked - and anything that may
 publish on your broker can write that topic. Such an address is used only when it is an IP address
 written out, never a host name, and is not loopback, link-local, unspecified, multicast or
