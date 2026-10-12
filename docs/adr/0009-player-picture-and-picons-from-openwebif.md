@@ -67,7 +67,8 @@ receiver, with the link OpenWebif gave.
 
 **6. The address asked is the typed one, and a reported one only within limits.** The host typed
 when the receiver was added is asked whenever there is one, and is not filtered: it is the
-administrator's choice. Without one, the address the receiver reports on `info` is asked only when
+administrator's choice. A typed value that cannot be the host of a web address - an IPv6 address
+with a zone, which only SSH can use - counts as none. Without one, the address the receiver reports on `info` is asked only when
 it is an IP address written out - never a host name, which this machine would resolve - and not
 loopback, link-local, unspecified, multicast or reserved. Otherwise there is no address and no
 picon. The reported address arrives over the broker, where anything that may publish can have
