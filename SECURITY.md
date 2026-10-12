@@ -54,7 +54,7 @@ connects - since 0.4.0, and only for the receiver plugin's releases - to:
 
 It also asks **your receiver's own web interface** (OpenWebif) for channel picons, over plain
 HTTP on port 80: one question and one picture when the media player needs the picon of a channel
-it has not seen, and one list when a bouquet is opened in the media browser. It sends no
+it has not seen, and at most one list each time a bouquet is opened in the media browser. It sends no
 credentials, follows no redirect, takes only a path under `/picon/` from the answer, limits every
 answer in size, and shows only a PNG or a JPEG
 ([DOCUMENTATION.md §4.1](DOCUMENTATION.md#41-media-player)).

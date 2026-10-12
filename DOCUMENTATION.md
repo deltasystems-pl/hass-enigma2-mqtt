@@ -459,6 +459,9 @@ while the box is unreachable, because that is precisely when somebody wants to w
   (`/api/getservices?sRef=<bouquet>&picon=1`). The next time the bouquet is opened the
   thumbnails are those links, so a picon OpenWebif finds under another name - the channel's
   name, another namespace - is found here too, and a channel without one gets no thumbnail.
+  A bouquet is listed at most once each time it is opened. A channel change while the list is
+  being fetched interrupts it for the channel that is on, and the list is then dropped, not
+  started again: its thumbnails arrive the next time the bouquet is opened.
   Where OpenWebif does not answer, the thumbnails stay as they were. No address on `info`
   simply means no thumbnail.
 - **Playing** - `media_content_type: channel` takes a service reference, and `channel_name`
@@ -505,8 +508,10 @@ while the box is unreachable, because that is precisely when somebody wants to w
   - **How often.** Nothing is polled, and one request runs at a time. A channel change to a
     channel not seen before costs at most two requests - the question and the picture - and a
     channel change abandons the lookup for the channel before it. A bouquet is listed when it is
-    opened in the media browser, at most once until its channel list changes, or a day; a
-    request for it that failed is not repeated for an hour. Up to 64 channels' pictures (8 MiB)
+    opened in the media browser: one request per opening at most, whatever the zapping, and none
+    once its links are held, until its channel list changes or a day passes. A list a channel
+    change interrupted is asked for again only at the next opening; a request for it that
+    failed is not repeated for an hour. Up to 64 channels' pictures (8 MiB)
     are kept for a day, "no picon" for an hour.
   - **When it fails** the other picture is shown and nothing else changes. A receiver whose web
     interface cannot be reached is left alone for 5 minutes; one that asks for a login (401 or

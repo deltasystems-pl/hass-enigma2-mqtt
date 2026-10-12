@@ -98,12 +98,15 @@ message. Every failure shows the other picture and is logged once per cause unti
   one `getpicon` and one picture. A channel seen before, or one whose bouquet the media browser
   has listed: nothing, or the picture alone. Start-up in the `screenshot` setting: nothing; in
   the `picon` setting: the current channel, as above. The whole-bouquet request is made only when
-  a bouquet is opened in the media browser, at most once per bouquet until its channel list
-  changes or a day passes, and not again for an hour when it failed.
+  a bouquet is opened in the media browser: at most one per opening, none while its links are
+  held - until its channel list changes or a day passes - and not again for an hour when it
+  failed.
 - The player does not wait behind the media browser: a lookup for the channel that is on
-  interrupts a bouquet's list that is being fetched, and the list is asked for again afterwards.
-  Zapping while a large bouquet is being listed can therefore make the receiver start that list
-  more than once.
+  interrupts a bouquet's list that is being fetched. The interrupted list is dropped, not started
+  again, so a bouquet's list is started at most once each time the bouquet is opened, whatever
+  the zapping. The price: thumbnails for a bouquet whose list a channel change interrupted -
+  picking a channel in the browser while it lists is enough - arrive the next time the bouquet
+  is opened. Bouquets that were waiting behind it are still listed, once.
 - **A broker client can still choose an address on the network when no host was typed.** It
   cannot make Home Assistant ask itself, a link-local address or a name. It can name another
   private address. Home Assistant then sends that host the current channel's service reference -
