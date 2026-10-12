@@ -86,6 +86,9 @@
       },
       "force_reinstall": {
         "default": "mdi:package-down"
+      },
+      "clear_error": {
+        "default": "mdi:notification-clear-all"
       }
     },
     "event": {

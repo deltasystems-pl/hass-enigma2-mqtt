@@ -356,6 +356,9 @@
       },
       "force_reinstall": {
         "name": "Wymuś reinstalację wtyczki (SSH)"
+      },
+      "clear_error": {
+        "name": "Wyczyść ostatni błąd"
       }
     },
     "event": {

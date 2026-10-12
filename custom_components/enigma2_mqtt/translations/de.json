@@ -356,6 +356,9 @@
       },
       "force_reinstall": {
         "name": "Plugin-Neuinstallation erzwingen (SSH)"
+      },
+      "clear_error": {
+        "name": "Letzten Fehler löschen"
       }
     },
     "event": {

@@ -71,6 +71,7 @@ from .const import (
     TOPIC_EPG,
     TOPIC_EPG_GRID,
     TOPIC_EPG_IMPORT,
+    TOPIC_ERROR_CLEARED,
     TOPIC_INFO,
     TOPIC_LAST_ERROR,
     TOPIC_LOCAL_ERROR,
@@ -938,6 +939,12 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
     while this shows Home Assistant's record, a replayed complaint replaces it only when
     the receiver's own time for it is later. A complaint the receiver publishes now is
     news whatever its clock says, and replaces it.
+
+    **A clear somebody asked for takes the record with it.** "Wyczyść ostatni błąd" sends
+    `cmd/clear_error`, and once the receiver has emptied its topic for it the box object
+    says so and this sensor goes back to unknown, whichever side the record came from.
+    Every other empty payload - the clearing after a command that succeeded, or at the
+    start of a new plugin process - still leaves the record alone.
     """
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -945,13 +952,20 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
     def __init__(self, box: Enigma2Box) -> None:
         """Set up the sensor on the complaint topic, with no state to wait for."""
         super().__init__(
-            box, "last_error", topics=(TOPIC_LAST_ERROR, TOPIC_LOCAL_ERROR), requires=None
+            box,
+            "last_error",
+            topics=(TOPIC_LAST_ERROR, TOPIC_LOCAL_ERROR, TOPIC_ERROR_CLEARED),
+            requires=None,
         )
         # How many `last_error` payloads had arrived when this entity last looked. The
         # count rather than the payload, because the same command failing the same way
         # twice is two errors and the second one has its own time.
         self._handled = 0
         self._handled_local = 0
+        # How many times the record had been cleared on request when this entity last
+        # looked; set when the entity is added, so that a clear made before it existed
+        # does not wipe the record it restores.
+        self._handled_cleared = 0
         self._attr_native_value = None
         self._attr_extra_state_attributes: dict[str, Any] = {
             "error": None,
@@ -977,11 +991,20 @@ class Enigma2LastErrorSensor(Enigma2Entity, RestoreEntity, SensorEntity):
                 "time": last_state.attributes.get("time"),
                 "source": last_state.attributes.get("source"),
             }
+        self._handled_cleared = self.box.updates.get(TOPIC_ERROR_CLEARED, 0)
         await super().async_added_to_hass()
 
     @callback
     def _async_read_state(self) -> None:
-        """Take a new complaint, and only a new one."""
+        """Take a new complaint, and only a new one - or forget the one shown, on request."""
+        cleared = self.box.updates.get(TOPIC_ERROR_CLEARED, 0)
+        if cleared != self._handled_cleared:
+            # "Wyczyść ostatni błąd": the receiver has emptied its topic because somebody
+            # asked, which is the one clearing that takes this record with it. The sensor
+            # is back to what it says before any complaint: unknown, with empty attributes.
+            self._handled_cleared = cleared
+            self._attr_native_value = None
+            self._attr_extra_state_attributes = {"error": None, "time": None, "source": None}
         recorded = self.box.updates.get(TOPIC_LOCAL_ERROR, 0)
         if recorded != self._handled_local:
             self._handled_local = recorded

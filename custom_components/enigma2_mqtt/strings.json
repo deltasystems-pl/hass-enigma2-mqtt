@@ -383,6 +383,9 @@
       },
       "force_reinstall": {
         "name": "Force plugin reinstall (SSH)"
+      },
+      "clear_error": {
+        "name": "Clear last error"
       }
     },
     "event": {

@@ -622,8 +622,9 @@ its time across a reload and a restart. The state is the failed command - `deep_
 255 characters, and `time` is the receiver's own `ts`, falling back to the moment Home
 Assistant learned of it when the payload has none. Taking the receiver's timestamp is what
 makes the replay harmless: the retained complaint arrives again on every reconnect and at
-every start-up, and a clock reading would walk the time forward each time. There is no clear
-button in 0.2.0: the next error replaces it. `source` says whose complaint it is: `receiver`, or
+every start-up, and a clock reading would walk the time forward each time. The next error
+replaces it, and "Wyczyść ostatni błąd" (section 4.5) clears it on a receiver that runs plugin
+0.5.0 or later. `source` says whose complaint it is: `receiver`, or
 `home_assistant` for a failure Home Assistant records itself - a forced reinstall over SSH
 (section 4.5), which the plugin may never be able to report. Home Assistant's own text is kept
 up to 1024 characters. A replay of the receiver's retained complaint replaces Home Assistant's
@@ -781,6 +782,7 @@ it is the opposite: the answer is coming, and the dashboard should not sit still
 | `softcam_restart` | *Restart softcam* | `<node_id>_softcam_restart` | `cmd/softcam_restart` · **both gates below** | silence |
 | `epg_import` | *Pobierz EPG* | `<node_id>_epg_import` | `cmd/epg_import` · **both gates below** | a new `epg_import` payload in `running` |
 | `history_clear` | *Wyczyść ostatnio oglądane* | `<node_id>_history_clear` | `cmd/history_clear` · only while the receiver names the `history_clear` capability; unavailable while `zap_history` says `panic_button: false` | a **new** `zap_history` payload with at most one entry |
+| `clear_error` | *Wyczyść ostatni błąd* · diagnostic | `<node_id>_clear_error` | `cmd/clear_error` · only for a receiver whose `info.plugin` is 0.5.0 or later (below) | a **new**, empty `last_error` payload |
 | `check_plugin_update` | *Sprawdź aktualizacje wtyczki* · diagnostic | `<node_id>_check_plugin_update` | no MQTT: fetches the plugin's signed release index, at most once in ten minutes, and available while the box is not | the update card's `index_serial`, `last_check` and `check_error` |
 | `force_reinstall` | *Wymuś reinstalację wtyczki (SSH)* · diagnostic, disabled by default, only while SSH credentials are stored | `<node_id>_force_reinstall` | no MQTT: the SSH installer's forced mode, after two presses by an administrator (below) | a new interface process holding the plugin's log open, and the announcement when the plugin is switched on |
 | `plugin` | *Wtyczka MQTT Bridge* | `<node_id>_plugin` | an `update` entity: installed = `info.plugin` with its build (`0.3.0+g1a2b3c4` for a development build), latest = what the card would install, and the installed version when it cannot install anything (below) | - |
@@ -907,6 +909,32 @@ code this release does not know, or none, is raised in the receiver's own Englis
 The press waits for a **new** `zap_history` payload holding at most one entry - not for the
 list to be short, which it already is before a press the receiver refuses for exactly that
 reason - and a retained copy the broker replays after a reconnect is never the answer.
+
+**"Wyczyść ostatni błąd"** (*Clear last error*) empties the receiver's retained `last_error`
+and, once the receiver has done that, the record "Ostatni błąd" keeps. It sends
+`cmd/clear_error`, which changes nothing else on the receiver and needs no permission.
+
+- **Only for plugin 0.5.0 or later.** The command came with that release and the plugin
+  announces no capability for it, so the button is created when `info.plugin` states 0.5.0 or
+  a later release, and not before `info` has arrived. An older plugin would answer the press
+  with "unknown command", so it gets no button. The number is what counts: a development build
+  that still reports 0.4.0 gets none either. The button is never removed again; on a receiver
+  taken back to an older plugin it is **unavailable**.
+- **What it clears.** The press waits up to ten seconds for a **new**, empty `last_error` from
+  the receiver, which the plugin sends whether or not an error was there. Then "Ostatni błąd"
+  goes back to `unknown` with empty `error`, `time` and `source` - also when what it showed was
+  Home Assistant's own record of a failed forced reinstall - and the update card drops the
+  refusal it was showing, as after any command that succeeds. Nothing is forgotten before the
+  receiver has answered: a sensor cleared on this side alone would get the retained complaint
+  back at the next reload.
+- **While the receiver is offline the button is unavailable**, like every button that sends a
+  command, and "Ostatni błąd" keeps what it shows; Home Assistant never writes to the receiver's
+  topic itself. A receiver that goes away between the press and its answer raises "The receiver
+  did not carry out `clear_error`" and clears nothing. The one refusal of its own - while an update is being
+  applied - is raised in the receiver's sentence, and that refusal is then what "Ostatni błąd"
+  shows. At the moments of an update when the plugin publishes nothing at all, the press ends
+  as unanswered instead. A new complaint that arrives right behind the receiver's clearing
+  stays on the sensor.
 
 **„Głębokie uśpienie" and „Restart" need two gates open**: the Home Assistant option
 [below](#options), and the receiver's own `deep_standby_allowed`, which is set on the box under
