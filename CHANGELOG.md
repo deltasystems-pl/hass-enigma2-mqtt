@@ -45,22 +45,27 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   and each per-bouquet topic as names and counts - never a channel - and carries the receiver's
   list of what it did not publish (DOCUMENTATION.md §7).
 - **The media player can show the channel's picon.** A new option, **Picture on the media
-  player**, with two settings. **Screenshot** stays the default and gains one thing: right after
-  a channel change the picon of the new channel is shown, until a screenshot taken after the
-  change arrives - until now the card kept showing the previous channel's frame for those
-  seconds, and for good with screenshots switched off. **Channel picon** always shows the picon,
-  and the screenshot only for a channel that has none. Standby keeps the last picture, and the
-  „Ekran" image entity is the screenshot either way. Home Assistant fetches the picon from the
-  receiver's web interface and serves it itself, so the browser does not have to reach the
-  receiver. This needs no particular plugin version, only OpenWebif reachable without a login on
-  port 80; without it the screenshot is shown as before (DOCUMENTATION.md §3 and §4.1,
+  player card**, with two settings. **Screenshot** stays the default and gains one thing: between
+  a channel change and the next screenshot the picon of the new channel is shown - until now the
+  card kept showing the previous channel's frame for those seconds, and for good with screenshots
+  switched off. **Channel picon** always shows the picon, and the screenshot only for a channel
+  that has none. Standby keeps the last picture, and the „Ekran" image entity is the screenshot
+  either way. Home Assistant fetches the picon from the receiver's web interface and serves it
+  itself, so the browser does not have to reach the receiver. This needs no particular plugin
+  version, only OpenWebif reachable without a login on port 80; without it the screenshot is
+  shown as before. A screenshot does not say which channel it shows, so one taken of a channel
+  that was only zapped through can replace the picon of the channel after it for a few seconds
+  (DOCUMENTATION.md §3 and §4.1,
   [ADR-0009](docs/adr/0009-player-picture-and-picons-from-openwebif.md)).
-- **Picons are found the way OpenWebif finds them.** The player and the media browser's
-  thumbnails ask OpenWebif which picon a channel has (`getservices` with `picon=1` for a bouquet,
-  `getpicon` for a single channel) instead of building one file name from the service reference,
-  so a picon stored under the channel's name or under another namespace is found. The old name is
-  still used where OpenWebif does not answer. Nothing is polled, answers are kept, and a receiver
-  that cannot be reached or asks for a login is left alone for minutes.
+- **Picons are found the way OpenWebif finds them.** The player asks OpenWebif which picon the
+  current channel has (`getpicon`), and the media browser asks for a bouquet's picons when the
+  bouquet is opened (`getservices` with `picon=1`), instead of building one file name from the
+  service reference - so a picon stored under the channel's name or under another namespace is
+  found. The old name is still used where OpenWebif does not answer. Nothing is polled, answers
+  are kept, the media browser never waits for the receiver, and a receiver that cannot be
+  reached, asks for a login or does not answer as OpenWebif does is left alone for minutes.
+  Home Assistant asks the host typed when the receiver was added, and the address the receiver
+  reports only when none was typed and it is an ordinary IP address (SECURITY.md).
 - The diagnostics download carries the chosen picture and the state of the picon lookup, as a
   status and counts.
 

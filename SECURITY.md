@@ -53,10 +53,24 @@ connects - since 0.4.0, and only for the receiver plugin's releases - to:
   the package; an API that cannot be reached does not.
 
 It also asks **your receiver's own web interface** (OpenWebif) for channel picons, over plain
-HTTP on your network: when the media player needs the picon of a channel, and when a bouquet is
-opened in the media browser. It sends no credentials, follows no redirect, takes only a path under
-`/picon/` from the answer, limits every answer in size, and shows only a PNG or a JPEG
+HTTP on port 80: one question and one picture when the media player needs the picon of a channel
+it has not seen, and one list when a bouquet is opened in the media browser. It sends no
+credentials, follows no redirect, takes only a path under `/picon/` from the answer, limits every
+answer in size, and shows only a PNG or a JPEG
 ([DOCUMENTATION.md §4.1](DOCUMENTATION.md#41-media-player)).
+
+**Which host that is, and what is left open.** If a receiver host was typed when the receiver was
+added, that host is asked, whatever it is, and nothing on the broker can change it. If none was
+typed, the address the receiver reports on its `info` topic is asked - and anything that may
+publish on your broker can write that topic. Such an address is used only when it is an IP address
+written out, never a host name, and is not loopback, link-local, unspecified, multicast or
+reserved, so Home Assistant cannot be pointed at itself or at a cloud metadata address this way.
+It **can** still be pointed at another address on your network. What that gets a broker client:
+Home Assistant sends that host the request with the current channel's service reference in it -
+for an IPTV channel the reference contains the stream's address - and shows on the media player
+card a PNG or JPEG of at most 1 MiB that the host serves under `/picon/`. Nothing else of the
+answer is used or shown. Typing the receiver's host when adding it (or with *Reconfigure*) closes
+this.
 
 It also **serves** a package: when a receiver without internet asks, or when the card updates a
 receiver over MQTT, Home Assistant offers the verified package at

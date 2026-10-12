@@ -326,7 +326,7 @@ appears.
 | **Wake-on-LAN MAC address** | the address the box reports on `info` | The target of the magic packet the „Obudź (WoL)" button, `media_player.turn_on` and `remote.turn_on` send. Set it when the receiver reports a different interface from the one that is plugged in - a box on Wi-Fi does not answer a packet sent to its cable port. Written as `00:00:5e:00:53:01`, `00-00-5e-00-53-01`, `0000.5e00.5301` or `00005e005301`, in any case; it is stored lower-case and colon-separated whichever you type, and anything that is not an address fails the form rather than failing later from inside `wake_on_lan`. Whichever address a packet would go to - the override, or the one the box reports - is registered on the device as its MAC connection, so the rest of Home Assistant knows it too. On current Home Assistant that connection does not merge devices across integrations, so a router or DHCP integration may still show a second card for the same receiver; it is there so that what *is* keyed on a MAC can find this one. A value stored by an earlier release that is not an address is dropped once at startup, with a line in the log. |
 | **Bouquets to offer** | every bouquet the box publishes | Which bouquets feed the media player's channel list and the media browser. The choices are the bouquets on the `channels` topic, and a name can be typed for one the box has not published yet. This narrows the plugin's own `bouquets_for_select`; it cannot widen it. |
 | **Channels in the media player's source list** | every bouquet on offer | What `media_player.source_list` holds, and nothing else. **Every bouquet on offer** is what this integration has always done and stays the default, so an existing installation does not change under an automation that names a channel; on a receiver with about a thousand channels it is a dropdown of about a thousand rows. **The active bouquet** is the short list the receiver's own channel ± is walking, which is also what the „Kanał" select shows. `select_source` follows this setting; the `zap` action takes a service reference and does not. Three cases keep the long list whatever is chosen, because there is nothing to shorten it to and an empty source list would leave no way to change channel: a receiver that publishes no channel-list context (an older plugin without `bouquet_context`), a context naming a bouquet the **Bouquets to offer** option excludes, and a context naming a bouquet with no playable channel in it. The last two are logged as a warning, once per bouquet. 🔴 This setting is **not** about the recorder: Home Assistant declares `source_list` an unrecorded attribute and the recorder removes it before it measures a state against its size limit, so the long list never reached the database in the first place. |
-| **Picture on the media player** | screenshot | Which picture the media player shows. **Screenshot** is the picture of the television the plugin publishes, as before, with one addition: right after a channel change the last screenshot still shows the previous channel, so the picon of the new channel is shown until a screenshot taken after the change arrives. With screenshots off on the receiver none arrives, and the picon stays. **Channel picon** always shows the picon of the current channel, and the screenshot only for a channel that has none. Home Assistant fetches picons from the receiver's web interface (OpenWebif, plain HTTP on port 80 of the address the receiver reports) and serves them itself; [§4.1](#41-media-player) says how, and what happens when that fails. The „Ekran" image entity is the screenshot in both settings. |
+| **Picture on the media player card** | screenshot | Which picture the media player shows. **Screenshot** shows the screenshot of the television the plugin publishes, as before, and the picon of the new channel only between a channel change and the next screenshot: the last screenshot still shows the previous channel then. With screenshots off on the receiver no next one arrives, and the picon stays. **Channel picon** always shows the picon of the current channel, and the screenshot only for a channel that has none. Home Assistant fetches picons from the receiver's web interface (OpenWebif, plain HTTP on port 80) and serves them itself; [§4.1](#41-media-player) says which address it asks, how, and what happens when that fails. The „Ekran" image entity is the screenshot in both settings. |
 | **Bouquets hidden from "Recently watched"** („Bukiety ukryte w „Ostatnio oglądane"") | none | Which bouquets' channels [„Ostatnio oglądane"](#46-selects) leaves out - and that one entity only: „Ostatnio oglądane (wszystkie)", „Kanał", „Bukiet" and the media player are untouched. The choices are the bouquets on the `channels` topic, and a name can be typed. With it empty every entry shows. With a bouquet chosen, an entry shows only when its bouquet is a published bouquet that is not hidden **and** its channel is not a member of any hidden bouquet, so a channel of a hidden bouquet reached through another one stays hidden. While anything is chosen, an entry that cannot be checked - no bouquet path, a radio bouquet, a bouquet the plugin does not publish - is hidden too. And while a hidden bouquet is listed without its channels - plugin 0.5.0 could not publish that bouquet's own topic, or it has not arrived - every entry is hidden, because which channels to hide is what is missing. A hidden name that is no longer on the `channels` topic is logged once. 🔴 **This is a filter in Home Assistant, not privacy on the network**: the receiver publishes every entry of its history on `zap_history` and every channel of every bouquet on `channels`, retained, to any broker login; its own History Zap screen, the plugin's OpenWebif page and „Ostatnio oglądane (wszystkie)" show everything. See [§4.6](#46-selects) for what the recorder keeps. |
 | **Check daily for available plugin versions** | off | Off means this integration asks nothing on its own. The plugin's **signed release index** - `releases.json` and its signature from the plugin's fixed HTTPS origin, `https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/` - is fetched only when somebody presses **Check for plugin updates** (*Sprawdź aktualizacje wtyczki*), or uses Home Assistant's own "Check for updates" while this option is on. On, it is also fetched **at most once every 24 hours**, one index for every receiver. It is fetched with a verified TLS context and no redirects, at most 64 KiB, and it is accepted only when its Ed25519 signature verifies with a key built into this integration and its serial rises by the rule in [ADR-0008](docs/adr/0008-signed-plugin-index.md) - the same rule the receiver applies. Manual checks share a ten-minute limit. The index, its signature, the stamps and the record of accepted serials are kept in `.storage/enigma2_mqtt.release_index`, so a reload or a restart asks nothing again; the old `.storage/enigma2_mqtt.release_check` is removed. **Every newly accepted index is announced**: a warning in the log and a persistent notification with its serial, its key, the versions it adds and withdraws, and its floor - the index is signed in the plugin repository's CI, so an index nobody expected must be visible. It is then published, retained, on `enigma2mqtt/release_index`, where every receiver on plugin 0.4.0 or later verifies it again - the way a receiver with no internet of its own learns of releases - and put back, verified first, when the first receiver is set up and at every reconnect to the broker, if the broker lost it. What the broker retains there is read first: an index of a higher-ranked key, or a newer one of the same key - such as an index signed with the plugin's spare key in an emergency - is never overwritten, and when the rule accepts it, Home Assistant takes it and announces it like any new index. An index and a signature that do not match are read once more before they are judged, because a publication can land between the two requests; a pair that still does not verify is reported as "could not be verified", and the log keeps a warning. Nothing else is downloaded on a check; a release package is downloaded only when somebody installs it (see [Buttons and update](#45-buttons-and-update)). |
 
@@ -453,11 +453,14 @@ while the box is unreachable, because that is precisely when somebody wants to w
   the service reference, for anything that has to be exact.
 - **Browsing** - bouquets, then channels, each with its picon as the thumbnail. Picons are not
   published over MQTT: the thumbnail is an address on the receiver's own web interface, which the
-  browser fetches. Opening a bouquet asks OpenWebif once for that bouquet's picon links
-  (`/api/getservices?sRef=<bouquet>&picon=1`), so a picon OpenWebif finds under another name -
-  the channel's name, another namespace - is found here too, and a channel without one gets no
-  thumbnail. Where OpenWebif does not answer, the thumbnail is `http://<ip>/picon/<sref>.png`,
-  as it always was. No address on `info` simply means no thumbnail.
+  browser fetches. The media browser never waits for the receiver. The first time a bouquet is
+  opened its thumbnails are `http://<ip>/picon/<sref>.png`, as they always were, and Home
+  Assistant asks OpenWebif in the background for that bouquet's picon links
+  (`/api/getservices?sRef=<bouquet>&picon=1`). The next time the bouquet is opened the
+  thumbnails are those links, so a picon OpenWebif finds under another name - the channel's
+  name, another namespace - is found here too, and a channel without one gets no thumbnail.
+  Where OpenWebif does not answer, the thumbnails stay as they were. No address on `info`
+  simply means no thumbnail.
 - **Playing** - `media_content_type: channel` takes a service reference, and `channel_name`
   takes a name. The browser sends the first.
 - **Volume** - set, step and mute, on the box's own 0-100 scale underneath.
@@ -472,31 +475,55 @@ while the box is unreachable, because that is precisely when somebody wants to w
   frame - so the browser fetches the new one.
   - **Screenshot** (the default): the retained `screen` JPEG. After a channel change the picon
     of the new channel is shown until a screenshot **taken after the change** arrives - judged by
-    the picture's bytes, so the broker replaying the retained one after a reconnect does not
-    count. If no new screenshot arrives, the picon stays. The channel a session starts on is not
-    a change: after a restart the screenshot is shown, and the receiver is asked nothing.
+    the picture's bytes, so the same picture delivered again after a reconnect does not count.
+    If no new screenshot arrives, the picon stays. The channel a session starts on is not a
+    change: after a restart the screenshot is shown, and the receiver is asked nothing.
   - **Channel picon**: the picon of the current channel, and the screenshot only for a channel
-    without one.
-  - **Standby keeps the last picture.** Nothing is swapped because the receiver went dark. As
-    with any media player, Home Assistant shows no picture on the card while the state is `off`.
-  - **Where a picon comes from.** OpenWebif is asked rather than its file names guessed:
-    `/api/getservices?sRef=<bouquet>&picon=1` for a channel in a bouquet on offer - one request a
-    bouquet, kept until its channel list changes, or a day - and `/api/getpicon?sRef=<service>&json=true`
-    for a channel in none of them. Only when OpenWebif answers neither is
-    `/picon/<sref>.png` tried. Its default picon counts as none.
-  - **What is accepted.** Requests go to the receiver's own address and follow no redirect. A
-    link is used only if it is a plain path under `/picon/`; a list larger than 2 MiB and a
-    picture larger than 1 MiB are dropped; and only a PNG or a JPEG, told by its first bytes, is
-    shown. A request waits five seconds at most.
-  - **How often.** Nothing is polled. The receiver is asked when the player needs a picon it
-    does not have and when a bouquet is opened in the media browser, one request at a time. Up to
-    64 channels' pictures (8 MiB) are kept for a day, "no picon" for an hour.
+    without one. For the moment the lookup of a channel seen for the first time takes, the
+    previous channel's picon stays on the card under the new title.
+  - **Standby keeps the last picture**, and a receiver that wakes keeps it until it has said
+    which channel it is on. As with any media player, Home Assistant shows no picture on the
+    card while the state is `off`.
+  - **Where a picon comes from.** OpenWebif is asked rather than its file names guessed. For
+    the player that is one question about the one channel that is on,
+    `/api/getpicon?sRef=<service>&json=true`, and then the picture. Where the media browser
+    has already listed the channel's bouquet (see *Browsing*), that answer is used and the
+    question is skipped. The player never lists a bouquet itself: that makes the receiver look
+    for a picon for every service in it. Only when OpenWebif does not answer `getpicon` is
+    `/picon/<sref>.png` tried, and once that has found a picture the unanswered question is
+    not asked again for an hour. OpenWebif's default picon counts as none.
+  - **Which address is asked.** The receiver host typed when the receiver was added, if one
+    was. Otherwise the address the receiver reports on `info`, and only when it is an IP
+    address written out - never a host name - that is not loopback, link-local, unspecified,
+    multicast or reserved. That address arrives over the broker, where anything allowed to
+    publish could have written it; [SECURITY.md](SECURITY.md) says what that leaves open. With
+    no usable address there are no picons.
+  - **What is accepted.** No redirect is followed. A link is used only if it is a plain path
+    under `/picon/`; an answer larger than 2 MiB and a picture larger than 1 MiB are dropped;
+    and only a PNG or a JPEG, told by its first bytes, is shown. A request waits five seconds at
+    most.
+  - **How often.** Nothing is polled, and one request runs at a time. A channel change to a
+    channel not seen before costs at most two requests - the question and the picture - and a
+    channel change abandons the lookup for the channel before it. A bouquet is listed when it is
+    opened in the media browser, at most once until its channel list changes, or a day; a
+    request for it that failed is not repeated for an hour. Up to 64 channels' pictures (8 MiB)
+    are kept for a day, "no picon" for an hour.
   - **When it fails** the other picture is shown and nothing else changes. A receiver whose web
-    interface cannot be reached is left alone for 5 minutes, one that asks for a login (401 or
-    403) for 15, and each is logged once, as a warning, until it works again. OpenWebif behind a
-    login, on HTTPS only, or on another port than 80 therefore means no picons; credentials for
-    it are not stored. A picon added to the receiver later appears after the hour or the day
-    above, or when the integration is reloaded.
+    interface cannot be reached is left alone for 5 minutes; one that asks for a login (401 or
+    403), or that answers but not as OpenWebif does - a status other than 200, or a page instead
+    of an answer - for 15. Each is logged once, as a warning, until it works again. In the
+    **Channel picon** setting the lookup is tried once more when that time is up, so the picon
+    comes back without waiting for the receiver's next message; a second failure waits for that
+    message. OpenWebif behind a login, on HTTPS only, or on another port than 80 therefore means
+    no picons; credentials for it are not stored. A picon added to the receiver later appears
+    after the hour or the day above, or when the integration is reloaded.
+  - **Known limit: a screenshot does not say which channel it shows.** A screenshot that arrives
+    after a channel change counts as taken after it. Zap through three channels quickly and the
+    screenshot of the second - taken a few seconds after it was tuned, by the on-zap delay -
+    arrives while the third is on, and replaces the third channel's picon until the third
+    channel's own screenshot follows. The same goes for a screenshot already being taken at the
+    moment of the change. Home Assistant cannot tell these apart; a later plugin release could
+    say which channel a screenshot shows.
 - **Position** - from `epg.now`, so the progress bar is the programme, not a stream.
 
 ### 4.2 Remote, notify, event, image
@@ -1385,8 +1412,9 @@ each `epg_grid` entry carries its `events_per_channel`.
 
 `box.player_picture` gives the picture chosen for the media player and the state of the picon
 lookup: `idle` (nothing asked yet), `ok`, `unreachable`, `refused` (the web interface asked for a
-login) or `no_address`, the seconds until it is tried again, and how many bouquets, picons and
-"no picon" answers are held. No address, channel or picture is in it.
+login), `unexpected` (it answered, but not as OpenWebif does), `error` (a fault in the lookup
+itself, with a warning in the log) or `no_address`, the seconds until it is tried again, and how
+many bouquets, picons and "no picon" answers are held. No address, channel or picture is in it.
 
 One thing is stated rather than left to be worked out. The **`plugin`** block gives the version
 installed on the box, the version bundled here, the version this release was written against,
