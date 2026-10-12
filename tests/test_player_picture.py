@@ -1366,6 +1366,7 @@ async def test_a_fault_in_the_lookup_is_a_failure_like_any_other(
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
     caplog: pytest.LogCaptureFixture,
+    receiver_without_a_web_interface: list[str],
 ) -> None:
     """Whatever goes wrong inside: reported, logged once, backed off - never a loop."""
     _serve(aioclient_mock)
@@ -1392,6 +1393,8 @@ async def test_a_fault_in_the_lookup_is_a_failure_like_any_other(
     assert len(_warnings(caplog)) == 1
     assert await _player(hass).async_get_media_image() == (SCREEN, "image/jpeg")
     assert aioclient_mock.call_count == 0
+    assert len(receiver_without_a_web_interface) == 1
+    receiver_without_a_web_interface.clear()
 
 
 async def test_a_fault_while_a_bouquet_is_opened_still_opens_it(
@@ -1401,6 +1404,7 @@ async def test_a_fault_while_a_bouquet_is_opened_still_opens_it(
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
     caplog: pytest.LogCaptureFixture,
+    receiver_without_a_web_interface: list[str],
 ) -> None:
     """The media browser lists the channels, with the thumbnails it always had."""
     _serve(aioclient_mock)
@@ -1420,6 +1424,8 @@ async def test_a_fault_while_a_bouquet_is_opened_still_opens_it(
     assert resolver.async_status()["status"] == "error"
     assert len(_warnings(caplog)) == 1
     assert aioclient_mock.call_count == 0
+    assert len(receiver_without_a_web_interface) == 1
+    receiver_without_a_web_interface.clear()
 
 
 # -------------------------------------------------------------------------- the task --
@@ -2329,6 +2335,33 @@ async def test_a_request_the_picon_lookup_does_not_make_is_noticed(
         f"{BASE}/api/zap?sRef=x",
     ]
     aioclient_mock.mock_calls.clear()
+
+
+async def test_a_request_to_a_host_no_test_serves_is_noticed(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    receiver_without_a_web_interface: list[str],
+) -> None:
+    """A request to an address nothing was registered for does not pass in silence.
+
+    The fake session refuses it with an AssertionError, and the lookup treats every
+    fault of its own as a failure - which would turn a test asking the wrong host into
+    a test that passes on the screenshot. The check every test ends with therefore also
+    fails on a fault of the lookup, unless the test says it meant one by taking the
+    record away, as this one does.
+    """
+    entry = _entry_with_host("198.51.100.9")
+    await _setup(hass, entry)
+
+    await _publish(hass, SERVICE_TOPIC, TVN)
+
+    assert entry.runtime_data.picons.async_status()["status"] == "error"
+    assert len(receiver_without_a_web_interface) == 1
+    assert "failed unexpectedly" in receiver_without_a_web_interface[0]
+    assert unexpected_receiver_requests(aioclient_mock) == []
+    receiver_without_a_web_interface.clear()
 
 
 # --------------------------------------------------------- what OpenWebif answers, read --

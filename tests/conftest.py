@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 import json
+import logging
 import re
 from typing import Any
 from unittest.mock import patch
@@ -317,8 +318,23 @@ def unexpected_receiver_requests(aioclient_mock: AiohttpClientMocker) -> list[st
     ]
 
 
+class _LookupFaults(logging.Handler):
+    """Keeps what the picon lookup logs when it fails in a way it did not foresee."""
+
+    def __init__(self) -> None:
+        super().__init__(logging.WARNING)
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        message = record.getMessage()
+        if "failed unexpectedly" in message:
+            self.messages.append(message)
+
+
 @pytest.fixture(autouse=True)
-def receiver_without_a_web_interface(aioclient_mock: AiohttpClientMocker) -> Generator[None]:
+def receiver_without_a_web_interface(
+    aioclient_mock: AiohttpClientMocker,
+) -> Generator[list[str]]:
     """Answer every request to the example receiver's web interface with 404.
 
     The media player asks the receiver's OpenWebif for a channel's picon after a channel
@@ -329,12 +345,23 @@ def receiver_without_a_web_interface(aioclient_mock: AiohttpClientMocker) -> Gen
     serves its own OpenWebif.
 
     A blanket answer would also hide a request nothing is meant to make, so every test
-    ends with a look at what was asked: anything sent to the receiver's web interface
-    that is not the picon lookup's fails the test that sent it.
+    ends with two looks at what happened. Anything sent to the receiver's web interface
+    that is not the picon lookup's fails the test that sent it. And so does a fault
+    inside the lookup: a request to any other address that no test serves is refused by
+    the fake session with an AssertionError, which the lookup catches like any fault of
+    its own and logs - the one trace such a request leaves. A test that means to cause
+    a fault takes this fixture and clears the list it is given.
     """
+    faults = _LookupFaults()
+    logger = logging.getLogger("custom_components.enigma2_mqtt.picture")
+    logger.addHandler(faults)
     aioclient_mock.get(re.compile(rf"^http://{re.escape(IP)}/"), status=404)
-    yield
+    try:
+        yield faults.messages
+    finally:
+        logger.removeHandler(faults)
     assert unexpected_receiver_requests(aioclient_mock) == []
+    assert faults.messages == [], "the picon lookup failed in a way no test expected"
 
 
 @pytest.fixture
