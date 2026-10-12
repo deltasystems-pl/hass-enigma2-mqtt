@@ -1242,24 +1242,80 @@ async def test_the_typed_host_is_asked_whatever_the_receiver_reports(
         ("localhost", "http://localhost/"),
         ("receiver.example", "http://receiver.example/"),
         ("  192.0.2.40 ", "http://192.0.2.40/"),
-        # A typed host that is not a host is no address, not a reason to fall back on
-        # the one from the broker.
-        ("http://192.0.2.40/", None),
-        ("192.0.2.40/../x", None),
+        ("2001:db8::40", "http://[2001:db8::40]/"),
+        # What the installer and SSH take and a certificate would not: still a host.
+        ("vu_uno.lan", "http://vu_uno.lan/"),
+        ("box.lan.", "http://box.lan./"),
+        ("_dmz_.box-2.lan.", "http://_dmz_.box-2.lan./"),
+        # What cannot be the host of an HTTP address at all is as good as nothing
+        # typed: the reported address is asked, by the rules for a reported address.
+        ("fe80::1%eth0", f"http://{IP}/"),
+        ("http://192.0.2.40/", f"http://{IP}/"),
+        ("192.0.2.40/../x", f"http://{IP}/"),
+        ("box lan", f"http://{IP}/"),
+        ("box.lan:8080", f"http://{IP}/"),
+        ("user@box.lan", f"http://{IP}/"),
+        ("-box.lan", f"http://{IP}/"),
+        ("a" * 254, f"http://{IP}/"),
     ],
 )
-async def test_a_typed_host_is_not_filtered(
+async def test_a_typed_host_is_asked_when_it_can_be_the_host_of_an_address(
     hass: HomeAssistant,
     mqtt_mock,
     box_on_the_broker: dict[str, str | bytes],
     typed: str,
     url: str | None,
 ) -> None:
-    """What the administrator typed is the administrator's choice."""
+    """What the administrator typed is the administrator's choice, and is not filtered."""
     entry = _entry_with_host(typed)
     await _setup(hass, entry)
 
     assert entry.runtime_data.picon_lookup_url == url
+
+
+@pytest.mark.parametrize("reported", ["127.0.0.1", "169.254.169.254", "localhost", None])
+async def test_an_unusable_typed_host_does_not_excuse_the_reported_address(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    reported: Any,
+) -> None:
+    """Falling back on the reported address is falling back on its rules as well."""
+    entry = _entry_with_host("fe80::1%eth0")
+    box_on_the_broker[INFO_TOPIC] = json.dumps({**INFO, "ip": reported})
+    box_on_the_broker[ANNOUNCEMENT_TOPIC] = json.dumps({**ANNOUNCEMENT, "ip": reported})
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(ANYWHERE, status=404)
+    await _setup(hass, entry)
+
+    await _publish(hass, SERVICE_TOPIC, TVN)
+
+    assert entry.runtime_data.picon_lookup_url is None
+    assert entry.runtime_data.picons.async_status()["status"] == picture.STATUS_NO_ADDRESS
+    assert aioclient_mock.call_count == 0
+
+
+@pytest.mark.parametrize("typed", ["vu_uno.lan", "box.lan."])
+async def test_a_typed_name_with_an_underscore_or_a_final_dot_is_really_asked(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    typed: str,
+) -> None:
+    """Not only judged usable: the request is made, to that name."""
+    entry = _entry_with_host(typed)
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"http://{typed}/api/getpicon", json=_getpicon_answer(LINK_TWO))
+    aioclient_mock.get(f"http://{typed}{LINK_TWO}", content=PNG_TWO)
+    aioclient_mock.get(ANYWHERE, status=404)
+    await _setup(hass, entry)
+
+    await _publish(hass, SERVICE_TOPIC, TVN)
+
+    assert [call[1].host for call in aioclient_mock.mock_calls] == [typed, typed]
+    assert await _player(hass).async_get_media_image() == (PNG_TWO, "image/png")
 
 
 # -------------------------------------------------- what the receiver's payloads hold --

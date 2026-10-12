@@ -252,6 +252,33 @@ def _configuration_url(host: Any) -> str | None:
     return f"http://{url_host}/"
 
 
+# A host name as HTTP will take it, which is wider than a name a certificate may carry:
+# underscores, and the final dot of a fully qualified name. Labels still cannot begin or
+# end with a hyphen, and nothing that would end the host part of an address gets in.
+_HTTP_HOST_LABEL: Final = r"[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?"
+_HTTP_HOST_NAME: Final = re.compile(rf"(?:{_HTTP_HOST_LABEL}\.)*{_HTTP_HOST_LABEL}\.?")
+
+
+def _typed_host_url(host: Any) -> str | None:
+    """Return the HTTP address of a host somebody typed, or None if it cannot have one.
+
+    The config flow stores what was typed for SSH, which takes more than an address
+    does: `fe80::1%eth0` is a fine SSH target and no host of a URL. So this judges only
+    whether the value can be put between `http://` and `/` - an IP address without a
+    zone, or a name - and never what kind of address it is: the choice is the
+    administrator's.
+    """
+    if not isinstance(host, str) or not (host := host.strip()) or "%" in host:
+        return None
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        if len(host) > 253 or not _HTTP_HOST_NAME.fullmatch(host):
+            return None
+        return f"http://{host}/"
+    return f"http://[{address}]/" if address.version == 6 else f"http://{address}/"
+
+
 def command_topic(base_topic: str, node_id: str, name: str) -> str:
     """Return a command topic of one box."""
     return f"{base_topic}/{node_id}/cmd/{name}"
@@ -974,15 +1001,16 @@ class Enigma2Box:
         This one decides where Home Assistant sends requests of its own, and the address
         a receiver reports arrives over the broker, where anything that may publish can
         have written it. So the host typed when the receiver was added wins whenever
-        there is one: that is the administrator's word, and it is not second-guessed.
-        Without one, the reported address is used only when it is an IP address written
-        out - never a name, which would be resolved by this machine - and not loopback,
-        link-local, unspecified, multicast or reserved: none of those is a receiver, and
-        the first two are where a machine keeps what only it should reach.
+        it can be the host of an address: that is the administrator's word, and it is
+        not second-guessed. Without one - or with one that only SSH can use, like an
+        IPv6 address with a zone - the reported address is used, and only when it is an
+        IP address written out - never a name, which would be resolved by this machine -
+        and not loopback, link-local, unspecified, multicast or reserved: none of those
+        is a receiver, and the first two are where a machine keeps what only it should
+        reach.
         """
-        typed = self.entry.data.get(CONF_RECEIVER_HOST)
-        if isinstance(typed, str) and typed.strip():
-            return _configuration_url(typed.strip())
+        if (typed := _typed_host_url(self.entry.data.get(CONF_RECEIVER_HOST))) is not None:
+            return typed
         try:
             address = ipaddress.ip_address(self.ip_address or "")
         except ValueError:
