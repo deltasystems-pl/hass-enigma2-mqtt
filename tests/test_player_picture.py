@@ -2195,6 +2195,206 @@ def test_a_service_list_is_read_up_to_a_bound(monkeypatch: pytest.MonkeyPatch) -
     }
 
 
+# --------------------------------------------- edges a careless change would not trip over --
+
+
+async def test_the_retry_is_set_for_after_the_back_off_and_only_once(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A second longer than the back-off, never shorter - and one timer, not one a failure."""
+    delays: list[float] = []
+    real = picture.async_call_later
+
+    def _recording(hass_: HomeAssistant, delay: float, action: Any) -> Any:
+        delays.append(delay)
+        return real(hass_, delay, action)
+
+    monkeypatch.setattr(picture, "async_call_later", _recording)
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(EVERYTHING, exc=aiohttp.ClientConnectionError())
+    await _setup(hass, config_entry, PLAYER_PICTURE_PICON)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    resolver = config_entry.runtime_data.picons
+
+    assert delays == [picture.BACKOFF["unreachable"] + 1]
+    waiting = resolver._retry_cancel
+
+    # The clock runs ahead of the timer, a payload asks, and that fails too: the timer
+    # that is waiting is the retry, and no second one is set beside it. The clock is
+    # stopped there: one that stayed ahead of every new back-off would ask without end.
+    now = resolver._retry_at + 1
+    resolver._clock = lambda: now
+    await _publish(hass, SERVICE_TOPIC, TVN)
+    assert aioclient_mock.call_count == 2
+    assert len(delays) == 1
+    assert resolver._retry_cancel is waiting
+
+    # Behind a login the wait is the longer one.
+    resolver._cancel_retry()
+    now = resolver._retry_at + 1
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(EVERYTHING, status=401)
+    await _publish(hass, SERVICE_TOPIC, SERVICE)
+    assert delays == [301, 901]
+
+
+async def test_opening_a_bouquet_does_not_interrupt_the_players_lookup(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The channel that is on comes first, and a bouquet waits its turn behind it."""
+    held = asyncio.Event()
+    started = asyncio.Event()
+
+    async def _getpicon(method: str, url: Any, data: Any) -> AiohttpClientMockResponse:
+        started.set()
+        await held.wait()
+        return AiohttpClientMockResponse(method, url, json=_getpicon_answer(LINK_TWO))
+
+    _serve(aioclient_mock)
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(GETPICON, side_effect=_getpicon)
+    aioclient_mock.get(GETSERVICES, text=FAVOURITES_ANSWER)
+    aioclient_mock.get(f"{BASE}{LINK_TWO}", content=PNG_TWO)
+    await _setup(hass, config_entry)
+    resolver = config_entry.runtime_data.picons
+
+    async_fire_mqtt_message(hass, SERVICE_TOPIC, json.dumps(TVN))
+    await hass.async_block_till_done()
+    await asyncio.wait_for(started.wait(), 2)
+    task = resolver._task
+
+    await _browse(hass)
+    await _browse(hass, SPORT)
+    await asyncio.sleep(0.02)
+
+    assert resolver._task is task and not task.done()
+    assert _asked(aioclient_mock) == ["/api/getpicon"]
+    held.set()
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert not task.cancelled()
+    assert _asked(aioclient_mock) == [
+        "/api/getpicon",
+        LINK_TWO,
+        "/api/getservices",
+        "/api/getservices",
+    ]
+    assert await _player(hass).async_get_media_image() == (PNG_TWO, "image/png")
+
+
+async def test_a_bouquet_queued_behind_a_failure_is_forgotten_not_postponed(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """After the back-off a bouquet is listed because somebody opened it, not before."""
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(EVERYTHING, exc=aiohttp.ClientConnectionError())
+    await _setup(hass, config_entry)
+    resolver = config_entry.runtime_data.picons
+    now = _clock(resolver)
+
+    await _browse(hass)
+    await _browse(hass, SPORT)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert _asked(aioclient_mock) == ["/api/getservices"]
+    assert not resolver._scans
+
+    # The receiver is back, and the player asks: "Sport" is not listed in its wake.
+    _serve(aioclient_mock)
+    now[0] += 301
+    await _publish(hass, SERVICE_TOPIC, TVN)
+
+    assert _asked(aioclient_mock) == ["/api/getpicon", LINK_TWO]
+    assert await _player(hass).async_get_media_image() == (PNG_TWO, "image/png")
+
+
+async def test_a_listener_that_asks_for_another_picon_does_not_cancel_the_task_it_runs_in(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Told about one picon, a listener asks for the next: the same task fetches it."""
+    _serve(aioclient_mock)
+    await _setup(hass, config_entry)
+    resolver = config_entry.runtime_data.picons
+    seen: list[Any] = []
+
+    def _ask_for_the_next() -> None:
+        seen.append((asyncio.current_task(), resolver.async_picon(SREF_OTHER)))
+
+    resolver.async_add_listener(_ask_for_the_next)
+    assert resolver.async_picon(SREF_TWO) is PENDING
+    first = resolver._task
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert seen[0] == (first, PENDING)
+    assert resolver._task is first
+    assert first.done() and not first.cancelled() and first.exception() is None
+    assert isinstance(resolver.async_picon(SREF_TWO), Picture)
+    assert isinstance(resolver.async_picon(SREF_OTHER), Picture)
+    assert _asked(aioclient_mock) == ["/api/getpicon", LINK_TWO, "/api/getpicon", LINK_OTHER]
+
+
+@pytest.mark.parametrize("mode", [PLAYER_PICTURE_SCREENSHOT, PLAYER_PICTURE_PICON])
+def test_holding_a_picture_ends_when_the_receiver_names_a_channel(mode: str) -> None:
+    """Held across standby and the wake - and then no longer, whatever comes next."""
+    one = picon_picture(PNG_ONE)
+    chosen = PlayerPicture(mode)
+    chosen.update(sref=SREF, screen=SCREEN, is_on=True, picon=lambda _: one)
+    chosen.update(sref=None, screen=SCREEN, is_on=False, picon=_never)
+    chosen.update(sref=SREF, screen=SCREEN, is_on=True, picon=lambda _: one)
+
+    # On, and the service payload empties - a recording is played, say: the screenshot
+    # follows the television again, as it did before the receiver was ever off.
+    later = chosen.update(sref=None, screen=NEW_SCREEN, is_on=True, picon=_never)
+
+    assert later is not None and later.content == NEW_SCREEN
+
+
+@pytest.mark.parametrize("mode", [PLAYER_PICTURE_SCREENSHOT, PLAYER_PICTURE_PICON])
+def test_a_receiver_that_starts_off_with_nothing_to_show_holds_nothing(mode: str) -> None:
+    """Off at start-up with no screenshot yet: there is no picture to keep through a wake."""
+    chosen = PlayerPicture(mode)
+
+    assert chosen.update(sref=None, screen=None, is_on=False, picon=_never) is None
+    # The retained screenshot arrives while it is still off, and is shown.
+    late = chosen.update(sref=None, screen=SCREEN, is_on=False, picon=_never)
+    assert late is not None and late.content == SCREEN
+
+    fresh = PlayerPicture(mode)
+    assert fresh.update(sref=None, screen=None, is_on=False, picon=_never) is None
+    # It comes on before it has named a channel: the screenshot, not the nothing held.
+    woken = fresh.update(sref=None, screen=SCREEN, is_on=True, picon=_never)
+    assert woken is not None and woken.content == SCREEN
+
+
+@pytest.mark.parametrize("mode", [PLAYER_PICTURE_SCREENSHOT, PLAYER_PICTURE_PICON])
+def test_a_receiver_that_was_never_off_is_not_held_to_an_old_picture(mode: str) -> None:
+    """The wake rule is for a wake. On all along, an empty service is just that."""
+    one = picon_picture(PNG_ONE)
+    chosen = PlayerPicture(mode)
+    first = chosen.update(sref=SREF, screen=SCREEN, is_on=True, picon=lambda _: one)
+    assert first is not None
+
+    emptied = chosen.update(sref=None, screen=NEW_SCREEN, is_on=True, picon=_never)
+
+    assert emptied is not None and emptied.content == NEW_SCREEN
+
+
 # ------------------------------------------------------------------ options, diagnostics --
 
 
