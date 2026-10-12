@@ -454,7 +454,8 @@ while the box is unreachable, because that is precisely when somebody wants to w
 - **Browsing** - bouquets, then channels, each with its picon as the thumbnail. Picons are not
   published over MQTT: the thumbnail is an address on the receiver's own web interface, which the
   browser fetches. The media browser never waits for the receiver. The first time a bouquet is
-  opened its thumbnails are `http://<ip>/picon/<sref>.png`, as they always were, and Home
+  opened its thumbnails are `http://<host>/picon/<sref>.png` - at the address picons are asked
+  at, which is the typed receiver host when there is one (see *Which address is asked*) - and Home
   Assistant asks OpenWebif in the background for that bouquet's picon links
   (`/api/getservices?sRef=<bouquet>&picon=1`). The next time the bouquet is opened the
   thumbnails are those links, so a picon OpenWebif finds under another name - the channel's
@@ -462,8 +463,8 @@ while the box is unreachable, because that is precisely when somebody wants to w
   A bouquet is listed at most once each time it is opened. A channel change while the list is
   being fetched interrupts it for the channel that is on, and the list is then dropped, not
   started again: its thumbnails arrive the next time the bouquet is opened.
-  Where OpenWebif does not answer, the thumbnails stay as they were. No address on `info`
-  simply means no thumbnail.
+  Where OpenWebif does not answer, the thumbnails stay as they were. No address that may be
+  asked simply means no thumbnail.
 - **Playing** - `media_content_type: channel` takes a service reference, and `channel_name`
   takes a name. The browser sends the first.
 - **Volume** - set, step and mute, on the box's own 0-100 scale underneath.
@@ -493,8 +494,9 @@ while the box is unreachable, because that is precisely when somebody wants to w
     has already listed the channel's bouquet (see *Browsing*), that answer is used and the
     question is skipped. The player never lists a bouquet itself: that makes the receiver look
     for a picon for every service in it. Only when OpenWebif does not answer `getpicon` is
-    `/picon/<sref>.png` tried, and once that has found a picture the unanswered question is
-    not asked again for an hour. OpenWebif's default picon counts as none.
+    `/picon/<sref>.png` tried, and once that has found a picture on a web interface whose
+    `getpicon` has never answered, the question is not asked again for an hour. OpenWebif's
+    default picon counts as none.
   - **Which address is asked.** The receiver host typed when the receiver was added, if one
     was. Otherwise the address the receiver reports on `info`, and only when it is an IP
     address written out - never a host name - that is not loopback, link-local, unspecified,
@@ -512,11 +514,14 @@ while the box is unreachable, because that is precisely when somebody wants to w
     once its links are held, until its channel list changes or a day passes. A list a channel
     change interrupted is asked for again only at the next opening; a request for it that
     failed is not repeated for an hour. Up to 64 channels' pictures (8 MiB)
-    are kept for a day, "no picon" for an hour.
+    are kept for a day, "no picon" for an hour, and a channel whose question got no answer
+    for five minutes.
   - **When it fails** the other picture is shown and nothing else changes. A receiver whose web
     interface cannot be reached is left alone for 5 minutes; one that asks for a login (401 or
     403), or that answers but not as OpenWebif does - a status other than 200, or a page instead
-    of an answer - for 15. Each is logged once, as a warning, until it works again. In the
+    of an answer - for 15. Once OpenWebif has answered, such a failure for one channel is only
+    that channel without a picon for five minutes; the 15 minutes start when it has happened
+    to three different channels with no answer in between. Each is logged once, as a warning, until it works again. In the
     **Channel picon** setting the lookup is tried once more when that time is up, so the picon
     comes back without waiting for the receiver's next message; a second failure waits for that
     message. OpenWebif behind a login, on HTTPS only, or on another port than 80 therefore means
