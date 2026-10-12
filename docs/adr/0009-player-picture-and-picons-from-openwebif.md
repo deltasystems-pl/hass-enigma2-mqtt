@@ -100,8 +100,10 @@ message. Every failure shows the other picture and is logged once per cause unti
   the `picon` setting: the current channel, as above. The whole-bouquet request is made only when
   a bouquet is opened in the media browser, at most once per bouquet until its channel list
   changes or a day passes, and not again for an hour when it failed.
-- A player waiting for a picon can wait behind a bouquet's list that is being fetched only until
-  the next channel change, which abandons it; the list is asked for again afterwards.
+- The player does not wait behind the media browser: a lookup for the channel that is on
+  interrupts a bouquet's list that is being fetched, and the list is asked for again afterwards.
+  Zapping while a large bouquet is being listed can therefore make the receiver start that list
+  more than once.
 - **A broker client can still choose an address on the network when no host was typed.** It
   cannot make Home Assistant ask itself, a link-local address or a name. It can name another
   private address. Home Assistant then sends that host the current channel's service reference -
