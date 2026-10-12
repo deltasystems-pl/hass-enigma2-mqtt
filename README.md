@@ -17,7 +17,7 @@ plugin. You do not have to install it by hand: this integration can put it on th
 ## What you get
 
 - One device per receiver, with a media player: power, volume, channel up and down, choosing a
-  channel or bouquet, browsing bouquets, and the TV picture as artwork.
+  channel or bouquet, browsing bouquets, and the TV picture or the channel's picon as artwork.
 - Sensors for the channel, the programme now and next, running recordings, the next timer and the
   receiver's last error.
 - Remote keys you can send from automations, and every key press on the real remote as an event.
