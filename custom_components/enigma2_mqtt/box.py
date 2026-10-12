@@ -38,6 +38,7 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_call_later
 import homeassistant.util.dt as dt_util
+from yarl import URL
 
 from .const import (
     ACK_TIMEOUT,
@@ -274,6 +275,12 @@ def _typed_host_url(host: Any) -> str | None:
         address = ipaddress.ip_address(host)
     except ValueError:
         if len(host) > 253 or not _HTTP_HOST_NAME.fullmatch(host):
+            return None
+        try:
+            # A label that claims to be punycode and is not is refused by the URL parser,
+            # and only when the host is read.
+            _ = URL(f"http://{host}/").host
+        except ValueError:
             return None
         return f"http://{host}/"
     return f"http://[{address}]/" if address.version == 6 else f"http://{address}/"
