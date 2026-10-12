@@ -2747,7 +2747,9 @@ async def _async_busy_error(
             and not isinstance(remaining, bool)
             and remaining > 0
         ):
-            minutes = max(1, math.ceil(remaining / 60))
+            # Never more than the thirty minutes the lock is honoured for, whatever a
+            # receiver's clock that was set back makes of its age.
+            minutes = min(30, max(1, math.ceil(remaining / 60)))
             return InstallerError(
                 InstallerErrorCode.BUSY_UNTIL,
                 "an installation of this integration holds the receiver's lock - running, "

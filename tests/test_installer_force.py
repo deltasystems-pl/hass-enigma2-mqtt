@@ -687,7 +687,12 @@ async def test_a_stalled_self_update_says_when_the_reinstall_can_run(
 
 @pytest.mark.parametrize(
     ("remaining", "minutes"),
-    [(900, "15"), (901, "16"), (61, "2"), (60, "1"), (1, "1"), (1800, "30")],
+    [
+        (900, "15"), (901, "16"), (61, "2"), (60, "1"), (1, "1"), (1800, "30"),
+        # A clock set back on the receiver makes the lock look younger than it can be:
+        # never more than the thirty minutes it is honoured for.
+        (1801, "30"), (10**9, "30"),
+    ],
 )
 async def test_an_installer_lock_has_no_heartbeat_to_judge_and_says_when_it_expires(
     hass: HomeAssistant,

@@ -779,8 +779,13 @@ class Enigma2ForceReinstallButton(Enigma2Entity, ButtonEntity):
             # On „Ostatni błąd" too, as Home Assistant's own: the plugin may never publish
             # again, and this is the one place the household looks for why.
             self.box.async_record_local_error(KEY_FORCE_REINSTALL, reason)
+            # A refusal changed nothing and is not a reinstall that failed: its sentence
+            # says "not reinstalled", in front of the same reason.
+            refused = err.code in REFUSALS
             raise service_error(
-                err.code in REFUSALS, "force_reinstall_failed", {"reason": reason}
+                refused,
+                "force_reinstall_refused" if refused else "force_reinstall_failed",
+                {"reason": reason},
             ) from err
         except Exception as err:
             # Not one of the installer's refusals - a transport error from a step that

@@ -117,6 +117,11 @@ def issue_id(entry_id: str) -> str:
     return f"{ISSUE_KEY}_{entry_id}"
 
 
+# Letters and marks by category that are drawn as nothing: the Hangul fillers, the
+# Braille pattern blank and the combining grapheme joiner.
+_DRAWN_AS_NOTHING = frozenset("\u115f\u1160\u3164\uffa0\u2800\u034f")
+
+
 def _visible(text: str) -> str:
     """Return `text` without the characters that are never seen and still act.
 
@@ -127,11 +132,22 @@ def _visible(text: str) -> str:
     left open reorders the words of the sentence around the name, and a zero-width
     character inside `www.` would carry it past the check below. White space stays here
     and is folded by the caller.
+
+    A few characters of other categories are drawn as nothing as well - the Hangul
+    fillers, the Braille blank, the combining grapheme joiner, the variation selectors -
+    and a name made of them would be a pair of empty quotation marks. They go too, so
+    that such a name falls back like an empty one.
     """
     return "".join(
         character
         for character in text
-        if character.isspace() or unicodedata.category(character) not in ("Cf", "Cc")
+        if character.isspace()
+        or (
+            unicodedata.category(character) not in ("Cf", "Cc")
+            and character not in _DRAWN_AS_NOTHING
+            and not 0xFE00 <= ord(character) <= 0xFE0F
+            and not 0xE0100 <= ord(character) <= 0xE01EF
+        )
     )
 
 

@@ -673,6 +673,8 @@ async def test_a_refused_second_install_does_not_stop_the_first_one_s_spinner(
             with pytest.raises(HomeAssistantError) as raised:
                 await entity.async_install(version=None, backup=False)
             refused.append(raised.value.translation_placeholders["reason"])
+            # A refusal without a sentence of its own is still not "failed".
+            assert raised.value.translation_key == "update_refused"
 
         # The refusal changed nothing about the install that is still running.
         assert entity.in_progress is True

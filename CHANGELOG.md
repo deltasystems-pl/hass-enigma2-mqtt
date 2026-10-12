@@ -100,7 +100,10 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   before and during an install, the refusals of an update over MQTT, and the forced reinstall
   refused for a recording, standby, another install or the package manager running. A failure,
   no answer, and a refusal in the receiver's own words without a code stay `HomeAssistantError`.
-  Sentences and translation keys are unchanged. **The REST API still answers 500 for both**:
+  Sentences and translation keys are unchanged, with one exception: a refused forced reinstall,
+  and an update the installer refused without a sentence of its own, said "failed" in front of
+  the reason, and now say that the plugin was not reinstalled or not updated
+  (`force_reinstall_refused`, `update_refused`). **The REST API still answers 500 for both**:
   Home Assistant 2026.9 turns only a schema error and an unknown service into a client error,
   and nothing an integration raises changes that; the WebSocket API carries the sentence
   (DOCUMENTATION.md §5).

@@ -882,7 +882,9 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
                 # card would not say that a question may still be on the television.
                 raise service_error(refusal, sentence) from err
             raise service_error(
-                refusal, "update_failed", {"reason": err.code.value}
+                refusal,
+                "update_refused" if refusal else "update_failed",
+                {"reason": err.code.value},
             ) from err
         finally:
             # A spinner that never stops is worse than none: whatever happened, the

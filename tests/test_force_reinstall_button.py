@@ -1511,7 +1511,10 @@ async def test_a_refusal_is_raised_as_a_refusal_and_a_failure_as_a_failure(
         await _press(hass, hass_admin_user.id)
         await _press(hass, hass_admin_user.id)
 
-    assert raised.value.translation_key == "force_reinstall_failed"
+    # The sentence follows the type: a refusal is not a reinstall that failed.
+    assert raised.value.translation_key == (
+        "force_reinstall_refused" if refusal else "force_reinstall_failed"
+    )
     assert isinstance(raised.value, ServiceValidationError) is refusal
     assert hass.states.get(LAST_ERROR).state == "force_reinstall"
 

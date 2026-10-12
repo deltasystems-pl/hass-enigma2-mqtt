@@ -762,6 +762,14 @@ INVISIBLE = {
         "left-to-right mark": 0x200E,
         "right-to-left mark": 0x200F,
         "arabic letter mark": 0x061C,
+        # Not format characters by category, and drawn as nothing all the same.
+        "hangul filler": 0x3164,
+        "hangul choseong filler": 0x115F,
+        "halfwidth hangul filler": 0xFFA0,
+        "braille pattern blank": 0x2800,
+        "combining grapheme joiner": 0x034F,
+        "variation selector-16": 0xFE0F,
+        "variation selector-17": 0xE0100,
         "zero width space": 0x200B,
         "zero width non-joiner": 0x200C,
         "zero width joiner": 0x200D,
@@ -824,7 +832,7 @@ def test_a_zero_width_character_does_not_carry_a_link_past_the_check() -> None:
 
 
 # Names of which nothing is left once they are plain text.
-NOTHING = [RLO + ZWSP, "***", "~~ ##", " \t ", ZWJ + ZWJ, "_ _"]
+NOTHING = [RLO + ZWSP, "***", "~~ ##", " \t ", ZWJ + ZWJ, "_ _", "\u3164\u2800", "\ufe0f"]
 
 
 @pytest.mark.parametrize("empty", NOTHING, ids=[ascii(name) for name in NOTHING])
