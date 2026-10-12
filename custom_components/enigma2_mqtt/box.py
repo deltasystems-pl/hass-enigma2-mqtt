@@ -27,7 +27,7 @@ import ipaddress
 import json
 import logging
 import re
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from homeassistant.components import mqtt
 from homeassistant.components.mqtt import ReceiveMessage
@@ -122,6 +122,9 @@ from .const import (
     TOPIC_VOLUME,
     TOPIC_ZAP_HISTORY,
 )
+
+if TYPE_CHECKING:
+    from .picture import PiconResolver
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -556,6 +559,10 @@ def picon_url(ip_address: str | None, sref: str | None) -> str | None:
 
     Everything about this is best effort. No address, no picon; no picon on the box,
     a broken image the media browser simply does not draw.
+
+    This name is only the first of several OpenWebif tries, so it is the fallback: the
+    media browser and the player use the link OpenWebif itself gives for a service
+    (`picture.PiconResolver`) whenever it gives one.
     """
     if not ip_address or not sref:
         return None
@@ -882,6 +889,9 @@ class Enigma2Box:
         self._hidden_missing_warned: set[str] = set()
         # Who answers the receiver's `relay_request`: set when the entry is set up.
         self.relay_request_handler: Callable[[Any], None] | None = None
+        # Finds and fetches channel picons through the receiver's web interface: set
+        # when the entry is set up, stopped with the box.
+        self.picons: PiconResolver | None = None
         # The channel list last shown from the per-bouquet topics; None while the combined
         # `channels` topic is the source. See `channel_list`.
         self._topic_list: ChannelList | None = None
@@ -942,6 +952,18 @@ class Enigma2Box:
         source = {**self.state.announcement, **self.state.info}
         ip_address = source.get("ip")
         return ip_address if isinstance(ip_address, str) and ip_address else None
+
+    @property
+    def web_url(self) -> str | None:
+        """Return the address of the receiver's web interface, or None if unknown.
+
+        The address the receiver reports, and the host typed when it was added only while
+        it has reported none. Built from a plain IP address or host name and nothing else.
+        """
+        source = {**self.state.announcement, **self.state.info}
+        return _configuration_url(source.get("ip")) or _configuration_url(
+            self.entry.data.get(CONF_RECEIVER_HOST)
+        )
 
     @property
     def reported_mac(self) -> str | None:
@@ -1397,6 +1419,8 @@ class Enigma2Box:
             self._unsubscribes.pop()()
         self._cancel_settle()
         self._cancel_refetch()
+        if self.picons is not None:
+            self.picons.async_stop()
         for pending in self._pending:
             pending.fail("the receiver was removed from Home Assistant")
         self._pending.clear()
@@ -1504,9 +1528,6 @@ class Enigma2Box:
         source = {**self.state.announcement, **self.state.info}
         name = self.state.announcement.get("name") or self.name
         boxtype = source.get("boxtype")
-        configuration_url = _configuration_url(source.get("ip"))
-        if configuration_url is None:
-            configuration_url = _configuration_url(self.entry.data.get(CONF_RECEIVER_HOST))
         # The address the packet is actually sent to, so that everything else in Home
         # Assistant - a DHCP discovery, a router integration listing what is on the
         # network - can recognise the same box. Without it the device page knew the
@@ -1522,7 +1543,7 @@ class Enigma2Box:
             manufacturer=manufacturer_for(boxtype),
             model=boxtype,
             sw_version=software_version(source),
-            configuration_url=configuration_url,
+            configuration_url=self.web_url,
         )
         self.device_id = device.id
         return device

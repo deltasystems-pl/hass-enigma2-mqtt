@@ -35,6 +35,7 @@ from .const import (
     PLUGIN_MIN_VERSION,
     TOPIC_INTEGRATION_PREFIX,
 )
+from .picture import PiconResolver
 from .relay import async_answer_relay_request, async_get_relay
 from .release_store import async_release_index_cache
 from .withheld import async_delete_withheld_issue, async_setup_withheld_issue
@@ -117,6 +118,9 @@ async def async_setup_entry(
 
     box = Enigma2Box(hass, entry)
     entry.runtime_data = box
+    # Before the platforms: the media player asks it for picons from its first payload.
+    # It requests nothing until asked, and `box.async_stop` stops it.
+    box.picons = PiconResolver(hass, entry, box)
     box.async_register_device()
     await box.async_start()
 

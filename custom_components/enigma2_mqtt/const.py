@@ -46,6 +46,7 @@ CONF_CONFIRM_DOWNGRADE: Final = "confirm_downgrade"
 CONF_UPDATE_ALLOWED: Final = "update_allowed"
 CONF_CHECK_GITHUB_RELEASES: Final = "check_github_releases"
 CONF_SOURCE_LIST_SCOPE: Final = "source_list_scope"
+CONF_PLAYER_PICTURE: Final = "player_picture"
 CONF_SOFTCAM_AUTOHEAL: Final = "softcam_autoheal"
 CONF_SOFTCAM_AUTOHEAL_SECONDS: Final = "softcam_autoheal_seconds"
 # Bouquets whose channels "Ostatnio oglądane" leaves out, stored as names like
@@ -149,6 +150,15 @@ SOURCE_LIST_SCOPE_ACTIVE_BOUQUET: Final = "active_bouquet"
 SOURCE_LIST_SCOPE_ALL: Final = "all"
 SOURCE_LIST_SCOPES: Final = (SOURCE_LIST_SCOPE_ACTIVE_BOUQUET, SOURCE_LIST_SCOPE_ALL)
 DEFAULT_SOURCE_LIST_SCOPE: Final = SOURCE_LIST_SCOPE_ALL
+
+# The picture on the media player. `screenshot` is what this integration has always
+# shown and stays the default, with the picon of the new channel standing in from a
+# channel change until a screenshot taken after it arrives. `picon` is the channel's
+# picon all the time, and the screenshot only for a channel that has none.
+PLAYER_PICTURE_SCREENSHOT: Final = "screenshot"
+PLAYER_PICTURE_PICON: Final = "picon"
+PLAYER_PICTURES: Final = (PLAYER_PICTURE_SCREENSHOT, PLAYER_PICTURE_PICON)
+DEFAULT_PLAYER_PICTURE: Final = PLAYER_PICTURE_SCREENSHOT
 
 # How many colon-separated fields identify a service. Two spellings of one channel
 # differ in what follows them - a trailing colon, a stream URL, a name - so a comparison

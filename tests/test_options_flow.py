@@ -24,6 +24,7 @@ from custom_components.enigma2_mqtt.const import (
     CONF_NAME,
     CONF_NODE_ID,
     CONF_OSCAM_TELEMETRY,
+    CONF_PLAYER_PICTURE,
     CONF_PUBLISH_KEYS,
     CONF_RECEIVER_HOST,
     CONF_SCREENSHOT,
@@ -31,6 +32,7 @@ from custom_components.enigma2_mqtt.const import (
     CONF_SCREENSHOT_INTERVAL,
     CONF_SOURCE_LIST_SCOPE,
     CONF_WOL_MAC,
+    DEFAULT_PLAYER_PICTURE,
     DEFAULT_SOURCE_LIST_SCOPE,
     DOMAIN,
     SOURCE_LIST_SCOPE_ACTIVE_BOUQUET,
@@ -130,6 +132,8 @@ async def test_saving_the_options_reloads_the_entry(
         # Nor for this one, whose default is the long list the media player has always
         # offered - narrowing it under an existing installation would be a surprise.
         CONF_SOURCE_LIST_SCOPE: DEFAULT_SOURCE_LIST_SCOPE,
+        # Nor for this one: the media player keeps the picture it always had.
+        CONF_PLAYER_PICTURE: DEFAULT_PLAYER_PICTURE,
         # Nor for this one: nothing hidden from "Ostatnio oglądane" unless somebody
         # chose it.
         CONF_HISTORY_HIDDEN_BOUQUETS: [],

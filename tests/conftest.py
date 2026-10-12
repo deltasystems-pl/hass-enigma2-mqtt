@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 import json
+import re
 from typing import Any
 from unittest.mock import patch
 
@@ -26,6 +27,7 @@ from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_fire_mqtt_message,
 )
+from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
 from custom_components.enigma2_mqtt.const import (
     CONF_BASE_TOPIC,
@@ -298,6 +300,20 @@ def quick_restart_rule(monkeypatch: pytest.MonkeyPatch) -> None:
     # How long "nothing is retained on the release index topic" takes to conclude. The fake
     # broker delivers a retained message on the next turn of the loop, not seconds later.
     monkeypatch.setattr(release_store, "RETAINED_GRACE", 0.05)
+
+
+@pytest.fixture(autouse=True)
+def receiver_without_a_web_interface(aioclient_mock: AiohttpClientMocker) -> None:
+    """Answer every request to the example receiver's web interface with 404.
+
+    The media player asks the receiver's OpenWebif for a channel's picon after a channel
+    change, and many tests change the channel. Without this each of them would try to
+    open a real connection to a documentation address. A 404 is a receiver that has no
+    such page: the lookup ends quietly and the picture is the screenshot, which is what
+    every test that is not about picons expects. A test about picons clears this and
+    serves its own OpenWebif.
+    """
+    aioclient_mock.get(re.compile(rf"^http://{re.escape(IP)}/"), status=404)
 
 
 @pytest.fixture
