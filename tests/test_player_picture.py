@@ -34,7 +34,7 @@ from pytest_homeassistant_custom_component.test_util.aiohttp import (
     AiohttpClientMockResponse,
 )
 
-from custom_components.enigma2_mqtt import picture
+from custom_components.enigma2_mqtt import box as box_module, picture
 from custom_components.enigma2_mqtt.box import service_identity
 from custom_components.enigma2_mqtt.const import (
     CONF_BASE_TOPIC,
@@ -685,6 +685,61 @@ async def test_three_questions_in_a_row_that_fail_are_a_web_interface_to_leave_a
     await _publish(hass, SERVICE_TOPIC, _new_channel(5))
     await _publish(hass, SERVICE_TOPIC, _new_channel(6))
     assert resolver.async_status()["status"] == picture.STATUS_OK
+
+
+async def test_one_service_that_keeps_failing_is_counted_once(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The same channel asked about every five minutes is one channel, not a dead web interface."""
+    _failing_for(aioclient_mock, SREF_OTHER, files=FILES)
+    await _setup(hass, config_entry)
+    resolver = config_entry.runtime_data.picons
+    now = _clock(resolver)
+    await _publish(hass, SERVICE_TOPIC, TVN)
+
+    for _ in range(picture.MAX_MISSES + 2):
+        asked = aioclient_mock.call_count
+        await _publish(hass, SERVICE_TOPIC, POLSAT)
+        assert aioclient_mock.call_count == asked + 2
+        assert resolver.async_status()["status"] == picture.STATUS_OK
+        # Back to a channel whose picon is held, which asks nothing and answers nothing.
+        await _publish(hass, SERVICE_TOPIC, TVN)
+        now[0] += picture.MISS_TTL + 1
+
+
+async def test_the_back_off_starts_the_count_of_failures_again(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """After the back-off one failure is one service again, not the third in a row."""
+    _failing_for(aioclient_mock, files=FILES)
+    await _setup(hass, config_entry)
+    resolver = config_entry.runtime_data.picons
+    now = _clock(resolver)
+    await _publish(hass, SERVICE_TOPIC, TVN)
+    _failing_for(aioclient_mock, "*", files={})
+    for number in range(1, picture.MAX_MISSES + 1):
+        await _publish(hass, SERVICE_TOPIC, _new_channel(number))
+    assert resolver.async_status()["retry_in_seconds"] == 900
+
+    now[0] += picture.BACKOFF["unexpected"] + 1
+    asked = aioclient_mock.call_count
+    await _publish(hass, SERVICE_TOPIC, _new_channel(11))
+    await _publish(hass, SERVICE_TOPIC, _new_channel(12))
+    assert aioclient_mock.call_count == asked + 4
+
+
+def test_a_typed_name_the_address_parser_refuses_is_no_host() -> None:
+    """A label that claims to be punycode and is not cannot be asked, and raises nothing."""
+    assert box_module._typed_host_url("xn--a.lan") is None
+    assert box_module._typed_host_url("xn--bcher-kva.example") == "http://xn--bcher-kva.example/"
 
 
 async def test_an_address_that_went_away_during_a_lookup_is_not_an_answer(

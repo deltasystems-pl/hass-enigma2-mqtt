@@ -445,10 +445,11 @@ class PiconResolver:
         # Until when `getpicon` is not asked: it did not answer, and the name built from
         # the reference found a picture, which is an OpenWebif without it.
         self._getpicon_missing_until = 0.0
-        # Whether `getpicon` has answered in this session, and how many lookups in a
-        # row have ended without any answer since it last did.
+        # Whether `getpicon` has answered in this session, and the services whose lookup
+        # has ended without any answer since it last did. Services, not lookups: one
+        # channel that is asked about again every few minutes is still one channel.
         self._getpicon_works = False
-        self._misses = 0
+        self._missed: set[str] = set()
         self._problem: str | None = None
         self._retry_at = 0.0
         self._logged: str | None = None
@@ -684,8 +685,9 @@ class PiconResolver:
 
         No answer from a web interface that has never answered is a web interface to
         stay away from. From an OpenWebif that has answered in this session it is one
-        service without a picon for a short while - until it has happened `MAX_MISSES`
-        times running, which is no longer about one service.
+        service without a picon for a short while - until it has happened to
+        `MAX_MISSES` different services with no answer in between, which is no longer
+        about one service.
         """
         if (base := self._base_url()) is None:
             return None, 0.0
@@ -724,9 +726,12 @@ class PiconResolver:
             return picture, ANSWER_TTL
         if proven:
             return None, NEGATIVE_TTL
-        if self._getpicon_works and self._misses + 1 < MAX_MISSES:
-            self._misses += 1
-            return None, MISS_TTL
+        if self._getpicon_works:
+            self._missed.add(service_identity(sref))
+            if len(self._missed) < MAX_MISSES:
+                return None, MISS_TTL
+            # The back-off starts the count again: what comes after it is judged anew.
+            self._missed.clear()
         # A web interface that answers neither question is not asked a third one for
         # every channel.
         raise _Unavailable(PROBLEM_UNEXPECTED)
@@ -844,7 +849,7 @@ class PiconResolver:
     def _async_answered(self) -> None:
         """Note that OpenWebif gave an answer that could be used, which ends any problem."""
         self._answered = True
-        self._misses = 0
+        self._missed.clear()
         if self._problem is not None:
             _LOGGER.debug("The web interface of %s answers again", self.box.node_id)
         self._problem = None
