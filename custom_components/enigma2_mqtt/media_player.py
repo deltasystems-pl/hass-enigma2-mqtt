@@ -349,12 +349,12 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
         thumbnails = picons.async_thumbnails(bouquet) if picons else {}
 
         def thumbnail(sref: Any) -> str | None:
-            if not isinstance(sref, str):
+            if picons is None or not isinstance(sref, str):
                 return None
             identity = service_identity(sref)
             if identity in thumbnails:
                 return thumbnails[identity]
-            return self.box.picon_url(sref)
+            return picons.async_legacy_thumbnail(sref)
 
         children: Sequence[BrowseMedia] = [
             BrowseMedia(

@@ -562,7 +562,8 @@ def picon_url(ip_address: str | None, sref: str | None) -> str | None:
 
     This name is only the first of several OpenWebif tries, so it is the fallback: the
     media browser and the player use the link OpenWebif itself gives for a service
-    (`picture.PiconResolver`) whenever it gives one.
+    (`picture.PiconResolver`) whenever it gives one - and the resolver builds the
+    fallback too, at the address it asks, not at whatever address is passed in here.
     """
     if not ip_address or not sref:
         return None
@@ -1365,10 +1366,6 @@ class Enigma2Box:
             if bouquet.get("sref") == sref:
                 return bouquet
         return None
-
-    def picon_url(self, sref: str | None) -> str | None:
-        """Return the picon URL of a service on this box."""
-        return picon_url(self.ip_address, sref)
 
     # ------------------------------------------------------------------- topics
 

@@ -1896,6 +1896,92 @@ async def test_a_bouquet_opened_during_a_back_off_is_not_asked_about(
     assert bouquet.children[0].thumbnail == PICON_URL
 
 
+@pytest.mark.parametrize("reported", ["evil.example/x?", "203.0.113.9", "127.0.0.1", IP])
+async def test_every_thumbnail_points_at_the_address_picons_are_asked_at(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    reported: str,
+) -> None:
+    """The typed host, whatever `info` says - before OpenWebif answered, and after."""
+    typed = "198.51.100.7"
+    entry = _entry_with_host(typed)
+    box_on_the_broker[INFO_TOPIC] = json.dumps({**INFO, "ip": reported})
+    box_on_the_broker[ANNOUNCEMENT_TOPIC] = json.dumps({**ANNOUNCEMENT, "ip": reported})
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(
+        f"http://{typed}/api/getservices",
+        text=_services((SREF, "TVP 1 HD", "/picon/tvp1hd.png")),
+    )
+    aioclient_mock.get(ANYWHERE, status=404)
+    await _setup(hass, entry)
+
+    first = await _browse(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    second = await _browse(hass)
+
+    assert [child.thumbnail for child in first.children] == [
+        f"http://{typed}{LINK_ONE}",
+        f"http://{typed}{LEGACY_TWO}",
+    ]
+    assert [child.thumbnail for child in second.children] == [
+        f"http://{typed}/picon/tvp1hd.png",
+        f"http://{typed}{LEGACY_TWO}",
+    ]
+    assert {call[1].host for call in aioclient_mock.mock_calls} == {typed}
+
+
+@pytest.mark.parametrize(
+    "reported", ["evil.example/x?", "localhost", "127.0.0.1", "169.254.169.254", None]
+)
+async def test_without_an_address_to_ask_there_is_no_thumbnail(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    reported: Any,
+) -> None:
+    """A thumbnail is a request the browser makes: not to an address nothing here asks."""
+    box_on_the_broker[INFO_TOPIC] = json.dumps({**INFO, "ip": reported})
+    box_on_the_broker[ANNOUNCEMENT_TOPIC] = json.dumps({**ANNOUNCEMENT, "ip": reported})
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(ANYWHERE, status=404)
+    await _setup(hass, config_entry)
+
+    bouquet = await _browse(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert [child.title for child in bouquet.children] == ["TVP 1 HD", "TVN HD"]
+    assert [child.thumbnail for child in bouquet.children] == [None, None]
+    assert aioclient_mock.call_count == 0
+
+
+async def test_a_reference_that_makes_no_file_name_makes_no_thumbnail(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """An IPTV reference carries a stream address; that is not put into a thumbnail."""
+    _serve(aioclient_mock)
+    iptv = "4097:0:1:0:0:0:0:0:0:0:http%3a//example.invalid/stream?token=secret:Kanal"
+    changed = json.loads(json.dumps(CHANNELS))
+    changed["bouquets"][0]["channels"].append({"sref": iptv, "name": "Kanal"})
+    box_on_the_broker[CHANNELS_TOPIC] = json.dumps(changed)
+    await _setup(hass, config_entry)
+
+    bouquet = await _browse(hass)
+
+    assert [child.thumbnail for child in bouquet.children] == [
+        PICON_URL,
+        f"{BASE}{LEGACY_TWO}",
+        None,
+    ]
+
+
 # ----------------------------------------------------------------- what is kept, and how long --
 
 

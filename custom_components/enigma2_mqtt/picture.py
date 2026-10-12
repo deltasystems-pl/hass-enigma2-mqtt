@@ -536,6 +536,20 @@ class PiconResolver:
             return {}
 
     @callback
+    def async_legacy_thumbnail(self, sref: Any) -> str | None:
+        """Return the thumbnail built from a service reference alone, or None for none.
+
+        At the address picons are asked at and nowhere else: the browser fetches a
+        thumbnail, and an address taken from the broker unchecked would send it there.
+        A reference that makes no plain file name - an IPTV one, with its stream address
+        in it - makes no thumbnail.
+        """
+        if not isinstance(sref, str) or (base := self._base_url()) is None:
+            return None
+        link = legacy_picon_link(sref)
+        return str(base.with_path(link)) if link is not None else None
+
+    @callback
     def async_status(self) -> dict[str, Any]:
         """Return the state of the lookup for diagnostics: counts and causes, no address."""
         now = self._clock()
