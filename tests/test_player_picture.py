@@ -556,6 +556,169 @@ async def test_an_openwebif_without_getpicon_is_asked_for_the_old_name_only(
     assert resolver.async_status()["services_without_picon"] == 1
 
 
+def _new_channel(number: int) -> dict[str, Any]:
+    """Return a service payload for a channel nothing has asked about before."""
+    return {**POLSAT, "sref": f"1:0:19:{0x5000 + number:X}:640:13E:820000:0:0:0:"}
+
+
+def _failing_for(
+    aioclient_mock: AiohttpClientMocker, *failing: str, files: dict[str, bytes]
+) -> None:
+    """Serve the example OpenWebif, with `getpicon` answering 500 for some services."""
+
+    async def _getpicon(method: str, url: Any, data: Any) -> AiohttpClientMockResponse:
+        sref = url.query.get("sRef", "")
+        if sref in failing or "*" in failing:
+            return AiohttpClientMockResponse(method, url, status=500, text="Internal Server Error")
+        return AiohttpClientMockResponse(method, url, json=_getpicon_answer(PICONS.get(sref)))
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(GETPICON, side_effect=_getpicon)
+    for link, content in files.items():
+        aioclient_mock.get(f"{BASE}{link}", content=content)
+    aioclient_mock.get(EVERYTHING, status=404)
+
+
+async def test_one_question_that_fails_does_not_switch_every_picon_off(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """An OpenWebif that has answered and then fails for one service is still OpenWebif.
+
+    That service has no picon for five minutes; the next channel is asked about as if
+    nothing had happened, and nothing is backed off.
+    """
+    assert picture.MISS_TTL == 5 * 60
+    _failing_for(aioclient_mock, SREF_OTHER, files=FILES)
+    await _setup(hass, config_entry)
+    entity = _player(hass)
+    resolver = config_entry.runtime_data.picons
+    now = _clock(resolver)
+
+    await _publish(hass, SERVICE_TOPIC, TVN)
+    assert await entity.async_get_media_image() == (PNG_TWO, "image/png")
+
+    await _publish(hass, SERVICE_TOPIC, POLSAT)
+    assert _asked(aioclient_mock)[2:] == ["/api/getpicon", LEGACY_OTHER]
+    assert await entity.async_get_media_image() == (SCREEN, "image/jpeg")
+    assert resolver.async_status()["status"] == picture.STATUS_OK
+    assert resolver.async_status()["retry_in_seconds"] is None
+
+    await _publish(hass, SERVICE_TOPIC, SERVICE)
+    assert await entity.async_get_media_image() == (PNG_ONE, "image/png")
+    assert resolver.async_status()["status"] == picture.STATUS_OK
+
+    # The service that failed is left alone for five minutes, and then asked about again.
+    asked = aioclient_mock.call_count
+    now[0] += picture.MISS_TTL - 1
+    await _publish(hass, SERVICE_TOPIC, POLSAT)
+    assert aioclient_mock.call_count == asked
+    await _publish(hass, SERVICE_TOPIC, SERVICE)
+    now[0] += 2
+    await _publish(hass, SERVICE_TOPIC, POLSAT)
+    assert aioclient_mock.call_count == asked + 2
+    assert resolver.async_status()["status"] == picture.STATUS_OK
+
+
+async def test_a_picon_under_the_old_name_does_not_retire_a_getpicon_that_works(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """One failed question answered by the old name is not an OpenWebif without getpicon."""
+    _failing_for(aioclient_mock, SREF_OTHER, files={**FILES, LEGACY_OTHER: JPEG_OTHER})
+    await _setup(hass, config_entry)
+
+    await _publish(hass, SERVICE_TOPIC, TVN)
+    await _publish(hass, SERVICE_TOPIC, POLSAT)
+    assert await _player(hass).async_get_media_image() == (JPEG_OTHER, "image/jpeg")
+    await _publish(hass, SERVICE_TOPIC, SERVICE)
+
+    assert _asked(aioclient_mock)[2:] == [
+        "/api/getpicon",
+        LEGACY_OTHER,
+        "/api/getpicon",
+        LINK_ONE,
+    ]
+    assert await _player(hass).async_get_media_image() == (PNG_ONE, "image/png")
+
+
+async def test_three_questions_in_a_row_that_fail_are_a_web_interface_to_leave_alone(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Once is a service; three times running is the web interface, answered or not."""
+    assert picture.MAX_MISSES == 3
+    _failing_for(aioclient_mock, files=FILES)
+    await _setup(hass, config_entry)
+    resolver = config_entry.runtime_data.picons
+    _clock(resolver)
+    await _publish(hass, SERVICE_TOPIC, TVN)
+    _failing_for(aioclient_mock, "*", files={})
+
+    await _publish(hass, SERVICE_TOPIC, _new_channel(1))
+    await _publish(hass, SERVICE_TOPIC, _new_channel(2))
+    assert resolver.async_status()["status"] == picture.STATUS_OK
+    assert aioclient_mock.call_count == 4
+
+    await _publish(hass, SERVICE_TOPIC, _new_channel(3))
+    assert aioclient_mock.call_count == 6
+    assert resolver.async_status()["status"] == "unexpected"
+    assert resolver.async_status()["retry_in_seconds"] == 900
+    await _publish(hass, SERVICE_TOPIC, _new_channel(4))
+    assert aioclient_mock.call_count == 6
+
+    # An answer in between starts the count again.
+    _failing_for(aioclient_mock, files=FILES)
+    resolver._clock = lambda: 10_000.0
+    await _publish(hass, SERVICE_TOPIC, SERVICE)
+    assert resolver.async_status()["status"] == picture.STATUS_OK
+    _failing_for(aioclient_mock, "*", files={})
+    await _publish(hass, SERVICE_TOPIC, _new_channel(5))
+    await _publish(hass, SERVICE_TOPIC, _new_channel(6))
+    assert resolver.async_status()["status"] == picture.STATUS_OK
+
+
+async def test_an_address_that_went_away_during_a_lookup_is_not_an_answer(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """No address is nothing to remember: the service is asked about when there is one."""
+    _serve(aioclient_mock)
+    await _setup(hass, config_entry)
+    box = config_entry.runtime_data
+    resolver = box.picons
+    told: list[None] = []
+    resolver.async_add_listener(lambda: told.append(None))
+
+    # The lookup is queued while there is an address, and runs when there is none.
+    assert resolver.async_picon(SREF_TWO) is PENDING
+    box.state.info["ip"] = "localhost"
+    box.state.announcement["ip"] = "localhost"
+    resolver._may_ask = lambda: True
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert told
+    assert SREF_TWO not in resolver._pictures
+    assert aioclient_mock.call_count == 0
+
+    del resolver._may_ask
+    box.state.info["ip"] = IP
+    await _publish(hass, SERVICE_TOPIC, TVN)
+    assert await _player(hass).async_get_media_image() == (PNG_TWO, "image/png")
+
+
 # ----------------------------------------------------------------------------- standby --
 
 
@@ -685,10 +848,16 @@ async def test_a_receiver_that_cannot_be_asked_is_left_alone_for_minutes(
     assert resolver.async_status()["status"] == picture.STATUS_OK
     assert resolver.async_status()["retry_in_seconds"] is None
 
+    # For a receiver that cannot be reached or wants a login that is the next lookup.
+    # One that has just answered as OpenWebif does gets the benefit of the doubt for a
+    # service or two before it is something else again.
     aioclient_mock.clear_requests()
     aioclient_mock.get(EVERYTHING, **answer)
-    await _publish(hass, SERVICE_TOPIC, POLSAT)
+    for number in range(picture.MAX_MISSES if problem == "unexpected" else 1):
+        assert len(_warnings(caplog)) == 1
+        await _publish(hass, SERVICE_TOPIC, _new_channel(number))
     assert len(_warnings(caplog)) == 2
+    assert resolver.async_status()["status"] == problem
 
 
 async def test_a_status_that_is_not_200_is_never_a_picture(

@@ -121,6 +121,10 @@ MAX_BOUQUET_LINKS: Final = 20000
 # bouquet's channel list changes, or when the entry is reloaded.
 ANSWER_TTL: Final = 24 * 60 * 60.0
 NEGATIVE_TTL: Final = 60 * 60.0
+# A service an OpenWebif that works failed to answer for is asked about again after
+# this long, and this many such failures in a row are no longer one service's.
+MISS_TTL: Final = 5 * 60.0
+MAX_MISSES: Final = 3
 
 # What stops the lookup for a while, and for how long. `unexpected` is a web interface
 # that answers, but not as OpenWebif does: anything but 200, or no JSON, on its API.
@@ -441,6 +445,10 @@ class PiconResolver:
         # Until when `getpicon` is not asked: it did not answer, and the name built from
         # the reference found a picture, which is an OpenWebif without it.
         self._getpicon_missing_until = 0.0
+        # Whether `getpicon` has answered in this session, and how many lookups in a
+        # row have ended without any answer since it last did.
+        self._getpicon_works = False
+        self._misses = 0
         self._problem: str | None = None
         self._retry_at = 0.0
         self._logged: str | None = None
@@ -616,10 +624,11 @@ class PiconResolver:
             else:
                 try:
                     if sref is not None:
-                        picture = await self._async_resolve(sref)
+                        picture, ttl = await self._async_resolve(sref)
                         if self._stopped:
                             return
-                        self._remember(sref, picture)
+                        if ttl > 0:
+                            self._remember(sref, picture, ttl)
                     elif bouquet is not None:
                         self._scanning = _bouquet_sref(bouquet)
                         try:
@@ -651,17 +660,24 @@ class PiconResolver:
             except Exception:
                 _LOGGER.debug("A listener of the picon lookup failed", exc_info=True)
 
-    async def _async_resolve(self, sref: str) -> Picture | None:
-        """Ask the receiver for one service's picon. None: it has none we can use.
+    async def _async_resolve(self, sref: str) -> tuple[Picture | None, float]:
+        """Ask the receiver for one service's picon, and say how long the answer holds.
 
         A bouquet's answer that is already held, then `getpicon`, then the name built
-        from the reference. A bouquet is never listed for this.
+        from the reference. A bouquet is never listed for this. The picon is None when
+        the service has none that can be used, and the time is 0 for no answer at all,
+        which is not remembered.
+
+        No answer from a web interface that has never answered is a web interface to
+        stay away from. From an OpenWebif that has answered in this session it is one
+        service without a picon for a short while - until it has happened `MAX_MISSES`
+        times running, which is no longer about one service.
         """
         if (base := self._base_url()) is None:
-            return None
+            return None, 0.0
         link = self._known_link(sref)
-        # Whether this is known to be an OpenWebif: it answered for this service, or it
-        # is one without `getpicon` that has served a picon under the old name before.
+        # Whether OpenWebif answered for this service - or is known to be one without
+        # `getpicon`, which has served a picon under the old name before.
         proven = link is not None or self._clock() < self._getpicon_missing_until
         if not proven:
             body = await self._async_get(
@@ -672,10 +688,11 @@ class PiconResolver:
             )
             if body is not None and getpicon_answered(body):
                 proven = True
+                self._getpicon_works = True
                 link = parse_getpicon(body)
                 self._async_answered()
         if link == NO_PICON:
-            return None
+            return None, NEGATIVE_TTL
         if link is None:
             # No link from OpenWebif - no answer, or one that cannot be used.
             link = legacy_picon_link(sref)
@@ -685,15 +702,20 @@ class PiconResolver:
             else None
         )
         picture = picon_picture(body) if body is not None else None
-        if not proven:
-            # A web interface that answers neither question is not asked a third one
-            # for every channel: it has to show a picon under the old name, or wait.
-            if picture is None:
-                raise _Unavailable(PROBLEM_UNEXPECTED)
-            self._getpicon_missing_until = self._clock() + NEGATIVE_TTL
         if picture is not None:
+            if not proven and not self._getpicon_works:
+                # The old name found a picture where `getpicon` never answered.
+                self._getpicon_missing_until = self._clock() + NEGATIVE_TTL
             self._async_answered()
-        return picture
+            return picture, ANSWER_TTL
+        if proven:
+            return None, NEGATIVE_TTL
+        if self._getpicon_works and self._misses + 1 < MAX_MISSES:
+            self._misses += 1
+            return None, MISS_TTL
+        # A web interface that answers neither question is not asked a third one for
+        # every channel.
+        raise _Unavailable(PROBLEM_UNEXPECTED)
 
     def _known_link(self, sref: str) -> str | None:
         """Return a service's link from a bouquet's answer that is held, if any has it."""
@@ -808,6 +830,7 @@ class PiconResolver:
     def _async_answered(self) -> None:
         """Note that OpenWebif gave an answer that could be used, which ends any problem."""
         self._answered = True
+        self._misses = 0
         if self._problem is not None:
             _LOGGER.debug("The web interface of %s answers again", self.box.node_id)
         self._problem = None
@@ -890,11 +913,12 @@ class PiconResolver:
             self._retry_cancel()
             self._retry_cancel = None
 
-    def _remember(self, sref: str, picture: Picture | None) -> None:
+    def _remember(self, sref: str, picture: Picture | None, ttl: float | None = None) -> None:
         """Keep one service's answer, within the bounds on count and bytes."""
         if self._stopped:
             return
-        ttl = ANSWER_TTL if picture is not None else NEGATIVE_TTL
+        if ttl is None:
+            ttl = ANSWER_TTL if picture is not None else NEGATIVE_TTL
         self._pictures[sref] = (self._clock() + ttl, picture)
         self._pictures.move_to_end(sref)
 
