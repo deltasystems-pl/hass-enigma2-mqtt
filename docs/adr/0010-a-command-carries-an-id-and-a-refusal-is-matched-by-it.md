@@ -2,6 +2,7 @@
 
 **Status:** accepted 2026-10-13
 **Date:** 2026-10-13
+**Amended:** 2026-10-13 - an `info` that is not a JSON object claims nothing either
 **Extends:** [ADR-0003](0003-control-feedback-and-household-features.md) - how a control learns
 that the receiver refused. The receiver's half is the plugin's
 [ADR-0016](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/main/docs/adr/0016-a-commands-id-comes-in-an-envelope-and-only-a-refusal-says-it-back.md).
@@ -33,8 +34,7 @@ for the command's own payload, and refuses most commands sent in one.
 **1. An envelope is sent to a plugin whose `info` claims `command_id` now, and to no other.** The
 question is asked for each command at the moment it is published, of `info` alone: an `info` that
 has not arrived claims nothing, a retracted one claims nothing although its last payload is kept
-for the device page, one that is not a JSON object claims nothing in the same way, and the
-announcement is not asked. A plugin that gains the capability with
+for the device page, and the announcement is not asked. A plugin that gains the capability with
 an update, or loses it with a downgrade, is sent what it takes from its next `info` on. Not known
 is "no": the cost of a wrong "yes" is a command the receiver refuses, the cost of a wrong "no" is
 the matching of before.
@@ -128,3 +128,18 @@ id included, and the log says at debug level when a refusal was left alone for i
   update whoever asked - that is its purpose - and so does not look at the id.
 - **A new sender has to go through the runtime object**, or be added to the list of decision 8;
   a test holds the list of modules that build a command topic.
+
+## Amendment - 2026-10-13: an `info` that cannot be read claims nothing
+
+Decision 1 names what claims nothing: an `info` that has not arrived, a retracted one, and the
+announcement. As first built there was a fourth case with the opposite answer. An `info` that is
+not a JSON object - a list, a string, a number, `null`, text that is not JSON, bytes that are not
+UTF-8 - was dropped, as it is everywhere else in this integration, and the claim of the `info`
+before it went on deciding. That contradicts "not known is no" in the same decision.
+
+Such an `info` now withdraws the claim the way a retracted one does: commands go out without an
+envelope until an `info` that is a JSON object arrives, and that one decides again. The last good
+payload is still kept for everything else that reads it, and nothing else changes with this:
+whether the removal of the plugin or an update over MQTT is offered still follows the last good
+`info`. The moment `info` becomes unreadable is logged once, at debug level, with the payload's
+size and none of its content.

@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 import json
+import logging
 from pathlib import Path
 import re
 from typing import Any
@@ -398,6 +399,46 @@ async def test_an_info_that_says_nothing_readable_claims_nothing(
     _says(hass, CLAIMS)
     await box.async_publish_cmd("volume", "40")
     assert receiver.heard[-1][2] is not None
+
+
+async def test_an_info_that_became_unreadable_is_logged_once_each_time(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """One debug line when `info` stops being readable, not one for every such payload,
+    with the payload's size and nothing of what was in it."""
+    box = await _box(hass, config_entry, box_on_the_broker)
+
+    def _lines() -> list[str]:
+        return [
+            record.getMessage()
+            for record in caplog.records
+            if record.name == box_module.__name__
+            and record.levelno == logging.DEBUG
+            and "not a JSON object" in record.getMessage()
+        ]
+
+    with caplog.at_level(logging.DEBUG, logger=box_module.__name__):
+        _says(hass, '["something-private"]')
+        _says(hass, "7")
+        _says(hass, "not json at all")
+
+        assert len(_lines()) == 1
+        assert NODE_ID in _lines()[0]
+        assert "(21 bytes)" in _lines()[0]
+        assert "private" not in _lines()[0]
+
+        # Readable again, and unreadable again: that is a second time.
+        _says(hass, CLAIMS)
+        assert box.takes_command_ids
+        _says(hass, "null")
+        _says(hass, "null")
+
+        assert len(_lines()) == 2
+        assert not box.takes_command_ids
 
 
 # ------------------------------------- nothing differs without the capability --

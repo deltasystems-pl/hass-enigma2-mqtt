@@ -2370,11 +2370,8 @@ async def test_answers_are_believed_for_a_day_and_no_picon_for_an_hour(
 
 
 @pytest.mark.parametrize(
-    "files",
-    [
-        {**FILES, LINK_TWO: b"<html><body>Login</body></html>"},
-        {LINK_ONE: PNG_ONE, LINK_OTHER: JPEG_OTHER},
-    ],
+    "behind_the_link",
+    [{"response": b"<html><body>Login</body></html>"}, {"status": 404}],
     ids=["a file that is no picture", "no file"],
 )
 async def test_a_link_without_a_usable_picture_is_not_asked_about_again_for_an_hour(
@@ -2383,11 +2380,28 @@ async def test_a_link_without_a_usable_picture_is_not_asked_about_again_for_an_h
     aioclient_mock: AiohttpClientMocker,
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
-    files: dict[str, bytes],
+    behind_the_link: dict[str, Any],
 ) -> None:
     """OpenWebif named a picon and there is no picture behind the link: no picon, for an hour."""
     assert picture.NEGATIVE_TTL == 3600
-    _serve(aioclient_mock, files=files)
+
+    async def _getpicon(method: str, url: Any, data: Any) -> AiohttpClientMockResponse:
+        return AiohttpClientMockResponse(
+            method, url, json=_getpicon_answer(PICONS.get(url.query.get("sRef", "")))
+        )
+
+    async def _no_picture(method: str, url: Any, data: Any) -> AiohttpClientMockResponse:
+        # A request to a receiver gives the loop a turn, and the mock by itself does not.
+        # Without one, a lookup that asks again without end would starve the bound below.
+        await asyncio.sleep(0)
+        return AiohttpClientMockResponse(method, url, **behind_the_link)
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(GETPICON, side_effect=_getpicon)
+    aioclient_mock.get(f"{BASE}{LINK_TWO}", side_effect=_no_picture)
+    aioclient_mock.get(f"{BASE}{LINK_ONE}", content=PNG_ONE)
+    aioclient_mock.get(f"{BASE}{LINK_OTHER}", content=JPEG_OTHER)
+    aioclient_mock.get(EVERYTHING, status=404)
     await _setup(hass, config_entry, PLAYER_PICTURE_PICON)
     await hass.async_block_till_done(wait_background_tasks=True)
     resolver = config_entry.runtime_data.picons
@@ -2395,7 +2409,8 @@ async def test_a_link_without_a_usable_picture_is_not_asked_about_again_for_an_h
 
     async def _zap_through() -> list[str]:
         aioclient_mock.mock_calls.clear()
-        # An answer that is not kept is asked for again without end: bounded, to fail.
+        # An answer that is not kept is asked for again without end, and this bound is
+        # then what fails the test.
         async with asyncio.timeout(5):
             for service in (TVN, POLSAT, TVN, POLSAT):
                 await _publish(hass, SERVICE_TOPIC, service)

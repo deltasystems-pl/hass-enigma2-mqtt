@@ -1298,8 +1298,10 @@ class Enigma2Box:
         box it runs on, and only `info` carries the permission beside it.
 
         🔴 The polarity is the opposite of `deep_standby_permission`'s, deliberately
-        (ADR-0004): silence - an older plugin, a payload that cannot be read, a box that has
-        not answered - offers nothing, because the act behind it cannot be undone from here.
+        (ADR-0004): silence - an older plugin, a box that has not answered - offers
+        nothing, because the act behind it cannot be undone from here. A payload that
+        cannot be read is not that silence once a good one is held: it is dropped, and
+        the last good `info` goes on deciding.
         An empty `info` counts as silence even though the last good payload is still held:
         it is what the plugin publishes on its way out, and a menu entry left standing for
         a receiver whose plugin has gone would be a control that can only ever time out.
@@ -1985,7 +1987,14 @@ class Enigma2Box:
                 self._async_updated(TOPIC_INFO)
             return
         if (info := parse_json_payload(msg.payload)) is None:
-            self.info_unreadable = True
+            if not self.info_unreadable:
+                self.info_unreadable = True
+                _LOGGER.debug(
+                    "Receiver %s published an `info` that is not a JSON object (%d bytes); "
+                    "commands go out without an id until one that can be read arrives",
+                    self.node_id,
+                    len(msg.payload),
+                )
             return
         self.info_retracted = False
         self.info_unreadable = False
