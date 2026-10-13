@@ -27,7 +27,7 @@ from pytest_homeassistant_custom_component.common import (
 )
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
-from custom_components.enigma2_mqtt import go2rtc
+from custom_components.enigma2_mqtt import own_go2rtc as go2rtc
 from custom_components.enigma2_mqtt.const import (
     CONF_BOUQUETS,
     CONF_DANGEROUS_BUTTONS,
@@ -330,7 +330,7 @@ async def test_a_refusal_is_reported_once_and_cleared_when_it_works_again(
     aioclient_mock.put(API, status=400, text="source with spaces may be insecure")
     streaming(box_on_the_broker)
     entry = following(config_entry)
-    caplog.set_level(logging.INFO, logger="custom_components.enigma2_mqtt.go2rtc")
+    caplog.set_level(logging.INFO, logger="custom_components.enigma2_mqtt.own_go2rtc")
     await async_setup_box_then_retained(hass, entry, box_on_the_broker)
     await settle(hass)
     await zap(hass, SERVICE_TWO)

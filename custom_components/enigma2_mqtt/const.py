@@ -742,7 +742,7 @@ MANUFACTURERS: Final[dict[str, str]] = {
 
 # What is on the decoder, from a plugin after 0.4.0: the `service` topic carries the video
 # codec, the scan, the frame rate and the audio tracks, and the capability says the image
-# can fill them in (the plugin's TOPICS.md, `service`). `stream.py` reads the members.
+# can fill them in (the plugin's TOPICS.md, `service`). `stream_facts.py` reads the members.
 CAPABILITY_SERVICE_CODECS: Final = "service_codecs"
 
 # Whether the receiver's volume acts on the audio being played, from a plugin after 0.4.0:
@@ -765,7 +765,7 @@ STREAM_STOP_FAILURES: Final = ("not_stopped",)
 
 # Where the image's stream server is, from a plugin after 0.4.0: `stream` carries the
 # port, the form of the request path and whether the server wants a login - no host and
-# no URL. The address is built in `stream.py`, at the host the picon lookup asks.
+# no URL. The address is built in `stream_facts.py`, at the host the picon lookup asks.
 TOPIC_STREAM: Final = "stream"
 CAPABILITY_STREAM: Final = "stream"
 # The media player's attributes for it: the address of the service on the decoder, a
@@ -788,7 +788,7 @@ STREAM_MIME_TYPE: Final = "video/mp2t"
 
 # The user's own go2rtc, in the options: the address of its API - empty is "off" - the
 # name of the one stream kept there, and the source it is given, with `{url}` where the
-# receiver's stream address goes (`go2rtc.py`). They sit in a section of the options
+# receiver's stream address goes (`own_go2rtc.py`). They sit in a section of the options
 # form of their own.
 SECTION_GO2RTC: Final = "go2rtc"
 CONF_GO2RTC_URL: Final = "go2rtc_url"

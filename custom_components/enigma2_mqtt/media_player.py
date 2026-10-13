@@ -74,7 +74,7 @@ from .const import (
 from .entity import Enigma2Entity
 from .picture import PendingPicon, Picture, PlayerPicture, player_picture_mode
 from .services import Enigma2Actions, async_select_bouquet, async_setup_services
-from .stream import stream_name, volume_passthrough
+from .stream_facts import stream_name, volume_passthrough
 
 PARALLEL_UPDATES = 0
 

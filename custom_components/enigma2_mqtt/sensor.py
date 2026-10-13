@@ -88,7 +88,7 @@ from .const import (
     WITHHELD_ATTRIBUTE_MAX,
 )
 from .entity import Enigma2Entity, OptionalEntities
-from .stream import audio_attributes, audio_codec, audio_language, frame_rate, video_codec
+from .stream_facts import audio_attributes, audio_codec, audio_language, frame_rate, video_codec
 
 PARALLEL_UPDATES = 0
 
@@ -582,7 +582,7 @@ WITHHELD_SENSORS: tuple[Enigma2SensorDescription, ...] = (
     ),
 )
 
-# What is on the decoder, from the codec members of `service` (`stream.py` reads them).
+# What is on the decoder, from the codec members of `service` (`stream_facts.py` reads them).
 # Technical facts about the current service, like the tuner's numbers: diagnostic, and
 # disabled until somebody wants them. The audio tracks ride on the audio codec's sensor
 # as an attribute the recorder is not given.

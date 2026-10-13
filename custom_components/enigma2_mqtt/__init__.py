@@ -35,7 +35,7 @@ from .const import (
     PLUGIN_MIN_VERSION,
     TOPIC_INTEGRATION_PREFIX,
 )
-from .go2rtc import Go2rtcFollower, async_delete_go2rtc_issue
+from .own_go2rtc import Go2rtcFollower, async_delete_go2rtc_issue
 from .picture import PiconResolver
 from .relay import async_answer_relay_request, async_get_relay
 from .release_store import async_release_index_cache

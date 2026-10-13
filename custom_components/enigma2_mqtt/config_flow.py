@@ -123,7 +123,6 @@ from .downgrade import (
     downgrade_candidates,
     loses_self_update,
 )
-from .go2rtc import default_stream_name, validate_options as validate_go2rtc_options
 from .installer import (
     InstallerError,
     InstallerErrorCode,
@@ -134,6 +133,7 @@ from .installer import (
     async_preflight,
     async_probe_host_key,
 )
+from .own_go2rtc import default_stream_name, validate_options as validate_go2rtc_options
 from .plugin_versions import has_credentials
 from .release_index import release_of
 from .release_package import (

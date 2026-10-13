@@ -36,7 +36,7 @@ from .const import (
     TOPIC_VOLUME,
 )
 from .entity import Enigma2Entity, OptionalEntities
-from .stream import interlaced, volume_passthrough
+from .stream_facts import interlaced, volume_passthrough
 
 PARALLEL_UPDATES = 0
 

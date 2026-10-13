@@ -21,7 +21,7 @@ from .const import (
     TOPIC_VOLUME,
 )
 from .entity import Enigma2Entity
-from .stream import volume_passthrough
+from .stream_facts import volume_passthrough
 
 PARALLEL_UPDATES = 0
 

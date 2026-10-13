@@ -137,7 +137,7 @@ from .const import (
     TOPIC_VOLUME,
     TOPIC_ZAP_HISTORY,
 )
-from .stream import (
+from .stream_facts import (
     build_stream_url,
     normalise_stream,
     normalise_stream_clients,
@@ -145,7 +145,7 @@ from .stream import (
 )
 
 if TYPE_CHECKING:
-    from .go2rtc import Go2rtcFollower
+    from .own_go2rtc import Go2rtcFollower
     from .picture import PiconResolver
 
 _LOGGER = logging.getLogger(__name__)
@@ -1025,11 +1025,11 @@ class Enigma2State:
     # Whether the last `info` that was read arrived retained: the broker's replay of what a
     # plugin said earlier, and not a plugin speaking now.
     info_retained: bool = False
-    # Where the image's stream server is, normalised (`stream.normalise_stream`).
+    # Where the image's stream server is, normalised (`stream_facts.normalise_stream`).
     # None until the topic arrives, and again after a retraction.
     stream: dict[str, Any] | None = None
     # Who the image's stream server is serving, normalised
-    # (`stream.normalise_stream_clients`). None until the topic arrives, and again
+    # (`stream_facts.normalise_stream_clients`). None until the topic arrives, and again
     # while the plugin has emptied it because the image's list could not be read.
     stream_clients: dict[str, Any] | None = None
     last_error: dict[str, Any] | None = None

@@ -21,7 +21,7 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_mqtt_message,
 )
 
-from custom_components.enigma2_mqtt import stream
+from custom_components.enigma2_mqtt import stream_facts as stream
 
 from .conftest import (
     INFO,
