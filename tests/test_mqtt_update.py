@@ -1711,6 +1711,133 @@ async def test_a_reload_does_not_start_the_ten_minutes_again(
     assert await _after(hass, freezer, minutes=9) == "stale"
 
 
+LATE = {
+    "info then update": (INFO_TOPIC, UPDATE_TOPIC),
+    "update then info": (UPDATE_TOPIC, INFO_TOPIC),
+    "info with the subscription, update late": (UPDATE_TOPIC,),
+}
+
+
+@pytest.mark.parametrize("order", list(LATE))
+@pytest.mark.parametrize(
+    ("phase", "state"), [("proving", "stale"), ("rolling_back", "in_progress")],
+    ids=["the same phase", "another phase"],
+)
+async def test_the_count_is_kept_when_the_replay_arrives_after_the_card_is_built(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    freezer: FrozenDateTimeFactory,
+    order: str,
+    phase: str,
+    state: str,
+) -> None:
+    """The order a broker produces: the reloaded entry subscribes, its card is built
+    beside a box that has heard nothing, and the retained `info` and `update` arrive
+    afterwards, in either order. An empty box is not a plugin that can update itself and a
+    topic not heard yet is not one without a transaction, so the count the card before
+    kept is still there when the replay comes - and nothing is shown as running before
+    it does."""
+    started = dt_util.utcnow().timestamp()
+    box_on_the_broker[UPDATE_TOPIC] = _transaction(
+        "proving", started_by="screen", started=started
+    )
+    await _self_updating(
+        hass, config_entry, box_on_the_broker, aioclient_mock,
+        info={**SELF_UPDATING, "capabilities": CANNOT},
+    )
+    assert await _after(hass, freezer, minutes=9) == "in_progress"
+
+    burst = dict(box_on_the_broker)
+    burst[UPDATE_TOPIC] = _transaction(phase, started_by="screen", started=started)
+    late = LATE[order]
+    for topic in late:
+        del box_on_the_broker[topic]
+    assert await hass.config_entries.async_reload(config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.states.get(PLUGIN).attributes.get("in_progress") is not True
+    for topic in late:
+        async_fire_mqtt_message(hass, topic, burst[topic], retain=True)
+        await hass.async_block_till_done()
+        freezer.tick(timedelta(seconds=1))
+
+    assert await _after(hass, freezer, minutes=1) == state
+    assert await _after(hass, freezer, minutes=9) == "stale"
+
+
+async def test_a_replay_that_never_comes_keeps_nothing_busy(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """The broker goes away with the reload: the new card hears nothing, shows no
+    transaction, and the kept count holds nothing on it."""
+    box_on_the_broker[UPDATE_TOPIC] = _transaction("proving", started_by="screen")
+    await _self_updating(
+        hass, config_entry, box_on_the_broker, aioclient_mock,
+        info={**SELF_UPDATING, "capabilities": CANNOT},
+    )
+    assert await _after(hass, freezer, minutes=9) == "in_progress"
+
+    box_on_the_broker.clear()
+    assert await hass.config_entries.async_reload(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    for minutes in (0, 5, 30):
+        freezer.tick(timedelta(minutes=minutes))
+        async_fire_time_changed(hass)
+        await hass.async_block_till_done()
+        assert hass.states.get(PLUGIN).attributes.get("in_progress") is not True
+
+
+async def test_two_receivers_keep_separate_counts(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A second receiver that starts counting later does not move the first one's count."""
+    other = "vuuno4kse_005302"
+    box_on_the_broker[UPDATE_TOPIC] = _transaction("proving", started_by="screen")
+    await _self_updating(
+        hass, config_entry, box_on_the_broker, aioclient_mock,
+        info={**SELF_UPDATING, "capabilities": CANNOT},
+    )
+    assert await _after(hass, freezer, minutes=9) == "in_progress"
+
+    second = MockConfigEntry(
+        domain=config_entry.domain,
+        title="Second",
+        unique_id=other,
+        data={**config_entry.data, "node_id": other, "name": "Second"},
+    )
+    second.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(second.entry_id)
+    await hass.async_block_till_done()
+    for suffix, payload in (
+        ("availability", "online"),
+        ("info", json.dumps({**SELF_UPDATING, "capabilities": CANNOT})),
+        ("update", _transaction("proving", started_by="screen")),
+    ):
+        async_fire_mqtt_message(hass, f"{BASE_TOPIC}/{other}/{suffix}", payload, retain=True)
+    await hass.async_block_till_done()
+    kept = hass.data["enigma2_mqtt_update_stood_still"]
+    assert set(kept) == {config_entry.entry_id, second.entry_id}
+    assert kept[config_entry.entry_id][1] + 9 * 60 == kept[second.entry_id][1]
+
+    assert await hass.config_entries.async_reload(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert await _after(hass, freezer, minutes=1, seconds=2) == "stale"
+
+
 async def test_a_retracted_info_says_nothing_of_what_the_plugin_can_do(
     hass: HomeAssistant,
     mqtt_mock,

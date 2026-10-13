@@ -116,6 +116,8 @@ PARALLEL_UPDATES = 0
 # Since when each entry's `update` has stood still beside a plugin that cannot update
 # itself, as ((transaction id, phase), epoch seconds) by entry id. In `hass.data`, because
 # the card and its box are built anew when the entry reloads and the count must not be.
+# Written and taken away only on the word of a box that has heard its own `info`
+# (`_stood_still`).
 _STILL_KEY = f"{DOMAIN}_update_stood_still"
 
 # How the plugin on the box stands against the one this integration carries, by `N.N.N`.
@@ -678,18 +680,32 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         of Home Assistant nothing is left to go on with, and the ten minutes start at
         the card's first look - once more for every restart, and never past the
         transaction's 25-minute window.
+
+        The card is built before its box has heard anything: the broker's replay arrives
+        a moment after the subscription, `info` and `update` in either order. Until this
+        box has had its own `info`, and its own word on `update`, there is nothing to
+        judge and nothing to count, and the count that was kept is left as it is - an
+        empty box is not a plugin that can update itself, and a topic not heard yet is
+        not one without a transaction. Nothing is shown as running meanwhile on the
+        strength of the kept count: without a transaction the card shows none, and with
+        one and no `info` the window decides. A replay that never comes changes nothing.
         """
+        box = self.box
+        if not box.info_received:
+            return None
         memory: dict[str, Any] = (
             self.hass.data.setdefault(_STILL_KEY, {}) if self.hass is not None else {}
         )
-        capabilities = self.box.info.get("capabilities")
+        capabilities = box.info.get("capabilities")
         if (
-            self.box.info_retracted
+            box.info_retracted
             or not isinstance(capabilities, list)
             or CAPABILITY_SELF_UPDATE in capabilities
         ):
             self._still_since = None
             memory.pop(self._entry.entry_id, None)
+            return None
+        if TOPIC_UPDATE not in box.seen:
             return None
         word = (transaction["id"], transaction["phase"]) if transaction is not None else None
         count = self.box.updates.get(TOPIC_UPDATE, 0)
