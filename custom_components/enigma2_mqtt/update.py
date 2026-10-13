@@ -117,8 +117,15 @@ PARALLEL_UPDATES = 0
 # itself, as ((transaction id, phase), epoch seconds) by entry id. In `hass.data`, because
 # the card and its box are built anew when the entry reloads and the count must not be.
 # Written and taken away only on the word of a box that has heard its own `info`
-# (`_stood_still`).
+# (`_stood_still`), and dropped when the entry is removed.
 _STILL_KEY = f"{DOMAIN}_update_stood_still"
+
+
+@callback
+def async_forget_stood_still(hass: HomeAssistant, entry_id: str) -> None:
+    """Drop the count kept for an entry that was removed: no card will go on with it."""
+    hass.data.get(_STILL_KEY, {}).pop(entry_id, None)
+
 
 # How the plugin on the box stands against the one this integration carries, by `N.N.N`.
 # The words are the answer to "is this receiver a version problem", which is the first

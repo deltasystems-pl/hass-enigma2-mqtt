@@ -1,6 +1,6 @@
 # ADR-0009: The media player's picture is a choice, and picons are found by asking OpenWebif
 
-**Status:** accepted 2026-10-12
+**Status:** accepted 2026-10-12. Amended 2026-10-13 (documentation only: a note in decision 6)
 **Date:** 2026-10-12
 **Extends:** [ADR-0000](0000-prd.md) §7 - the integration now also makes HTTP requests to the
 receiver's own web interface. No telemetry, no cloud service and nothing outside the household's
@@ -81,7 +81,10 @@ cannot be decoded is shown as it came.
 when the receiver was added is asked whenever there is one, and is not filtered: it is the
 administrator's choice. A typed value that cannot be the host of a web address - an IPv6 address
 with a zone, a host with a port, which only SSH can use - means no address and no picons, never
-the reported one. Without a typed host, the address the receiver reports on `info` is asked only when
+the reported one. (Amended 2026-10-13, documentation only, no change of decision: those examples
+are not the whole list. A host with a user name, an IPv6 address written in brackets and a name
+with a character outside ASCII are such values too. An IPv6 address written bare, without a zone,
+is a host and is asked.) Without a typed host, the address the receiver reports on `info` is asked only when
 it is an IP address written out - never a host name, which this machine would resolve - and not
 loopback, link-local, unspecified, multicast or reserved. Otherwise there is no address and no
 picon. The reported address arrives over the broker, where anything that may publish can have

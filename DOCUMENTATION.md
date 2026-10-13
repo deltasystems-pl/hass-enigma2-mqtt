@@ -511,12 +511,16 @@ while the box is unreachable, because that is precisely when somebody wants to w
     `getpicon` has never answered, the question is not asked again for an hour. OpenWebif's
     default picon counts as none.
   - **Which address is asked.** The receiver host typed when the receiver was added, if one
-    was - and if that cannot be the host of a web address (it has a port, a user name or an
-    IPv6 zone), there are no picons. Only with no host typed, the address the receiver reports on `info`, and only when it is an IP
-    address written out - never a host name - that is not loopback, link-local, unspecified,
-    multicast or reserved. That address arrives over the broker, where anything allowed to
-    publish could have written it; [SECURITY.md](SECURITY.md) says what that leaves open. With
-    no usable address there are no picons.
+    was - and if that cannot be the host of a web address (it has a port, a user name, an
+    IPv6 zone, brackets around an IPv6 address, or a character outside ASCII - an
+    international name is typed in its `xn--` form), there are no picons and no thumbnails,
+    never the reported address. An IPv6 address typed bare, without a zone, is a host like
+    an IPv4 address or a name, and is asked. Only with no host typed, the address the
+    receiver reports on `info`, and only when it is an IP address written out - never a host
+    name - that is not loopback, link-local, unspecified, multicast or reserved. That address
+    arrives over the broker, where anything allowed to publish could have written it;
+    [SECURITY.md](SECURITY.md) says what that leaves open. With no usable address there are
+    no picons.
   - **What is accepted.** No redirect is followed. A link is used only if it is a plain path
     under `/picon/`; an answer larger than 2 MiB and a picture larger than 1 MiB are dropped;
     and only a PNG or a JPEG, told by its first bytes, is shown. A request waits five seconds at
@@ -1078,7 +1082,8 @@ the middle of an update reports it to its end without claiming that it can updat
 says nothing while the receiver's helper proves it or puts the previous version back. The price
 is that a phase nobody will move any more - its helper was killed, say - keeps the card busy for
 those ten minutes. The count is kept when the integration reloads and starts again when Home
-Assistant restarts, so each restart can add up to ten minutes, never past the 25. A refusal of
+Assistant restarts, so each restart can add up to ten minutes, never past the 25. Removing
+the receiver from Home Assistant drops the count. A refusal of
 such an install that only
 the receiver sees - no internet and no answer from Home Assistant, a clock that calls Home
 Assistant's address expired - is in `last_refusal`, in the household's language, for as long as it
@@ -1416,10 +1421,11 @@ is carried out, no longer ends it as "refused". An install started at the televi
 id, so its refusal in the same minute can still be read as the answer to Home Assistant's.
 
 Nothing changes for a plugin that does not claim the capability - 0.4.0 and older - or whose
-`info` has not arrived or was retracted: no envelope, and every payload is what it always
-was. The question is asked again for every command, so an update or a downgrade of the plugin
-takes effect with its next `info`. `cmd/relay` is never in an envelope, and neither are the
-few commands sent where nothing has read `info` - the mode switch of the config flow and of a
+`info` has not arrived, was retracted, or was last published as something that is not a JSON
+object: no envelope, and every payload is what it always was. The question is asked again
+for every command, so an update or a downgrade of the plugin takes effect with its next
+`info`. `cmd/relay` is never in an envelope, and neither are the few commands sent where
+nothing has read `info` - the mode switch of the config flow and of a
 removed entry, and the installer's `cmd/reset` and `cmd/bouquet`. The payload inside the
 envelope is always a string, the text an older plugin is sent as the whole payload, so a
 command reads the same characters either way. The id is shown on no entity; the diagnostics

@@ -714,7 +714,10 @@ class PiconResolver:
                         try:
                             await self._async_scan(bouquet)
                         finally:
-                            self._scanning = None
+                            # Not by a task that was abandoned: `_start` cleared it
+                            # then, and the task after it may be listing by now.
+                            if asyncio.current_task() is self._task:
+                                self._scanning = None
                 except _Unavailable as error:
                     self._async_unavailable(error.problem, sref=sref, bouquet=bouquet)
                 except Exception:

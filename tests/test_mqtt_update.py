@@ -1840,6 +1840,96 @@ async def test_two_receivers_keep_separate_counts(
     assert await _after(hass, freezer, minutes=1, seconds=2) == "stale"
 
 
+async def _cannot_update_itself(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    retained: dict[str, Any],
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """`_self_updating`, in the order a broker produces: the card is built beside a box
+    that has heard nothing, and the retained topics arrive afterwards."""
+    burst = dict(retained)
+    retained.clear()
+    await _setup(hass, entry, credentials=True)
+    for topic, payload in burst.items():
+        async_fire_mqtt_message(hass, topic, payload, retain=True)
+    await hass.async_block_till_done()
+    await _accept(hass, aioclient_mock, 1, [release(TARGET, sha256=SHA), release("0.3.0")])
+
+
+async def test_the_count_of_a_removed_receiver_goes_with_its_entry(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Nothing will go on with the count of an entry that was removed: it is dropped then,
+    and not with the next restart. The other receiver's count is left as it is."""
+    other = "vuuno4kse_005302"
+    box_on_the_broker[INFO_TOPIC] = json.dumps({**SELF_UPDATING, "capabilities": CANNOT})
+    box_on_the_broker[UPDATE_TOPIC] = _transaction("proving", started_by="screen")
+    await _cannot_update_itself(hass, config_entry, box_on_the_broker, aioclient_mock)
+    assert await _after(hass, freezer, minutes=9) == "in_progress"
+    second = MockConfigEntry(
+        domain=config_entry.domain,
+        title="Second",
+        unique_id=other,
+        data={**config_entry.data, "node_id": other, "name": "Second"},
+    )
+    second.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(second.entry_id)
+    await hass.async_block_till_done()
+    for suffix, payload in (
+        ("availability", "online"),
+        ("info", json.dumps({**SELF_UPDATING, "capabilities": CANNOT})),
+        ("update", _transaction("proving", started_by="screen")),
+    ):
+        async_fire_mqtt_message(hass, f"{BASE_TOPIC}/{other}/{suffix}", payload, retain=True)
+    await hass.async_block_till_done()
+    kept = hass.data["enigma2_mqtt_update_stood_still"]
+    assert set(kept) == {config_entry.entry_id, second.entry_id}
+    of_the_second = kept[second.entry_id]
+
+    assert await hass.config_entries.async_remove(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.data["enigma2_mqtt_update_stood_still"] == {second.entry_id: of_the_second}
+
+
+async def test_the_count_of_a_reloaded_receiver_stays_where_it_is_kept(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A reload unloads the entry and does not remove it: the record is there for the
+    card that is built next, with the moment the count began."""
+    box_on_the_broker[INFO_TOPIC] = json.dumps({**SELF_UPDATING, "capabilities": CANNOT})
+    box_on_the_broker[UPDATE_TOPIC] = _transaction("proving", started_by="screen")
+    burst = dict(box_on_the_broker)
+    await _cannot_update_itself(hass, config_entry, box_on_the_broker, aioclient_mock)
+    assert await _after(hass, freezer, minutes=9) == "in_progress"
+    kept = dict(hass.data["enigma2_mqtt_update_stood_still"])
+    assert set(kept) == {config_entry.entry_id}
+
+    assert await hass.config_entries.async_unload(config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.data["enigma2_mqtt_update_stood_still"] == kept
+
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.data["enigma2_mqtt_update_stood_still"] == kept
+    for topic, payload in burst.items():
+        async_fire_mqtt_message(hass, topic, payload, retain=True)
+    await hass.async_block_till_done()
+    assert hass.data["enigma2_mqtt_update_stood_still"] == kept
+    assert await _after(hass, freezer, minutes=1, seconds=2) == "stale"
+
+
 async def test_a_retracted_info_says_nothing_of_what_the_plugin_can_do(
     hass: HomeAssistant,
     mqtt_mock,
