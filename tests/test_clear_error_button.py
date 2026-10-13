@@ -318,6 +318,35 @@ async def test_an_empty_payload_from_before_the_press_is_not_the_answer(
     await press
 
 
+@pytest.mark.parametrize("payload", ["[]", "null", "oops", "0", '"cleared"', " "])
+async def test_a_payload_that_is_not_a_complaint_is_not_the_clearing(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    payload: str,
+) -> None:
+    """The receiver clears `last_error` with the empty payload and nothing else. A payload
+    that is not a JSON object reads as no complaint as well, and is not that answer."""
+    await _setup(hass, config_entry, box_on_the_broker, "0.5.0")
+    box: Enigma2Box = config_entry.runtime_data
+    box.async_record_local_error("force_reinstall", "the receiver could not be reached")
+    await hass.async_block_till_done()
+
+    press = hass.async_create_task(_press(hass))
+    await _command_sent(mqtt_mock)
+    async_fire_mqtt_message(hass, LAST_ERROR_TOPIC, payload)
+    for _ in range(20):
+        await asyncio.sleep(0)
+
+    assert not press.done()
+    assert hass.states.get(SENSOR).state == "force_reinstall"
+    async_fire_mqtt_message(hass, LAST_ERROR_TOPIC, "")
+    await press
+    await hass.async_block_till_done()
+    assert hass.states.get(SENSOR).state == STATE_UNKNOWN
+
+
 async def test_a_complaint_about_another_command_is_not_the_answer(
     hass: HomeAssistant,
     mqtt_mock,

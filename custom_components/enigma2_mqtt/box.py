@@ -906,6 +906,10 @@ class Enigma2State:
     # already happened rather than news - which matters to anything that stamps a time
     # on it, because a reconnect replays it again.
     last_error_retained: bool = False
+    # Whether the last payload on `last_error` was the empty one - the receiver clearing
+    # the topic. `last_error` is None for that and for a payload that is not a JSON
+    # object alike, and only the first is a clearing.
+    last_error_empty: bool = False
     # A failure Home Assistant records itself on „Ostatni błąd": `cmd`, `error`, `ts`.
     local_error: dict[str, Any] | None = None
     screen: bytes | None = None
@@ -2572,6 +2576,7 @@ class Enigma2Box:
         error = parse_json_payload(msg.payload)
         self.state.last_error = error
         self.state.last_error_retained = msg.retain
+        self.state.last_error_empty = not msg.payload
         if not msg.retain and error is not None:
             cmd = error.get("cmd")
             text = str(error.get("error") or "")

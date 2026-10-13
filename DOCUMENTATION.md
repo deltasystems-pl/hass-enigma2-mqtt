@@ -1412,10 +1412,11 @@ by raising, with a sentence in the household's language. There are two kinds, an
 | `ServiceValidationError` | The call was **refused and nothing was done**, for a reason the caller can act on or wait out: the moment, or what was asked for | *Sprawdź aktualizacje wtyczki* pressed again inside its ten minutes; the zap history refusing to clear in standby or with one channel in it; an install refused for a recording, a timer about to start, standby, a stream, another install or the package manager running; a version the signed index withdraws or does not list; a downgrade |
 | `HomeAssistantError` | Something was **tried and failed**, the receiver did not answer, or the refusal is the receiver's own English sentence without a reason code, which can be either | no answer within ten seconds; an install, restart or rollback that failed; a download that failed; a receiver that cannot be reached over SSH; `not_cleared` after the 0 key |
 
-In the frontend a `ServiceValidationError` is shown as the sentence it carries, and a
-`HomeAssistantError` with "Failed to perform the action" in front of it. Over the WebSocket API
-the answer carries the code `service_validation_error` or `home_assistant_error` and the
-sentence's `translation_key`.
+Over the WebSocket API - the one Home Assistant's own pages use - the answer carries the code
+`service_validation_error` or `home_assistant_error` and the sentence's `translation_key`, so a
+client can say the sentence in the household's language either way. Home Assistant logs one line
+for both: the sentence alone for a refusal, and "Error during service call to ..." in front of
+it for a failure, with the traceback at debug level only (Home Assistant 2026.9.2).
 
 **The REST API answers 500 for both.** `POST /api/services/<domain>/<service>` turns only a
 schema error and an unknown service into a client error (measured on Home Assistant 2026.9.2):

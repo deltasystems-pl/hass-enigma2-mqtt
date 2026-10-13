@@ -20,7 +20,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import asyncssh
 from homeassistant.core import HomeAssistant
@@ -581,6 +581,25 @@ async def test_a_switched_on_plugin_proved_both_ways_is_enabled(
     assert result.proof == "log_open+announcement"
 
 
+async def test_the_proof_survives_a_failure_after_the_commit(
+    hass: HomeAssistant,
+    credentials: SshCredentials,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Whatever goes wrong once the install is committed is tidying up, and the result
+    returned from there names the proof like the one returned at the end."""
+    with patch(
+        "custom_components.enigma2_mqtt.installer._async_verify_restart",
+        AsyncMock(side_effect=RuntimeError("the channel could not be checked")),
+    ):
+        result = await _install(hass, _request(credentials), tmp_path, _receiver())
+
+    assert "ignoring post-commit cleanup failure" in caplog.text
+    assert result.version == "0.2.0"
+    assert result.proof == "log_open+announcement"
+
+
 async def test_the_proof_that_passed_is_named_in_the_result_and_in_the_log(
     hass: HomeAssistant,
     credentials: SshCredentials,
@@ -1133,6 +1152,31 @@ async def test_a_failed_install_in_a_respawn_loop_sends_nothing_to_init(
 
     assert receiver.respawns == []
     assert _init(receiver) == []
+
+
+@pytest.mark.parametrize("origin", ["mqtt", None], ids=["self-update", "installer"])
+@pytest.mark.parametrize("remaining", [1801, 10**9])
+async def test_a_stalled_lock_is_never_said_to_last_longer_than_it_is_honoured(
+    hass: HomeAssistant,
+    credentials: SshCredentials,
+    tmp_path: Path,
+    origin: str | None,
+    remaining: int,
+) -> None:
+    """The rule frees a lock thirty minutes after its record was last written, and a claim
+    a second old leaves 1801 s by the helper's arithmetic. Neither that nor a receiver's
+    clock that was set back makes "in about 31 minutes" of it - for a self-update whose
+    helper stopped beating, or for an installer's lock met with the interface stopped."""
+    receiver = _ours_stopped(
+        claim_busy=True,
+        lock={"held": True, "origin": origin, "silent": 300, "remaining": remaining},
+    )
+
+    with pytest.raises(InstallerError) as raised:
+        await _install(hass, _request(credentials), tmp_path, receiver)
+
+    assert raised.value.code is InstallerErrorCode.BUSY_STALLED
+    assert raised.value.placeholders == {"minutes": "30"}
 
 
 async def test_runlevel_4_of_ours_with_a_live_installer_lock_says_when(

@@ -1493,9 +1493,10 @@ async def test_a_refusal_is_raised_as_a_refusal_and_a_failure_as_a_failure(
 ) -> None:
     """Another install running, a recording, standby: nothing failed, the moment was wrong.
 
-    Home Assistant shows a validation error as the sentence it carries, and a general
-    error as an action that failed. The sentence and its key are the same either way, and
-    both are recorded on the last-error sensor.
+    A refusal raises a validation error and a failure a general one, and each has a
+    sentence of its own: `force_reinstall_refused` says the plugin was not reinstalled,
+    `force_reinstall_failed` that the reinstall failed. Both are recorded on the
+    last-error sensor.
     """
     await _ready(hass, config_entry, box_on_the_broker)
 

@@ -80,7 +80,8 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   capability for the command, so the button is created only for a receiver whose `info.plugin`
   is 0.5.0 or later; an older plugin would answer "unknown command" and gets none, and on a
   receiver taken back to an older plugin the button is unavailable. It is unavailable while
-  the receiver is offline, and a press the receiver does not answer raises and clears nothing
+  the receiver is offline, and a press the receiver does not answer raises and clears nothing;
+  only the empty payload is that answer, not one that merely is no complaint
   (DOCUMENTATION.md §4.3 and §4.5).
 
 ### Changed
@@ -106,9 +107,10 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
 
 ### Fixed
 
-- **A refusal is no longer shown as an action that failed.** Every refused or failed call
-  raised `HomeAssistantError`, so the frontend put "Failed to perform the action" in front of
-  sentences that say nothing failed - *Sprawdź aktualizacje wtyczki* pressed again inside its
+- **A refusal is no longer raised as an action that failed.** Every refused or failed call
+  raised `HomeAssistantError`, the type Home Assistant has for something that was tried and
+  failed and logs as "Error during service call", also for sentences that say nothing
+  failed - *Sprawdź aktualizacje wtyczki* pressed again inside its
   ten minutes, a zap history that will not clear in standby. A refusal - the moment or the
   request was wrong, and nothing was done - now raises `ServiceValidationError`: the receiver's
   refusals that carry a reason code, the check button's limit, the update card's refusals
@@ -128,7 +130,9 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   Assistant restart left the forced reinstall refused for all of that time with no end named.
   The refusal now says "The lock expires in about N min at the latest", in the guided
   installer, the options flow, the update card and the forced reinstall, in English, Polish
-  and German. The lock is still never taken back (DOCUMENTATION.md §3).
+  and German. The lock is still never taken back (DOCUMENTATION.md §3). No refusal names
+  more than the thirty minutes a lock is honoured for: the one for a lock whose holder
+  stopped could say "31".
 - **An update over MQTT whose plugin was replaced under it ends at once.** When something else
   installed a plugin while the card was following its own update - the release put over a
   development build of the same number by hand, an install over SSH - the new plugin has no
@@ -158,7 +162,8 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   confirmed, the sentence now adds that if the television shows a question about restarting,
   either answer is safe.
 - **The repair for withheld payloads cannot be bent by a name.** Direction controls, zero-width
-  characters and other characters that are not seen are removed from a bouquet's name, the
+  characters and other characters that are not seen - variation selectors, the Mongolian
+  ones included, fillers, the Khmer inherent vowels - are removed from a bouquet's name, the
   device's name and a topic before they are put into the repair's text; a name of which
   nothing is left is replaced by the bouquet's slug, the entry's title or the node id, and by
   "?" when none is left. An `info` of `{}` now takes the repair away like any `info` that
