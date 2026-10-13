@@ -238,7 +238,7 @@
           "check_github_releases": "On, the plugin's signed list of versions is also fetched automatically, at most once every 24 hours, one list shared by all receivers; a check downloads that list and nothing else. Off, it is fetched only when somebody presses “Check for plugin updates”.",
           "source_list_scope": "“Every bouquet on offer” puts the channels of all of them in one list, which can be very long. “The active bouquet” shows only the list the receiver itself is on, as the “Channel” select does; a receiver that publishes no active bouquet keeps the long list.",
           "player_picture": "Screenshot shows the screenshot, and the picon of the new channel only between a channel change and the next screenshot. Channel picon always shows the picon, and the screenshot only for a channel without one. Home Assistant fetches picons from the receiver's web interface (OpenWebif).",
-          "history_hidden_bouquets": "Channels of these bouquets are left out of “Recently watched”, and while anything is chosen so is a channel whose bouquet cannot be checked. This hides them in that one entity only: the other entities, the receiver's own history screen and the broker still show them, and “Recently watched (all)”, once that entity is enabled, puts the channel playing now into Home Assistant's history.",
+          "history_hidden_bouquets": "Channels of these bouquets are left out of “Recently watched”, and while anything is chosen so is a channel whose bouquet cannot be checked. This hides them in that one entity only: the other entities, the receiver's own history screen and the broker still show them, and “Recently watched (all)”, once that entity is enabled, puts the channel playing now into Home Assistant's history. With plugin 0.5.0 the same bouquets are also kept out of what Home Assistant shows about streams: a stream client on such a channel is listed without the channel, and such a channel gets no stream address and is not offered as a media source.",
           "configure_ssh": "The “Force plugin reinstall (SSH)” button appears once SSH credentials are stored. It is disabled by default; enable it on the device page.",
           "keep_ssh_credentials": "Untick to forget the stored SSH credentials. The update card then has no install path, and the “Force plugin reinstall (SSH)” button is removed."
         }
@@ -751,6 +751,12 @@
     }
   },
   "exceptions": {
+    "stream_source_unknown": {"message": "That receiver, bouquet or channel is not offered for streaming here. Open the media browser again and pick from what is there now."},
+    "stream_player_browser": {"message": "The browser cannot play a receiver's transport stream. Choose a media player that decodes it itself, such as Kodi, VLC or an Android TV player."},
+    "stream_player_cast": {"message": "Chromecast cannot play a receiver's transport stream. Choose a media player that decodes it itself, such as Kodi, VLC or an Android TV player."},
+    "stream_login_required": {"message": "The receiver's stream server asks for a login, and Home Assistant never puts a login into a stream address. Switch the login off in the receiver's streaming settings to play its channels from here."},
+    "stream_no_address": {"message": "Home Assistant has no address at which to reach the receiver's stream server. Enter the receiver's host with Reconfigure."},
+    "stream_not_playable": {"message": "{channel} cannot be streamed right now: the tuner it needs is in use by the television, a recording or another stream."},
     "stream_stop_unsupported": {"message": "This receiver cannot stop a stream client: its image's stream server does not offer it, or the plugin is older than 0.5.0."},
     "stream_client_unknown": {"message": "No stream client with the address {host} is on the receiver's list."},
     "stream_client_ambiguous": {"message": "{host} has more than one stream open. Give the service reference of the one to stop."},

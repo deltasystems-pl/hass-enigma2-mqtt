@@ -26,7 +26,7 @@ has to reach the receiver for it, and standby keeps the last one.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 import json
 import time
 from typing import Any
@@ -389,16 +389,7 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
         where there is none, as with an older OpenWebif - the name built from the service
         reference is used, as it always was.
         """
-        picons = self.box.picons
-        thumbnails = picons.async_thumbnails(bouquet) if picons else {}
-
-        def thumbnail(sref: Any) -> str | None:
-            if picons is None or not isinstance(sref, str):
-                return None
-            identity = service_identity(sref)
-            if identity in thumbnails:
-                return thumbnails[identity]
-            return picons.async_legacy_thumbnail(sref)
+        thumbnail = channel_thumbnail_lookup(self.box, bouquet)
 
         children: Sequence[BrowseMedia] = [
             BrowseMedia(
@@ -423,6 +414,30 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
             children_media_class=MediaClass.CHANNEL,
             children=children,
         )
+
+
+def channel_thumbnail_lookup(
+    box: Enigma2Box, bouquet: dict[str, Any]
+) -> Callable[[Any], str | None]:
+    """Return what gives a channel of one bouquet its thumbnail in a media browser.
+
+    Shared by the media player's own browser and the media source, so the two show the
+    same picons and ask the receiver's web interface the same single question for a
+    bouquet: the link it gave for the channel where one is held, and the name built
+    from the service reference until then.
+    """
+    picons = box.picons
+    thumbnails = picons.async_thumbnails(bouquet) if picons else {}
+
+    def thumbnail(sref: Any) -> str | None:
+        if picons is None or not isinstance(sref, str):
+            return None
+        identity = service_identity(sref)
+        if identity in thumbnails:
+            return thumbnails[identity]
+        return picons.async_legacy_thumbnail(sref)
+
+    return thumbnail
 
 
 async def async_zap_to_name(

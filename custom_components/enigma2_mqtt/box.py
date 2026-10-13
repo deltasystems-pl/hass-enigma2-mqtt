@@ -103,6 +103,7 @@ from .const import (
     SOFTCAM_NAME_MAX,
     SOFTCAM_RESTART_REASONS,
     SOURCE_LIST_SCOPE_ACTIVE_BOUQUET,
+    STREAM_PLAYABLE_TIMEOUT,
     SUBSCRIBE_TIMEOUT,
     TOPIC_AVAILABILITY,
     TOPIC_BOUQUET,
@@ -129,6 +130,7 @@ from .const import (
     TOPIC_SOFTCAM,
     TOPIC_STREAM,
     TOPIC_STREAM_CLIENTS,
+    TOPIC_STREAM_PLAYABLE,
     TOPIC_TIMERS,
     TOPIC_TUNER,
     TOPIC_UPDATE,
@@ -911,6 +913,31 @@ class _Pending:
         self.future.set_exception(refusal)
 
 
+@dataclass(slots=True)
+class _PlayableQuestion:
+    """One `cmd/stream_playable` whose answer is being waited for."""
+
+    sref: str
+    future: asyncio.Future[bool | None]
+    # Whether the question has gone to the broker, and the id it went out with - None
+    # for one sent without an envelope. An answer that arrives before it has cannot be
+    # its answer.
+    sent: bool = False
+    command_id: str | None = None
+
+    @callback
+    def sent_as(self, command_id: str | None) -> None:
+        """Note that the question is being published, and under which id."""
+        self.sent = True
+        self.command_id = command_id
+
+    @callback
+    def answer(self, playable: bool | None) -> None:
+        """Give the answer: yes, no, or None for "the receiver could not say"."""
+        if not self.future.done():
+            self.future.set_result(playable)
+
+
 @callback
 def _discard(future: asyncio.Future[None]) -> None:
     """Retire a future nobody is going to wait on.
@@ -1043,6 +1070,8 @@ class Enigma2Box:
         self._listeners: list[_Listener] = []
         self._key_listeners: list[Callable[[str, str], None]] = []
         self._pending: list[_Pending] = []
+        # The `cmd/stream_playable` questions whose answers are being waited for.
+        self._questions: list[_PlayableQuestion] = []
         self._pending_cam: object = _NO_PENDING_CAM
         self._pending_oscam: object = _NO_PENDING_OSCAM
         self._subscribed = asyncio.Event()
@@ -1679,6 +1708,8 @@ class Enigma2Box:
         for pending in self._pending:
             pending.fail("the receiver was removed from Home Assistant")
         self._pending.clear()
+        for question in self._questions:
+            question.answer(None)
 
     async def async_wait_subscribed(self, timeout: float = SUBSCRIBE_TIMEOUT) -> None:
         """Wait until the broker is actually sending this box's topics to us.
@@ -1907,6 +1938,8 @@ class Enigma2Box:
             self._zap_history_received(msg)
         elif suffix == TOPIC_STREAM:
             self._stream_received(msg)
+        elif suffix == TOPIC_STREAM_PLAYABLE:
+            self._stream_playable_received(msg)
         elif suffix == TOPIC_STREAM_CLIENTS:
             self._stream_clients_received(msg)
         elif suffix.startswith(f"{TOPIC_EPG_GRID}/"):
@@ -2687,6 +2720,96 @@ class Enigma2Box:
         self.state.stream = normalise_stream(payload)
         self._async_updated(TOPIC_STREAM)
 
+    def streamable_bouquets(self) -> list[tuple[dict[str, Any], list[dict[str, Any]]]]:
+        """Return the bouquets a stream may be offered from, each with its channels.
+
+        Read from the one channel list every reader shares (`channel_list`): the
+        bouquets the options offer, without the hidden ones, and each without the
+        channels the options hide (`service_hidden`) - a channel of a hidden bouquet
+        is left out of every other bouquet too. The bouquet is the list's own object;
+        the channels are the ones of it that have a reference and may be shown.
+        """
+        hidden = self.hidden_bouquet_names
+        offered: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
+        for bouquet in self.bouquets:
+            name = bouquet.get("name")
+            if name in hidden:
+                continue
+            offered.append(
+                (
+                    bouquet,
+                    [
+                        channel
+                        for channel in bouquet["channels"]
+                        if isinstance(channel, dict)
+                        and isinstance(channel.get("sref"), str)
+                        and channel["sref"]
+                        and not self.service_hidden(channel["sref"], name)
+                    ],
+                )
+            )
+        return offered
+
+    async def async_stream_playable(
+        self, sref: str, timeout: float | None = None
+    ) -> bool | None:
+        """Ask the receiver whether a service could be played now; None for unknown.
+
+        `cmd/stream_playable` is a question, answered by one message on the event
+        topic `stream_playable` - never retained, true for the moment it was asked.
+        The answer is this question's when it says the id the question was sent with;
+        an answer without an id is told by its reference, which is all a plugin that
+        takes no ids - or dropped this one - has to go by (`_stream_playable_received`).
+
+        None is every way of not knowing: no answer within the timeout, a refusal on
+        `last_error` (the image will not say), a question that could not be published.
+        A caller treats it as "not known", never as "no".
+        """
+        question = _PlayableQuestion(sref=sref, future=self.hass.loop.create_future())
+        self._questions.append(question)
+        try:
+            await self.async_publish_cmd("stream_playable", sref, sent_as=question.sent_as)
+            async with asyncio.timeout(
+                STREAM_PLAYABLE_TIMEOUT if timeout is None else timeout
+            ):
+                return await question.future
+        except TimeoutError:
+            return None
+        except HomeAssistantError as error:
+            _LOGGER.debug(
+                "Could not ask %s whether a service can be played: %s", self.node_id, error
+            )
+            return None
+        finally:
+            self._questions.remove(question)
+            if not question.future.done():
+                question.future.cancel()
+
+    @callback
+    def _stream_playable_received(self, msg: ReceiveMessage) -> None:
+        """Hand an answer on `stream_playable` to the question it answers.
+
+        An event, not state: nothing is stored and no listener is woken. A retained
+        message is a leftover - the plugin never retains this topic - and an answer
+        about tuners that have moved on. `playable` has to be a boolean; anything else
+        answers nothing and the question runs into its timeout, which is "unknown".
+        """
+        if msg.retain or (answer := parse_json_payload(msg.payload)) is None:
+            return
+        playable = answer.get("playable")
+        if not isinstance(playable, bool):
+            return
+        said = refusal_id(answer)
+        sref = answer.get("sref")
+        for question in list(self._questions):
+            if not question.sent:
+                continue
+            if said is not None:
+                if said == question.command_id:
+                    question.answer(playable)
+            elif isinstance(sref, str) and same_service(sref, question.sref):
+                question.answer(playable)
+
     def stream_client_rows(self) -> list[dict[str, Any]]:
         """Return the stream clients as they may be shown, the hidden ones without a channel.
 
@@ -2945,6 +3068,16 @@ class Enigma2Box:
                         self.node_id,
                         pending.cmd,
                     )
+            # A question that could not be asked is refused here and answered nowhere:
+            # its wait ends as "the receiver could not say".
+            said = refusal_id(error)
+            for question in list(self._questions):
+                if question.sent and (
+                    said == question.command_id
+                    if said is not None
+                    else error.get("cmd") == "stream_playable"
+                ):
+                    question.answer(None)
         self._async_updated(TOPIC_LAST_ERROR)
 
     # ------------------------------------------------------------ channel list

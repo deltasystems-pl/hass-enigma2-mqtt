@@ -773,3 +773,15 @@ CAPABILITY_STREAM: Final = "stream"
 ATTR_STREAM_URL: Final = "stream_url"
 ATTR_STREAM_NAME: Final = "stream_name"
 ATTR_STREAM_AUTHENTICATION: Final = "stream_authentication"
+
+# Whether a service could be played now, beside everything the receiver is doing, from a
+# plugin after 0.4.0: `cmd/stream_playable` is a question, and the one command answered
+# on a topic of its own - an event, never retained, carrying the question's id.
+TOPIC_STREAM_PLAYABLE: Final = "stream_playable"
+CAPABILITY_STREAM_PLAYABLE: Final = "stream_playable"
+# Seconds the answer is waited for before an address is handed to a player. The contract
+# says to treat no answer within a few seconds as "unknown", not as "no", and a media
+# browser is waiting on it.
+STREAM_PLAYABLE_TIMEOUT: Final = 3.0
+# What the receiver's stream server sends: an MPEG transport stream.
+STREAM_MIME_TYPE: Final = "video/mp2t"
