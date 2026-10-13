@@ -482,6 +482,7 @@
       "frame_rate": {"name": "Bildrate"},
       "audio_codec": {"name": "Audiocodec"},
       "audio_language": {"name": "Audiosprache"},
+      "stream_clients": {"name": "Stream-Clients"},
       "withheld_payloads": {"name": "Zurückgehaltene Daten"}
     },
     "switch": {
@@ -529,6 +530,14 @@
     }
   },
   "services": {
+    "stop_stream": {
+      "name": "Stream stoppen",
+      "description": "Beendet einen Stream, den der Receiver an ein anderes Gerät sendet. Ein Player, der sich von selbst neu verbindet, öffnet ihn wieder: Einen Client zu stoppen heißt nicht, ihn zu sperren.",
+      "fields": {
+        "host": {"name": "Client-Adresse", "description": "Die Adresse des Clients, wie der Sensor „Stream-Clients“ sie zeigt."},
+        "sref": {"name": "Service-Referenz", "description": "Der Sender, der an diesen Client gesendet wird. Leer lassen, wenn der Client einen Stream offen hat oder wenn der Stream gestoppt werden soll, dessen Sender der Sensor nicht zeigt."}
+      }
+    },
     "zap": {
       "name": "Umschalten",
       "description": "Schaltet den Receiver auf einen Sender um, über die Service-Referenz oder den Namen. Gib genau eines von beiden an.",
@@ -715,6 +724,11 @@
     }
   },
   "exceptions": {
+    "stream_stop_unsupported": {"message": "Dieser Receiver kann keinen Stream-Client stoppen: Der Streamserver seines Images bietet das nicht an, oder das Plugin ist älter als 0.5.0."},
+    "stream_client_unknown": {"message": "Auf der Liste des Receivers steht kein Stream-Client mit der Adresse {host}."},
+    "stream_client_ambiguous": {"message": "{host} hat mehr als einen Stream offen. Gib die Service-Referenz des Streams an, der gestoppt werden soll."},
+    "stream_stop_not_connected": {"message": "Dieser Stream-Client ist nicht mehr mit dem Receiver verbunden."},
+    "stream_stop_not_stopped": {"message": "Der Receiver hat diesen Stream-Client nicht gestoppt."},
     "mqtt_not_available": {
       "message": "Die MQTT-Integration ist nicht verfügbar, der Receiver ist daher nicht erreichbar."
     },

@@ -60,6 +60,7 @@ from .const import (
     CAPABILITY_PROCESS,
     CAPABILITY_SERVICE_CODECS,
     CAPABILITY_SOFTCAM,
+    CAPABILITY_STREAM_CLIENTS,
     CONF_CAM_TELEMETRY,
     CONF_OSCAM_TELEMETRY,
     DOMAIN,
@@ -69,6 +70,7 @@ from .const import (
     LOCAL_ERROR_TEXT_MAX,
     TOPIC_BOUQUET,
     TOPIC_CAM,
+    TOPIC_CHANNELS,
     TOPIC_EPG,
     TOPIC_EPG_GRID,
     TOPIC_EPG_IMPORT,
@@ -81,6 +83,7 @@ from .const import (
     TOPIC_RECORDING,
     TOPIC_SERVICE,
     TOPIC_SOFTCAM,
+    TOPIC_STREAM_CLIENTS,
     TOPIC_TUNER,
     WITHHELD_ATTRIBUTE_MAX,
 )
@@ -619,6 +622,7 @@ SERVICE_CODEC_SENSORS: tuple[Enigma2SensorDescription, ...] = (
 )
 
 KEY_EPG_ACTIVE_BOUQUET = "epg_active_bouquet"
+KEY_STREAM_CLIENTS = "stream_clients"
 
 # The grids to read, and the context that says which one is in use. A box that publishes
 # grids but no context has no „active" bouquet to speak of, and one with a context but no
@@ -722,6 +726,20 @@ async def async_setup_entry(
         ).start()
     )
 
+    entry.async_on_unload(
+        OptionalEntities(
+            hass,
+            box,
+            "sensor",
+            (KEY_STREAM_CLIENTS,),
+            lambda _key: Enigma2StreamClientsSensor(box),
+            lambda: CAPABILITY_STREAM_CLIENTS in box.capabilities,
+            # Never removed, for the reason the softcam sensor above gives.
+            lambda: False,
+            async_add_entities,
+        ).start()
+    )
+
     codecs = {description.key: description for description in SERVICE_CODEC_SENSORS}
     entry.async_on_unload(
         OptionalEntities(
@@ -817,6 +835,40 @@ class Enigma2Sensor(Enigma2Entity, SensorEntity):
         self._attr_native_value = description.value_fn(self.box.state)
         if description.attributes_fn is not None:
             self._attr_extra_state_attributes = description.attributes_fn(self.box.state)
+
+
+class Enigma2StreamClientsSensor(Enigma2Entity, SensorEntity):
+    """How many clients the receiver's stream server is serving, and who they are.
+
+    The state is the image's own count - every open stream holds a tuner, so it is the
+    number that explains "no free tuner". The rows are the attribute `clients`: host,
+    channel, bouquet and whether the client is served through the encoder.
+
+    **The plugin publishes every client; hiding is done here.** A row whose service the
+    options hide is shown with its host and `transcoded` and without its name, its
+    reference and its bouquet (`Enigma2Box.stream_client_rows`), by the filter the zap
+    history uses. The channel list is listened to as well, because what is hidden
+    follows it.
+
+    `clients` is declared unrecorded: it is who watched what from which address, and it
+    changes with every client that comes and goes. The count is what history keeps.
+    """
+
+    _unrecorded_attributes = frozenset({"clients"})
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, box: Enigma2Box) -> None:
+        """Follow the client list, and the channel list the hiding is judged by."""
+        super().__init__(
+            box, KEY_STREAM_CLIENTS, topics=(TOPIC_STREAM_CLIENTS, TOPIC_CHANNELS)
+        )
+
+    @callback
+    def _async_read_state(self) -> None:
+        """Read the count, and the rows as they may be shown."""
+        clients = self.box.state.stream_clients
+        self._attr_native_value = None if clients is None else clients["count"]
+        self._attr_extra_state_attributes = {"clients": self.box.stream_client_rows()}
 
 
 class Enigma2EpgActiveBouquetSensor(Enigma2Entity, SensorEntity):

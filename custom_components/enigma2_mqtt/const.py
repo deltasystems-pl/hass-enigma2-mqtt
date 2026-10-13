@@ -751,3 +751,14 @@ CAPABILITY_SERVICE_CODECS: Final = "service_codecs"
 CAPABILITY_VOLUME_PASSTHROUGH: Final = "volume_passthrough"
 # The attribute the two volume controls carry it in, and the binary sensor's key.
 ATTR_VOLUME_PASSTHROUGH: Final = "volume_passthrough"
+
+# Who the image's stream server is serving, from a plugin after 0.4.0: `stream_clients`
+# lists the clients, and `cmd/stream_stop` ends one of them. Each is claimed by itself -
+# an image whose server lists clients and cannot stop one claims the first only.
+TOPIC_STREAM_CLIENTS: Final = "stream_clients"
+CAPABILITY_STREAM_CLIENTS: Final = "stream_clients"
+CAPABILITY_STREAM_STOP: Final = "stream_stop"
+# The refusal codes of `cmd/stream_stop` this integration has a sentence for: the client
+# has left, and the image did not stop a client it listed - the second is a failure.
+STREAM_STOP_REASONS: Final = ("not_connected", "not_stopped")
+STREAM_STOP_FAILURES: Final = ("not_stopped",)

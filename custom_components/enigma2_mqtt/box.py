@@ -126,12 +126,14 @@ from .const import (
     TOPIC_SCREEN,
     TOPIC_SERVICE,
     TOPIC_SOFTCAM,
+    TOPIC_STREAM_CLIENTS,
     TOPIC_TIMERS,
     TOPIC_TUNER,
     TOPIC_UPDATE,
     TOPIC_VOLUME,
     TOPIC_ZAP_HISTORY,
 )
+from .stream import normalise_stream_clients, same_client_host
 
 if TYPE_CHECKING:
     from .picture import PiconResolver
@@ -988,6 +990,10 @@ class Enigma2State:
     # Whether the last `info` that was read arrived retained: the broker's replay of what a
     # plugin said earlier, and not a plugin speaking now.
     info_retained: bool = False
+    # Who the image's stream server is serving, normalised
+    # (`stream.normalise_stream_clients`). None until the topic arrives, and again
+    # while the plugin has emptied it because the image's list could not be read.
+    stream_clients: dict[str, Any] | None = None
     last_error: dict[str, Any] | None = None
     # Whether the last complaint arrived with the retain flag set. A retained payload
     # is what the broker had before we subscribed, so it is a replay of something that
@@ -1889,6 +1895,8 @@ class Enigma2Box:
             self._epg_import_received(msg)
         elif suffix == TOPIC_ZAP_HISTORY:
             self._zap_history_received(msg)
+        elif suffix == TOPIC_STREAM_CLIENTS:
+            self._stream_clients_received(msg)
         elif suffix.startswith(f"{TOPIC_EPG_GRID}/"):
             self._epg_grid_received(suffix[len(TOPIC_EPG_GRID) + 1 :], msg.payload)
         elif suffix == TOPIC_CHANNELS:
@@ -2559,11 +2567,7 @@ class Enigma2Box:
         entries = list((self.state.zap_history or {}).get("entries") or [])
         if not filtered:
             return entries
-        hidden = {
-            name
-            for name in self.entry.options.get(CONF_HISTORY_HIDDEN_BOUQUETS) or []
-            if isinstance(name, str) and name
-        }
+        hidden = self.hidden_bouquet_names
         if not hidden:
             return entries
         published = self.published_bouquets
@@ -2586,6 +2590,119 @@ class Enigma2Box:
                 continue
             visible.append(entry)
         return visible
+
+    @property
+    def hidden_bouquet_names(self) -> set[str]:
+        """Return the bouquets the options hide, by name. Empty hides nothing."""
+        return {
+            name
+            for name in self.entry.options.get(CONF_HISTORY_HIDDEN_BOUQUETS) or []
+            if isinstance(name, str) and name
+        }
+
+    def service_hidden(self, sref: Any, bouquet: Any) -> bool:
+        """Return whether a service is one the options hide.
+
+        The zap history's filter (`zap_history_entries`), asked about one service that
+        is not an entry of the history: the channel on the decoder, a channel a client
+        is streaming. `bouquet` is the name the receiver gives with it - the first of
+        its configured bouquets that holds the service, or nothing. With the option
+        empty nothing is hidden. With it set, a service is shown only when **both**
+        hold:
+
+        1. the bouquet named with it is a published bouquet, and not a hidden one; and
+        2. the service is not a member of any hidden bouquet - so a channel of a hidden
+           bouquet that the receiver names under another one stays hidden.
+
+        **It fails toward hiding**, exactly as that filter does: no bouquet named, a
+        bouquet the receiver does not publish, no reference, or a hidden bouquet that
+        is on the list without its channels - which then hides every service, because
+        which channels to hide is what is not known.
+
+        This decides what Home Assistant shows and offers. The receiver publishes
+        every service and every stream client to anybody on the broker.
+        """
+        hidden = self.hidden_bouquet_names
+        if not hidden:
+            return False
+        published = self.published_bouquets
+        self._warn_missing_hidden(hidden, published)
+        if (hidden_members := self._members_of_hidden(hidden, published)) is None:
+            return True
+        if not isinstance(bouquet, str) or bouquet in hidden:
+            return True
+        if not any(candidate.get("name") == bouquet for candidate in published):
+            return True
+        identity = service_identity(sref)
+        return not identity or identity in hidden_members
+
+    def stream_client_rows(self) -> list[dict[str, Any]]:
+        """Return the stream clients as they may be shown, the hidden ones without a channel.
+
+        Every row keeps its host and whether it is transcoded. A row whose service the
+        options hide (`service_hidden`) loses its reference, its name and its bouquet,
+        and says `hidden`. The count is not changed: how many clients hold a tuner is
+        the fact the sensor is for.
+        """
+        rows: list[dict[str, Any]] = []
+        for client in (self.state.stream_clients or {}).get("clients") or []:
+            if self.service_hidden(client["sref"], client["bouquet"]):
+                rows.append(
+                    {
+                        "host": client["host"],
+                        "sref": None,
+                        "name": None,
+                        "bouquet": None,
+                        "transcoded": client["transcoded"],
+                        "hidden": True,
+                    }
+                )
+            else:
+                rows.append({**client, "hidden": False})
+        return rows
+
+    def stream_client_references(self, host: str) -> list[str]:
+        """Return the services one host is being streamed, for a stop that names no service.
+
+        A hidden row has no reference anywhere a caller could read it, so a stop of it
+        can only name the host; the reference is supplied from here, where the
+        receiver's own payload is held, and goes nowhere but into the command. When the
+        host has hidden streams, those are the ones meant - a shown one can be named by
+        its reference. One service listed twice for a host - once transcoded, once not -
+        is one client to the receiver's command, and is returned once.
+        """
+        rows = [
+            client
+            for client in (self.state.stream_clients or {}).get("clients") or []
+            if client["sref"] is not None and same_client_host(client["host"], host)
+        ]
+        hidden = [
+            client
+            for client in rows
+            if self.service_hidden(client["sref"], client["bouquet"])
+        ]
+        references: dict[str, str] = {}
+        for client in hidden or rows:
+            references.setdefault(service_identity(client["sref"]), client["sref"])
+        return list(references.values())
+
+    @callback
+    def _stream_clients_received(self, msg: ReceiveMessage) -> None:
+        """Cache who the stream server is serving, normalised.
+
+        The three answers of `_zap_history_received`: an empty payload is the plugin
+        saying the image's list could not be read, and clears it - a list that names a
+        client that has left is worse than none; a payload that is not a JSON object
+        leaves the last good one alone; anything else is normalised and kept.
+        """
+        if not (decode_payload(msg.payload) or "").strip():
+            self.state.stream_clients = None
+            self._async_updated(TOPIC_STREAM_CLIENTS)
+            return
+        if (payload := parse_json_payload(msg.payload)) is None:
+            return
+        self.state.stream_clients = normalise_stream_clients(payload)
+        self._async_updated(TOPIC_STREAM_CLIENTS)
 
     def _members_of_hidden(
         self, hidden: set[str], published: list[dict[str, Any]]

@@ -240,6 +240,9 @@
       },
       "audio_language": {
         "default": "mdi:translate"
+      },
+      "stream_clients": {
+        "default": "mdi:cast-connected"
       }
     },
     "switch": {
@@ -306,6 +309,9 @@
     },
     "zap": {
       "service": "mdi:television-classic"
+    },
+    "stop_stream": {
+      "service": "mdi:stop-circle-outline"
     }
   }
 }

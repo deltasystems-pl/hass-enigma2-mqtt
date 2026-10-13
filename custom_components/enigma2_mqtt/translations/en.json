@@ -509,6 +509,7 @@
       "frame_rate": {"name": "Frame rate"},
       "audio_codec": {"name": "Audio codec"},
       "audio_language": {"name": "Audio language"},
+      "stream_clients": {"name": "Stream clients"},
       "withheld_payloads": {"name": "Withheld payloads"}
     },
     "switch": {
@@ -556,6 +557,14 @@
     }
   },
   "services": {
+    "stop_stream": {
+      "name": "Stop stream",
+      "description": "Ends one stream the receiver is serving to another device. A player that reconnects by itself opens it again: stopping a client is not blocking it.",
+      "fields": {
+        "host": {"name": "Client address", "description": "The client's address, as the “Stream clients” sensor shows it."},
+        "sref": {"name": "Service reference", "description": "The channel being streamed to that client. Leave empty when the client has one stream open, or to stop the one whose channel the sensor does not show."}
+      }
+    },
     "zap": {
       "name": "Zap",
       "description": "Tunes the receiver to a channel, by service reference or by name. Give exactly one of the two.",
@@ -742,6 +751,11 @@
     }
   },
   "exceptions": {
+    "stream_stop_unsupported": {"message": "This receiver cannot stop a stream client: its image's stream server does not offer it, or the plugin is older than 0.5.0."},
+    "stream_client_unknown": {"message": "No stream client with the address {host} is on the receiver's list."},
+    "stream_client_ambiguous": {"message": "{host} has more than one stream open. Give the service reference of the one to stop."},
+    "stream_stop_not_connected": {"message": "That stream client is no longer connected to the receiver."},
+    "stream_stop_not_stopped": {"message": "The receiver did not stop that stream client."},
     "mqtt_not_available": {
       "message": "The MQTT integration is not available, so the receiver cannot be reached."
     },

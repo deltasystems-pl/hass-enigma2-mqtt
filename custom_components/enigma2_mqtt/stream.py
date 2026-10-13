@@ -140,3 +140,61 @@ def volume_passthrough(volume: dict[str, Any] | None) -> bool | None:
     """
     value = (volume or {}).get("passthrough")
     return value if isinstance(value, bool) else None
+
+
+# ------------------------------------------------------------ `stream_clients`
+
+# The most rows the plugin lists, and the most characters of a host, a name and a
+# reference that are kept. A reference is never cut - a cut one names no service - so
+# one that is too long is dropped.
+STREAM_CLIENTS_MAX = 32
+CLIENT_HOST_MAX = 64
+CLIENT_NAME_MAX = 255
+CLIENT_SREF_MAX = 2048
+
+
+def normalise_stream_clients(payload: dict[str, Any]) -> dict[str, Any]:
+    """Strip a `stream_clients` payload to what the contract names.
+
+    `count` is how many clients the image lists, which can be more than the rows: the
+    plugin cuts the list at 32. A payload without a usable count is counted by its rows.
+    A row is kept whenever it names a host; its other members are None when they are
+    missing or of another type, and `transcoded` is None rather than False then.
+    """
+    raw = payload.get("clients")
+    clients: list[dict[str, Any]] = []
+    for item in (raw if isinstance(raw, list) else [])[:STREAM_CLIENTS_MAX]:
+        if not isinstance(item, dict):
+            continue
+        if (host := _text(item.get("host"), CLIENT_HOST_MAX)) is None:
+            continue
+        sref = item.get("sref")
+        transcoded = item.get("transcoded")
+        clients.append(
+            {
+                "host": host,
+                "sref": sref
+                if isinstance(sref, str) and 0 < len(sref) <= CLIENT_SREF_MAX
+                else None,
+                "name": _text(item.get("name"), CLIENT_NAME_MAX),
+                "bouquet": _text(item.get("bouquet"), CLIENT_NAME_MAX),
+                "transcoded": transcoded if isinstance(transcoded, bool) else None,
+            }
+        )
+    count = _whole(payload.get("count"))
+    return {"count": len(clients) if count is None else count, "clients": clients}
+
+
+def same_client_host(one: str, other: str) -> bool:
+    """Return whether two spellings name the same stream client's address.
+
+    The topic shows an IPv4 client as `192.0.2.20`, the image holds it as
+    `::ffff:192.0.2.20`, and the plugin takes either; letters in an address are
+    compared without regard to case.
+    """
+
+    def plain(host: str) -> str:
+        host = host.strip().lower()
+        return host[len("::ffff:") :] if host.startswith("::ffff:") else host
+
+    return plain(one) == plain(other)

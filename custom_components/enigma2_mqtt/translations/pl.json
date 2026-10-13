@@ -482,6 +482,7 @@
       "frame_rate": {"name": "Liczba klatek na sekundę"},
       "audio_codec": {"name": "Kodek dźwięku"},
       "audio_language": {"name": "Język dźwięku"},
+      "stream_clients": {"name": "Klienci strumienia"},
       "withheld_payloads": {"name": "Nieopublikowane dane"}
     },
     "switch": {
@@ -529,6 +530,14 @@
     }
   },
   "services": {
+    "stop_stream": {
+      "name": "Zatrzymaj strumień",
+      "description": "Kończy jeden strumień, który dekoder wysyła do innego urządzenia. Odtwarzacz, który sam łączy się ponownie, otworzy go znowu: zatrzymanie klienta nie jest jego blokadą.",
+      "fields": {
+        "host": {"name": "Adres klienta", "description": "Adres klienta tak, jak pokazuje go czujnik „Klienci strumienia”."},
+        "sref": {"name": "Referencja usługi", "description": "Kanał wysyłany do tego klienta. Zostaw puste, gdy klient ma otwarty jeden strumień albo gdy chcesz zatrzymać ten, którego kanału czujnik nie pokazuje."}
+      }
+    },
     "zap": {
       "name": "Przełącz kanał",
       "description": "Przełącza dekoder na kanał — po referencji usługi albo po nazwie. Podaj dokładnie jedno z dwóch.",
@@ -715,6 +724,11 @@
     }
   },
   "exceptions": {
+    "stream_stop_unsupported": {"message": "Ten dekoder nie potrafi zatrzymać klienta strumienia: serwer strumieni jego obrazu tego nie oferuje albo wtyczka jest starsza niż 0.5.0."},
+    "stream_client_unknown": {"message": "Na liście dekodera nie ma klienta strumienia o adresie {host}."},
+    "stream_client_ambiguous": {"message": "{host} ma otwarty więcej niż jeden strumień. Podaj referencję usługi tego, który ma zostać zatrzymany."},
+    "stream_stop_not_connected": {"message": "Ten klient strumienia nie jest już połączony z dekoderem."},
+    "stream_stop_not_stopped": {"message": "Dekoder nie zatrzymał tego klienta strumienia."},
     "mqtt_not_available": {
       "message": "Integracja MQTT jest niedostępna, więc nie można połączyć się z dekoderem."
     },
