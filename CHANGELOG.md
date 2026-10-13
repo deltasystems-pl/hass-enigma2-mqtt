@@ -183,7 +183,8 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   a phase stays on the card until the topic has stood still for ten minutes. A phase nobody
   will move any more is therefore shown for up to ten minutes too. The count is kept across
   a reload of the integration and starts again with a restart of Home Assistant, never past
-  the 25-minute window (DOCUMENTATION.md §4.5).
+  the 25-minute window; removing the receiver from Home Assistant drops it
+  (DOCUMENTATION.md §4.5).
 - **Two outcome sentences of a withdrawn install say what holds in every case.** After a
   withdrawal that could not put the previous files back, the sentence said the new files are
   still on the receiver; after a restore that failed part-way they may be partly new and

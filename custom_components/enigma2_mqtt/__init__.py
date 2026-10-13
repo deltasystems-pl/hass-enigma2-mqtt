@@ -38,6 +38,7 @@ from .const import (
 from .picture import PiconResolver
 from .relay import async_answer_relay_request, async_get_relay
 from .release_store import async_release_index_cache
+from .update import async_forget_stood_still
 from .withheld import async_delete_withheld_issue, async_setup_withheld_issue
 
 _LOGGER = logging.getLogger(__name__)
@@ -218,6 +219,8 @@ async def async_remove_entry(
     """
     # The receiver's repair goes with it, and with it the record that it was ignored.
     async_delete_withheld_issue(hass, entry.entry_id)
+    # So does the count its update card kept for the card after a reload.
+    async_forget_stood_still(hass, entry.entry_id)
     try:
         if not await mqtt.async_wait_for_mqtt_client(hass):
             _LOGGER.debug(
