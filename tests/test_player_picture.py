@@ -744,6 +744,33 @@ def test_a_typed_name_the_address_parser_refuses_is_no_host() -> None:
     assert box_module._typed_host_url("xn--bcher-kva.example") == "http://xn--bcher-kva.example/"
 
 
+@pytest.mark.parametrize(
+    ("typed", "usable"),
+    [
+        # 253 characters is the longest a name can be, and 63 the longest a label.
+        (".".join(["a" * 63] * 3 + ["a" * 61]), True),
+        (".".join(["a" * 63] * 3 + ["a" * 62]), False),
+        ("a" * 63 + ".lan", True),
+        ("a" * 64 + ".lan", False),
+        ("box.l-n", True),
+        ("box-.lan", False),
+        ("box.lan-", False),
+    ],
+    ids=[
+        "253 characters",
+        "254 characters",
+        "a label of 63",
+        "a label of 64",
+        "a hyphen inside a label",
+        "a label that ends in a hyphen",
+        "a last label that ends in a hyphen",
+    ],
+)
+def test_a_typed_name_is_held_to_the_bounds_of_a_host_name(typed: str, usable: bool) -> None:
+    """The whole name, each label, and the hyphen a label cannot end with."""
+    assert box_module._typed_host_url(typed) == (f"http://{typed}/" if usable else None)
+
+
 async def test_an_address_that_went_away_during_a_lookup_is_not_an_answer(
     hass: HomeAssistant,
     mqtt_mock,
@@ -1760,6 +1787,157 @@ async def test_a_bouquet_waiting_its_turn_is_listed_once_after_the_channel(
     assert await _player(hass).async_get_media_image() == (PNG_TWO, "image/png")
 
 
+async def test_a_list_that_failed_is_not_the_list_in_flight_any_more(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A channel change drops the list in flight, and a list that failed is not in flight.
+
+    The same bouquet, opened again after its hour and waiting behind the player's
+    lookup, keeps its turn through the next channel change.
+    """
+    held = asyncio.Event()
+    started = asyncio.Event()
+
+    async def _getpicon(method: str, url: Any, data: Any) -> AiohttpClientMockResponse:
+        sref = url.query["sRef"]
+        if sref == SREF_TWO:
+            started.set()
+            await held.wait()
+        return AiohttpClientMockResponse(method, url, json=_getpicon_answer(PICONS.get(sref)))
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(GETSERVICES, status=500)
+    aioclient_mock.get(EVERYTHING, status=404)
+    await _setup(hass, config_entry)
+    resolver = config_entry.runtime_data.picons
+    now = _clock(resolver)
+
+    await _browse(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert _asked(aioclient_mock) == ["/api/getservices"]
+    assert resolver.async_status()["status"] == "unexpected"
+
+    # An hour later the receiver answers. The bouquet is opened while TVN is looked up.
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(GETPICON, side_effect=_getpicon)
+    aioclient_mock.get(GETSERVICES, text=FAVOURITES_ANSWER)
+    aioclient_mock.get(f"{BASE}{LINK_OTHER}", content=JPEG_OTHER)
+    aioclient_mock.get(EVERYTHING, status=404)
+    now[0] += picture.NEGATIVE_TTL + 1
+    async_fire_mqtt_message(hass, SERVICE_TOPIC, json.dumps(TVN))
+    await hass.async_block_till_done()
+    await asyncio.wait_for(started.wait(), 2)
+    await _browse(hass)
+    await _publish(hass, SERVICE_TOPIC, POLSAT)
+
+    assert _asked(aioclient_mock) == [
+        "/api/getpicon",
+        "/api/getpicon",
+        LINK_OTHER,
+        "/api/getservices",
+    ]
+    assert resolver.async_status()["bouquets_cached"] == 1
+    held.set()
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+
+async def test_a_list_that_was_cancelled_is_not_the_list_in_flight_any_more(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A task cancelled from outside leaves no bouquet marked as being listed."""
+    started = asyncio.Event()
+
+    async def _never(url: Any) -> _FakeResponse:
+        started.set()
+        await asyncio.Event().wait()
+        return _FakeResponse(404)
+
+    session = _FakeSession(_never)
+    monkeypatch.setattr(picture, "async_get_clientsession", lambda _hass: session)
+    await _setup(hass, config_entry)
+    resolver = config_entry.runtime_data.picons
+
+    await _browse(hass)
+    await asyncio.wait_for(started.wait(), 2)
+    task = resolver._task
+    assert resolver._scanning == FAVOURITES["sref"]
+
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+    assert task.cancelled()
+    assert resolver._scanning is None
+    assert session.active == 0
+
+
+async def test_a_dropped_list_that_ends_late_does_not_unmark_the_list_after_it(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A request that takes a moment to close ends after the next task has begun.
+
+    The list a channel change dropped is still closing its connection when the bouquet
+    behind it is being listed. When it has closed, that second list is still the one
+    in flight: the next channel change drops it, and it is not listed a second time.
+    """
+    listed: list[str] = []
+    listing = [asyncio.Event(), asyncio.Event()]
+    closing = asyncio.Event()
+
+    async def _slow_to_close(url: Any) -> _FakeResponse:
+        if url.path != "/api/getservices":
+            return await _openwebif(url)
+        listed.append(url.query["sRef"])
+        if len(listed) > 2:
+            return _FakeResponse(200, FAVOURITES_ANSWER.encode())
+        listing[len(listed) - 1].set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            if len(listed) == 1:
+                await closing.wait()
+            raise
+        return _FakeResponse(404)
+
+    session = _FakeSession(_slow_to_close)
+    monkeypatch.setattr(picture, "async_get_clientsession", lambda _hass: session)
+    await _setup(hass, config_entry)
+    resolver = config_entry.runtime_data.picons
+
+    await _browse(hass)
+    await _browse(hass, SPORT)
+    await asyncio.wait_for(listing[0].wait(), 2)
+    dropped = resolver._task
+
+    # TVN interrupts the first list, and "Sport" is listed behind it while the first
+    # request is still closing.
+    async_fire_mqtt_message(hass, SERVICE_TOPIC, json.dumps(TVN))
+    await asyncio.wait_for(listing[1].wait(), 2)
+    assert not dropped.done()
+    closing.set()
+    await asyncio.gather(dropped, return_exceptions=True)
+
+    await _publish(hass, SERVICE_TOPIC, POLSAT)
+
+    assert listed == [FAVOURITES["sref"], SPORT["sref"]]
+    assert not resolver._scans
+    assert session.active == 0
+    assert await _player(hass).async_get_media_image() == (JPEG_OTHER, "image/jpeg")
+
+
 async def test_what_was_queued_behind_a_failure_is_not_asked(
     hass: HomeAssistant,
     mqtt_mock,
@@ -2149,6 +2327,47 @@ async def test_answers_are_believed_for_a_day_and_no_picon_for_an_hour(
     # again. The bouquet's answer is no longer used for the player either.
     now[0] += 2
     assert await _zap_through() == ["/api/getpicon", LINK_TWO, "/api/getservices"]
+
+
+@pytest.mark.parametrize(
+    "files",
+    [
+        {**FILES, LINK_TWO: b"<html><body>Login</body></html>"},
+        {LINK_ONE: PNG_ONE, LINK_OTHER: JPEG_OTHER},
+    ],
+    ids=["a file that is no picture", "no file"],
+)
+async def test_a_link_without_a_usable_picture_is_not_asked_about_again_for_an_hour(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    files: dict[str, bytes],
+) -> None:
+    """OpenWebif named a picon and there is no picture behind the link: no picon, for an hour."""
+    assert picture.NEGATIVE_TTL == 3600
+    _serve(aioclient_mock, files=files)
+    await _setup(hass, config_entry, PLAYER_PICTURE_PICON)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    resolver = config_entry.runtime_data.picons
+    now = _clock(resolver)
+
+    async def _zap_through() -> list[str]:
+        aioclient_mock.mock_calls.clear()
+        # An answer that is not kept is asked for again without end: bounded, to fail.
+        async with asyncio.timeout(5):
+            for service in (TVN, POLSAT, TVN, POLSAT):
+                await _publish(hass, SERVICE_TOPIC, service)
+        return _asked(aioclient_mock)
+
+    # TVN has a link and no picture behind it; Polsat has a picon, kept for a day.
+    assert await _zap_through() == ["/api/getpicon", LINK_TWO, "/api/getpicon", LINK_OTHER]
+    assert resolver.async_status()["services_without_picon"] == 1
+    now[0] += picture.NEGATIVE_TTL - 1
+    assert await _zap_through() == []
+    now[0] += 2
+    assert await _zap_through() == ["/api/getpicon", LINK_TWO]
 
 
 async def test_a_bouquets_links_are_asked_for_again_when_its_channel_list_changes(
