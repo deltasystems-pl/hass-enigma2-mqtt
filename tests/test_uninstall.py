@@ -14,6 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
+import re
 from typing import Any
 from unittest.mock import call, patch
 
@@ -29,8 +30,9 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_mqtt_message,
 )
 
-from custom_components.enigma2_mqtt import installer_helper
+from custom_components.enigma2_mqtt import installer_helper, uninstall
 from custom_components.enigma2_mqtt.const import (
+    CAPABILITY_COMMAND_ID,
     CONF_BASE_TOPIC,
     CONF_CONFIRM_UNINSTALL,
     CONF_KEEP_SSH_CREDENTIALS,
@@ -68,6 +70,7 @@ from .conftest import (
     async_setup_box,
     async_setup_box_then_retained,
     command_topic,
+    opened_command,
 )
 
 UNINSTALL_TOPIC = command_topic("uninstall")
@@ -1910,3 +1913,161 @@ async def test_an_ssh_failure_during_the_probe_costs_only_the_verification(
     assert received == [NODE_ID]
     assert result["reason"] == "uninstall_not_verified"
     assert result["description_placeholders"]["detail"] == detail
+
+
+# ------------------------------------------------------------------ a command's id
+#
+# A plugin that claims `command_id` is sent the node id in an envelope with an id, and
+# says the id back on `last_error` - for a refusal, and for a removal that stopped (the
+# plugin's TOPICS.md, section 2). `tests/test_command_id.py` holds the rule itself.
+
+COMMAND_ID = re.compile(r"[0-9a-f]{16}")
+SOMEBODY_ELSES = "7f9c2e4a-3b1d-4c8e-9f60-2d5a1b7c8e90"
+
+PERMITTED_WITH_IDS = {
+    **PERMITTED_INFO,
+    "capabilities": [*PERMITTED_INFO["capabilities"], CAPABILITY_COMMAND_ID],
+}
+_TORN_DOWN = [(INFO_TOPIC, ""), (ANNOUNCEMENT_TOPIC, ""), (AVAILABILITY_TOPIC, "offline")]
+
+
+async def _uninstalling(
+    hass: HomeAssistant,
+    retained: dict[str, str | bytes],
+    info: dict[str, Any],
+    answer: Callable[[str | None], list[tuple[str, str]]],
+) -> tuple[dict[str, Any], list[tuple[str | None, str]]]:
+    """Run the removal against a receiver that answers with `answer(the command's id)`."""
+    retained[INFO_TOPIC] = json.dumps(info)
+    entry = _entry()
+    await async_setup_box_then_retained(hass, entry, retained)
+    heard: list[tuple[str | None, str]] = []
+
+    @callback
+    def _command(msg: ReceiveMessage) -> None:
+        heard.append(opened_command(msg.payload))
+        for topic, payload in answer(heard[-1][0]):
+            async_fire_mqtt_message(hass, topic, payload)
+
+    await mqtt.async_subscribe(hass, UNINSTALL_TOPIC, _after_publish(hass, _command))
+    with patch.object(uninstall, "UNINSTALL_TIMEOUT", 0.3):
+        result = await _confirm(hass, await _open_uninstall(hass, entry))
+    return result, heard
+
+
+def _complaint(command_id: Any, error: str = REFUSAL) -> tuple[str, str]:
+    payload: dict[str, Any] = {"cmd": "uninstall", "error": error}
+    if command_id is not None:
+        payload["id"] = command_id
+    return LAST_ERROR_TOPIC, json.dumps(payload)
+
+
+async def test_the_uninstall_goes_in_an_envelope_with_the_node_id_as_its_payload(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+) -> None:
+    result, heard = await _uninstalling(
+        hass, box_on_the_broker, PERMITTED_WITH_IDS, lambda _id: _TORN_DOWN
+    )
+
+    assert result["reason"] == "uninstall_reported"
+    ((command_id, payload),) = heard
+    assert payload == NODE_ID
+    assert command_id is not None and COMMAND_ID.fullmatch(command_id)
+
+
+async def test_the_uninstall_of_an_older_plugin_is_the_bare_node_id(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+) -> None:
+    result, heard = await _uninstalling(
+        hass, box_on_the_broker, PERMITTED_INFO, lambda _id: _TORN_DOWN
+    )
+
+    assert result["reason"] == "uninstall_reported"
+    assert heard == [(None, NODE_ID)]
+    assert mqtt_mock.async_publish.call_args_list[-1].args[:2] == (UNINSTALL_TOPIC, NODE_ID)
+
+
+@pytest.mark.parametrize("info", [PERMITTED_WITH_IDS, PERMITTED_INFO], ids=["with ids", "older"])
+async def test_a_refusal_of_somebody_else_s_uninstall_is_not_the_answer_to_this_one(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    info: dict[str, Any],
+) -> None:
+    """A second `cmd/uninstall` from another client is refused "already running" while
+    ours is carried out; it says that client's id."""
+    result, _ = await _uninstalling(
+        hass, box_on_the_broker, info, lambda _id: [_complaint(SOMEBODY_ELSES), *_TORN_DOWN]
+    )
+
+    assert result["reason"] == "uninstall_reported"
+
+
+@pytest.mark.parametrize("with_id", [True, False], ids=["its id", "no id"])
+async def test_a_refusal_of_the_uninstall_with_its_id_or_with_none_is_the_answer(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    with_id: bool,
+) -> None:
+    result, _ = await _uninstalling(
+        hass,
+        box_on_the_broker,
+        PERMITTED_WITH_IDS,
+        lambda command_id: [_complaint(command_id if with_id else None)],
+    )
+
+    assert result["reason"] == "uninstall_refused"
+    assert result["description_placeholders"]["detail"] == REFUSAL
+
+
+@pytest.mark.parametrize(
+    ("whose", "reason"),
+    [("ours", "uninstall_rolled_back"), ("another", "uninstall_reported")],
+)
+async def test_a_removal_is_rolled_back_only_by_its_own_failure(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    whose: str,
+    reason: str,
+) -> None:
+    """The fresh session says why a removal stopped, under the removal's id. A complaint
+    about `cmd/uninstall` under another id after the teardown is not that."""
+    result, _ = await _uninstalling(
+        hass,
+        box_on_the_broker,
+        PERMITTED_WITH_IDS,
+        lambda command_id: [
+            *_TORN_DOWN,
+            _complaint(command_id if whose == "ours" else SOMEBODY_ELSES, "opkg remove exited 255"),
+        ],
+    )
+
+    assert result["reason"] == reason
+
+
+async def test_a_complaint_before_the_uninstall_was_sent_is_not_its_refusal(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+) -> None:
+    """The watch listens from the moment it subscribes, and the command goes out only
+    once the broker has confirmed that: a fresh complaint in between is an earlier
+    command's."""
+    watch = await uninstall._async_watch_uninstall(hass, BASE_TOPIC, NODE_ID)
+    try:
+        async_fire_mqtt_message(hass, *_complaint(None))
+        await hass.async_block_till_done()
+        assert not watch.refused.done()
+
+        watch.arm(None)
+        async_fire_mqtt_message(hass, *_complaint(None))
+        await hass.async_block_till_done()
+        assert watch.refused.result() == REFUSAL
+    finally:
+        watch.cancel()

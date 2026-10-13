@@ -319,6 +319,9 @@ async def test_error_clear_cannot_acknowledge_concurrent_commands(
     """An anonymous clear cannot hide a later error for one of two commands."""
     await async_setup_box(hass, config_entry)
     box = config_entry.runtime_data
+    # Both commands are on the broker before the receiver says anything: a complaint
+    # made before a command was published is not about it.
+    await box.async_wait_subscribed()
     key = hass.async_create_task(box.async_command("key", "KEY_GREEN"))
     message = hass.async_create_task(box.async_command("message", "hello"))
     await asyncio.sleep(0)
@@ -532,6 +535,8 @@ async def test_screenshot_error_after_a_clear_still_fails_the_command(
     """A grab failure after startup's error clear is still the command's result."""
     await async_setup_box(hass, config_entry)
     box = config_entry.runtime_data
+    # The command is on the broker before the receiver says anything.
+    await box.async_wait_subscribed()
     before = box.updates.get(TOPIC_SCREEN, 0)
     command = hass.async_create_task(
         box.async_command(

@@ -541,6 +541,31 @@ async def async_arm_box_error(hass: HomeAssistant, command: str, error: str) -> 
     await mqtt.async_subscribe(hass, command_topic(command), _command_received)
 
 
+def opened_command(payload: Any) -> tuple[str | None, str]:
+    """A command as the plugin's dispatcher reads it: its id, and its own payload.
+
+    The plugin's rule (`commands.unwrap`): an envelope is a JSON object with exactly the
+    members `id` and `payload`, whose `payload` is a string or an object - an object
+    stands for its JSON text, written without spaces. Anything else is the command's own
+    payload, without an id.
+    """
+    text = payload.decode() if isinstance(payload, (bytes, bytearray)) else str(payload)
+    try:
+        envelope = json.loads(text)
+    except ValueError:
+        return None, text
+    if (
+        not isinstance(envelope, dict)
+        or set(envelope) != {"id", "payload"}
+        or not isinstance(envelope["payload"], (str, dict))
+    ):
+        return None, text
+    inner = envelope["payload"]
+    if isinstance(inner, dict):
+        inner = json.dumps(inner, ensure_ascii=False, separators=(",", ":"))
+    return envelope["id"], inner
+
+
 def assert_published(mqtt_mock: Any, topic: str, payload: str) -> None:
     """Assert that exactly this command went out, at the QoS the contract sets.
 

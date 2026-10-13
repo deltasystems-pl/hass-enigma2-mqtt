@@ -805,7 +805,8 @@ The proof is that the topic moved, not that *this* command moved it: a screensho
 publishes on its own interval, or a retained picture or announcement replayed by the broker
 after a reconnect, can end a press's wait. The press then reports success for something it did
 not cause. It is benign - the command was sent, and the receiver carries it out or complains on
-its own - and the alternative is a correlation id the contract does not have.
+its own. The contract has an id for a command from plugin 0.5.0 on, but only a refusal says it
+back ([§5](#how-an-action-knows-it-worked)): success is still the topic moving.
 
 **A receiver that cannot be woken over the network says so on „Głębokie uśpienie" and „Obudź
 (WoL)".** From plugin 0.3.0 the receiver reports `info.wol`, whose `supported` is the image's own
@@ -1389,6 +1390,41 @@ and disproved by `last_error`. So every action that changes something waits up t
 for whichever comes first, and raises `HomeAssistantError` carrying the box's own words when
 the box refuses. A retained `last_error` is ignored - that is the complaint the broker had
 before the command was sent, not an answer to it.
+
+**Whose refusal it is.** `last_error` names the refused command, and until plugin 0.5.0 that
+was all there was to go by: a refusal of `zap` failed every zap being waited for, whoever had
+sent the one refused. A plugin that claims the capability `command_id` is sent each command in
+an envelope with a fresh random id - `{"id": "<16 hexadecimal digits>", "payload": "<the
+command's payload>"}` - and says the id back on `last_error` when it refuses that command.
+Then:
+
+| `last_error` says | The waiting command is failed by it |
+|---|---|
+| the command's own id | yes - also when the receiver reports it under another name |
+| another id, or any id when the command went out without one | no: it is another client's command, or another of this integration's |
+| no id | when it names the command, as before |
+
+A refusal without an id still counts because it can be the command's own: the plugin drops an
+id that happens to hold one of its passwords and runs the command without it, and a command
+that would pass the plugin's 4096-byte limit only without the envelope is sent without one. A
+complaint that arrives before the command has left Home Assistant is never its answer, with any
+plugin.
+
+The same rule decides the answer to an update over MQTT and to a removal of the plugin: a
+second `cmd/update` or `cmd/uninstall` from another client, refused while Home Assistant's own
+is carried out, no longer ends it as "refused". An install started at the television has no
+id, so its refusal in the same minute can still be read as the answer to Home Assistant's.
+
+Nothing changes for a plugin that does not claim the capability - 0.4.0 and older - or whose
+`info` has not arrived or was retracted: no envelope, and every payload is what it always
+was. The question is asked again for every command, so an update or a downgrade of the plugin
+takes effect with its next `info`. `cmd/relay` is never in an envelope, and neither are the
+few commands sent where nothing has read `info` - the mode switch of the config flow and of a
+removed entry, and the installer's `cmd/reset` and `cmd/bouquet`. The payload inside the
+envelope is always a string, the text an older plugin is sent as the whole payload, so a
+command reads the same characters either way. The id is shown on no entity; the diagnostics
+download carries `last_error` as it arrived, with it
+([ADR-0010](docs/adr/0010-a-command-carries-an-id-and-a-refusal-is-matched-by-it.md)).
 
 | Action | What proves it |
 |---|---|

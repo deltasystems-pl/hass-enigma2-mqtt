@@ -53,6 +53,7 @@ from custom_components.enigma2_mqtt import (
     release_index,
 )
 from custom_components.enigma2_mqtt.box import Enigma2Box
+from custom_components.enigma2_mqtt.const import CAPABILITY_COMMAND_ID
 from custom_components.enigma2_mqtt.plugin_versions import async_plugin_versions
 from custom_components.enigma2_mqtt.relay import RELAY_PATH, RelayError, async_get_relay
 from custom_components.enigma2_mqtt.release_package import ORIGIN_DOWNLOAD, PackageSource
@@ -64,6 +65,7 @@ from .conftest import (
     LAST_ERROR_TOPIC,
     NODE_ID,
     command_topic,
+    opened_command,
 )
 from .signed_index import commit_of, keyset, release
 from .test_force_reinstall_button import INSTALL as FORCED_INSTALL, _press, _ready, _result
@@ -3675,3 +3677,221 @@ async def test_a_refusal_right_after_a_reconnect_is_a_refusal_on_the_card(
     receiver.last_error(OPKG_BUSY, "opkg_busy")
     await hass.async_block_till_done()
     assert hass.states.get(PLUGIN).attributes["last_refusal"]["reason"] == "opkg_busy"
+
+
+# ------------------------------------------------------------- a command's id --
+#
+# A plugin that claims `command_id` is sent the request in an envelope with an id, and says
+# the id back on `last_error` - for a refusal, and for the end of the transaction that
+# request started (the plugin's TOPICS.md, section 2). `tests/test_command_id.py` holds the
+# rule itself; these are the update's two readers of `last_error`.
+
+COMMAND_ID = re.compile(r"[0-9a-f]{16}")
+SOMEBODY_ELSES = "7f9c2e4a-3b1d-4c8e-9f60-2d5a1b7c8e90"
+
+UPDATING_WITH_IDS = {
+    **SELF_UPDATING,
+    "capabilities": [*SELF_UPDATING["capabilities"], CAPABILITY_COMMAND_ID],
+}
+
+
+class UpdatingWithIds(FakeReceiver):
+    """The update's fake receiver, opening the envelope as the plugin does."""
+
+    def __init__(self, hass: HomeAssistant, answer: Any = None) -> None:
+        super().__init__(hass, answer)
+        self.ids: list[str | None] = []
+        self.wire: list[str] = []
+
+    @callback
+    def _received(self, msg: ReceiveMessage) -> None:
+        command_id, inner = opened_command(msg.payload)
+        self.ids.append(command_id)
+        self.wire.append(str(msg.payload))
+        self.requests.append(json.loads(inner))
+        if self.answer == "accept":
+            self.phase("downloading")
+
+    def refuse(self, reason: str, error: str, command_id: Any = None) -> None:
+        payload = {
+            "cmd": "update",
+            "error": error,
+            "reason": reason,
+            "ts": int(dt_util.utcnow().timestamp()),
+        }
+        if command_id is not None:
+            payload["id"] = command_id
+        async_fire_mqtt_message(self.hass, LAST_ERROR_TOPIC, json.dumps(payload))
+
+
+async def test_the_update_request_goes_in_an_envelope_as_the_text_it_was(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    lan: None,
+) -> None:
+    await _self_updating(
+        hass, config_entry, box_on_the_broker, aioclient_mock, info=UPDATING_WITH_IDS
+    )
+    receiver = UpdatingWithIds(hass, "accept")
+    await receiver.arm()
+
+    with patch(FETCH, AsyncMock(return_value=_package())):
+        task = _install(hass)
+        await _until(lambda: receiver.requests)
+        receiver.report()
+        receiver.phase("finished", result="installed")
+        await task
+
+    (command_id,) = receiver.ids
+    assert command_id is not None and COMMAND_ID.fullmatch(command_id)
+    (request,) = receiver.requests
+    assert set(request) == {"version", "sha256", "relay"}
+    assert (request["version"], request["sha256"]) == (TARGET, SHA)
+    assert RELAY_URL.fullmatch(request["relay"]["url"])
+    # The request as a string, in the spelling it has for a plugin without ids.
+    envelope = json.loads(receiver.wire[0])
+    assert envelope == {"id": command_id, "payload": json.dumps(request, separators=(",", ":"))}
+
+
+@pytest.mark.parametrize("info", [UPDATING_WITH_IDS, SELF_UPDATING], ids=["with ids", "older"])
+async def test_a_refusal_of_somebody_else_s_update_is_not_the_answer_to_this_one(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    lan: None,
+    info: dict[str, Any],
+) -> None:
+    """A second `cmd/update` from another client is refused `busy` while ours is being
+    taken up. It says that client's id, so it is not ours - also when ours went out bare."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock, info=info)
+    receiver = UpdatingWithIds(hass)
+    await receiver.arm()
+
+    with patch(FETCH, AsyncMock(return_value=_package())):
+        task = _install(hass)
+        await _until(lambda: receiver.requests)
+        receiver.refuse("busy", "another installation holds the lock", SOMEBODY_ELSES)
+        await _settle()
+        assert not task.done()
+        receiver.phase("downloading")
+        await _settle()
+        receiver.report()
+        receiver.phase("finished", result="installed")
+        await task
+
+    assert (receiver.ids[0] is not None) is (info is UPDATING_WITH_IDS)
+
+
+@pytest.mark.parametrize("with_id", [True, False], ids=["its id", "no id"])
+async def test_a_refusal_of_the_update_with_its_id_or_with_none_is_the_answer(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    lan: None,
+    with_id: bool,
+) -> None:
+    """Without an id it may still be ours: the plugin drops an id that holds one of its
+    secrets, and the command runs - and is refused - without it."""
+    await _self_updating(
+        hass, config_entry, box_on_the_broker, aioclient_mock, info=UPDATING_WITH_IDS
+    )
+    receiver = UpdatingWithIds(hass)
+    await receiver.arm()
+
+    with patch(FETCH, AsyncMock(return_value=_package())):
+        task = _install(hass)
+        await _until(lambda: receiver.requests)
+        receiver.refuse(
+            "opkg_busy",
+            "the receiver's package manager is busy",
+            receiver.ids[0] if with_id else None,
+        )
+        raised = await _refused(task)
+
+    assert raised.translation_key == "update_mqtt_opkg_busy"
+
+
+@pytest.mark.parametrize(
+    ("whose", "key"),
+    [
+        ("ours", "update_mqtt_interrupted_files_reinstall"),
+        ("none", "update_mqtt_interrupted_files_reinstall"),
+        ("another", "update_mqtt_interrupted_signal"),
+    ],
+)
+async def test_only_the_followed_update_s_own_words_are_its_end_said_again(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    lan: None,
+    short_bounds: None,
+    whose: str,
+    key: str,
+) -> None:
+    """The plugin repeats an end on `last_error` under the id of the request that started
+    it. A complaint about `cmd/update` in those words under another id is another
+    request's, and adds nothing to this end."""
+    await _self_updating(
+        hass, config_entry, box_on_the_broker, aioclient_mock, info=UPDATING_WITH_IDS
+    )
+    receiver = UpdatingWithIds(hass, "accept")
+    await receiver.arm()
+    signalled = "the update was interrupted: signal 15"
+
+    with patch(FETCH, AsyncMock(return_value=_package())):
+        task = _install(hass)
+        await _until(lambda: receiver.requests)
+        receiver.phase("finished", result="interrupted", reason="interrupted", error=signalled)
+        await _settle()
+        assert not task.done()
+        said = {"ours": receiver.ids[0], "none": None, "another": SOMEBODY_ELSES}[whose]
+        receiver.refuse("interrupted", signalled + "; install the plugin again", said)
+        raised = await _refused(task)
+
+    assert raised.translation_key == key
+
+
+async def test_a_refusal_said_before_the_update_request_went_out_is_not_its_answer(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    lan: None,
+) -> None:
+    """The request waits for the broker to confirm the subscription before it is published,
+    and the follow is listening by then: a complaint in that wait is an earlier request's."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    box: Enigma2Box = config_entry.runtime_data
+    receiver = UpdatingWithIds(hass)
+    await receiver.arm()
+    confirmed = asyncio.Event()
+    listeners = len(box._listeners)
+
+    with (
+        patch(FETCH, AsyncMock(return_value=_package())),
+        patch.object(box, "async_wait_subscribed", confirmed.wait),
+    ):
+        task = _install(hass)
+        await _until(lambda: len(box._listeners) > listeners)
+        receiver.refuse("busy", "another installation holds the lock")
+        await _settle()
+        assert not receiver.requests
+        confirmed.set()
+        await _until(lambda: receiver.requests)
+        await _settle()
+        assert not task.done()
+        receiver.phase("downloading")
+        await _settle()
+        receiver.report()
+        receiver.phase("finished", result="installed")
+        await task

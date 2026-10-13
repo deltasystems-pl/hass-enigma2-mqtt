@@ -251,6 +251,28 @@ SUBSCRIBE_TIMEOUT: Final = 5
 # Seconds an action waits for the state topic that proves its command worked.
 COMMAND_TIMEOUT: Final = 10
 
+# A command's id, from a plugin after 0.4.0 (the plugin's TOPICS.md section 2 and its
+# ADR-0016): the command's payload travels in an envelope `{"id", "payload"}`, and a
+# refusal of that command says the id back as `last_error.id`. The capability is how the
+# plugin says it opens the envelope; one that does not claim it takes an envelope for
+# the command's own payload, so it is never sent one.
+CAPABILITY_COMMAND_ID: Final = "command_id"
+# Random bytes in an id, written as twice as many hexadecimal digits: 64 bits in 16 of the
+# 64 characters an id may have. An id only has to differ from the others waited for in
+# the seconds or minutes a command waits, which 64 bits do; and the shorter it is, the
+# less often it happens to hold a short secret of the plugin's - an id that does is
+# dropped - and the less of the command's size it takes. No prefix, for the same reason:
+# a fixed word in front of every id could hold a short password every time.
+COMMAND_ID_BYTES: Final = 8
+# The most bytes of a command the plugin reads (its `commands.MAX_PAYLOAD_BYTES`); a
+# longer one is discarded unanswered. The envelope counts, so a command that fits only
+# without one is sent without one.
+COMMAND_MAX_BYTES: Final = 4096
+# What is never put in an envelope, whatever the plugin claims: `cmd/relay` is the answer
+# to the receiver's own `relay_request` and not a command - the plugin does not open an
+# envelope there, it never reaches `last_error`, and its `id` is the request's.
+COMMANDS_WITHOUT_ENVELOPE: Final = frozenset({"relay"})
+
 # Seconds an action waits for a complaint about a command that has no observable
 # effect. `send_key` and `message` change no state topic, so the contract offers no
 # positive acknowledgement for them: the plugin either says nothing or publishes
