@@ -27,6 +27,7 @@ import ipaddress
 import json
 import logging
 import re
+import secrets
 from typing import TYPE_CHECKING, Any, Final
 
 from homeassistant.components import mqtt
@@ -47,11 +48,15 @@ from .const import (
     ATTR_NODE_ID,
     ATTR_PRESS,
     CAPABILITY_CHANNEL_TOPICS,
+    CAPABILITY_COMMAND_ID,
     CAPABILITY_SELF_UPDATE,
     CAPABILITY_UNINSTALL,
     CHANNEL_TOPICS_SETTLE,
     CHANNELS_REFETCH_GRACE,
+    COMMAND_ID_BYTES,
+    COMMAND_MAX_BYTES,
     COMMAND_TIMEOUT,
+    COMMANDS_WITHOUT_ENVELOPE,
     CONF_BASE_TOPIC,
     CONF_BOUQUETS,
     CONF_DEEP_STANDBY_ALLOWED,
@@ -293,6 +298,55 @@ def _typed_host_url(host: Any) -> str | None:
 def command_topic(base_topic: str, node_id: str, name: str) -> str:
     """Return a command topic of one box."""
     return f"{base_topic}/{node_id}/cmd/{name}"
+
+
+def new_command_id() -> str:
+    """Return a fresh id for one command: random, hexadecimal, and nothing else."""
+    return secrets.token_hex(COMMAND_ID_BYTES)
+
+
+def command_envelope(command_id: str, payload: str) -> str:
+    """Return the envelope that carries a command's payload with its id.
+
+    The payload travels as a string, also when it is the text of a JSON object: the
+    plugin hands a string to the command character for character, and writes an object
+    again its own way - other spacing, other escapes, a number spelled differently. As a
+    string the command reads exactly what it reads from a plugin that is sent no
+    envelope, so there is one behaviour to know and nothing here has to tell which
+    payloads are objects. Characters outside ASCII are not escaped, for the same reason
+    the payload is not: fewer bytes, and a string UTF-8 cannot carry fails where it
+    always did, in the publish.
+    """
+    return json.dumps(
+        {"id": command_id, "payload": payload}, ensure_ascii=False, separators=(",", ":")
+    )
+
+
+def refusal_id(error: Any) -> str | None:
+    """Return the command id a `last_error` payload says back, or None when it has none.
+
+    Only a non-empty string is an id. The plugin leaves the member out rather than
+    sending `null`, and anything else there was not written by it.
+    """
+    if not isinstance(error, dict):
+        return None
+    said = error.get("id")
+    return said if isinstance(said, str) and said else None
+
+
+def refusal_of_another(error: Any, command_id: str | None) -> bool:
+    """Return whether a `last_error` payload is about a command other than the one asked of.
+
+    `command_id` is the id that command was sent with, None when it went out without
+    an envelope. A refusal that says an id is about the command that carried it and no
+    other, so one with another id - or with any id, for a command sent without one - is
+    somebody else's: another broker client's, or another command of this integration. A
+    refusal without an id decides nothing here: the plugin drops an id it cannot use and
+    the command still runs, an older plugin knows no ids, and what was started at the
+    television has none.
+    """
+    said = refusal_id(error)
+    return said is not None and said != command_id
 
 
 # The four spellings a MAC address is written in. Anything else is not a near miss to be
@@ -628,8 +682,15 @@ async def async_request_ha_mode(
     node_id: str,
     mode: str,
     timeout: float = ACK_TIMEOUT,
+    *,
+    wire: Callable[[str], str] | None = None,
 ) -> dict[str, Any] | None:
     """Switch a box's `ha_mode` and return the `info` payload that acknowledges it.
+
+    `wire` turns the mode into what is published, at the moment it is: the runtime
+    object passes its envelope (`Enigma2Box.async_wire_payload`). The config flow has
+    no runtime object and passes nothing, so its command goes out bare, which every
+    plugin takes.
 
     There is no acknowledgement topic in the contract: the plugin answers by
     republishing `info` with the new mode, and that answer comes within a fraction of
@@ -651,7 +712,7 @@ async def async_request_ha_mode(
         await mqtt.async_publish(
             hass,
             command_topic(base_topic, node_id, "ha_mode"),
-            mode,
+            mode if wire is None else wire(mode),
             qos=1,
             retain=False,
         )
@@ -776,6 +837,33 @@ class _Pending:
     # Those of `reasons` that say the receiver tried and did not manage, rather than
     # that it refused: raised as a failure, not as a refusal.
     failures: frozenset[str] = frozenset()
+    # Whether the command has gone to the broker. A complaint that arrives before it has
+    # cannot be about it.
+    sent: bool = False
+    # The id it went out with, None for one sent without an envelope.
+    command_id: str | None = None
+
+    @callback
+    def sent_as(self, command_id: str | None) -> None:
+        """Note that the command is being published, and under which id."""
+        self.sent = True
+        self.command_id = command_id
+
+    @callback
+    def refused_by(self, error: dict[str, Any]) -> bool:
+        """Return whether a fresh `last_error` payload is a complaint about this command.
+
+        One that says this command's id is, whatever name it gives. One that says another
+        id is not, and neither is one that says any id when this command carried none
+        (`refusal_of_another`). One without an id is judged as before there were ids, by
+        the command's name - once the command has been sent.
+        """
+        if not self.sent:
+            return False
+        said = refusal_id(error)
+        if said is not None:
+            return said == self.command_id
+        return error.get("cmd") == self.cmd
 
     @callback
     def resolve(self) -> None:
@@ -1018,6 +1106,21 @@ class Enigma2Box:
         """
         source = self.state.info or self.state.announcement
         return isinstance(source.get("capabilities"), list)
+
+    @property
+    def takes_command_ids(self) -> bool:
+        """Return whether the plugin opens the envelope a command's id travels in.
+
+        Read from `info` alone, as it stands when a command is sent: the announcement is
+        not asked, an `info` that has not arrived claims nothing, and neither does one
+        that was retracted - the last payload is kept for the device page, but it no
+        longer says what the plugin on the receiver takes. A plugin that does not open
+        the envelope refuses most commands sent in one, so "not known" is "no".
+        """
+        if self.info_retracted:
+            return False
+        capabilities = self.state.info.get("capabilities")
+        return isinstance(capabilities, list) and CAPABILITY_COMMAND_ID in capabilities
 
     @property
     def ip_address(self) -> str | None:
@@ -1563,7 +1666,48 @@ class Enigma2Box:
 
     # ----------------------------------------------------------------- commands
 
-    async def async_publish_cmd(self, name: str, payload: str, qos: int = 1) -> None:
+    @callback
+    def async_wire_payload(self, name: str, payload: str) -> tuple[str, str | None]:
+        """Return what to publish for a command, and the id it carries.
+
+        For a plugin that claims `command_id` that is the payload in an envelope with a
+        fresh id; for every other plugin it is the payload as it stands, and None. Asked
+        at the moment of the publish, so a plugin that gained or lost the capability
+        since the last command - an update, a downgrade - is sent what it takes now.
+
+        Three things go out bare to a plugin that takes ids as well: `cmd/relay`, which
+        is not a command (`COMMANDS_WITHOUT_ENVELOPE`); a payload whose envelope would
+        be over the plugin's size limit, because an oversized command is discarded
+        unanswered and the id is not worth the command - one that is over the limit by
+        itself goes out as it always did; and a payload UTF-8 cannot carry, which fails
+        in the publish as it did before.
+        """
+        if name in COMMANDS_WITHOUT_ENVELOPE or not self.takes_command_ids:
+            return payload, None
+        command_id = new_command_id()
+        wrapped = command_envelope(command_id, payload)
+        try:
+            too_long = len(wrapped.encode("utf-8")) > COMMAND_MAX_BYTES
+        except UnicodeEncodeError:
+            return payload, None
+        if too_long:
+            _LOGGER.debug(
+                "cmd/%s for %s would be over the receiver's limit in an envelope; sent "
+                "without an id",
+                name,
+                self.node_id,
+            )
+            return payload, None
+        return wrapped, command_id
+
+    async def async_publish_cmd(
+        self,
+        name: str,
+        payload: str,
+        qos: int = 1,
+        *,
+        sent_as: Callable[[str | None], None] | None = None,
+    ) -> None:
         """Send a command to the box and do not wait for anything.
 
         Commands are never retained: a retained command is delivered again the instant
@@ -1574,10 +1718,18 @@ class Enigma2Box:
         because the state topic confirms them a moment later. Anything whose only
         answer is an error goes through `async_command` instead: the buttons used this
         directly, and a refusal had nowhere to arrive.
+
+        The payload goes out in an envelope with an id when the plugin takes one
+        (`async_wire_payload`). `sent_as` is called with that id - None for a command
+        sent bare - immediately before the publish, for a caller that waits for a
+        refusal: the answer can arrive before the publish has returned.
         """
         await self.async_wait_subscribed()
+        wire, command_id = self.async_wire_payload(name, payload)
+        if sent_as is not None:
+            sent_as(command_id)
         await mqtt.async_publish(
-            self.hass, self.command_topic(name), payload, qos=qos, retain=False
+            self.hass, self.command_topic(name), wire, qos=qos, retain=False
         )
 
     async def async_command(
@@ -1596,6 +1748,10 @@ class Enigma2Box:
         wants to know. There is no acknowledgement topic in the contract: a command is
         proved by the state topic it moves, and disproved by `last_error`. So the wait
         is for whichever comes first.
+
+        A complaint is this command's when it says the id the command was sent with, and
+        never when it says another; one that says no id is this command's by its name,
+        as it was before the plugin had ids (`_Pending.refused_by`).
 
         `effect` returns True once the command has visibly happened. A command whose
         effect is already true - zapping to the channel that is already tuned - is
@@ -1620,7 +1776,7 @@ class Enigma2Box:
         )
         self._pending.append(pending)
         try:
-            await self.async_publish_cmd(name, payload)
+            await self.async_publish_cmd(name, payload, sent_as=pending.sent_as)
             if already_done:
                 return
             async with asyncio.timeout(ERROR_GRACE if effect is None else timeout):
@@ -1642,7 +1798,14 @@ class Enigma2Box:
     async def async_request_ha_mode(self, mode: str, timeout: float = ACK_TIMEOUT) -> bool:
         """Switch the box's Home Assistant mode and wait for the acknowledgement."""
         await self.async_wait_subscribed()
-        info = await async_request_ha_mode(self.hass, self.base_topic, self.node_id, mode, timeout)
+        info = await async_request_ha_mode(
+            self.hass,
+            self.base_topic,
+            self.node_id,
+            mode,
+            timeout,
+            wire=lambda payload: self.async_wire_payload("ha_mode", payload)[0],
+        )
         if info is None:
             return False
         self.state.info = info
@@ -2572,18 +2735,28 @@ class Enigma2Box:
         never be the answer to a command we just sent. An empty payload only clears
         state: it carries no command identity, so treating it as an acknowledgement
         could complete an unrelated concurrent command and hide its later error.
+
+        Whose complaint it is: the command's whose id it says, and without an id every
+        waiting command's of that name (`_Pending.refused_by`).
         """
         error = parse_json_payload(msg.payload)
         self.state.last_error = error
         self.state.last_error_retained = msg.retain
         self.state.last_error_empty = not msg.payload
         if not msg.retain and error is not None:
-            cmd = error.get("cmd")
             text = str(error.get("error") or "")
             reason = error.get("reason")
             for pending in list(self._pending):
-                if pending.cmd == cmd:
+                if pending.refused_by(error):
                     pending.fail(text, reason)
+                elif pending.sent and pending.cmd == error.get("cmd"):
+                    _LOGGER.debug(
+                        "A refusal of cmd/%s on %s says another command's id; the "
+                        "cmd/%s waited for here is not failed by it",
+                        pending.cmd,
+                        self.node_id,
+                        pending.cmd,
+                    )
         self._async_updated(TOPIC_LAST_ERROR)
 
     # ------------------------------------------------------------ channel list

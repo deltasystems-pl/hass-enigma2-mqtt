@@ -55,6 +55,7 @@ from .box import (
     command_topic,
     decode_payload,
     parse_json_payload,
+    refusal_of_another,
     state_topic,
 )
 from .const import (
@@ -274,11 +275,14 @@ async def async_uninstall(
         # synchronously as it reads them, so after a stall of the event loop the
         # acknowledgement and the receiver's first retractions arrive in one read - and
         # are handled before the publish returns, or while it waits out its own timeout.
-        watch.arm()
+        # The id is chosen in the same step, for the same reason: a refusal that names
+        # it can arrive before the publish returns.
+        payload, command_id = box.async_wire_payload(COMMAND, box.node_id)
+        watch.arm(command_id)
         await mqtt.async_publish(
             hass,
             command_topic(box.base_topic, box.node_id, COMMAND),
-            box.node_id,
+            payload,
             qos=1,
             retain=False,
         )
@@ -632,10 +636,16 @@ class _UninstallWatch:
     rolled_back: asyncio.Future[str]
     established: asyncio.Future[None]
     cancel: CALLBACK_TYPE
-    seen: dict[str, bool] = field(default_factory=dict)
+    seen: dict[str, Any] = field(default_factory=dict)
 
-    def arm(self) -> None:
-        """Start counting retractions toward a rollback; the command has been sent."""
+    def arm(self, command_id: str | None = None) -> None:
+        """Start listening for the answer; the command is being sent, under this id.
+
+        From here a retraction counts toward a rollback and a `last_error` about the
+        command can be its refusal. `command_id` is None for a command sent without an
+        envelope.
+        """
+        self.seen["command_id"] = command_id
         self.seen["armed"] = True
 
     @property
@@ -674,7 +684,12 @@ async def _async_watch_uninstall(
     gone = {"info": False, "announcement": not expect_announcement}
     # `retracted`: any fresh empty `info`, announcement or `availability` - the teardown
     # has begun, whatever else did or did not arrive after it.
-    seen = {"came_back": False, "retracted": False, "armed": False}
+    seen: dict[str, Any] = {
+        "came_back": False,
+        "retracted": False,
+        "armed": False,
+        "command_id": None,
+    }
     confirmed = 0
 
     def _retracted_or_back(key: str, msg: ReceiveMessage) -> None:
@@ -723,6 +738,12 @@ async def _async_watch_uninstall(
             return
         error = parse_json_payload(msg.payload)
         if error is None or error.get("cmd") != COMMAND:
+            return
+        # Not ours: said before the command went out, or about a command with another
+        # id - a second `cmd/uninstall`, from another client, refused while this one
+        # runs. One without an id is read as before there were ids: the plugin may
+        # have dropped ours.
+        if not seen["armed"] or refusal_of_another(error, seen["command_id"]):
             return
         sentence = str(error.get("error") or "").strip() or COMMAND
         # After any retraction the removal had begun, so its failure is a rollback -

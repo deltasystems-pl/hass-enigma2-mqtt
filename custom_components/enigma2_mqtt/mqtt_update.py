@@ -68,6 +68,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 
+from .box import refusal_of_another
 from .const import (
     MQTT_UPDATE_ANSWER_TIMEOUT,
     MQTT_UPDATE_END_WAIT,
@@ -522,9 +523,10 @@ def is_refusal(error: Any, transaction: dict[str, Any] | None) -> bool:
 
     A reason only an end carries is an end, and so is the repeat of the transaction that has
     just finished (`end_repeated`). The rest is a refusal: it came before any transaction
-    started. The plugin carries no request id, so a refusal of somebody else's `cmd/update` in
-    the same minute - an install started at the television, say - reads as this one's; that is
-    rare, and accepted.
+    started. Whose refusal is not asked here. The follow of a request (`_Watch`) first drops
+    a payload that says another command's id; one that says none - from a plugin without
+    ids, or for an install started at the television, which has none - still reads as the
+    request's own when it arrives in the same minute. That is rare, and accepted.
     """
     if not isinstance(error, dict) or error.get("cmd") != "update":
         return False
@@ -617,6 +619,11 @@ class _Watch:
         # Set when the card that asked is gone - its entry reloaded or unloaded: this box's
         # topics stop, and what the receiver does next is the new card's to show.
         self.abandoned = False
+        # Whether the request has gone to the broker, and the id it went out with - None
+        # for one sent without an envelope. A complaint before it went cannot be its
+        # answer, and one that says another id is about another `cmd/update`.
+        self.sent = False
+        self.command_id: str | None = None
         self.changed = asyncio.Event()
         self._seen = {
             TOPIC_UPDATE: box.updates.get(TOPIC_UPDATE, 0),
@@ -638,7 +645,12 @@ class _Watch:
     def _updated(self) -> None:
         box = self.box
         state = box.state
-        if self._new(TOPIC_LAST_ERROR) and not state.last_error_retained:
+        if (
+            self._new(TOPIC_LAST_ERROR)
+            and not state.last_error_retained
+            and self.sent
+            and not refusal_of_another(state.last_error, self.command_id)
+        ):
             error = state.last_error
             if self.ident is not None:
                 if isinstance(error, dict) and error.get("cmd") == "update":
@@ -754,6 +766,12 @@ class _Watch:
         return end_repeated(self.complaint, self.transaction)
 
     @callback
+    def sent_as(self, command_id: str | None) -> None:
+        """Note that the request is being published, and under which id."""
+        self.sent = True
+        self.command_id = command_id
+
+    @callback
     def abandon(self) -> None:
         """Stop waiting: the card that asked is gone."""
         self.abandoned = True
@@ -856,6 +874,7 @@ async def async_install_over_mqtt(
                 },
                 separators=(",", ":"),
             ),
+            sent_as=watch.sent_as,
         )
         published = True
         answered = await watch.wait(
