@@ -83,6 +83,21 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   the receiver is offline, and a press the receiver does not answer raises and clears nothing;
   only the empty payload is that answer, not one that merely is no complaint
   (DOCUMENTATION.md §4.3 and §4.5).
+- **A command carries an id, and a refusal is matched by it.** Plugin 0.5.0 takes a command in
+  an envelope with an id and says the id back on `last_error` when it refuses that command; it
+  says so with the capability `command_id`. To a receiver that claims it, every command now
+  goes out as `{"id": "<32 random hexadecimal digits>", "payload": "<the payload as before>"}`,
+  and a waiting button, action, update or uninstall is failed by the refusal that says its own
+  id - never by one that says another. Until now a refusal failed every waiting command of its
+  name: two zaps sent close together were both failed by the refusal of one, and another broker
+  client's refused `cmd/update` or `cmd/uninstall` ended Home Assistant's own as "refused". A
+  refusal without an id is read by the command's name as before, because the plugin may have
+  dropped the id. A receiver on plugin 0.4.0 or older, and one whose `info` has not arrived or
+  was retracted, is sent exactly the payloads it was sent before. `cmd/relay` is never in an
+  envelope, and a command that would pass the plugin's 4096-byte limit only without one is sent
+  without. The id is on no entity; the diagnostics download shows it inside `last_error`
+  (DOCUMENTATION.md §5,
+  [ADR-0010](docs/adr/0010-a-command-carries-an-id-and-a-refusal-is-matched-by-it.md)).
 
 ### Changed
 
@@ -107,6 +122,11 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
 
 ### Fixed
 
+- **A complaint made before a command was sent no longer fails it.** A command waits for the
+  broker to confirm Home Assistant's subscription before it is published, and a fresh
+  `last_error` about a command of the same name in that wait was taken for its refusal - by
+  buttons and actions, by the update over MQTT and by the removal of the plugin. It is now left
+  alone, with any plugin.
 - **A refusal is no longer raised as an action that failed.** Every refused or failed call
   raised `HomeAssistantError`, the type Home Assistant has for something that was tried and
   failed and logs as "Error during service call", also for sentences that say nothing
