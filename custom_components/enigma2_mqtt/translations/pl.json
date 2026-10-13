@@ -766,7 +766,7 @@
     "release_check_bad_memory": {"message": "Zapisanych danych o przyjętych listach wersji wtyczki nie da się odczytać, więc żadna nowa lista nie zostanie przyjęta. Aby zacząć od nowa, usuń plik .storage/enigma2_mqtt.release_index w katalogu konfiguracji Home Assistanta."},
     "update_no_credentials": {"message": "Dla tego dekodera nie zapisano danych SSH. Skonfiguruj go ponownie i zaznacz „Zachowaj dane SSH do aktualizacji”, a potem spróbuj jeszcze raz."},
     "update_failed": {"message": "Aktualizacja wtyczki nie powiodła się: {reason}"},
-    "update_refused": {"message": "Wtyczki nie zaktualizowano: {reason}"},
+    "update_refused": {"message": "Nie zaktualizowano wtyczki: {reason}"},
     "update_withdrawn": {"message": "Dekoder zapytał na ekranie, czy uruchomić ponownie interfejs, więc aktualizację wycofano; działa poprzednia wersja wtyczki. Pytanie może nadal być widoczne na ekranie telewizora - odpowiedź „tak” albo „nie” jest bezpieczna."},
     "update_standby": {"message": "Dekoder jest w trybie czuwania. Aktualizacja uruchamia ponownie interfejs dekodera, co go wybudzi i może włączyć telewizor. Włącz dekoder i spróbuj ponownie."},
     "update_streaming": {"message": "Dekoder przesyła teraz strumień do innego urządzenia. Aktualizacja uruchamia ponownie jego interfejs i przerwałaby strumień. Spróbuj ponownie po jego zakończeniu."},

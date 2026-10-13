@@ -2656,14 +2656,14 @@ async def _async_recheck_forced_gui(session: InstallerSession, gui: _ForcedGui) 
 
 
 def _minutes_left(remaining: int) -> int:
-    """The whole minutes until the released rule frees a lock, rounded up.
+    """The whole minutes until the released rule frees a lock, rounded up, for `remaining > 0`.
 
     Never more than the thirty minutes a lock is honoured for after its owner record was
     last written, whichever program holds it - an installer's claim and a self-update's
     last heartbeat are judged by the one rule - and whatever a receiver's clock that was
     set back makes of the record's age: a fresh claim leaves 1801 s, which is not 31.
     """
-    return min(30, max(1, math.ceil(remaining / 60)))
+    return min(30, math.ceil(remaining / 60))
 
 
 async def _async_busy_error(

@@ -140,8 +140,9 @@ def _visible(text: str) -> str:
     fillers, the Braille blank, the combining grapheme joiner, the variation selectors,
     the Mongolian ones among them, the Khmer inherent vowels - and a name made of them
     would be a pair of empty quotation marks. They go too, so that such a name falls
-    back like an empty one. A variation selector only picks one of a character's
-    shapes, so a name written with one reads the same without it.
+    back like an empty one. A name that uses one of them for what it is - a Mongolian
+    letter in another of its forms, a Khmer syllable written with its inherent vowel -
+    is shown in the repair's text in its plain form.
     """
     return "".join(
         character
