@@ -672,6 +672,21 @@ async def test_a_lock_left_by_a_stopped_helper_says_when_to_try_again(
 
 
 @pytest.mark.parametrize(
+    ("said", "minutes"), [("1", "1"), ("30", "30"), ("31", "30"), ("45", "30"), ("9999", "30")]
+)
+def test_the_receiver_s_minutes_are_never_more_than_a_lock_is_honoured_for(
+    said: str, minutes: str
+) -> None:
+    """The number is read out of the receiver's sentence, and a lock is stale thirty
+    minutes after its last heartbeat whatever that sentence says."""
+    error = f"the previous update stopped; a new one is possible in about {said} minutes"
+
+    assert mqtt_update.refusal_sentence("busy", error) == (
+        "update_busy_stalled", {"minutes": minutes}
+    )
+
+
+@pytest.mark.parametrize(
     ("kwargs", "why"),
     [
         ({"retain": True}, "the broker's replay"),
@@ -1069,8 +1084,12 @@ async def test_a_plugin_replaced_by_the_release_asked_for_ends_the_follow_at_onc
 
 @pytest.mark.parametrize(
     ("version", "commit", "running"),
-    [("0.3.1", None, "0.3.1"), (TARGET, "f" * 40, TARGET)],
-    ids=["another version", "another build of the version"],
+    [
+        ("0.3.1", None, "0.3.1"),
+        (TARGET, "f" * 40, TARGET),
+        ("0.3.1", commit_of(TARGET), "0.3.1"),
+    ],
+    ids=["another version", "another build of the version", "the commit under another number"],
 )
 async def test_a_plugin_replaced_by_something_else_is_said_as_that(
     hass: HomeAssistant,
@@ -1311,6 +1330,7 @@ async def test_a_replay_of_the_broker_is_no_plugin_starting(
     assert config_entry.runtime_data.last_install is None
 
 
+@pytest.mark.parametrize("then", [None, "{}"], ids=["as it is", "then an empty info"])
 async def test_the_build_that_accepted_put_back_is_followed_to_the_bound(
     hass: HomeAssistant,
     mqtt_mock,
@@ -1319,10 +1339,12 @@ async def test_the_build_that_accepted_put_back_is_followed_to_the_bound(
     aioclient_mock: AiohttpClientMocker,
     lan: None,
     short_bounds: None,
+    then: str | None,
 ) -> None:
     """Another plugin spoke and then the very build that accepted the request speaks
     again, with an `update` that does not carry the transaction. That cannot be told from
-    the plugin that accepted it, and is not said to be something else's install."""
+    the plugin that accepted it, and is not said to be something else's install - nor
+    when an `info` of `{}` follows, which names nobody."""
     await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
     receiver = FakeReceiver(hass)
     receiver.report("0.3.0", "a" * 40)
@@ -1334,6 +1356,8 @@ async def test_the_build_that_accepted_put_back_is_followed_to_the_bound(
         await _until(lambda: receiver.requests)
         receiver.report()
         receiver.report("0.3.0", "a" * 40)
+        if then is not None:
+            async_fire_mqtt_message(hass, INFO_TOPIC, then)
         async_fire_mqtt_message(hass, UPDATE_TOPIC, NO_TRANSACTION)
         await _settle()
         assert not task.done()
@@ -1373,6 +1397,65 @@ async def test_an_info_that_names_no_plugin_is_nobody_starting(
         await asyncio.wait_for(task, 5)
 
     assert config_entry.runtime_data.last_install["proof"] == "info_build"
+
+
+@pytest.mark.parametrize(
+    ("version", "key"), [("0.3.1", "update_mqtt_replaced"), (TARGET, None)]
+)
+async def test_the_plugin_heard_to_start_is_the_one_that_is_named(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    lan: None,
+    version: str,
+    key: str | None,
+) -> None:
+    """An `info` of `{}` between the new plugin's `info` and its `update` takes nothing
+    back and names nobody: the verdict and the sentence are about the plugin that was
+    heard to start, never about "?"."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass)
+    await receiver.arm()
+
+    with patch(FETCH, AsyncMock(return_value=_package())):
+        task = _install(hass)
+        await _until(lambda: receiver.requests)
+        receiver.report(version)
+        async_fire_mqtt_message(hass, INFO_TOPIC, "{}")
+        async_fire_mqtt_message(hass, UPDATE_TOPIC, NO_TRANSACTION)
+        if key is None:
+            await asyncio.wait_for(task, 5)
+            assert config_entry.runtime_data.last_install["version"] == TARGET
+        else:
+            raised = await asyncio.wait_for(_refused(task), 5)
+            assert raised.translation_key == key
+            assert raised.translation_placeholders["running"] == version
+
+
+async def test_a_replacement_by_a_release_without_a_signed_commit_is_told_by_its_version(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    lan: None,
+) -> None:
+    """An entry that names no build commit is proven by the version alone, here as at the
+    end of a transaction."""
+    await _self_updating(hass, config_entry, box_on_the_broker, aioclient_mock)
+    receiver = FakeReceiver(hass)
+    await receiver.arm()
+
+    with patch(FETCH, AsyncMock(return_value=replace(_package(), commit=None))):
+        task = _install(hass)
+        await _until(lambda: receiver.requests)
+        receiver.report(TARGET, "f" * 40)
+        async_fire_mqtt_message(hass, UPDATE_TOPIC, NO_TRANSACTION)
+        await asyncio.wait_for(task, 5)
+
+    assert config_entry.runtime_data.last_install["proof"] == "info_version"
 
 
 async def test_a_plugin_that_knew_the_update_can_still_be_replaced_by_another(
@@ -1569,6 +1652,63 @@ async def test_the_ten_minutes_start_again_with_each_plugin_that_cannot(
 
     assert await _after(hass, freezer, minutes=9) == "in_progress"
     assert await _after(hass, freezer, minutes=1, seconds=2) == "stale"
+
+
+@pytest.mark.parametrize(
+    ("between", "state"),
+    [
+        ("a reload", "stale"),
+        ("a reload and another phase", "in_progress"),
+        ("a reload and another transaction", "in_progress"),
+        ("a plugin that can, and a reload", "in_progress"),
+        ("a restart", "in_progress"),
+    ],
+)
+async def test_a_reload_does_not_start_the_ten_minutes_again(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    freezer: FrozenDateTimeFactory,
+    between: str,
+    state: str,
+) -> None:
+    """Saving the options reloads the entry, and the card that is built finds the same
+    phase replayed by the broker: it goes on with the count of the card before it, so
+    reloading does not keep a phase on the card. A phase or a transaction that changed in
+    between is the update moving, a plugin that could update itself ended the count, and
+    after a restart of Home Assistant nothing is left to go on with: those count from
+    the new card's first look."""
+    started = dt_util.utcnow().timestamp()
+    box_on_the_broker[UPDATE_TOPIC] = _transaction(
+        "proving", started_by="screen", started=started
+    )
+    await _self_updating(
+        hass, config_entry, box_on_the_broker, aioclient_mock,
+        info={**SELF_UPDATING, "capabilities": CANNOT},
+    )
+    assert await _after(hass, freezer, minutes=9) == "in_progress"
+
+    if between == "a reload and another phase":
+        box_on_the_broker[UPDATE_TOPIC] = _transaction(
+            "rolling_back", started_by="screen", started=started
+        )
+    if between == "a reload and another transaction":
+        box_on_the_broker[UPDATE_TOPIC] = _transaction(
+            "proving", ident="0123456789ab", started_by="screen", started=started
+        )
+    if between == "a plugin that can, and a reload":
+        _says(hass, CAN)
+        await hass.async_block_till_done()
+    if between == "a restart":
+        # What a restart leaves of the count: nothing.
+        hass.data.pop("enigma2_mqtt_update_stood_still")
+    assert await hass.config_entries.async_reload(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert await _after(hass, freezer, minutes=1, seconds=2) == state
+    assert await _after(hass, freezer, minutes=9) == "stale"
 
 
 async def test_a_retracted_info_says_nothing_of_what_the_plugin_can_do(

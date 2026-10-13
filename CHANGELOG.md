@@ -131,8 +131,9 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   The refusal now says "The lock expires in about N min at the latest", in the guided
   installer, the options flow, the update card and the forced reinstall, in English, Polish
   and German. The lock is still never taken back (DOCUMENTATION.md §3). No refusal names
-  more than the thirty minutes a lock is honoured for: the one for a lock whose holder
-  stopped could say "31".
+  more than the thirty minutes a lock is honoured for: the installer's for a lock whose
+  holder stopped could say "31", and the receiver's own number in a refusal over MQTT was
+  repeated whatever it was.
 - **An update over MQTT whose plugin was replaced under it ends at once.** When something else
   installed a plugin while the card was following its own update - the release put over a
   development build of the same number by hand, an install over SSH - the new plugin has no
@@ -144,17 +145,20 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   sentence that says the update is no longer reported and what runs instead. An `update`
   payload without the transaction that no starting plugin said - a leftover, another broker
   client's, the broker's replay - ends nothing, before the new plugin speaks or after, and
-  neither does an `info` that names no plugin; the update is then followed to the end its
-  helper writes.
+  neither does an `info` that names no plugin, before a new plugin is heard or after it; the
+  update is then followed to the end its helper writes.
 - **A phase left on `update` beside a plugin that cannot update itself stops holding the
   card, but not while the update can still move.** A plugin that says it cannot update
   itself - an older one, or one its package manager did not install - starts no transaction,
   and the phase a plugin before it left on the topic kept the card busy until the 25-minute
   window closed. A phase before `installing`, which only the plugin that asked reports, is
-  now `stale` at once. From `installing` on the receiver's helper works outside the
-  interface and may still be proving the plugin that runs or putting the previous one back,
-  so such a phase stays on the card until the topic has stood still for ten minutes
-  (DOCUMENTATION.md §4.5).
+  now `stale` at once. From `installing` on a plugin from 0.4.0 on that started in the
+  middle of an update reports it to its end without claiming that it can update itself, and
+  is silent while the receiver's helper proves it or puts the previous version back, so such
+  a phase stays on the card until the topic has stood still for ten minutes. A phase nobody
+  will move any more is therefore shown for up to ten minutes too. The count is kept across
+  a reload of the integration and starts again with a restart of Home Assistant, never past
+  the 25-minute window (DOCUMENTATION.md §4.5).
 - **Two outcome sentences of a withdrawn install say what holds in every case.** After a
   withdrawal that could not put the previous files back, the sentence said the new files are
   still on the receiver; after a restore that failed part-way they may be partly new and

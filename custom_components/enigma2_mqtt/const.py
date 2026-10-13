@@ -645,11 +645,12 @@ CAPABILITY_SELF_UPDATE: Final = "self_update"
 MQTT_UPDATE_FOLLOW: Final = 25 * 60
 # How long a phase from `installing` on is still believed beside a plugin that says it
 # cannot update itself, counted from that plugin's word or the last one on `update`,
-# whichever is later. The helper works outside the interface: after a restart it proves
-# the plugin that started for at most 120 s and, when that fails, puts the previous one
-# back within 409 s (TRANSACTION.md, sections 2.4 and 6), and the plugin that restart
-# starts says the end. Ten minutes covers those 529 s with room for the copying the
-# measurement leaves out.
+# whichever is later. A plugin that started on the helper's marker reports the
+# transaction without claiming the capability, and is silent between two phases: for at
+# most 120 s while the helper proves it and, when that fails, 409 s while the previous
+# version is put back (TRANSACTION.md, sections 2.4 and 6), after which the plugin that
+# restart starts says the end. Ten minutes covers those 529 s with room for the copying
+# the measurement leaves out.
 MQTT_UPDATE_TAIL: Final = 10 * 60
 # A `started` stamp further ahead of Home Assistant's clock than this is not believed.
 MQTT_UPDATE_FUTURE_TOLERANCE: Final = 60

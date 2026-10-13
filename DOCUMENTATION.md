@@ -1071,9 +1071,14 @@ of Home Assistant's), and in the attribute `receiver_transaction` (`state` is `i
 `finished` with the end in words in `message`, or `stale`); a card with no install path has no
 progress bar, and shows it in the attribute only. Beside a plugin that says it cannot update
 itself - an older one, or one its package manager did not install - a phase before `installing`
-is `stale` at once, because only the plugin that asked reports those, and a later phase once the
-update topic has stood still for ten minutes: until then the receiver's helper may still be
-proving that plugin or putting the previous one back. A refusal of such an install that only
+is `stale` at once, because only the plugin that asked reports those. A later phase is `stale`
+once the update topic has stood still for ten minutes: a plugin from 0.4.0 on that started in
+the middle of an update reports it to its end without claiming that it can update itself, and
+says nothing while the receiver's helper proves it or puts the previous version back. The price
+is that a phase nobody will move any more - its helper was killed, say - keeps the card busy for
+those ten minutes. The count is kept when the integration reloads and starts again when Home
+Assistant restarts, so each restart can add up to ten minutes, never past the 25. A refusal of
+such an install that only
 the receiver sees - no internet and no answer from Home Assistant, a clock that calls Home
 Assistant's address expired - is in `last_refusal`, in the household's language, for as long as it
 is on the receiver's `last_error`: the next command that succeeds clears both. The end of a

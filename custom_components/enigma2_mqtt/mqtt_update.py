@@ -344,7 +344,9 @@ def phase_percentage(phase: str | None) -> int | None:
 def refusal_sentence(reason: Any, error: Any) -> tuple[str, dict[str, str]]:
     """The translation key, and its extra placeholders, of a refusal of `cmd/update`."""
     if reason == "busy" and isinstance(error, str) and (found := _MINUTES.search(error)):
-        return "update_busy_stalled", {"minutes": found.group(1)}
+        # The receiver's number, and never more than the thirty minutes a lock is
+        # honoured for: the sentence is the receiver's text, and its clock may be wrong.
+        return "update_busy_stalled", {"minutes": str(min(30, int(found.group(1))))}
     if isinstance(reason, str):
         if (shared := _SHARED.get(reason)) is not None:
             return shared, {}
@@ -717,6 +719,10 @@ class _Watch:
            transaction: that plugin has no record of it;
         3. and that plugin is another one than the plugin that accepted the request.
 
+        The verdict rests on the plugin heard at step 1 (`speaker`), not on what `info`
+        holds when it is read: an `info` of `{}` after it takes nothing back and adds no
+        "?" to the sentence.
+
         Neither sign alone ends the follow, and neither do both in another order. An
         `update` without the transaction while no new plugin has spoken, or after the new
         plugin's own first `update` carried it, is a leftover or a broker client's - a
@@ -740,7 +746,7 @@ class _Watch:
             self.ident is not None
             and not self.finished
             and self.disowned is True
-            and _running(self.box) != self.accepted_as
+            and self.speaker != self.accepted_as
         )
 
     def end_said(self) -> str | None:
@@ -887,8 +893,11 @@ async def async_install_over_mqtt(
         ended = await watch.wait(lambda: watch.finished or watch.replaced, MQTT_UPDATE_FOLLOW)
         _raise_if_abandoned(watch, box, placeholders)
         if ended and not watch.finished:
-            running = box.info.get("plugin")
-            if _proven(box, version, package.commit):
+            # The plugin that was heard to start, as the watch recorded it: `info` may
+            # have been replaced by one that names nobody since.
+            assert watch.speaker is not None
+            running, build = watch.speaker
+            if running == version and (not package.commit or build == package.commit):
                 _LOGGER.info(
                     "Plugin update over MQTT: %s no longer reports transaction %s, and runs "
                     "%s - installed by something other than this update. Proof: %s",
