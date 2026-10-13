@@ -143,7 +143,7 @@ WITHDRAWAL_WORDS = {
     "pl": {
         "partly": "częściowo nowe, a częściowo poprzednie",
         "whole": "więc na dekoderze są nowe",
-        "restarts": "uruchomi interfejs na plikach, które są tam teraz",
+        "restarts": "uruchomi interfejs z plikami, które są tam teraz",
         "if_asked": "Jeśli na ekranie telewizora widać pytanie o ponowne uruchomienie, "
         "odpowiedź „tak” albo „nie” jest bezpieczna.",
     },
