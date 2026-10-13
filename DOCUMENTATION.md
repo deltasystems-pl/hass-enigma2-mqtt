@@ -1416,8 +1416,8 @@ is carried out, no longer ends it as "refused". An install started at the televi
 id, so its refusal in the same minute can still be read as the answer to Home Assistant's.
 
 Nothing changes for a plugin that does not claim the capability - 0.4.0 and older - or whose
-`info` has not arrived or was retracted: no envelope, and every payload is what it always
-was. The question is asked again for every command, so an update or a downgrade of the plugin
+`info` has not arrived, was retracted, or was last published as something that is not a JSON
+object: no envelope, and every payload is what it always was. The question is asked again for every command, so an update or a downgrade of the plugin
 takes effect with its next `info`. `cmd/relay` is never in an envelope, and neither are the
 few commands sent where nothing has read `info` - the mode switch of the config flow and of a
 removed entry, and the installer's `cmd/reset` and `cmd/bouquet`. The payload inside the

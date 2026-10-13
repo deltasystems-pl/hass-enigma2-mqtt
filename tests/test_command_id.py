@@ -343,6 +343,63 @@ async def test_what_the_plugin_takes_is_asked_for_each_command(
     assert [inner for _, _, _, inner in receiver.heard] == ["40"] * 5
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "[]",
+        json.dumps([CAPABILITY_COMMAND_ID]),
+        json.dumps(CAPABILITY_COMMAND_ID),
+        "7",
+        "true",
+        "null",
+        "not json at all",
+        json.dumps(CLAIMS)[:-1],
+        b"\xff\xfe",
+        "{}",
+        "",
+    ],
+    ids=[
+        "an empty list",
+        "a list",
+        "a string",
+        "a number",
+        "true",
+        "null",
+        "not JSON",
+        "JSON cut short",
+        "not UTF-8",
+        "an empty object",
+        "retracted",
+    ],
+)
+async def test_an_info_that_says_nothing_readable_claims_nothing(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    payload: str | bytes,
+) -> None:
+    """After a plugin that claimed the capability, an `info` that is no JSON object, an
+    empty object or a retraction: whatever runs now has not said it opens an envelope."""
+    box = await _box(hass, config_entry, box_on_the_broker)
+    receiver = await Receiver(hass).arm()
+    await box.async_publish_cmd("volume", "40")
+    assert receiver.heard[-1][2] is not None
+
+    async_fire_mqtt_message(hass, INFO_TOPIC, payload)
+    await box.async_publish_cmd("volume", "40")
+
+    assert not box.takes_command_ids
+    assert receiver.heard[-1] == ("volume", "40", None, "40")
+    # Only an `info` that could be read replaces the last one, for the device page.
+    assert box.info == ({} if payload == "{}" else CLAIMS)
+
+    # The next `info` that can be read is the plugin's word again.
+    _says(hass, CLAIMS)
+    await box.async_publish_cmd("volume", "40")
+    assert receiver.heard[-1][2] is not None
+
+
 # ------------------------------------- nothing differs without the capability --
 
 

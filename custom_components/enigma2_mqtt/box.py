@@ -1035,6 +1035,10 @@ class Enigma2Box:
         # The last good payload is kept for everything that reads it, as it always was;
         # this flag only withdraws what that payload *permitted*. See `uninstall_offered`.
         self.info_retracted: bool = False
+        # Whether an `info` that could not be read - not empty, and not a JSON object -
+        # has arrived since the last one that could. The last good payload is kept here
+        # too; this flag only keeps `takes_command_ids` from reading a claim out of it.
+        self.info_unreadable: bool = False
         # Whether an `info` that is a JSON object has arrived in this run. `state.info`
         # cannot say: an `info` of `{}` is as false as none at all, and the topic's place
         # in `seen` cannot either, because the announcement wakes the same listeners.
@@ -1113,13 +1117,15 @@ class Enigma2Box:
 
         Read from `info` alone, as it stands when a command is sent: the announcement is
         not asked, an `info` that has not arrived claims nothing, and neither does one
-        that was retracted - the last payload is kept for the device page, but it no
-        longer says what the plugin on the receiver takes. A plugin that does not open
-        the envelope refuses most commands sent in one, so "not known" is "no".
+        that was retracted or one that is not a JSON object - the last good payload is
+        kept for the device page, but it no longer says what the plugin on the receiver
+        takes. A plugin that does not open the envelope refuses most commands sent in
+        one, so "not known" is "no".
         """
-        # An `info` that is not a JSON object changes nothing here, as it changes nothing
-        # anywhere: `_info_received` drops it and every reader keeps the last good one.
-        if self.info_retracted:
+        # Everywhere else an `info` that is not a JSON object changes nothing: every
+        # reader keeps the last good one. Here it is the receiver's last word, and it
+        # does not claim the capability.
+        if self.info_retracted or self.info_unreadable:
             return False
         capabilities = self.state.info.get("capabilities")
         return isinstance(capabilities, list) and CAPABILITY_COMMAND_ID in capabilities
@@ -1966,7 +1972,8 @@ class Enigma2Box:
     def _info_received(self, msg: ReceiveMessage) -> None:
         """Track the box's `info` topic and keep the device page current.
 
-        A payload that does not parse leaves the last good one alone, as it always has. An
+        A payload that does not parse leaves the last good one alone, as it always has,
+        and is remembered only as unreadable, for `takes_command_ids`. An
         empty one is different in one respect only: it is a retraction, and it withdraws
         the permission `uninstall_offered` reads - the rest of the last payload stays,
         because every entity reading it would otherwise lose its device details to a
@@ -1978,8 +1985,10 @@ class Enigma2Box:
                 self._async_updated(TOPIC_INFO)
             return
         if (info := parse_json_payload(msg.payload)) is None:
+            self.info_unreadable = True
             return
         self.info_retracted = False
+        self.info_unreadable = False
         self.info_received = True
         self.state.info = info
         self.state.info_retained = msg.retain

@@ -33,7 +33,8 @@ for the command's own payload, and refuses most commands sent in one.
 **1. An envelope is sent to a plugin whose `info` claims `command_id` now, and to no other.** The
 question is asked for each command at the moment it is published, of `info` alone: an `info` that
 has not arrived claims nothing, a retracted one claims nothing although its last payload is kept
-for the device page, and the announcement is not asked. A plugin that gains the capability with
+for the device page, one that is not a JSON object claims nothing in the same way, and the
+announcement is not asked. A plugin that gains the capability with
 an update, or loses it with a downgrade, is sent what it takes from its next `info` on. Not known
 is "no": the cost of a wrong "yes" is a command the receiver refuses, the cost of a wrong "no" is
 the matching of before.
