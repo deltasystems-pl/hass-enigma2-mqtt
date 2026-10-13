@@ -322,6 +322,7 @@
         "name": "Recording"
       },
       "interlaced": {"name": "Interlaced picture"},
+      "volume_passthrough": {"name": "Audio passthrough"},
       "recording_disk": {
         "name": "Recording disk"
       },

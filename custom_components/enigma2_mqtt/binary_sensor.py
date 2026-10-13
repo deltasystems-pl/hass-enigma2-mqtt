@@ -25,6 +25,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from .box import Enigma2Box, Enigma2MqttConfigEntry, Enigma2State
 from .const import (
     CAPABILITY_SERVICE_CODECS,
+    CAPABILITY_VOLUME_PASSTHROUGH,
     CONF_CAM_TELEMETRY,
     CONF_OSCAM_TELEMETRY,
     TOPIC_CAM,
@@ -32,9 +33,10 @@ from .const import (
     TOPIC_OSCAM,
     TOPIC_RECORDING,
     TOPIC_SERVICE,
+    TOPIC_VOLUME,
 )
 from .entity import Enigma2Entity, OptionalEntities
-from .stream import interlaced
+from .stream import interlaced, volume_passthrough
 
 PARALLEL_UPDATES = 0
 
@@ -134,6 +136,18 @@ SERVICE_CODEC_BINARY_SENSORS: tuple[Enigma2BinarySensorDescription, ...] = (
     ),
 )
 
+# On while the receiver hands the playing track to the television undecoded, which is
+# when its own volume and mute change nothing that can be heard. Unknown, not off, when
+# the receiver cannot tell. Not a diagnostic: it is what a dashboard greys the volume
+# out on.
+VOLUME_BINARY_SENSORS: tuple[Enigma2BinarySensorDescription, ...] = (
+    Enigma2BinarySensorDescription(
+        key="volume_passthrough",
+        topics=(TOPIC_VOLUME,),
+        value_fn=lambda state: volume_passthrough(state.volume),
+    ),
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -184,6 +198,21 @@ async def async_setup_entry(
             lambda: CAPABILITY_SERVICE_CODECS in box.capabilities,
             # Never removed: a capability that goes quiet is an older plugin or a
             # receiver that has not answered yet, not a decision.
+            lambda: False,
+            async_add_entities,
+        ).start()
+    )
+
+    volume = {description.key: description for description in VOLUME_BINARY_SENSORS}
+    entry.async_on_unload(
+        OptionalEntities(
+            hass,
+            box,
+            "binary_sensor",
+            list(volume),
+            lambda key: Enigma2BinarySensor(box, volume[key]),
+            lambda: CAPABILITY_VOLUME_PASSTHROUGH in box.capabilities,
+            # Never removed, for the same reason.
             lambda: False,
             async_add_entities,
         ).start()

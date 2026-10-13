@@ -125,3 +125,18 @@ def audio_attributes(service: dict[str, Any] | None) -> dict[str, Any]:
         "description": (active_audio_track(service) or {}).get("description"),
         "audio_tracks": audio_tracks(service),
     }
+
+
+# -------------------------------------------------------------------- `volume`
+
+
+def volume_passthrough(volume: dict[str, Any] | None) -> bool | None:
+    """Return whether the playing track is handed on undecoded, or None for unknown.
+
+    True: the receiver's volume and mute do nothing that can be heard now. False: the
+    receiver decodes the track and its volume acts on it. None: it cannot be told -
+    nothing is playing, the codec is unknown, the image has no setting for it - or the
+    plugin publishes no such member. Unknown is never read as "no".
+    """
+    value = (volume or {}).get("passthrough")
+    return value if isinstance(value, bool) else None

@@ -51,6 +51,12 @@
       },
       "interlaced": {
         "default": "mdi:reorder-horizontal"
+      },
+      "volume_passthrough": {
+        "default": "mdi:volume-off",
+        "state": {
+          "off": "mdi:volume-high"
+        }
       }
     },
     "button": {

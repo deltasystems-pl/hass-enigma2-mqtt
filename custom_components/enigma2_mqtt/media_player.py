@@ -53,10 +53,13 @@ from .box import (
     service_identity,
 )
 from .const import (
+    ATTR_VOLUME_PASSTHROUGH,
+    CAPABILITY_VOLUME_PASSTHROUGH,
     DOMAIN,
     TOPIC_BOUQUET,
     TOPIC_CHANNELS,
     TOPIC_EPG,
+    TOPIC_INFO,
     TOPIC_POWER,
     TOPIC_SCREEN,
     TOPIC_SERVICE,
@@ -65,6 +68,7 @@ from .const import (
 from .entity import Enigma2Entity
 from .picture import PendingPicon, Picture, PlayerPicture, player_picture_mode
 from .services import Enigma2Actions, async_select_bouquet, async_setup_services
+from .stream import volume_passthrough
 
 PARALLEL_UPDATES = 0
 
@@ -127,6 +131,9 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
                 # default, so a bouquet switched on the remote reshapes it - and a
                 # list that only reshapes on the next reload is a list that is wrong.
                 TOPIC_BOUQUET,
+                # The capabilities the extra attributes follow arrive here, and can
+                # arrive after everything else.
+                TOPIC_INFO,
             ),
             requires=None,
         )
@@ -198,6 +205,20 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
             screenshots_off=self.box.screenshots_off,
         )
         self._attr_media_image_hash = shown.digest if shown is not None else None
+        self._attr_extra_state_attributes = self._extra_attributes()
+
+    def _extra_attributes(self) -> dict[str, Any]:
+        """Return what the receiver says beyond what a media player has a field for.
+
+        Each attribute is there only for a receiver that claims the capability behind
+        it, so a receiver on an older plugin has none of them.
+        """
+        attributes: dict[str, Any] = {}
+        if CAPABILITY_VOLUME_PASSTHROUGH in self.box.capabilities:
+            # True while the receiver hands the audio on undecoded and its volume does
+            # nothing audible; None when it cannot tell. The volume stays settable.
+            attributes[ATTR_VOLUME_PASSTHROUGH] = volume_passthrough(self.box.state.volume)
+        return attributes
 
     @callback
     def _picon(self, sref: str) -> Picture | PendingPicon | None:

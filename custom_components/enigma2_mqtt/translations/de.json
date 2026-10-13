@@ -295,6 +295,7 @@
         "name": "Aufnahme"
       },
       "interlaced": {"name": "Bild im Zeilensprung"},
+      "volume_passthrough": {"name": "Audio-Passthrough"},
       "recording_disk": {
         "name": "Aufnahmefestplatte"
       },

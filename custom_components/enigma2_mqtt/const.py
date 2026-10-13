@@ -744,3 +744,10 @@ MANUFACTURERS: Final[dict[str, str]] = {
 # codec, the scan, the frame rate and the audio tracks, and the capability says the image
 # can fill them in (the plugin's TOPICS.md, `service`). `stream.py` reads the members.
 CAPABILITY_SERVICE_CODECS: Final = "service_codecs"
+
+# Whether the receiver's volume acts on the audio being played, from a plugin after 0.4.0:
+# `volume.passthrough` is true, false or null for "cannot be told", and the capability
+# says the image has at least one of the settings it is read from.
+CAPABILITY_VOLUME_PASSTHROUGH: Final = "volume_passthrough"
+# The attribute the two volume controls carry it in, and the binary sensor's key.
+ATTR_VOLUME_PASSTHROUGH: Final = "volume_passthrough"

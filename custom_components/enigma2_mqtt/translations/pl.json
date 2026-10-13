@@ -295,6 +295,7 @@
         "name": "Nagrywanie"
       },
       "interlaced": {"name": "Obraz z przeplotem"},
+      "volume_passthrough": {"name": "Passthrough dźwięku"},
       "recording_disk": {
         "name": "Dysk nagrań"
       },
