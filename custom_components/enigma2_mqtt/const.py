@@ -762,3 +762,14 @@ CAPABILITY_STREAM_STOP: Final = "stream_stop"
 # has left, and the image did not stop a client it listed - the second is a failure.
 STREAM_STOP_REASONS: Final = ("not_connected", "not_stopped")
 STREAM_STOP_FAILURES: Final = ("not_stopped",)
+
+# Where the image's stream server is, from a plugin after 0.4.0: `stream` carries the
+# port, the form of the request path and whether the server wants a login - no host and
+# no URL. The address is built in `stream.py`, at the host the picon lookup asks.
+TOPIC_STREAM: Final = "stream"
+CAPABILITY_STREAM: Final = "stream"
+# The media player's attributes for it: the address of the service on the decoder, a
+# stable name for that channel's stream, and whether the stream server wants a login.
+ATTR_STREAM_URL: Final = "stream_url"
+ATTR_STREAM_NAME: Final = "stream_name"
+ATTR_STREAM_AUTHENTICATION: Final = "stream_authentication"

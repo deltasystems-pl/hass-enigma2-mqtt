@@ -15,7 +15,9 @@ callback that feeds every topic.
 from __future__ import annotations
 
 import math
+import re
 from typing import Any
+from urllib.parse import quote
 
 # The most audio tracks the plugin lists for one service, and the most characters of a
 # track's description or language. Bounded here as well: the payload arrives from a
@@ -198,3 +200,81 @@ def same_client_host(one: str, other: str) -> bool:
         return host[len("::ffff:") :] if host.startswith("::ffff:") else host
 
     return plain(one) == plain(other)
+
+
+# -------------------------------------------------------------------- `stream`
+
+# The form of the stream server's request path: a plain path with `{sref}` where the
+# service reference goes, once. The payload arrives from a broker, so nothing that
+# would end the path or start another part of an address is taken - no query, no
+# fragment, no user name, no white space.
+_PATH_PART = r"[A-Za-z0-9/._~-]*"
+_STREAM_PATH = re.compile(rf"/{_PATH_PART}\{{sref\}}{_PATH_PART}")
+SREF_PLACEHOLDER = "{sref}"
+
+
+def _port(value: Any) -> int | None:
+    """Return a TCP port, or None."""
+    port = _whole(value)
+    return port if port is not None and 1 <= port <= 65535 else None
+
+
+def normalise_stream(payload: dict[str, Any]) -> dict[str, Any]:
+    """Strip a `stream` payload to the five members of the contract.
+
+    `authentication` is True, False or None - None is an image without that setting,
+    which is not a login. A port or a path that cannot be used is None, and no address
+    is built without both.
+    """
+    path = payload.get("path")
+    authentication = payload.get("authentication")
+    encoder = payload.get("encoder")
+    return {
+        "port": _port(payload.get("port")),
+        "path": path if isinstance(path, str) and _STREAM_PATH.fullmatch(path) else None,
+        "authentication": authentication if isinstance(authentication, bool) else None,
+        "encoder": encoder if isinstance(encoder, bool) else None,
+        "encoder_port": _port(payload.get("encoder_port")),
+    }
+
+
+def build_stream_url(
+    base_url: str | None, stream: dict[str, Any] | None, sref: Any
+) -> str | None:
+    """Return the address the receiver serves one service's transport stream at.
+
+    `base_url` is the receiver's web address as Home Assistant asks it,
+    `http://<host>/`; the port and the form of the path are the receiver's own
+    (`normalise_stream`). The reference goes in as the receiver publishes it, colons
+    and the trailing colon included, which is how its stream server reads it; every
+    other character that is not plain is percent-encoded, because the server decodes
+    the path - so the `%3a` inside an IPTV reference arrives as `%3a` again.
+
+    None without an address, a port, a path or a reference. Whether the server wants a
+    login is the caller's question: this never adds one.
+    """
+    if not base_url or not stream or not isinstance(sref, str) or not sref:
+        return None
+    port, path = stream.get("port"), stream.get("path")
+    if port is None or path is None:
+        return None
+    filled = path.replace(SREF_PLACEHOLDER, quote(sref, safe=":"))
+    return f"{base_url.rstrip('/')}:{port}{filled}"
+
+
+_NAME_RUN = re.compile(r"[^a-z0-9]+")
+
+
+def stream_name(sref: Any) -> str | None:
+    """Return the stable name of one channel's stream, from its reference alone.
+
+    Lower-cased, every run of characters other than `a`-`z` and `0`-`9` collapsed to
+    one `_`, the ends stripped, and `ch_` in front:
+    `1:0:19:283D:3FB:1:C00000:0:0:0:` is `ch_1_0_19_283d_3fb_1_c00000_0_0_0`. It is
+    the transform existing go2rtc configurations already use for their per-channel
+    streams, so it must not change. None for a reference with nothing left in it.
+    """
+    if not isinstance(sref, str):
+        return None
+    body = _NAME_RUN.sub("_", sref.lower()).strip("_")
+    return f"ch_{body}" if body else None

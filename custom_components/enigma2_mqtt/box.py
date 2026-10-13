@@ -50,6 +50,7 @@ from .const import (
     CAPABILITY_CHANNEL_TOPICS,
     CAPABILITY_COMMAND_ID,
     CAPABILITY_SELF_UPDATE,
+    CAPABILITY_STREAM,
     CAPABILITY_UNINSTALL,
     CHANNEL_TOPICS_SETTLE,
     CHANNELS_REFETCH_GRACE,
@@ -126,6 +127,7 @@ from .const import (
     TOPIC_SCREEN,
     TOPIC_SERVICE,
     TOPIC_SOFTCAM,
+    TOPIC_STREAM,
     TOPIC_STREAM_CLIENTS,
     TOPIC_TIMERS,
     TOPIC_TUNER,
@@ -133,7 +135,12 @@ from .const import (
     TOPIC_VOLUME,
     TOPIC_ZAP_HISTORY,
 )
-from .stream import normalise_stream_clients, same_client_host
+from .stream import (
+    build_stream_url,
+    normalise_stream,
+    normalise_stream_clients,
+    same_client_host,
+)
 
 if TYPE_CHECKING:
     from .picture import PiconResolver
@@ -990,6 +997,9 @@ class Enigma2State:
     # Whether the last `info` that was read arrived retained: the broker's replay of what a
     # plugin said earlier, and not a plugin speaking now.
     info_retained: bool = False
+    # Where the image's stream server is, normalised (`stream.normalise_stream`).
+    # None until the topic arrives, and again after a retraction.
+    stream: dict[str, Any] | None = None
     # Who the image's stream server is serving, normalised
     # (`stream.normalise_stream_clients`). None until the topic arrives, and again
     # while the plugin has emptied it because the image's list could not be read.
@@ -1895,6 +1905,8 @@ class Enigma2Box:
             self._epg_import_received(msg)
         elif suffix == TOPIC_ZAP_HISTORY:
             self._zap_history_received(msg)
+        elif suffix == TOPIC_STREAM:
+            self._stream_received(msg)
         elif suffix == TOPIC_STREAM_CLIENTS:
             self._stream_clients_received(msg)
         elif suffix.startswith(f"{TOPIC_EPG_GRID}/"):
@@ -2635,6 +2647,45 @@ class Enigma2Box:
             return True
         identity = service_identity(sref)
         return not identity or identity in hidden_members
+
+    def stream_url_for(self, sref: Any, bouquet: Any) -> str | None:
+        """Return the address the receiver streams one service at, or None for none.
+
+        Built at the address Home Assistant itself asks the receiver at
+        (`picon_lookup_url`: the typed host when there is one, and never the reported
+        address then), with the port and path the receiver publishes on `stream`.
+
+        None - no address at all, never a partial or a guessed one - when the receiver
+        does not claim `stream` or has published no usable `stream`; when its stream
+        server wants a login, because an address is never built with credentials and
+        one without them only answers 401; when the service is one the options hide
+        (`service_hidden`, with the bouquet the receiver names for it); and when there
+        is no address to ask the receiver at.
+        """
+        if CAPABILITY_STREAM not in self.capabilities:
+            return None
+        stream = self.state.stream
+        if stream is None or stream["authentication"] is True:
+            return None
+        if self.service_hidden(sref, bouquet):
+            return None
+        return build_stream_url(self.picon_lookup_url, stream, sref)
+
+    @callback
+    def _stream_received(self, msg: ReceiveMessage) -> None:
+        """Cache where the stream server is, normalised.
+
+        An empty payload is a retraction and clears it, a payload that is not a JSON
+        object leaves the last good one alone, and anything else is normalised and kept.
+        """
+        if not (decode_payload(msg.payload) or "").strip():
+            self.state.stream = None
+            self._async_updated(TOPIC_STREAM)
+            return
+        if (payload := parse_json_payload(msg.payload)) is None:
+            return
+        self.state.stream = normalise_stream(payload)
+        self._async_updated(TOPIC_STREAM)
 
     def stream_client_rows(self) -> list[dict[str, Any]]:
         """Return the stream clients as they may be shown, the hidden ones without a channel.

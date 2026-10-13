@@ -29,6 +29,10 @@ many channels it holds, and never a channel's name or reference. `channel_list` 
 of the two sources the entities are reading and whether every bouquet's list is in, and
 `not_published` is the receiver's own list of what it withheld, normalised.
 
+`stream` is what the receiver says about its stream server - a port, the form of the
+path and three flags - and `stream_clients` is summarised as counts: who is watching
+what from which address describes a household, not a fault.
+
 `player_picture` is the chosen picture of the media player and the state of the picon
 lookup as counts and a cause - never the address asked, a channel or a picture.
 """
@@ -180,6 +184,10 @@ async def async_get_config_entry_diagnostics(
                 for slug, received in sorted(state.bouquet_channels.items())
             },
             "zap_history": _summarise_zap_history(state.zap_history),
+            # Where the stream server is: a port, a path form and three flags, as
+            # normalised. No host is in it.
+            "stream": state.stream,
+            "stream_clients": _summarise_stream_clients(state.stream_clients),
             "last_error": state.last_error,
             "screen": {
                 "bytes": len(state.screen) if state.screen else 0,
@@ -272,6 +280,18 @@ def _summarise_bouquet_index(index: dict[str, Any] | None) -> dict[str, Any] | N
             {"name": entry["name"], "slug": entry["slug"], "count": entry["count"]}
             for entry in index["bouquets"]
         ],
+    }
+
+
+def _summarise_stream_clients(clients: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Return the stream clients as counts: no address, no channel, hidden or not."""
+    if clients is None:
+        return None
+    rows = clients.get("clients") or []
+    return {
+        "count": clients.get("count"),
+        "rows": len(rows),
+        "transcoded": sum(1 for row in rows if row.get("transcoded") is True),
     }
 
 

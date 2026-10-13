@@ -53,7 +53,11 @@ from .box import (
     service_identity,
 )
 from .const import (
+    ATTR_STREAM_AUTHENTICATION,
+    ATTR_STREAM_NAME,
+    ATTR_STREAM_URL,
     ATTR_VOLUME_PASSTHROUGH,
+    CAPABILITY_STREAM,
     CAPABILITY_VOLUME_PASSTHROUGH,
     DOMAIN,
     TOPIC_BOUQUET,
@@ -63,12 +67,13 @@ from .const import (
     TOPIC_POWER,
     TOPIC_SCREEN,
     TOPIC_SERVICE,
+    TOPIC_STREAM,
     TOPIC_VOLUME,
 )
 from .entity import Enigma2Entity
 from .picture import PendingPicon, Picture, PlayerPicture, player_picture_mode
 from .services import Enigma2Actions, async_select_bouquet, async_setup_services
-from .stream import volume_passthrough
+from .stream import stream_name, volume_passthrough
 
 PARALLEL_UPDATES = 0
 
@@ -134,6 +139,8 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
                 # The capabilities the extra attributes follow arrive here, and can
                 # arrive after everything else.
                 TOPIC_INFO,
+                # Where the stream server is; the stream address is built from it.
+                TOPIC_STREAM,
             ),
             requires=None,
         )
@@ -218,6 +225,21 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
             # True while the receiver hands the audio on undecoded and its volume does
             # nothing audible; None when it cannot tell. The volume stays settable.
             attributes[ATTR_VOLUME_PASSTHROUGH] = volume_passthrough(self.box.state.volume)
+        if CAPABILITY_STREAM in self.box.capabilities:
+            # The receiver's own stream of the channel on the decoder, for a player
+            # that decodes a transport stream itself, and a stable name for it. No
+            # address while the stream server wants a login - the third attribute
+            # says so - and neither an address nor a name for a channel of a bouquet
+            # the options hide.
+            service = self.box.state.service or {}
+            sref, bouquet = service.get("sref"), service.get("bouquet")
+            attributes[ATTR_STREAM_URL] = self.box.stream_url_for(sref, bouquet)
+            attributes[ATTR_STREAM_NAME] = (
+                None if self.box.service_hidden(sref, bouquet) else stream_name(sref)
+            )
+            attributes[ATTR_STREAM_AUTHENTICATION] = (self.box.state.stream or {}).get(
+                "authentication"
+            )
         return attributes
 
     @callback
