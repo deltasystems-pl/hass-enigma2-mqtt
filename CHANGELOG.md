@@ -133,13 +133,24 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   installed a plugin while the card was following its own update - the release put over a
   development build of the same number by hand, an install over SSH - the new plugin has no
   record of the transaction, and the card stayed busy for up to 25 minutes and then said the
-  update was still running. Now the call ends as soon as the receiver's `update` no longer
-  carries the transaction **and** `info` names another version or build than the one that
-  accepted it: as installed when the receiver runs the release that was asked for, and
-  otherwise with a sentence that says the update is no longer reported and what runs instead.
-  A transaction started on the receiver and left on `update` by a plugin that has since been
-  replaced by one that cannot update itself - after a downgrade chosen on the receiver - no
-  longer holds the card busy either.
+  update was still running. Now the call ends as soon as a new plugin is heard to start
+  without it: an `info` that names another version or build than the one before it, and then,
+  as that plugin's first word on `update`, a payload that does not carry the transaction - as
+  installed when the receiver runs the release that was asked for, and otherwise with a
+  sentence that says the update is no longer reported and what runs instead. An `update`
+  payload without the transaction that no starting plugin said - a leftover, another broker
+  client's, the broker's replay - ends nothing, before the new plugin speaks or after, and
+  neither does an `info` that names no plugin; the update is then followed to the end its
+  helper writes.
+- **A phase left on `update` beside a plugin that cannot update itself stops holding the
+  card, but not while the update can still move.** A plugin that says it cannot update
+  itself - an older one, or one its package manager did not install - starts no transaction,
+  and the phase a plugin before it left on the topic kept the card busy until the 25-minute
+  window closed. A phase before `installing`, which only the plugin that asked reports, is
+  now `stale` at once. From `installing` on the receiver's helper works outside the
+  interface and may still be proving the plugin that runs or putting the previous one back,
+  so such a phase stays on the card until the topic has stood still for ten minutes
+  (DOCUMENTATION.md §4.5).
 - **Two outcome sentences of a withdrawn install say what holds in every case.** After a
   withdrawal that could not put the previous files back, the sentence said the new files are
   still on the receiver; after a restore that failed part-way they may be partly new and

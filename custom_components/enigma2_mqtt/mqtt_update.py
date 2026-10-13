@@ -599,10 +599,14 @@ class _Watch:
         self.transaction: dict[str, Any] | None = None
         # The furthest phase seen of the accepted transaction (`reached`).
         self.reached: tuple[str, str | None] | None = None
-        # What the receiver said it ran when it accepted the request, as `_running` reads
-        # it, and whether its latest `update` no longer carries the followed transaction.
+        # What the receiver said it ran when it accepted the request, as `_running` reads it.
         self.accepted_as: tuple[Any, Any] | None = None
-        self.dropped = False
+        # The plugin last heard to speak on `info`, and what its first `update` after that
+        # said of the followed transaction: True when it did not carry it, False when it
+        # did or when a replay took the order away, None while it has not said one yet
+        # (`replaced`).
+        self.speaker: tuple[Any, Any] | None = None
+        self.disowned: bool | None = None
         self.refusal: tuple[Any, Any] | None = None
         # The receiver's last complaint about `cmd/update` after the acceptance: the end's
         # repeat, once it comes (`end_said`); one about another command leaves it.
@@ -615,6 +619,7 @@ class _Watch:
         self._seen = {
             TOPIC_UPDATE: box.updates.get(TOPIC_UPDATE, 0),
             TOPIC_LAST_ERROR: box.updates.get(TOPIC_LAST_ERROR, 0),
+            TOPIC_INFO: box.updates.get(TOPIC_INFO, 0),
         }
         self._remove = box.async_add_listener(
             self._updated, (TOPIC_UPDATE, TOPIC_LAST_ERROR, TOPIC_INFO)
@@ -643,6 +648,17 @@ class _Watch:
                 if is_refusal(error, held):
                     assert isinstance(error, dict)
                     self.refusal = (error.get("reason"), error.get("error"))
+        if self._new(TOPIC_INFO):
+            running = _running(box)
+            # An `info` that names no plugin says nothing of who runs - a retracted one
+            # leaves the last payload as it was - and the same plugin saying `info`
+            # again, as every connect does and a capability that binds late, is not
+            # another one starting.
+            if _named(running) and running != self.speaker:
+                self.speaker = running
+                # A replay is in no order with `update`: who runs is known from it, what
+                # that plugin said first is not, and is never taken for "nothing".
+                self.disowned = False if state.info_retained else None
         if self._new(TOPIC_UPDATE):
             transaction = parse_update(state.update)
             if transaction is not None:
@@ -656,17 +672,22 @@ class _Watch:
                         and transaction["started_by"] == STARTED_BY_HOME_ASSISTANT
                     ):
                         self.ident = transaction["id"]
-                        self.accepted_as = _running(box)
+                        self.accepted_as = self.speaker = _running(box)
                 if transaction["id"] == self.ident:
                     self.transaction = transaction
                     self.reached = reached(self.reached, transaction)
                     if self.phase_callback is not None:
                         self.phase_callback(transaction["phase"])
             if self.ident is not None and isinstance(state.update, dict):
-                # The receiver's own word, whichever way it goes: `update` is published
-                # whole, with the transaction in progress or the last one that ended, so a
-                # payload without the followed one says this plugin has no record of it.
-                self.dropped = transaction is None or transaction["id"] != self.ident
+                # `update` is published whole, with the transaction in progress or the
+                # last one that ended, so the first one a plugin says after its `info`
+                # tells whether it has a record of the followed one: a plugin that knows
+                # it carries it from its first connect on. A replay is nobody's first
+                # word, and takes the order away.
+                if state.update_retained:
+                    self.disowned = False
+                elif self.disowned is None:
+                    self.disowned = transaction is None or transaction["id"] != self.ident
         self.changed.set()
 
     @property
@@ -678,24 +699,47 @@ class _Watch:
     def replaced(self) -> bool:
         """Whether the plugin that accepted the request has been replaced under the follow.
 
-        Two things together, both the receiver's own: its `update` no longer carries the
-        followed transaction, and `info` names another plugin - version or build commit -
-        than the one that accepted it. An install this integration did not start does
-        that: the release put over a development build of the same number by hand, an
-        install over SSH, the receiver's own package manager. The new plugin has no record
-        of the transaction and will never report its end, so the follow would otherwise
-        run to its 25-minute bound and say "still running" of an update that is not.
+        An install this integration did not start does that: the release put over a
+        development build of the same number by hand, an install over SSH, the receiver's
+        own package manager. The new plugin has no record of the transaction and will
+        never report its end, so the follow would otherwise run to its 25-minute bound
+        and say "still running" of an update that is not.
 
-        Neither alone is enough. Another transaction's `update` with the same plugin
-        running is a leftover or a broker client's, and does not end the follow; `info`
-        changes in every update that works, while `update` still carries the transaction.
-        A replacement by the very same build cannot be told from no replacement at all,
-        and is followed to the bound as before.
+        **The rule.** A plugin that starts says `online`, then `info`, then its other
+        topics with `update` last, at every connect (the plugin's `Bridge.on_connect`),
+        and one that knows the followed transaction - it read the helper's marker before
+        its first connect - carries it on `update` from that first word on. So "replaced"
+        is that sequence, heard live after the acceptance and in that order:
+
+        1. an `info` that names another plugin - version or build commit - than the one
+           heard before it: a new plugin speaks;
+        2. the **first** `update` after that `info` does not carry the followed
+           transaction: that plugin has no record of it;
+        3. and that plugin is another one than the plugin that accepted the request.
+
+        Neither sign alone ends the follow, and neither do both in another order. An
+        `update` without the transaction while no new plugin has spoken, or after the new
+        plugin's own first `update` carried it, is a leftover or a broker client's - a
+        healthy plugin never publishes it - and changes nothing, however `info` changes
+        afterwards; `info` changes in every update that works, while `update` still
+        carries the transaction. A retained payload is the broker's replay, never a
+        plugin speaking now: a replayed `info` says who runs but not what that plugin
+        said first, and a replayed `update` is nobody's first word, so after either
+        nothing counts until yet another plugin speaks. An `info` of `{}` or without a
+        plugin names nobody. `availability` is not asked: the box reports only its
+        changes, and a plugin that reconnects says `online` as a new one does.
+
+        What this cannot tell is followed to the bound as before: a replacement by the
+        very build that accepted the request, and one heard only as a replay - after Home
+        Assistant's own reconnect to the broker. And it is no defence against a broker
+        client that forges the whole sequence, or slips its `update` between a starting
+        plugin's `info` and its `update`; the success below still needs `info` to name
+        the release that was asked for.
         """
         return (
             self.ident is not None
             and not self.finished
-            and self.dropped
+            and self.disowned is True
             and _running(self.box) != self.accepted_as
         )
 
@@ -730,6 +774,11 @@ def _running(box: Any) -> tuple[Any, Any]:
     return info.get("plugin"), build.get("commit") if isinstance(build, dict) else None
 
 
+def _named(running: tuple[Any, Any]) -> bool:
+    """Whether `_running` names a plugin at all: an `info` of `{}` names nobody."""
+    return isinstance(running[0], str) and bool(running[0])
+
+
 def _proven(box: Any, version: str, commit: str | None) -> bool:
     """Whether the receiver reports the target on `info`, with the signed commit if there is one."""
     info = box.info
@@ -760,7 +809,8 @@ async def async_install_over_mqtt(
     to name when the files may be a mix; `on_follow` is handed the function that abandons the
     follow, for the card to call when it goes away.
 
-    A follow whose plugin was replaced under it (`_Watch.replaced`) ends at once: as a success
+    A follow whose plugin was replaced under it (`_Watch.replaced`: a new plugin heard to
+    start, whose first `update` does not carry the transaction) ends at once: as a success
     when the receiver runs the release that was asked for, whoever installed it, and with a
     sentence that says the update is no longer reported otherwise.
     """

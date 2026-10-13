@@ -23,7 +23,9 @@ is and never retried over SSH.
 **The receiver's own transactions** - started at the television, on the OpenWebif page, or by a
 broker client - are shown here as running only while they plausibly run: not finished, and
 started within the last 25 minutes. The attribute `receiver_transaction` says what the receiver
-last said about one, and `stale` when that no longer can be true.
+last said about one, and `stale` when that no longer can be true - sooner beside a plugin that
+says it cannot update itself: at once for a phase before `installing`, and from there on once
+`update` has stood still for ten minutes (`_read_receiver_transaction`).
 
 The picture is worked out in `plugin_versions.py`, shared with the select that lets a
 household pin a version. Which build is newer than which is `buildid.is_newer`, and it is the
@@ -73,6 +75,7 @@ from .const import (
     DEFAULT_CHECK_GITHUB_RELEASES,
     DOMAIN,
     MQTT_UPDATE_END_WAIT,
+    MQTT_UPDATE_TAIL,
     PLUGIN_RELEASES_URL,
     RELEASE_CHECK_INTERVAL,
     SIGNAL_FORCE_REINSTALL,
@@ -281,6 +284,10 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         self._reached: tuple[str, str | None] | None = None
         # The timer that looks again when a receiver transaction's window opens or closes.
         self._window_timer: Any = None
+        # Since when `update` has stood still beside a plugin that says it cannot update
+        # itself, as (the count of `update` messages, epoch seconds); None while the
+        # plugin that runs can, or has not said.
+        self._still_since: tuple[int, float] | None = None
         # The household's sentences for the ends of updates, from the `exceptions` section.
         self._sentences: dict[str, str] = {}
         # The receiver's last complaint about `cmd/update`, kept when a later complaint about
@@ -596,21 +603,29 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
         self._receiver_transaction = transaction
         self._reached = mqtt_update.reached(self._reached, transaction)
         self._receiver_state = mqtt_update.transaction_state(transaction, now)
-        if (
-            self._receiver_state == mqtt_update.STATE_IN_PROGRESS
-            and not self.box.info_retracted
-            and isinstance(self.box.info.get("capabilities"), list)
-            and CAPABILITY_SELF_UPDATE not in self.box.info["capabilities"]
-        ):
+        edge = mqtt_update.window_edge(transaction, now)
+        still = self._stood_still(now)
+        if self._receiver_state == mqtt_update.STATE_IN_PROGRESS and still is not None:
             # The plugin that runs now says it cannot update itself - an older plugin, or
-            # one the package manager did not install. It starts no transaction, follows
-            # none and finishes none (`cmd/update` is refused `no_capability`), so the
-            # phase still retained on `update` is the plugin's before it - after a
-            # downgrade chosen on the receiver the topic stands still - and would hold the
-            # card busy until its window closed. A plugin that has not said either way
+            # one the package manager did not install. It starts no transaction
+            # (`cmd/update` is refused `no_capability`), so a phase before `installing`,
+            # which only the plugin that asked reports, is the plugin's before it and
+            # stands still: it would hold the card busy until its window closed, and is
+            # stale at once. From `installing` on the helper works outside the interface
+            # and the update can still move: a plugin that started on the helper's marker
+            # reports it to its end whether it claims the capability or not, and beside a
+            # plugin that reports nothing the helper may still be proving it or putting
+            # the previous one back, after which the plugin it restarts says the end
+            # here. Such a phase is stale only once `update` has stood still beside that
+            # plugin for `MQTT_UPDATE_TAIL`. A plugin that has not said either way
             # leaves the window to decide, as before.
-            self._receiver_state = mqtt_update.STATE_STALE
-        self._schedule_window_timer(mqtt_update.window_edge(transaction, now))
+            assert transaction is not None
+            moves_until = still + MQTT_UPDATE_TAIL
+            if transaction["phase"] not in mqtt_update.FILES_PHASES or now >= moves_until:
+                self._receiver_state = mqtt_update.STATE_STALE
+            elif edge is None or moves_until < edge:
+                edge = moves_until
+        self._schedule_window_timer(edge)
         if transaction is None:
             return None
         message = None
@@ -636,6 +651,31 @@ class Enigma2PluginUpdate(Enigma2Entity, UpdateEntity):
             "state": self._receiver_state,
             "message": message,
         }
+
+    def _stood_still(self, now: float) -> float | None:
+        """Since when `update` has stood still beside a plugin that cannot update itself.
+
+        In epoch seconds; None while the plugin that runs states the capability, has not
+        stated its capabilities, or has retracted its `info` - which says nothing of
+        what runs. Counted from the look that first found such a plugin, and again from
+        every `update` message after it: a word on the topic is the update moving. The
+        broker's replay is not such a word and moves nothing.
+        """
+        capabilities = self.box.info.get("capabilities")
+        if (
+            self.box.info_retracted
+            or not isinstance(capabilities, list)
+            or CAPABILITY_SELF_UPDATE in capabilities
+        ):
+            self._still_since = None
+            return None
+        count = self.box.updates.get(TOPIC_UPDATE, 0)
+        if self._still_since is None:
+            self._still_since = (count, now)
+        elif self._still_since[0] != count:
+            moved = not self.box.state.update_retained
+            self._still_since = (count, now if moved else self._still_since[1])
+        return self._still_since[1]
 
     def _last_refusal(self) -> dict[str, Any] | None:
         """The receiver's last refusal of an update, said in words, while it is on `last_error`.

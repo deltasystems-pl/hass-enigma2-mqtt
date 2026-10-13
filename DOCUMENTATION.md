@@ -1069,7 +1069,11 @@ page, or by another broker client - appear on the card too: as running only whil
 finished and started within the last 25 minutes (by the receiver's clock, at most a minute ahead
 of Home Assistant's), and in the attribute `receiver_transaction` (`state` is `in_progress`,
 `finished` with the end in words in `message`, or `stale`); a card with no install path has no
-progress bar, and shows it in the attribute only. A refusal of such an install that only
+progress bar, and shows it in the attribute only. Beside a plugin that says it cannot update
+itself - an older one, or one its package manager did not install - a phase before `installing`
+is `stale` at once, because only the plugin that asked reports those, and a later phase once the
+update topic has stood still for ten minutes: until then the receiver's helper may still be
+proving that plugin or putting the previous one back. A refusal of such an install that only
 the receiver sees - no internet and no answer from Home Assistant, a clock that calls Home
 Assistant's address expired - is in `last_refusal`, in the household's language, for as long as it
 is on the receiver's `last_error`: the next command that succeeds clears both. The end of a

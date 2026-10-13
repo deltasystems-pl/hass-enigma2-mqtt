@@ -897,6 +897,9 @@ class Enigma2State:
     # Whether the last `update` arrived retained: the broker's replay, which can describe an
     # earlier transaction and is never the answer to a request just sent.
     update_retained: bool = False
+    # Whether the last `info` that was read arrived retained: the broker's replay of what a
+    # plugin said earlier, and not a plugin speaking now.
+    info_retained: bool = False
     last_error: dict[str, Any] | None = None
     # Whether the last complaint arrived with the retain flag set. A retained payload
     # is what the broker had before we subscribed, so it is a replay of something that
@@ -1810,6 +1813,7 @@ class Enigma2Box:
         self.info_retracted = False
         self.info_received = True
         self.state.info = info
+        self.state.info_retained = msg.retain
         self.state.not_published = normalise_not_published(info)
         self._async_channel_topics_reviewed()
         if self.cam_enabled and self._pending_cam is not _NO_PENDING_CAM:
