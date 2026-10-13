@@ -511,8 +511,10 @@ while the box is unreachable, because that is precisely when somebody wants to w
     `getpicon` has never answered, the question is not asked again for an hour. OpenWebif's
     default picon counts as none.
   - **Which address is asked.** The receiver host typed when the receiver was added, if one
-    was - and if that cannot be the host of a web address (it has a port, a user name or an
-    IPv6 zone), there are no picons. Only with no host typed, the address the receiver reports on `info`, and only when it is an IP
+    was - and if that cannot be the host of a web address (it has a port, a user name, an
+    IPv6 zone, brackets around an IPv6 address, or a character outside ASCII - an
+    international name is typed in its `xn--` form), there are no picons and no thumbnails,
+    never the reported address. Only with no host typed, the address the receiver reports on `info`, and only when it is an IP
     address written out - never a host name - that is not loopback, link-local, unspecified,
     multicast or reserved. That address arrives over the broker, where anything allowed to
     publish could have written it; [SECURITY.md](SECURITY.md) says what that leaves open. With

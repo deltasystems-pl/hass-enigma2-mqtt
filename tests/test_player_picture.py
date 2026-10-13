@@ -1389,6 +1389,46 @@ async def test_an_unusable_typed_host_is_never_replaced_by_the_reported_address(
     assert aioclient_mock.call_count == 0
 
 
+@pytest.mark.parametrize("mode", [PLAYER_PICTURE_SCREENSHOT, PLAYER_PICTURE_PICON])
+@pytest.mark.parametrize(
+    "typed",
+    ["box.lan:8080", "user@box", "[2001:db8::40]", "b" + chr(0xFC) + "cher.example"],
+    ids=["a port", "a user name", "brackets", "not ASCII"],
+)
+async def test_a_typed_host_that_is_no_host_means_no_picon_and_no_thumbnail(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    caplog: pytest.LogCaptureFixture,
+    typed: str,
+    mode: str,
+) -> None:
+    """The receiver reports a good address, and it is not asked in the typed one's place.
+
+    The card shows the screenshot, the media browser has no thumbnails, nothing is
+    requested anywhere and nothing is logged about it.
+    """
+    entry = _entry_with_host(typed)
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(ANYWHERE, content=PNG_TWO)
+    await _setup(hass, entry, mode)
+    box = entry.runtime_data
+    assert box.ip_address == IP
+
+    await _publish(hass, SERVICE_TOPIC, TVN)
+    await _browse(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    bouquet = await _browse(hass)
+
+    assert box.picon_lookup_url is None
+    assert aioclient_mock.call_count == 0
+    assert box.picons.async_status()["status"] == picture.STATUS_NO_ADDRESS
+    assert [child.thumbnail for child in bouquet.children] == [None, None]
+    assert await _player(hass).async_get_media_image() == (SCREEN, "image/jpeg")
+    assert _warnings(caplog) == []
+
+
 @pytest.mark.parametrize("typed", ["vu_uno.lan", "box.lan."])
 async def test_a_typed_name_with_an_underscore_or_a_final_dot_is_really_asked(
     hass: HomeAssistant,
