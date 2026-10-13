@@ -58,6 +58,7 @@ from .const import (
     CAPABILITY_EPG_GRID,
     CAPABILITY_EPG_IMPORT,
     CAPABILITY_PROCESS,
+    CAPABILITY_SERVICE_CODECS,
     CAPABILITY_SOFTCAM,
     CONF_CAM_TELEMETRY,
     CONF_OSCAM_TELEMETRY,
@@ -84,6 +85,7 @@ from .const import (
     WITHHELD_ATTRIBUTE_MAX,
 )
 from .entity import Enigma2Entity, OptionalEntities
+from .stream import audio_attributes, audio_codec, audio_language, frame_rate, video_codec
 
 PARALLEL_UPDATES = 0
 
@@ -577,6 +579,45 @@ WITHHELD_SENSORS: tuple[Enigma2SensorDescription, ...] = (
     ),
 )
 
+# What is on the decoder, from the codec members of `service` (`stream.py` reads them).
+# Technical facts about the current service, like the tuner's numbers: diagnostic, and
+# disabled until somebody wants them. The audio tracks ride on the audio codec's sensor
+# as an attribute the recorder is not given.
+SERVICE_CODEC_SENSORS: tuple[Enigma2SensorDescription, ...] = (
+    Enigma2SensorDescription(
+        key="video_codec",
+        topics=(TOPIC_SERVICE,),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value_fn=lambda state: video_codec(state.service),
+    ),
+    Enigma2SensorDescription(
+        key="frame_rate",
+        topics=(TOPIC_SERVICE,),
+        native_unit_of_measurement="fps",
+        suggested_display_precision=3,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value_fn=lambda state: frame_rate(state.service),
+    ),
+    Enigma2SensorDescription(
+        key="audio_codec",
+        topics=(TOPIC_SERVICE,),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value_fn=lambda state: audio_codec(state.service),
+        attributes_fn=lambda state: audio_attributes(state.service),
+    ),
+    Enigma2SensorDescription(
+        key="audio_language",
+        topics=(TOPIC_SERVICE,),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value_fn=lambda state: audio_language(state.service),
+    ),
+)
+
 KEY_EPG_ACTIVE_BOUQUET = "epg_active_bouquet"
 
 # The grids to read, and the context that says which one is in use. A box that publishes
@@ -681,6 +722,22 @@ async def async_setup_entry(
         ).start()
     )
 
+    codecs = {description.key: description for description in SERVICE_CODEC_SENSORS}
+    entry.async_on_unload(
+        OptionalEntities(
+            hass,
+            box,
+            "sensor",
+            list(codecs),
+            lambda key: Enigma2Sensor(box, codecs[key]),
+            lambda: CAPABILITY_SERVICE_CODECS in box.capabilities,
+            # Never removed, for the reason the softcam sensor above gives: an older
+            # plugin after a downgrade names no codecs, and that is no decision.
+            lambda: False,
+            async_add_entities,
+        ).start()
+    )
+
     withheld = {description.key: description for description in WITHHELD_SENSORS}
     # Whether this receiver has had the sensor before. Read once: the registry entry is
     # made by the first creation and nothing here ever removes it.
@@ -744,8 +801,9 @@ class Enigma2Sensor(Enigma2Entity, SensorEntity):
     entity_description: Enigma2SensorDescription
 
     # A plot summary and a list of running recordings are kilobytes that change every
-    # quarter of an hour. The state is worth recording; these are not.
-    _unrecorded_attributes = frozenset({"long", "recordings"})
+    # quarter of an hour. The state is worth recording; these are not. Nor is the list
+    # of a service's audio tracks, rewritten whenever another one is picked.
+    _unrecorded_attributes = frozenset({"long", "recordings", "audio_tracks"})
 
     def __init__(self, box: Enigma2Box, description: Enigma2SensorDescription) -> None:
         """Set up the sensor from its description."""

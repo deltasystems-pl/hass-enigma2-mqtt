@@ -294,6 +294,7 @@
       "recording": {
         "name": "Nagrywanie"
       },
+      "interlaced": {"name": "Obraz z przeplotem"},
       "recording_disk": {
         "name": "Dysk nagrań"
       },
@@ -476,6 +477,10 @@
         "state": {"idle": "Bezczynny", "running": "Trwa", "done": "Zakończony", "failed": "Nieudany"}
       },
       "last_error": {"name": "Ostatni błąd"},
+      "video_codec": {"name": "Kodek obrazu"},
+      "frame_rate": {"name": "Liczba klatek na sekundę"},
+      "audio_codec": {"name": "Kodek dźwięku"},
+      "audio_language": {"name": "Język dźwięku"},
       "withheld_payloads": {"name": "Nieopublikowane dane"}
     },
     "switch": {

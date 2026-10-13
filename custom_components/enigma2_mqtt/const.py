@@ -739,3 +739,8 @@ MANUFACTURERS: Final[dict[str, str]] = {
     "ax": "AX Technology",
     "formuler": "Formuler",
 }
+
+# What is on the decoder, from a plugin after 0.4.0: the `service` topic carries the video
+# codec, the scan, the frame rate and the audio tracks, and the capability says the image
+# can fill them in (the plugin's TOPICS.md, `service`). `stream.py` reads the members.
+CAPABILITY_SERVICE_CODECS: Final = "service_codecs"

@@ -48,6 +48,9 @@
         "state": {
           "off": "mdi:lock-open-variant"
         }
+      },
+      "interlaced": {
+        "default": "mdi:reorder-horizontal"
       }
     },
     "button": {
@@ -219,6 +222,18 @@
       },
       "withheld_payloads": {
         "default": "mdi:package-variant-closed-remove"
+      },
+      "video_codec": {
+        "default": "mdi:video"
+      },
+      "frame_rate": {
+        "default": "mdi:filmstrip"
+      },
+      "audio_codec": {
+        "default": "mdi:surround-sound"
+      },
+      "audio_language": {
+        "default": "mdi:translate"
       }
     },
     "switch": {

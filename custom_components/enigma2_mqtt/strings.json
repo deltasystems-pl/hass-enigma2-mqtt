@@ -321,6 +321,7 @@
       "recording": {
         "name": "Recording"
       },
+      "interlaced": {"name": "Interlaced picture"},
       "recording_disk": {
         "name": "Recording disk"
       },
@@ -503,6 +504,10 @@
         "state": {"idle": "Idle", "running": "Running", "done": "Done", "failed": "Failed"}
       },
       "last_error": {"name": "Last error"},
+      "video_codec": {"name": "Video codec"},
+      "frame_rate": {"name": "Frame rate"},
+      "audio_codec": {"name": "Audio codec"},
+      "audio_language": {"name": "Audio language"},
       "withheld_payloads": {"name": "Withheld payloads"}
     },
     "switch": {

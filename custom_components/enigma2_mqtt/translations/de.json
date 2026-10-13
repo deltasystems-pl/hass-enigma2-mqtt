@@ -294,6 +294,7 @@
       "recording": {
         "name": "Aufnahme"
       },
+      "interlaced": {"name": "Bild im Zeilensprung"},
       "recording_disk": {
         "name": "Aufnahmefestplatte"
       },
@@ -476,6 +477,10 @@
         "state": {"idle": "Bereit", "running": "Läuft", "done": "Abgeschlossen", "failed": "Fehlgeschlagen"}
       },
       "last_error": {"name": "Letzter Fehler"},
+      "video_codec": {"name": "Videocodec"},
+      "frame_rate": {"name": "Bildrate"},
+      "audio_codec": {"name": "Audiocodec"},
+      "audio_language": {"name": "Audiosprache"},
       "withheld_payloads": {"name": "Zurückgehaltene Daten"}
     },
     "switch": {

@@ -24,14 +24,17 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .box import Enigma2Box, Enigma2MqttConfigEntry, Enigma2State
 from .const import (
+    CAPABILITY_SERVICE_CODECS,
     CONF_CAM_TELEMETRY,
     CONF_OSCAM_TELEMETRY,
     TOPIC_CAM,
     TOPIC_HDD,
     TOPIC_OSCAM,
     TOPIC_RECORDING,
+    TOPIC_SERVICE,
 )
 from .entity import Enigma2Entity, OptionalEntities
+from .stream import interlaced
 
 PARALLEL_UPDATES = 0
 
@@ -119,6 +122,18 @@ OSCAM_BINARY_SENSORS: tuple[Enigma2BinarySensorDescription, ...] = tuple(
     ),
 )
 
+# Whether the picture on the decoder is interlaced: one of the codec facts of `service`,
+# beside the sensors that carry the rest. Diagnostic and disabled by default, like them.
+SERVICE_CODEC_BINARY_SENSORS: tuple[Enigma2BinarySensorDescription, ...] = (
+    Enigma2BinarySensorDescription(
+        key="interlaced",
+        topics=(TOPIC_SERVICE,),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value_fn=lambda state: interlaced(state.service),
+    ),
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -157,6 +172,22 @@ async def async_setup_entry(
                 async_add_entities,
             ).start()
         )
+
+    codecs = {description.key: description for description in SERVICE_CODEC_BINARY_SENSORS}
+    entry.async_on_unload(
+        OptionalEntities(
+            hass,
+            box,
+            "binary_sensor",
+            list(codecs),
+            lambda key: Enigma2BinarySensor(box, codecs[key]),
+            lambda: CAPABILITY_SERVICE_CODECS in box.capabilities,
+            # Never removed: a capability that goes quiet is an older plugin or a
+            # receiver that has not answered yet, not a decision.
+            lambda: False,
+            async_add_entities,
+        ).start()
+    )
 
 
 class Enigma2BinarySensor(Enigma2Entity, BinarySensorEntity):
