@@ -259,7 +259,9 @@ async def _async_clear_error(box: Enigma2Box) -> None:
     The plugin answers `cmd/clear_error` with the empty retained payload whether or not
     an error was there, so there is always an effect to wait for: an empty `last_error`
     that arrived **after** the press. A broker replays no empty retained payload, so an
-    empty one is always news. Without it nothing is
+    empty one is always news. Only the empty payload is that clearing: one that is not a
+    JSON object - `null`, `[]`, a word - reads as no complaint too (`last_error` is None
+    for both), and is not the receiver's answer. Without the empty payload nothing is
     forgotten here - a receiver that did not answer has cleared nothing, and a sensor
     that said otherwise would be put right by the retained complaint at the next reload.
     The one refusal the command has - an update being applied - arrives on `last_error`
@@ -272,7 +274,7 @@ async def _async_clear_error(box: Enigma2Box) -> None:
     before = box.updates.get(TOPIC_LAST_ERROR, 0)
 
     def cleared() -> bool:
-        return box.updates.get(TOPIC_LAST_ERROR, 0) > before and box.state.last_error is None
+        return box.updates.get(TOPIC_LAST_ERROR, 0) > before and box.state.last_error_empty
 
     await box.async_command("clear_error", PRESS, effect=cleared)
     if box.state.last_error is not None:

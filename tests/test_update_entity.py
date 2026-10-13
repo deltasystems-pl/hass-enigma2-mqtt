@@ -1208,6 +1208,45 @@ async def test_the_installer_s_own_refusal_reads_as_the_card_s(
     )
 
 
+@pytest.mark.parametrize(
+    ("code", "key", "refused"),
+    [
+        ("INSTALL_FAILED", "update_failed", False),
+        ("ANNOUNCEMENT_TIMEOUT", "update_failed", False),
+        ("BUSY", "update_refused", True),
+        ("RECORDING", "update_refused", True),
+    ],
+)
+async def test_an_outcome_without_a_sentence_of_its_own_is_said_by_its_kind(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    code: str,
+    key: str,
+    refused: bool,
+) -> None:
+    """A failure the card has no sentence for is still a failure, under `update_failed`
+    with the installer's code; only a refusal is said as "not updated"."""
+    from custom_components.enigma2_mqtt.installer import InstallerError, InstallerErrorCode
+
+    failed = InstallerError(InstallerErrorCode[code])
+    await _setup(hass, config_entry, credentials=True)
+    await _report(hass, "0.2.0")
+    with (
+        patch("custom_components.enigma2_mqtt.update.async_install", AsyncMock(side_effect=failed)),
+        pytest.raises(HomeAssistantError) as raised,
+    ):
+        await hass.services.async_call(
+            "update", "install", {ATTR_ENTITY_ID: PLUGIN, ATTR_VERSION: PLUGIN_VERSION},
+            blocking=True,
+        )
+
+    assert raised.value.translation_key == key
+    assert raised.value.translation_placeholders == {"reason": InstallerErrorCode[code].value}
+    assert isinstance(raised.value, ServiceValidationError) is refused
+
+
 # --------------------------------------------- a release of the index, downloaded --
 
 

@@ -1069,7 +1069,16 @@ page, or by another broker client - appear on the card too: as running only whil
 finished and started within the last 25 minutes (by the receiver's clock, at most a minute ahead
 of Home Assistant's), and in the attribute `receiver_transaction` (`state` is `in_progress`,
 `finished` with the end in words in `message`, or `stale`); a card with no install path has no
-progress bar, and shows it in the attribute only. A refusal of such an install that only
+progress bar, and shows it in the attribute only. Beside a plugin that says it cannot update
+itself - an older one, or one its package manager did not install - a phase before `installing`
+is `stale` at once, because only the plugin that asked reports those. A later phase is `stale`
+once the update topic has stood still for ten minutes: a plugin from 0.4.0 on that started in
+the middle of an update reports it to its end without claiming that it can update itself, and
+says nothing while the receiver's helper proves it or puts the previous version back. The price
+is that a phase nobody will move any more - its helper was killed, say - keeps the card busy for
+those ten minutes. The count is kept when the integration reloads and starts again when Home
+Assistant restarts, so each restart can add up to ten minutes, never past the 25. A refusal of
+such an install that only
 the receiver sees - no internet and no answer from Home Assistant, a clock that calls Home
 Assistant's address expired - is in `last_refusal`, in the household's language, for as long as it
 is on the receiver's `last_error`: the next command that succeeds clears both. The end of a
@@ -1408,10 +1417,11 @@ by raising, with a sentence in the household's language. There are two kinds, an
 | `ServiceValidationError` | The call was **refused and nothing was done**, for a reason the caller can act on or wait out: the moment, or what was asked for | *Sprawdź aktualizacje wtyczki* pressed again inside its ten minutes; the zap history refusing to clear in standby or with one channel in it; an install refused for a recording, a timer about to start, standby, a stream, another install or the package manager running; a version the signed index withdraws or does not list; a downgrade |
 | `HomeAssistantError` | Something was **tried and failed**, the receiver did not answer, or the refusal is the receiver's own English sentence without a reason code, which can be either | no answer within ten seconds; an install, restart or rollback that failed; a download that failed; a receiver that cannot be reached over SSH; `not_cleared` after the 0 key |
 
-In the frontend a `ServiceValidationError` is shown as the sentence it carries, and a
-`HomeAssistantError` with "Failed to perform the action" in front of it. Over the WebSocket API
-the answer carries the code `service_validation_error` or `home_assistant_error` and the
-sentence's `translation_key`.
+Over the WebSocket API - the one Home Assistant's own pages use - the answer carries the code
+`service_validation_error` or `home_assistant_error` and the sentence's `translation_key`, so a
+client can say the sentence in the household's language either way. Home Assistant logs one line
+for both: the sentence alone for a refusal, and "Error during service call to ..." in front of
+it for a failure, with the traceback at debug level only (Home Assistant 2026.9.2).
 
 **The REST API answers 500 for both.** `POST /api/services/<domain>/<service>` turns only a
 schema error and an unknown service into a client error (measured on Home Assistant 2026.9.2):

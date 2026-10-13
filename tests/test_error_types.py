@@ -106,7 +106,7 @@ async def test_the_websocket_api_says_which_it_was_with_the_translation_key(
     code: str,
     key: str,
 ) -> None:
-    """What the frontend is told: the code it words the toast by, and the sentence's key."""
+    """What a client of the WebSocket API is told: which of the two, and the sentence's key."""
     await async_setup_box(hass, config_entry)
     client = await hass_ws_client(hass)
 

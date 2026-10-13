@@ -831,6 +831,37 @@ def test_a_zero_width_character_does_not_carry_a_link_past_the_check() -> None:
     assert _plain(f"see w{WJ}w{ZWJ}w.e.example") == "see www e.example"
 
 
+# Characters of a letter's or a mark's category that are drawn as nothing: the Hangul
+# fillers, the Braille blank, the combining grapheme joiner, both ranges of variation
+# selectors at their edges, the Mongolian free variation selectors and the Khmer inherent
+# vowels.
+UNSEEN = [
+    "\u115f", "\u1160", "\u3164", "\uffa0", "\u2800", "\u034f",
+    "\ufe00", "\ufe0f", "\U000e0100", "\U000e01ef",
+    "\u180b", "\u180c", "\u180d", "\u180f", "\u17b4", "\u17b5",
+]
+# Their neighbours, which are seen and stay: a Hangul vowel, the characters on either
+# side of the first range of variation selectors, Mongolian punctuation and a digit, a
+# Khmer letter and a Khmer vowel sign.
+SEEN = ["\u1161", "\ufdff", "\ufe10", "\u180a", "\u1810", "\u17b3", "\u17b6"]
+
+
+@pytest.mark.parametrize("character", UNSEEN, ids=[ascii(item) for item in UNSEEN])
+def test_a_character_that_is_drawn_as_nothing_is_taken_out_of_a_name(character: str) -> None:
+    from custom_components.enigma2_mqtt.withheld import _named, _visible  # noqa: PLC0415
+
+    assert _visible(f"Sp{character}ort{character}") == "Sport"
+    # And a name made of nothing else falls back like an empty one.
+    assert _named(character * 3, "sport_hd") == "sport_hd"
+
+
+@pytest.mark.parametrize("character", SEEN, ids=[ascii(item) for item in SEEN])
+def test_the_characters_next_to_the_unseen_ones_stay(character: str) -> None:
+    from custom_components.enigma2_mqtt.withheld import _visible  # noqa: PLC0415
+
+    assert _visible(f"Sp{character}ort") == f"Sp{character}ort"
+
+
 # Names of which nothing is left once they are plain text.
 NOTHING = [RLO + ZWSP, "***", "~~ ##", " \t ", ZWJ + ZWJ, "_ _", "\u3164\u2800", "\ufe0f"]
 

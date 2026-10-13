@@ -7,15 +7,20 @@ that, and they say different things:
 - `ServiceValidationError` - the call was refused and nothing was done, for a reason the
   caller can act on or wait out: what was asked for (a version that cannot be had, a
   downgrade), or the moment (a rate limit, standby, a recording, another install running,
-  a zap history too short to clear). The frontend shows the sentence as it is, and the
-  log gets one line without a traceback.
+  a zap history too short to clear).
 - `HomeAssistantError` - something was tried and failed, the receiver did not answer, or
   the reason is the receiver's own English sentence without a code, which can be either.
-  The frontend puts "Failed to perform the action" in front of the sentence.
 
 The second is the base class of the first, so code that catches `HomeAssistantError` sees
 both. Where a refusal carries a reason code the code decides; where it carries none the
 type stays `HomeAssistantError`, because a sentence cannot be classified.
+
+What the type changes is what a caller is told. Over the WebSocket API a refusal is
+answered `service_validation_error` and a failure `home_assistant_error`, each with the
+sentence's translation key, and Home Assistant logs one line for either - the sentence
+alone for a refusal, "Error during service call to ..." in front of it for a failure -
+with the traceback at debug level only (Home Assistant 2026.9). How a frontend words the
+two codes is its own business, and nothing here relies on it.
 
 What neither type changes is the REST API. `POST /api/services/<domain>/<service>` turns
 only a schema error and an unknown service into a client error (Home Assistant 2026.9);

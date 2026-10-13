@@ -118,8 +118,11 @@ def issue_id(entry_id: str) -> str:
 
 
 # Letters and marks by category that are drawn as nothing: the Hangul fillers, the
-# Braille pattern blank and the combining grapheme joiner.
-_DRAWN_AS_NOTHING = frozenset("\u115f\u1160\u3164\uffa0\u2800\u034f")
+# Braille pattern blank, the combining grapheme joiner, the Mongolian free variation
+# selectors and the two Khmer inherent vowels, which stand for a sound and have no glyph.
+_DRAWN_AS_NOTHING = frozenset(
+    "\u115f\u1160\u3164\uffa0\u2800\u034f\u180b\u180c\u180d\u180f\u17b4\u17b5"
+)
 
 
 def _visible(text: str) -> str:
@@ -134,9 +137,12 @@ def _visible(text: str) -> str:
     and is folded by the caller.
 
     A few characters of other categories are drawn as nothing as well - the Hangul
-    fillers, the Braille blank, the combining grapheme joiner, the variation selectors -
-    and a name made of them would be a pair of empty quotation marks. They go too, so
-    that such a name falls back like an empty one.
+    fillers, the Braille blank, the combining grapheme joiner, the variation selectors,
+    the Mongolian ones among them, the Khmer inherent vowels - and a name made of them
+    would be a pair of empty quotation marks. They go too, so that such a name falls
+    back like an empty one. A name that uses one of them for what it is - a Mongolian
+    letter in another of its forms, a Khmer syllable written with its inherent vowel -
+    is shown in the repair's text in its plain form.
     """
     return "".join(
         character

@@ -80,7 +80,8 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   capability for the command, so the button is created only for a receiver whose `info.plugin`
   is 0.5.0 or later; an older plugin would answer "unknown command" and gets none, and on a
   receiver taken back to an older plugin the button is unavailable. It is unavailable while
-  the receiver is offline, and a press the receiver does not answer raises and clears nothing
+  the receiver is offline, and a press the receiver does not answer raises and clears nothing;
+  only the empty payload is that answer, not one that merely is no complaint
   (DOCUMENTATION.md §4.3 and §4.5).
 
 ### Changed
@@ -106,9 +107,10 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
 
 ### Fixed
 
-- **A refusal is no longer shown as an action that failed.** Every refused or failed call
-  raised `HomeAssistantError`, so the frontend put "Failed to perform the action" in front of
-  sentences that say nothing failed - *Sprawdź aktualizacje wtyczki* pressed again inside its
+- **A refusal is no longer raised as an action that failed.** Every refused or failed call
+  raised `HomeAssistantError`, the type Home Assistant has for something that was tried and
+  failed and logs as "Error during service call", also for sentences that say nothing
+  failed - *Sprawdź aktualizacje wtyczki* pressed again inside its
   ten minutes, a zap history that will not clear in standby. A refusal - the moment or the
   request was wrong, and nothing was done - now raises `ServiceValidationError`: the receiver's
   refusals that carry a reason code, the check button's limit, the update card's refusals
@@ -128,18 +130,35 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   Assistant restart left the forced reinstall refused for all of that time with no end named.
   The refusal now says "The lock expires in about N min at the latest", in the guided
   installer, the options flow, the update card and the forced reinstall, in English, Polish
-  and German. The lock is still never taken back (DOCUMENTATION.md §3).
+  and German. The lock is still never taken back (DOCUMENTATION.md §3). No refusal names
+  more than the thirty minutes a lock is honoured for: the installer's for a lock whose
+  holder stopped could say "31", and the receiver's own number in a refusal over MQTT was
+  repeated whatever it was.
 - **An update over MQTT whose plugin was replaced under it ends at once.** When something else
   installed a plugin while the card was following its own update - the release put over a
   development build of the same number by hand, an install over SSH - the new plugin has no
   record of the transaction, and the card stayed busy for up to 25 minutes and then said the
-  update was still running. Now the call ends as soon as the receiver's `update` no longer
-  carries the transaction **and** `info` names another version or build than the one that
-  accepted it: as installed when the receiver runs the release that was asked for, and
-  otherwise with a sentence that says the update is no longer reported and what runs instead.
-  A transaction started on the receiver and left on `update` by a plugin that has since been
-  replaced by one that cannot update itself - after a downgrade chosen on the receiver - no
-  longer holds the card busy either.
+  update was still running. Now the call ends as soon as a new plugin is heard to start
+  without it: an `info` that names another version or build than the one before it, and then,
+  as that plugin's first word on `update`, a payload that does not carry the transaction - as
+  installed when the receiver runs the release that was asked for, and otherwise with a
+  sentence that says the update is no longer reported and what runs instead. An `update`
+  payload without the transaction that no starting plugin said - a leftover, another broker
+  client's, the broker's replay - ends nothing, before the new plugin speaks or after, and
+  neither does an `info` that names no plugin, before a new plugin is heard or after it; the
+  update is then followed to the end its helper writes.
+- **A phase left on `update` beside a plugin that cannot update itself stops holding the
+  card, but not while the update can still move.** A plugin that says it cannot update
+  itself - an older one, or one its package manager did not install - starts no transaction,
+  and the phase a plugin before it left on the topic kept the card busy until the 25-minute
+  window closed. A phase before `installing`, which only the plugin that asked reports, is
+  now `stale` at once. From `installing` on a plugin from 0.4.0 on that started in the
+  middle of an update reports it to its end without claiming that it can update itself, and
+  is silent while the receiver's helper proves it or puts the previous version back, so such
+  a phase stays on the card until the topic has stood still for ten minutes. A phase nobody
+  will move any more is therefore shown for up to ten minutes too. The count is kept across
+  a reload of the integration and starts again with a restart of Home Assistant, never past
+  the 25-minute window (DOCUMENTATION.md §4.5).
 - **Two outcome sentences of a withdrawn install say what holds in every case.** After a
   withdrawal that could not put the previous files back, the sentence said the new files are
   still on the receiver; after a restore that failed part-way they may be partly new and
@@ -147,7 +166,8 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   confirmed, the sentence now adds that if the television shows a question about restarting,
   either answer is safe.
 - **The repair for withheld payloads cannot be bent by a name.** Direction controls, zero-width
-  characters and other characters that are not seen are removed from a bouquet's name, the
+  characters and other characters that are not seen - variation selectors, the Mongolian
+  ones included, fillers, the Khmer inherent vowels - are removed from a bouquet's name, the
   device's name and a topic before they are put into the repair's text; a name of which
   nothing is left is replaced by the bouquet's slug, the entry's title or the node id, and by
   "?" when none is left. An `info` of `{}` now takes the repair away like any `info` that

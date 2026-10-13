@@ -897,12 +897,19 @@ class Enigma2State:
     # Whether the last `update` arrived retained: the broker's replay, which can describe an
     # earlier transaction and is never the answer to a request just sent.
     update_retained: bool = False
+    # Whether the last `info` that was read arrived retained: the broker's replay of what a
+    # plugin said earlier, and not a plugin speaking now.
+    info_retained: bool = False
     last_error: dict[str, Any] | None = None
     # Whether the last complaint arrived with the retain flag set. A retained payload
     # is what the broker had before we subscribed, so it is a replay of something that
     # already happened rather than news - which matters to anything that stamps a time
     # on it, because a reconnect replays it again.
     last_error_retained: bool = False
+    # Whether the last payload on `last_error` was the empty one - the receiver clearing
+    # the topic. `last_error` is None for that and for a payload that is not a JSON
+    # object alike, and only the first is a clearing.
+    last_error_empty: bool = False
     # A failure Home Assistant records itself on „Ostatni błąd": `cmd`, `error`, `ts`.
     local_error: dict[str, Any] | None = None
     screen: bytes | None = None
@@ -1810,6 +1817,7 @@ class Enigma2Box:
         self.info_retracted = False
         self.info_received = True
         self.state.info = info
+        self.state.info_retained = msg.retain
         self.state.not_published = normalise_not_published(info)
         self._async_channel_topics_reviewed()
         if self.cam_enabled and self._pending_cam is not _NO_PENDING_CAM:
@@ -2568,6 +2576,7 @@ class Enigma2Box:
         error = parse_json_payload(msg.payload)
         self.state.last_error = error
         self.state.last_error_retained = msg.retain
+        self.state.last_error_empty = not msg.payload
         if not msg.retain and error is not None:
             cmd = error.get("cmd")
             text = str(error.get("error") or "")
