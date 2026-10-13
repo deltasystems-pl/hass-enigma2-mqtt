@@ -38,9 +38,13 @@ an update, or loses it with a downgrade, is sent what it takes from its next `in
 is "no": the cost of a wrong "yes" is a command the receiver refuses, the cost of a wrong "no" is
 the matching of before.
 
-**2. The id is 32 random hexadecimal digits, new for every command.** That is 128 bits in half
-of the 64 characters the plugin allows, with no prefix: the plugin drops an id that holds one of
-its secrets, and a fixed word in front of every id could hold a short password every time.
+**2. The id is 16 random hexadecimal digits, new for every command.** That is 64 bits in a
+quarter of the 64 characters the plugin allows. An id has to differ only from the others being
+waited for at the same time - seconds for a command, minutes for an update - and 64 bits do
+that. A shorter id is also dropped less often: the plugin drops an id that holds one of its
+secrets, and the fewer digits there are, the less often they happen to spell a short password
+made of digits and the letters a to f. For the same reason there is no prefix: a fixed word in
+front of every id could hold a short password every time.
 
 **3. The payload travels as a string, also when it is the text of a JSON object.** The plugin
 takes an object there too, but it writes an object again before the command reads it: other
@@ -103,6 +107,8 @@ id included, and the log says at debug level when a refusal was left alone for i
   says the envelope is opened. A development build and a fork answer the second question only.
 - **Envelopes from the installer and the config flow.** They would have to read `info` for a
   command whose refusal they do not wait for.
+- **A longer id.** 32 digits were built first. They buy nothing a command's wait needs, cost 16
+  more bytes of every command, and double the chance of an id the plugin drops.
 - **Showing the id on „Ostatni błąd".** It says nothing a person can act on.
 
 ## Consequences
@@ -113,7 +119,7 @@ id included, and the log says at debug level when a refusal was left alone for i
 - **Nothing on the wire changes for a plugin without the capability.** Every command is the
   bytes it was; the differential test in `tests/test_command_id.py` sends each kind of command
   to both and compares.
-- **The largest command that still gets an id is 54 bytes smaller than the plugin's limit**, less
+- **The largest command that still gets an id is 38 bytes smaller than the plugin's limit**, less
   one byte for every quote and backslash in it. Past that the command goes out bare.
 - **A command the plugin reports under another name is now matched.** With the id, the name in
   `last_error.cmd` is not asked a second time.

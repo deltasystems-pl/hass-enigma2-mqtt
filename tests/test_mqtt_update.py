@@ -3686,7 +3686,7 @@ async def test_a_refusal_right_after_a_reconnect_is_a_refusal_on_the_card(
 # request started (the plugin's TOPICS.md, section 2). `tests/test_command_id.py` holds the
 # rule itself; these are the update's two readers of `last_error`.
 
-COMMAND_ID = re.compile(r"[0-9a-f]{32}")
+COMMAND_ID = re.compile(r"[0-9a-f]{16}")
 SOMEBODY_ELSES = "7f9c2e4a-3b1d-4c8e-9f60-2d5a1b7c8e90"
 
 UPDATING_WITH_IDS = {

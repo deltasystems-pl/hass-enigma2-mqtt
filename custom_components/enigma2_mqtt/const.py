@@ -257,13 +257,16 @@ COMMAND_TIMEOUT: Final = 10
 # plugin says it opens the envelope; one that does not claim it takes an envelope for
 # the command's own payload, so it is never sent one.
 CAPABILITY_COMMAND_ID: Final = "command_id"
-# Random bytes in an id, written as twice as many hexadecimal digits: 128 bits, which no
-# two commands share by accident, in 32 of the 64 characters an id may have. No prefix:
-# the plugin drops an id that holds one of its secrets, and a fixed word in front of
-# every id could hold a short password every time.
-COMMAND_ID_BYTES: Final = 16
-# The most bytes of a command the plugin reads; a longer one is discarded unanswered. The
-# envelope counts, so a command that fits only without one is sent without one.
+# Random bytes in an id, written as twice as many hexadecimal digits: 64 bits in 16 of the
+# 64 characters an id may have. An id only has to differ from the others waited for in
+# the seconds or minutes a command waits, which 64 bits do; and the shorter it is, the
+# less often it happens to hold a short secret of the plugin's - an id that does is
+# dropped - and the less of the command's size it takes. No prefix, for the same reason:
+# a fixed word in front of every id could hold a short password every time.
+COMMAND_ID_BYTES: Final = 8
+# The most bytes of a command the plugin reads (its `commands.MAX_PAYLOAD_BYTES`); a
+# longer one is discarded unanswered. The envelope counts, so a command that fits only
+# without one is sent without one.
 COMMAND_MAX_BYTES: Final = 4096
 # What is never put in an envelope, whatever the plugin claims: `cmd/relay` is the answer
 # to the receiver's own `relay_request` and not a command - the plugin does not open an

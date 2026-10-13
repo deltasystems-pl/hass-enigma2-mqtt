@@ -85,17 +85,21 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   (DOCUMENTATION.md §4.3 and §4.5).
 - **A command carries an id, and a refusal is matched by it.** Plugin 0.5.0 takes a command in
   an envelope with an id and says the id back on `last_error` when it refuses that command; it
-  says so with the capability `command_id`. To a receiver that claims it, every command now
-  goes out as `{"id": "<32 random hexadecimal digits>", "payload": "<the payload as before>"}`,
+  says so with the capability `command_id`. To a receiver that claims it, the commands of the
+  entities, the actions, the options form, the update over MQTT and the uninstall now
+  go out as `{"id": "<16 random hexadecimal digits>", "payload": "<the payload as before>"}`,
   and a waiting button, action, update or uninstall is failed by the refusal that says its own
   id - never by one that says another. Until now a refusal failed every waiting command of its
   name: two zaps sent close together were both failed by the refusal of one, and another broker
   client's refused `cmd/update` or `cmd/uninstall` ended Home Assistant's own as "refused". A
   refusal without an id is read by the command's name as before, because the plugin may have
   dropped the id. A receiver on plugin 0.4.0 or older, and one whose `info` has not arrived or
-  was retracted, is sent exactly the payloads it was sent before. `cmd/relay` is never in an
-  envelope, and a command that would pass the plugin's 4096-byte limit only without one is sent
-  without. The id is on no entity; the diagnostics download shows it inside `last_error`
+  was retracted, is sent exactly the payloads it was sent before. Not in an envelope, with any
+  plugin: `cmd/relay`, which is an answer and not a command; a command that would pass the
+  plugin's 4096-byte limit only without one; and the few commands sent where nothing has read
+  the receiver's `info` - the mode switch when a receiver is added or its entry removed, and the
+  installer's `cmd/reset` after a downgrade and `cmd/bouquet` after a restart. Nothing waits
+  for a refusal of those. The id is on no entity; the diagnostics download shows it inside `last_error`
   (DOCUMENTATION.md §5,
   [ADR-0010](docs/adr/0010-a-command-carries-an-id-and-a-refusal-is-matched-by-it.md)).
 

@@ -1921,7 +1921,7 @@ async def test_an_ssh_failure_during_the_probe_costs_only_the_verification(
 # says the id back on `last_error` - for a refusal, and for a removal that stopped (the
 # plugin's TOPICS.md, section 2). `tests/test_command_id.py` holds the rule itself.
 
-COMMAND_ID = re.compile(r"[0-9a-f]{32}")
+COMMAND_ID = re.compile(r"[0-9a-f]{16}")
 SOMEBODY_ELSES = "7f9c2e4a-3b1d-4c8e-9f60-2d5a1b7c8e90"
 
 PERMITTED_WITH_IDS = {

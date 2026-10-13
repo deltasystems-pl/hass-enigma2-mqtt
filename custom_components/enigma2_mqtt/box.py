@@ -1117,6 +1117,8 @@ class Enigma2Box:
         longer says what the plugin on the receiver takes. A plugin that does not open
         the envelope refuses most commands sent in one, so "not known" is "no".
         """
+        # An `info` that is not a JSON object changes nothing here, as it changes nothing
+        # anywhere: `_info_received` drops it and every reader keeps the last good one.
         if self.info_retracted:
             return False
         capabilities = self.state.info.get("capabilities")

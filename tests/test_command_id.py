@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from contextlib import suppress
 import json
 from pathlib import Path
 import re
@@ -79,9 +78,9 @@ from .conftest import (
 
 PLAYER = "media_player.dekoder_salon"
 COMMANDS = f"{BASE_TOPIC}/{NODE_ID}/cmd/"
-# What this integration makes an id of: 32 hexadecimal digits, inside the plugin's rule of
+# What this integration makes an id of: 16 hexadecimal digits, inside the plugin's rule of
 # 1 to 64 characters out of letters, digits, `.`, `_`, `:` and `-`.
-AN_ID = re.compile(r"[0-9a-f]{32}")
+AN_ID = re.compile(r"[0-9a-f]{16}")
 SOMEBODY_ELSES = "7f9c2e4a-3b1d-4c8e-9f60-2d5a1b7c8e90"
 
 # The example receiver, running a plugin that opens the envelope.
@@ -163,8 +162,8 @@ async def _box(
 
 
 def test_an_id_is_random_hexadecimal_and_inside_the_plugin_s_rule() -> None:
-    """Thirty-two hexadecimal digits and no prefix: the plugin drops an id that holds one
-    of its secrets, and a fixed word in front could hold a short password every time."""
+    """Sixteen hexadecimal digits and no prefix: the plugin drops an id that holds one of
+    its secrets, and a fixed word in front could hold a short password every time."""
     ids = {new_command_id() for _ in range(200)}
 
     assert len(ids) == 200
@@ -379,37 +378,52 @@ def _direct(name: str, payload: str) -> Callable[..., Any]:
 
 
 # One of every kind of sender that goes through the runtime object, and the command it is
-# expected to publish. The update, the uninstall and the mode switch have their own tests
-# below; `test_no_command_is_published_past_the_runtime_object` holds the list closed.
-SENDERS: list[tuple[str, str, Callable[..., Awaitable[None]]]] = [
-    ("action zap by reference", "zap", _action("zap", sref=SREF_TWO)),
-    ("action zap by name", "zap", _action("zap", name="TVN HD")),
-    ("action select_bouquet", "bouquet", _action("select_bouquet", sref=BOUQUET["sref"])),
-    ("action send_key", "key", _action("send_key", key="green", long=True)),
+# expected to publish, and whether the sender waits to hear a refusal - the actions and
+# the buttons do, the controls that move the moment they are pressed do not. The update,
+# the uninstall and the mode switch have their own tests below;
+# `test_no_command_is_published_past_the_runtime_object` holds the list closed.
+SENDERS: list[tuple[str, str, Callable[..., Awaitable[None]], bool]] = [
+    ("action zap by reference", "zap", _action("zap", sref=SREF_TWO), True),
+    ("action zap by name", "zap", _action("zap", name="TVN HD"), True),
+    ("action select_bouquet", "bouquet", _action("select_bouquet", sref=BOUQUET["sref"]), True),
+    ("action send_key", "key", _action("send_key", key="green", long=True), True),
     (
         "action message",
         "message",
         _action("message", text='Uwaga: "żółć" 100 %', type="warning"),
+        True,
     ),
-    ("action add_timer", "timer", _action("add_timer", sref=SREF, event_id=27431)),
-    ("action record", "record", _action("record", action="start")),
-    ("action screenshot", "screenshot", _action("screenshot")),
-    ("switch power off", "power", _entity("switch", "turn_off", "switch.dekoder_salon_power")),
-    ("switch mute on", "mute", _entity("switch", "turn_on", "switch.dekoder_salon_mute")),
+    ("action add_timer", "timer", _action("add_timer", sref=SREF, event_id=27431), True),
+    ("action record", "record", _action("record", action="start"), True),
+    ("action screenshot", "screenshot", _action("screenshot"), True),
+    (
+        "switch power off",
+        "power",
+        _entity("switch", "turn_off", "switch.dekoder_salon_power"),
+        False,
+    ),
+    ("switch mute on", "mute", _entity("switch", "turn_on", "switch.dekoder_salon_mute"), False),
     (
         "number volume",
         "volume",
         _entity("number", "set_value", "number.dekoder_salon_volume", value=20),
+        False,
     ),
-    ("player off", "power", _entity("media_player", "turn_off", PLAYER)),
-    ("player volume", "volume", _entity("media_player", "volume_set", PLAYER, volume_level=0.4)),
+    ("player off", "power", _entity("media_player", "turn_off", PLAYER), False),
+    (
+        "player volume",
+        "volume",
+        _entity("media_player", "volume_set", PLAYER, volume_level=0.4),
+        False,
+    ),
     (
         "player mute",
         "mute",
         _entity("media_player", "volume_mute", PLAYER, is_volume_muted=True),
+        False,
     ),
-    ("player next", "key", _entity("media_player", "media_next_track", PLAYER)),
-    ("player previous", "key", _entity("media_player", "media_previous_track", PLAYER)),
+    ("player next", "key", _entity("media_player", "media_next_track", PLAYER), False),
+    ("player previous", "key", _entity("media_player", "media_previous_track", PLAYER), False),
     (
         "player play_media",
         "zap",
@@ -420,52 +434,60 @@ SENDERS: list[tuple[str, str, Callable[..., Awaitable[None]]]] = [
             media_content_type="channel",
             media_content_id=SREF_TWO,
         ),
+        False,
     ),
-    ("remote off", "power", _entity("remote", "turn_off", "remote.dekoder_salon_remote")),
+    ("remote off", "power", _entity("remote", "turn_off", "remote.dekoder_salon_remote"), False),
     (
         "remote send_command",
         "key",
         _entity("remote", "send_command", "remote.dekoder_salon_remote", command=["KEY_OK"]),
+        False,
     ),
     (
         "notify",
         "message",
         _entity("notify", "send_message", "notify.dekoder_salon_osd", message="Kolacja"),
+        False,
     ),
     (
         "button screenshot",
         "screenshot",
         _entity("button", "press", "button.dekoder_salon_screenshot"),
+        True,
     ),
     (
         "button refresh_discovery",
         "discovery",
         _entity("button", "press", "button.dekoder_salon_refresh_discovery"),
+        True,
     ),
     (
         "button restart_gui",
         "restart_gui",
         _entity("button", "press", "button.dekoder_salon_restart_gui"),
+        True,
     ),
     (
         "button refresh_epg",
         "epg_grid",
         _entity("button", "press", "button.dekoder_salon_refresh_epg"),
+        True,
     ),
-    ("press-style command", "epg_import", _direct("epg_import", "PRESS")),
+    ("press-style command", "epg_import", _direct("epg_import", "PRESS"), True),
     (
         "settings",
         "config",
         _direct("config", json.dumps({"publish_keys": False, "screenshot_interval": 90})),
+        True,
     ),
-    ("zap history", "zap_history", _direct("zap_history", json.dumps({"sref": SREF}))),
+    ("zap history", "zap_history", _direct("zap_history", json.dumps({"sref": SREF})), True),
 ]
 
 
 @pytest.mark.parametrize(
-    ("name", "send"),
-    [(name, send) for _, name, send in SENDERS],
-    ids=[label for label, _, _ in SENDERS],
+    ("name", "send", "waits"),
+    [(name, send, waits) for _, name, send, waits in SENDERS],
+    ids=[label for label, _, _, _ in SENDERS],
 )
 async def test_a_command_is_the_same_text_with_and_without_the_envelope(
     hass: HomeAssistant,
@@ -474,6 +496,7 @@ async def test_a_command_is_the_same_text_with_and_without_the_envelope(
     config_entry: MockConfigEntry,
     name: str,
     send: Callable[[HomeAssistant], Awaitable[None]],
+    waits: bool,
 ) -> None:
     """The same press three times: to an older plugin, to one that claims `command_id`,
     and to an older one again.
@@ -481,17 +504,24 @@ async def test_a_command_is_the_same_text_with_and_without_the_envelope(
     Without the capability the command is what it always was - no member added, nothing
     re-spelled. With it, the envelope holds exactly that text as a string. The fake
     receiver refuses every command the way the plugin does, with the id when there was
-    one, so every sender is also seen to end on its own refusal either way.
+    one, and a sender that waits for its answer raises that refusal all three times -
+    by the command's name from an older plugin, by its id from one with ids.
     """
     await _box(hass, config_entry, box_on_the_broker, OLDER_WITH_BOUQUETS)
     receiver = Receiver(hass)
     receiver.answer = lambda heard, command_id, _inner: receiver.refuse(heard, command_id)
     await receiver.arm()
 
+    refused: list[str | None] = []
+
     async def _sent() -> list[tuple[str, str, str | None, str]]:
         receiver.heard.clear()
-        with suppress(HomeAssistantError):
+        try:
             await send(hass)
+        except HomeAssistantError as error:
+            refused.append(error.translation_key)
+        else:
+            refused.append(None)
         await hass.async_block_till_done()
         return list(receiver.heard)
 
@@ -502,6 +532,7 @@ async def test_a_command_is_the_same_text_with_and_without_the_envelope(
     again = await _sent()
 
     assert [heard for heard, _, _, _ in bare] == [name]
+    assert refused == ["command_refused" if waits else None] * 3
     # To a plugin without the capability: the payload itself, and no id.
     assert all(wire == inner and command_id is None for _, wire, command_id, inner in bare)
     assert again == bare
@@ -513,11 +544,18 @@ async def test_a_command_is_the_same_text_with_and_without_the_envelope(
         assert inner == was
 
 
+# The ways a command topic is written in source: the helper, a string with the topic's
+# `/cmd/` level in it, and a string that starts with `cmd/`.
+_BUILDS_A_COMMAND_TOPIC = re.compile(r"""\bcommand_topic\(|/cmd/|["']cmd/""")
+
+
 def test_no_command_is_published_past_the_runtime_object() -> None:
     """Every command leaves through `Enigma2Box`, or is on this list with its reason.
 
     A new sender that built its own topic would publish bare to a plugin that takes ids
-    and could not tell its refusal from another's. The four modules below build a command
+    and could not tell its refusal from another's. A topic can be built three ways and all
+    three are looked for: `command_topic(...)`, a string with `/cmd/` in it, and a string
+    that starts with `cmd/` to be joined to a base. The four modules below build a command
     topic themselves:
 
     - `uninstall.py` - enveloped, through `Enigma2Box.async_wire_payload`;
@@ -533,10 +571,38 @@ def test_no_command_is_published_past_the_runtime_object() -> None:
     builders = {
         path.name
         for path in sources.glob("*.py")
-        if re.search(r"\bcommand_topic\(|/cmd/\{", path.read_text(encoding="utf-8"))
+        if _BUILDS_A_COMMAND_TOPIC.search(path.read_text(encoding="utf-8"))
     }
 
     assert builders == {"box.py", "uninstall.py", "__init__.py", "installer.py", "restart_rule.py"}
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'topic = command_topic(base_topic, node_id, "reset")',
+        'topic = f"{base_topic}/{node_id}/cmd/{name}"',
+        'topic = f"{base_topic}/{node_id}/cmd/reset"',
+        'topic = base_topic + "/" + node_id + "/cmd/reset"',
+        "topic = prefix + 'cmd/reset'",
+        'topic = "/".join((base_topic, node_id, "cmd/reset"))',
+    ],
+)
+def test_a_command_topic_is_recognised_however_it_is_built(line: str) -> None:
+    """A literal topic is a sender too, and so is one joined from pieces."""
+    assert _BUILDS_A_COMMAND_TOPIC.search(line)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "# `cmd/reset` retracts them all and republishes its own.",
+        '"Receiver %s retracted its topics and went offline after cmd/uninstall",',
+        '"""Answer a receiver that asks for a package: `cmd/relay`, or nothing."""',
+    ],
+)
+def test_a_command_named_in_a_comment_or_a_log_line_is_no_sender(line: str) -> None:
+    assert not _BUILDS_A_COMMAND_TOPIC.search(line)
 
 
 # --------------------------------------------------------------- what stays bare --
@@ -570,7 +636,12 @@ async def test_a_command_that_fits_only_without_the_envelope_goes_out_bare(
     command the envelope would push over the limit keeps its place and loses its id."""
     box = await _box(hass, config_entry, box_on_the_broker)
     receiver = await Receiver(hass).arm()
+    # The plugin's own number, `MAX_PAYLOAD_BYTES` in its `commands.py`, written out: a
+    # limit that drifted here would be measured against itself by everything below.
+    assert COMMAND_MAX_BYTES == 4096
     overhead = len(command_envelope(new_command_id(), ""))
+    # `{"id":"` and `","payload":"` and `"}` around sixteen digits.
+    assert overhead == 38
     fits = "x" * (COMMAND_MAX_BYTES - overhead)
     # Two bytes a character in UTF-8: the limit is in bytes, as the plugin counts it.
     fits_in_bytes = "ż" * ((COMMAND_MAX_BYTES - overhead) // 2)
@@ -683,6 +754,39 @@ async def test_a_refusal_that_says_the_command_s_id_fails_it(
         "command": "zap",
         "reason": "no such channel",
     }
+
+
+@pytest.mark.parametrize("with_id", [True, False], ids=["its id", "no id"])
+@pytest.mark.parametrize("info", [CLAIMS, INFO], ids=["with ids", "an older plugin"])
+async def test_a_retained_refusal_never_fails_a_waiting_command(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    info: dict[str, Any],
+    with_id: bool,
+) -> None:
+    """A retained `last_error` is the broker's replay of what it held - Home Assistant
+    reconnected and subscribed again while the command waited - and not the receiver
+    speaking now. It fails nothing: not by the command's name, and not by its id
+    either, which a replay of this very command's refusal would carry."""
+    box = await _box(hass, config_entry, box_on_the_broker, info)
+    receiver = await Receiver(hass).arm()
+    task = _start(_zap(box))
+    await _waiting(receiver, "zap")
+    command_id = receiver.ids("zap")[0]
+    assert (command_id is not None) is (info is CLAIMS)
+    payload: dict[str, Any] = {"cmd": "zap", "error": "no such channel", "ts": 1789459213}
+    if with_id and command_id is not None:
+        payload["id"] = command_id
+
+    async_fire_mqtt_message(hass, LAST_ERROR_TOPIC, json.dumps(payload), retain=True)
+    await _settle()
+    assert not task.done()
+    assert box.state.last_error == payload
+    _tuned(hass)
+
+    await task
 
 
 async def test_a_refusal_that_says_another_id_does_not_fail_a_command_of_that_name(

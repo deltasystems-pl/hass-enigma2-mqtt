@@ -1394,7 +1394,7 @@ before the command was sent, not an answer to it.
 **Whose refusal it is.** `last_error` names the refused command, and until plugin 0.5.0 that
 was all there was to go by: a refusal of `zap` failed every zap being waited for, whoever had
 sent the one refused. A plugin that claims the capability `command_id` is sent each command in
-an envelope with a fresh random id - `{"id": "<32 hexadecimal digits>", "payload": "<the
+an envelope with a fresh random id - `{"id": "<16 hexadecimal digits>", "payload": "<the
 command's payload>"}` - and says the id back on `last_error` when it refuses that command.
 Then:
 
