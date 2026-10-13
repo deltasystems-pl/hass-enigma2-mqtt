@@ -53,6 +53,7 @@ from .box import (
     service_identity,
 )
 from .const import (
+    ATTR_GO2RTC_STREAM,
     ATTR_STREAM_AUTHENTICATION,
     ATTR_STREAM_NAME,
     ATTR_STREAM_URL,
@@ -240,6 +241,10 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
             attributes[ATTR_STREAM_AUTHENTICATION] = (self.box.state.stream or {}).get(
                 "authentication"
             )
+            if (follower := self.box.go2rtc) is not None and follower.enabled:
+                # The name of the stream the user's own go2rtc is kept on this channel
+                # under, for a dashboard card to play.
+                attributes[ATTR_GO2RTC_STREAM] = follower.stream_name
         return attributes
 
     @callback

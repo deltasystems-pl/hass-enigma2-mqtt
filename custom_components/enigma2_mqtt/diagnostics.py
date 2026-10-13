@@ -59,6 +59,9 @@ TO_REDACT = {
     # The configuration URL is built from the box's address, so redacting `ip` alone
     # would only move the address one key to the right.
     "configuration_url",
+    # The address of the user's own go2rtc is typed, and may carry a user name and a
+    # password for its API.
+    "go2rtc_url",
     "ip",
     "mac",
     "password",
@@ -120,6 +123,9 @@ async def async_get_config_entry_diagnostics(
                 "mode": player_picture_mode(entry.options),
                 "picon_lookup": box.picons.async_status() if box.picons else None,
             },
+            # Whether the user's own go2rtc is kept on the channel, under which name,
+            # and what the last request came to. No address and no channel.
+            "go2rtc": box.go2rtc.async_status() if box.go2rtc else None,
         },
         "announcement": dict(state.announcement),
         "info": dict(state.info),

@@ -785,3 +785,23 @@ CAPABILITY_STREAM_PLAYABLE: Final = "stream_playable"
 STREAM_PLAYABLE_TIMEOUT: Final = 3.0
 # What the receiver's stream server sends: an MPEG transport stream.
 STREAM_MIME_TYPE: Final = "video/mp2t"
+
+# The user's own go2rtc, in the options: the address of its API - empty is "off" - the
+# name of the one stream kept there, and the source it is given, with `{url}` where the
+# receiver's stream address goes (`go2rtc.py`). They sit in a section of the options
+# form of their own.
+SECTION_GO2RTC: Final = "go2rtc"
+CONF_GO2RTC_URL: Final = "go2rtc_url"
+CONF_GO2RTC_STREAM: Final = "go2rtc_stream"
+CONF_GO2RTC_SOURCE: Final = "go2rtc_source"
+GO2RTC_OPTIONS: Final = (CONF_GO2RTC_URL, CONF_GO2RTC_STREAM, CONF_GO2RTC_SOURCE)
+# `ffmpeg:` because go2rtc cannot read the receiver's stream port without it; H.264 for
+# every browser; Opus for WebRTC and AAC for MSE. No space anywhere: go2rtc refuses a
+# source that has one.
+DEFAULT_GO2RTC_SOURCE: Final = "ffmpeg:{url}#video=h264#audio=opus#audio=aac"
+# Seconds one request to that go2rtc may take, and seconds until a failed one is tried
+# again without a channel change.
+GO2RTC_TIMEOUT: Final = 10
+GO2RTC_RETRY_SECONDS: Final = 300
+# The media player's attribute with the name of that stream, for a dashboard card.
+ATTR_GO2RTC_STREAM: Final = "go2rtc_stream"

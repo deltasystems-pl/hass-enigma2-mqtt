@@ -177,6 +177,22 @@
       "settings": {
         "title": "Opcje dekodera",
         "description": "Dekoder zgłasza adres MAC {mac}. Pakiety budzące trafią tam, o ile poniżej nie zostanie podany inny.",
+        "sections": {
+          "go2rtc": {
+            "name": "Własne go2rtc (opcjonalnie)",
+            "description": "Utrzymuje jeden strumień w go2rtc, które prowadzisz samodzielnie, na kanale, na którym jest dekoder, tak aby karta na pulpicie mogła go pokazać. Wyłączone, dopóki adres jest pusty.",
+            "data": {
+              "go2rtc_url": "Adres go2rtc",
+              "go2rtc_stream": "Nazwa strumienia",
+              "go2rtc_source": "Szablon źródła"
+            },
+            "data_description": {
+              "go2rtc_url": "Adres API twojego go2rtc, na przykład `http://homeassistant.local:1984` dla dodatku go2rtc. Przy każdej zmianie kanału Home Assistant wysyła tam nazwę i źródło podane niżej, i nic więcej.",
+              "go2rtc_stream": "Nazwa jednego strumienia, który Home Assistant tam aktualizuje. Tylko litery, cyfry, `_`, `-` i `.`. Puste — `enigma2_` i identyfikator węzła dekodera.",
+              "go2rtc_source": "To, co go2rtc dostaje do odtwarzania. Adres strumienia dekodera trafia w miejsce, w którym wartość domyślna ma znacznik w nawiasach klamrowych. Bez spacji: go2rtc odrzuca źródło ze spacją, więc filtr ze spacjami trzeba zapisać jako nazwany szablon w konfiguracji samego go2rtc. Zostaw `ffmpeg:` na początku; bez niego go2rtc nie odczyta strumienia dekodera."
+            }
+          }
+        },
         "data": {
           "dangerous_buttons": "Pokaż przyciski głębokiego uśpienia i restartu",
           "wol_mac": "Adres MAC do Wake-on-LAN",
@@ -225,6 +241,10 @@
     "error": {
       "plugin_unavailable": "Dekoder nie jest połączony, więc jego ustawienia prywatności nie zostały zmienione. Spróbuj ponownie, gdy będzie dostępny.",
       "plugin_config_failed": "Dekoder nie potwierdził nowych ustawień prywatności. Zachowano poprzednie ustawienia dekodera i opcje Home Assistanta.",
+      "go2rtc_invalid_url": "Adres go2rtc nie jest adresem WWW. Wpisz go jako `http://host:1984`, bez niczego po adresie, albo zostaw pole puste, żeby to wyłączyć.",
+      "go2rtc_invalid_stream": "Nazwa strumienia go2rtc może zawierać tylko litery, cyfry, `_`, `-` i `.`, najwyżej 64 znaki.",
+      "go2rtc_source_spaces": "Szablon źródła go2rtc zawiera spację, a go2rtc odrzuca takie źródło. Filtr, który wymaga spacji, zapisz jako nazwany szablon w konfiguracji samego go2rtc i podaj tu jego nazwę, na przykład `#video=tv`.",
+      "go2rtc_source_placeholder": "Szablon źródła go2rtc musi zawierać znacznik adresu strumienia dekodera dokładnie raz, tak jak wartość domyślna.",
       "invalid_mac": "To nie jest adres MAC. Wpisz go jako `00:00:5e:00:53:01`, `00-00-5e-00-53-01`, `0000.5e00.5301` albo `00005e005301`, albo zostaw pole puste, żeby użyć adresu zgłaszanego przez dekoder.",
       "uninstall_not_confirmed": "Zaznacz pole, aby usunąć wtyczkę. Do dekodera nic nie zostało wysłane.",
       "downgrade_not_confirmed": "Zaznacz pole, aby zainstalować starszą wersję."
@@ -718,6 +738,14 @@
     }
   },
   "issues": {
+    "go2rtc_unreachable": {
+      "title": "{name}: go2rtc nie odpowiada",
+      "description": "Home Assistant utrzymuje strumień „{stream}” w go2rtc pod adresem {host} na kanale, na którym jest dekoder {name}, zgodnie z opcjami dekodera. go2rtc nie odpowiedziało, więc ten strumień nadal pokazuje wcześniejszy kanał albo nic.\n\nSprawdź, czy go2rtc działa i czy adres w opcjach jest adresem jego API (dla dodatku go2rtc: port 1984). Home Assistant spróbuje ponownie przy następnej zmianie kanału i co pięć minut.\n\nTen komunikat zniknie sam, gdy go2rtc znowu przyjmie strumień. Aby przestać używać go2rtc, wyczyść jego adres w opcjach dekodera."
+    },
+    "go2rtc_refused": {
+      "title": "{name}: go2rtc odrzuciło strumień",
+      "description": "go2rtc pod adresem {host} odpowiedziało HTTP {status}, gdy Home Assistant ustawiał jego strumień „{stream}” na kanał, na którym jest dekoder {name}, więc ten strumień nadal pokazuje wcześniejszy kanał albo nic.\n\nSprawdź szablon źródła w opcjach dekodera: go2rtc odrzuca źródło ze spacją, a użyty w nim nazwany szablon musi istnieć w konfiguracji samego go2rtc. Odpowiedź 401 albo 403 oznacza, że API go2rtc wymaga logowania.\n\nTen komunikat zniknie sam, gdy go2rtc znowu przyjmie strumień. Aby przestać używać go2rtc, wyczyść jego adres w opcjach dekodera."
+    },
     "payloads_withheld": {
       "title": "{name}: dekoder nie publikuje wszystkich danych",
       "description": "Wtyczka na dekoderze {name} nie opublikowała poniższych danych, bo każda z tych wiadomości przekroczyłaby dopuszczalny rozmiar jednej wiadomości MQTT i broker zerwałby połączenie:\n\n{withheld}\n\nW Home Assistant oznacza to: kanały bukietu, którego listy brakuje, nie są oferowane, a bukiet bez EPG nie ma programu.\n\nAby je odzyskać, ogranicz bukiety publikowane przez wtyczkę ustawieniem `bouquets_for_select` na dekoderze (ekran ustawień wtyczki albo jej strona w OpenWebif) lub podziel bardzo duży bukiet na mniejsze. Zmniejszenie `epg_grid_events` nie przywróci brakującego EPG: wtyczka sama skraca je, na ile się da, zanim z niego zrezygnuje.\n\nTen komunikat zniknie sam, gdy dekoder znów opublikuje wszystko."

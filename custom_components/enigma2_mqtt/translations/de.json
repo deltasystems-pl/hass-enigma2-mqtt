@@ -177,6 +177,22 @@
       "settings": {
         "title": "Receiver-Optionen",
         "description": "Der Receiver meldet die MAC-Adresse {mac}. Magic Packets gehen dorthin, sofern unten keine andere angegeben wird.",
+        "sections": {
+          "go2rtc": {
+            "name": "Eigenes go2rtc (optional)",
+            "description": "Hält einen Stream eines go2rtc, das du selbst betreibst, auf dem Sender, auf dem der Receiver steht, damit eine Dashboard-Karte ihn zeigen kann. Aus, solange die Adresse leer ist.",
+            "data": {
+              "go2rtc_url": "go2rtc-Adresse",
+              "go2rtc_stream": "Stream-Name",
+              "go2rtc_source": "Quellvorlage"
+            },
+            "data_description": {
+              "go2rtc_url": "Die Adresse der API deines go2rtc, zum Beispiel `http://homeassistant.local:1984` für das go2rtc-Add-on. Bei jedem Senderwechsel schickt Home Assistant den Namen und die Quelle von unten dorthin, und sonst nichts.",
+              "go2rtc_stream": "Der Name des einen Streams, den Home Assistant dort aktuell hält. Nur Buchstaben, Ziffern, `_`, `-` und `.`. Leer gelassen ist es `enigma2_` gefolgt von der Knoten-ID des Receivers.",
+              "go2rtc_source": "Was go2rtc zum Abspielen bekommt. Die Stream-Adresse des Receivers kommt an die Stelle, an der der Standardwert seinen Platzhalter in geschweiften Klammern hat. Keine Leerzeichen: go2rtc lehnt eine Quelle mit Leerzeichen ab, ein Filter mit Leerzeichen gehört also als benannte Vorlage in die Konfiguration von go2rtc selbst. Lass `ffmpeg:` vorn stehen; ohne das kann go2rtc den Stream des Receivers nicht lesen."
+            }
+          }
+        },
         "data": {
           "dangerous_buttons": "Schaltflächen für Tiefschlaf und Neustart anzeigen",
           "wol_mac": "MAC-Adresse für Wake-on-LAN",
@@ -225,6 +241,10 @@
     "error": {
       "plugin_unavailable": "Der Receiver ist nicht verbunden; seine Datenschutzeinstellungen wurden nicht geändert. Versuche es erneut, wenn er online ist.",
       "plugin_config_failed": "Der Receiver hat die neuen Datenschutzeinstellungen nicht bestätigt. Die bisherigen Receiver-Einstellungen und Home-Assistant-Optionen wurden beibehalten.",
+      "go2rtc_invalid_url": "Die go2rtc-Adresse ist keine Webadresse. Schreibe sie als `http://host:1984`, ohne etwas hinter der Adresse, oder lass das Feld leer, um das auszuschalten.",
+      "go2rtc_invalid_stream": "Der go2rtc-Stream-Name darf nur Buchstaben, Ziffern, `_`, `-` und `.` enthalten, höchstens 64 Zeichen.",
+      "go2rtc_source_spaces": "Die go2rtc-Quellvorlage enthält ein Leerzeichen, und go2rtc lehnt eine solche Quelle ab. Lege einen Filter, der Leerzeichen braucht, als benannte Vorlage in der Konfiguration von go2rtc selbst an und nenne sie hier, zum Beispiel `#video=tv`.",
+      "go2rtc_source_placeholder": "Die go2rtc-Quellvorlage muss den Platzhalter für die Stream-Adresse des Receivers genau einmal enthalten, so wie der Standardwert.",
       "invalid_mac": "Das ist keine MAC-Adresse. Schreibe sie als `00:00:5e:00:53:01`, `00-00-5e-00-53-01`, `0000.5e00.5301` oder `00005e005301`, oder lass das Feld leer, um die vom Receiver gemeldete Adresse zu verwenden.",
       "uninstall_not_confirmed": "Setze das Häkchen, um das Plugin zu entfernen. An den Receiver wurde nichts gesendet.",
       "downgrade_not_confirmed": "Setze das Häkchen, um die ältere Version zu installieren."
@@ -718,6 +738,14 @@
     }
   },
   "issues": {
+    "go2rtc_unreachable": {
+      "title": "{name}: go2rtc antwortet nicht",
+      "description": "Home Assistant hält den Stream „{stream}“ des go2rtc unter {host} auf dem Sender, auf dem {name} steht, wie in den Optionen des Receivers eingestellt. go2rtc hat nicht geantwortet, der Stream zeigt also noch einen früheren Sender oder nichts.\n\nPrüfe, ob go2rtc läuft und ob die Adresse in den Optionen die Adresse seiner API ist (beim go2rtc-Add-on: Port 1984). Home Assistant versucht es beim nächsten Senderwechsel und alle fünf Minuten erneut.\n\nDieser Hinweis verschwindet von selbst, sobald go2rtc den Stream wieder annimmt. Um go2rtc nicht mehr zu verwenden, leere seine Adresse in den Optionen des Receivers."
+    },
+    "go2rtc_refused": {
+      "title": "{name}: go2rtc hat den Stream abgelehnt",
+      "description": "Das go2rtc unter {host} hat mit HTTP {status} geantwortet, als Home Assistant seinen Stream „{stream}“ auf den Sender setzte, auf dem {name} steht; der Stream zeigt also noch einen früheren Sender oder nichts.\n\nPrüfe die Quellvorlage in den Optionen des Receivers: go2rtc lehnt eine Quelle mit Leerzeichen ab, und eine darin verwendete benannte Vorlage muss in der Konfiguration von go2rtc selbst vorhanden sein. 401 oder 403 bedeutet, dass die API von go2rtc eine Anmeldung verlangt.\n\nDieser Hinweis verschwindet von selbst, sobald go2rtc den Stream wieder annimmt. Um go2rtc nicht mehr zu verwenden, leere seine Adresse in den Optionen des Receivers."
+    },
     "payloads_withheld": {
       "title": "{name}: Der Receiver veröffentlicht nicht alles",
       "description": "Das Plugin auf {name} hat Folgendes nicht veröffentlicht, weil jede dieser Nachrichten die zulässige Größe einer MQTT-Nachricht überschreiten würde und der Broker die Verbindung trennen würde:\n\n{withheld}\n\nIn Home Assistant bedeutet das: Die Sender eines Bouquets, dessen Liste fehlt, werden nicht angeboten, und ein Bouquet ohne EPG hat kein Programm.\n\nUm sie zurückzubekommen, begrenze mit der Einstellung `bouquets_for_select` am Receiver (Einstellungsbildschirm des Plugins oder seine OpenWebif-Seite) die Bouquets, die das Plugin veröffentlicht, oder teile ein sehr großes Bouquet in kleinere auf. `epg_grid_events` zu verringern bringt ein fehlendes EPG nicht zurück: Das Plugin kürzt es selbst so weit wie möglich, bevor es darauf verzichtet.\n\nDieser Hinweis verschwindet von selbst, sobald der Receiver wieder alles veröffentlicht."

@@ -35,6 +35,7 @@ from .const import (
     PLUGIN_MIN_VERSION,
     TOPIC_INTEGRATION_PREFIX,
 )
+from .go2rtc import Go2rtcFollower, async_delete_go2rtc_issue
 from .picture import PiconResolver
 from .relay import async_answer_relay_request, async_get_relay
 from .release_store import async_release_index_cache
@@ -122,6 +123,9 @@ async def async_setup_entry(
     # Before the platforms: the media player asks it for picons from its first payload.
     # It requests nothing until asked, and `box.async_stop` stops it.
     box.picons = PiconResolver(hass, entry, box)
+    # Before the platforms as well: the media player names its stream. It sends
+    # nothing until it is started, below, and nothing at all without an address.
+    box.go2rtc = Go2rtcFollower(hass, entry, box)
     box.async_register_device()
     await box.async_start()
 
@@ -133,6 +137,10 @@ async def async_setup_entry(
     # so that one somebody chose to ignore is still ignored after a reload; removing the
     # entry is what deletes it.
     entry.async_on_unload(async_setup_withheld_issue(hass, entry, box))
+
+    # The user's own go2rtc, where the options name one: one of its streams follows
+    # the channel this receiver is on.
+    entry.async_on_unload(box.go2rtc.start())
 
     # A receiver without internet asks for a package on `relay_request`; the answer is an
     # address on this Home Assistant, bound to that receiver, which goes with the entry.
@@ -219,6 +227,7 @@ async def async_remove_entry(
     """
     # The receiver's repair goes with it, and with it the record that it was ignored.
     async_delete_withheld_issue(hass, entry.entry_id)
+    async_delete_go2rtc_issue(hass, entry.entry_id)
     # So does the count its update card kept for the card after a reload.
     async_forget_stood_still(hass, entry.entry_id)
     try:
