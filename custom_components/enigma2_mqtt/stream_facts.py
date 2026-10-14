@@ -148,11 +148,14 @@ def volume_passthrough(volume: dict[str, Any] | None) -> bool | None:
 
 # The most rows the plugin lists, and the most characters of a host, a name and a
 # reference that are kept. A reference is never cut - a cut one names no service - so
-# one that is too long is dropped.
+# one that is too long is dropped. The bound on a reference is the plugin's own: it
+# lists a client whose reference is longer than 512 characters without it, and its
+# `cmd/stream_stop` passes such a row over, so a longer one here could be offered for a
+# stop the receiver can never carry out.
 STREAM_CLIENTS_MAX = 32
 CLIENT_HOST_MAX = 64
 CLIENT_NAME_MAX = 255
-CLIENT_SREF_MAX = 2048
+CLIENT_SREF_MAX = 512
 
 
 def normalise_stream_clients(payload: dict[str, Any]) -> dict[str, Any]:
@@ -187,17 +190,32 @@ def normalise_stream_clients(payload: dict[str, Any]) -> dict[str, Any]:
     return {"count": len(clients) if count is None else count, "clients": clients}
 
 
+_MAPPED_PREFIX = "::ffff:"
+
+
+def _dotted_quad(text: str) -> bool:
+    """Return whether `text` is an IPv4 address as it is written: four numbers to 255."""
+    parts = text.split(".")
+    return len(parts) == 4 and all(
+        part.isascii() and part.isdigit() and len(part) <= 3 and int(part) <= 255
+        for part in parts
+    )
+
+
 def same_client_host(one: str, other: str) -> bool:
     """Return whether two spellings name the same stream client's address.
 
-    The topic shows an IPv4 client as `192.0.2.20`, the image holds it as
+    The topic shows an IPv4 client as `192.0.2.20`, the image may hold it as
     `::ffff:192.0.2.20`, and the plugin takes either; letters in an address are
-    compared without regard to case.
+    compared without regard to case. Only a well-formed dotted quad is taken out of
+    that wrapping, as the plugin does: `::ffff:1:2` is another address than `1:2`.
     """
 
     def plain(host: str) -> str:
         host = host.strip().lower()
-        return host[len("::ffff:") :] if host.startswith("::ffff:") else host
+        if host.startswith(_MAPPED_PREFIX) and _dotted_quad(host[len(_MAPPED_PREFIX) :]):
+            return host[len(_MAPPED_PREFIX) :]
+        return host
 
     return plain(one) == plain(other)
 

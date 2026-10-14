@@ -173,6 +173,12 @@ async def async_stop_stream(box: Enigma2Box, host: str, sref: str | None = None)
     if CAPABILITY_STREAM_STOP not in box.capabilities:
         raise _invalid("stream_stop_unsupported")
     host = host.strip()
+    sref = (sref or "").strip() or None
+    # An offline receiver lists nobody - its retained list is of clients that have gone -
+    # and a command sent to it now is answered by nobody, which this path would report
+    # as done. An empty address names no client; the receiver would refuse it in English.
+    if not host or not box.available:
+        raise _invalid("stream_client_unknown", host=host)
     if not sref:
         references = box.stream_client_references(host)
         if not references:

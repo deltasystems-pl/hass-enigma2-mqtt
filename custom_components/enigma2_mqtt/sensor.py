@@ -858,9 +858,22 @@ class Enigma2StreamClientsSensor(Enigma2Entity, SensorEntity):
     _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, box: Enigma2Box) -> None:
-        """Follow the client list, and the channel list the hiding is judged by."""
+        """Follow the client list, and the channel list the hiding is judged by.
+
+        Available whenever the receiver is, without waiting for a list: the plugin
+        empties the topic when the image's list cannot be read, and an emptied retained
+        topic is one a broker never delivers again - so after a restart of Home
+        Assistant that answer is a topic that never arrives. It is `unknown` either way,
+        never unavailable for one and unknown for the other.
+
+        `info` is followed too: `can_stop` is the capability `stream_stop`, which a
+        downgrade or an update changes without a new list.
+        """
         super().__init__(
-            box, KEY_STREAM_CLIENTS, topics=(TOPIC_STREAM_CLIENTS, TOPIC_CHANNELS)
+            box,
+            KEY_STREAM_CLIENTS,
+            topics=(TOPIC_STREAM_CLIENTS, TOPIC_CHANNELS, TOPIC_INFO),
+            requires=None,
         )
 
     @callback

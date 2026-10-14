@@ -241,6 +241,88 @@ def test_the_reader_keeps_what_the_contract_names_and_nothing_else() -> None:
     assert long_host["clients"][0]["host"] == "a" * 64
 
 
+def test_a_reference_over_the_plugins_bound_is_no_reference() -> None:
+    """The plugin lists a reference over 512 characters as none, and stops no such row."""
+    at_bound = SREF + "x" * (512 - len(SREF))
+    over = at_bound + "x"
+    read = stream.normalise_stream_clients(
+        {"count": 2, "clients": [{"host": HOST, "sref": at_bound}, {"host": HOST, "sref": over}]}
+    )
+
+    assert [row["sref"] for row in read["clients"]] == [at_bound, None]
+
+
+def test_only_a_dotted_quad_is_taken_out_of_the_mapped_form() -> None:
+    """The plugin's rule: `::ffff:` is dropped in front of a written IPv4 address only."""
+    assert stream.same_client_host("::ffff:192.0.2.20", "192.0.2.20")
+    assert stream.same_client_host(" ::FFFF:192.0.2.20 ", "192.0.2.20")
+    assert stream.same_client_host("192.0.2.20", "::ffff:192.0.2.20")
+    assert stream.same_client_host("2001:DB8::17", "2001:db8::17")
+    assert not stream.same_client_host("::ffff:1:2", "1:2")
+    assert not stream.same_client_host("::ffff:192.0.2.256", "192.0.2.256")
+    assert not stream.same_client_host("::ffff:192.0.2", "192.0.2")
+    assert not stream.same_client_host("192.0.2.20", "192.0.2.21")
+
+
+async def test_a_list_the_broker_no_longer_holds_is_unknown_and_not_unavailable(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """An emptied retained topic is never delivered again: after a restart it is absent.
+
+    The plugin empties `stream_clients` when the image's list cannot be read. A broker
+    deletes a retained message on an empty payload, so Home Assistant started later
+    gets nothing on the topic at all - which says the same as the empty payload did.
+    """
+    box_on_the_broker[INFO_TOPIC] = info_with("stream_clients", "stream_stop")
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    state = hass.states.get(SENSOR)
+    assert state.state == "unknown"
+    assert state.attributes["clients"] == []
+
+    async_fire_mqtt_message(hass, CLIENTS_TOPIC, json.dumps(CLIENTS), retain=True)
+    await hass.async_block_till_done()
+    assert hass.states.get(SENSOR).state == "2"
+
+
+async def test_an_empty_retained_payload_in_the_first_burst_is_unknown_not_zero(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A retraction is "cannot be read"; only `count` 0 with `[]` is "no clients"."""
+    streaming(box_on_the_broker)
+    box_on_the_broker[CLIENTS_TOPIC] = ""
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    assert hass.states.get(SENSOR).state == "unknown"
+
+
+async def test_a_capability_that_goes_quiet_keeps_the_sensor(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A downgraded plugin claims nothing: the sensor stays, and no row can be stopped."""
+    streaming(box_on_the_broker)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    async_fire_mqtt_message(hass, INFO_TOPIC, json.dumps(INFO))
+    await hass.async_block_till_done()
+
+    assert (
+        er.async_get(hass).async_get_entity_id("sensor", DOMAIN, f"{NODE_ID}_stream_clients")
+        is not None
+    )
+    rows = hass.states.get(SENSOR).attributes["clients"]
+    assert [row["can_stop"] for row in rows] == [False, False]
+
+
 # ------------------------------------------------------------ hidden bouquets
 
 
@@ -684,3 +766,77 @@ async def test_host_alone_means_the_hidden_stream_when_the_host_has_a_shown_one_
 
     (sent,) = published_payloads(mqtt_mock, command_topic("stream_stop"))
     assert json.loads(opened_command(sent)[1]) == {"host": HOST, "sref": EUROSPORT}
+
+
+async def test_a_stop_for_an_offline_receiver_is_refused_also_with_a_reference(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Nobody would answer it, and silence is what this path takes for "done"."""
+    streaming(box_on_the_broker)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/{NODE_ID}/availability", "offline")
+    await hass.async_block_till_done()
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await _stop(hass, host=HOST, sref=SREF)
+
+    assert raised.value.translation_key == "stream_client_unknown"
+    assert published_payloads(mqtt_mock, command_topic("stream_stop")) == []
+
+
+@pytest.mark.parametrize("host", ["", "   "])
+async def test_an_empty_host_is_refused_before_anything_is_sent(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    host: str,
+) -> None:
+    """The receiver would refuse it too, in English; an empty address names nobody."""
+    streaming(box_on_the_broker)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await _stop(hass, host=host, sref=SREF)
+
+    assert raised.value.translation_key == "stream_client_unknown"
+    assert published_payloads(mqtt_mock, command_topic("stream_stop")) == []
+
+
+async def test_a_blank_reference_is_no_reference(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Spaces are not a service: the host's one stream is meant, as with none given."""
+    streaming(box_on_the_broker)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    await async_arm_box_ack(hass, "stream_stop")
+
+    await _stop(hass, host=HOST, sref="   ")
+
+    (sent,) = published_payloads(mqtt_mock, command_topic("stream_stop"))
+    assert json.loads(opened_command(sent)[1]) == {"host": HOST, "sref": SREF}
+
+
+async def test_a_reference_is_sent_as_it_was_given_for_the_receiver_to_match_as_text(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The plugin ends the row it spells exactly first, so nothing here respells it."""
+    named = f"{SREF}:TVP 1 HD"
+    rows = [ROW_VISIBLE, {**ROW_VISIBLE, "sref": named}]
+    streaming(box_on_the_broker, {"count": 2, "clients": rows})
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    await async_arm_box_ack(hass, "stream_stop")
+
+    await _stop(hass, host=HOST, sref=f" {named} ")
+
+    (sent,) = published_payloads(mqtt_mock, command_topic("stream_stop"))
+    assert json.loads(opened_command(sent)[1]) == {"host": HOST, "sref": named}
