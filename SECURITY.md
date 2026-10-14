@@ -77,6 +77,38 @@ card a PNG or JPEG of at most 1 MiB that the host serves under `/picon/`. Nothin
 answer is used or shown. Typing the receiver's host when adding it (or with *Reconfigure*) closes
 this.
 
+**Streams** (since the release after 0.4.0, with plugin 0.5.0;
+[DOCUMENTATION.md §4.7](DOCUMENTATION.md#47-streams)). Home Assistant opens no stream and
+carries no video. Two things about streams do leave it:
+
+- **Your own go2rtc, if you name one.** While an address is set in a receiver's options, Home
+  Assistant sends that address `PUT /api/streams?name=<name>&src=<source>` when the channel
+  on that receiver changes. **Home Assistant calls an address you typed**, whatever it is, and
+  sends it the stream name and the source and nothing else - no token of Home Assistant's, no
+  body, no redirect followed, and the answer's body is not read. The source is your template
+  with the receiver's stream address in it, which contains the receiver's address and the
+  service reference of the channel that is on. If the address you typed carries a user name
+  and a password, they are sent to that host as HTTP basic authentication, over plain HTTP
+  if the address says `http://`; they are stored in the config entry like every option, are
+  never written to the log or a repair - both name the host alone - and are redacted in the
+  diagnostics download. It is off while the address is empty. Nothing on the broker can set
+  or change the address, the name or the template. What a broker client **can** do is the
+  same as for picons, below: forge the `info.ip` and the `stream` port and path of a receiver
+  without a typed host, and so choose the address *inside* the source your go2rtc is told to
+  fetch. go2rtc would then open `http://<that address>:<that port>/<path>` on your network.
+  The path takes only letters, digits and `/ . _ ~ -` around the reference; the address
+  rule is the picons' rule. Typing the receiver's host closes the address half of it.
+- **The stream address handed to a player.** The media player's `stream_url` attribute and
+  the media source give a player the receiver's own stream address, plain HTTP on the
+  receiver's stream port. The player fetches it from the receiver directly. No address is
+  built while the receiver says its stream server wants a login, and this integration never
+  puts credentials into an address and stores none for streams.
+
+The option that hides bouquets is **not an access control**: it decides what Home Assistant
+shows and offers. The receiver publishes every stream client and every channel on the broker,
+and whoever may publish to the receiver's command topics may stop any client's stream -
+the plugin guards `cmd/stream_stop` with no permission, as it guards a zap with none.
+
 It also **serves** a package: when a receiver without internet asks, or when the card updates a
 receiver over MQTT, Home Assistant offers the verified package at
 `/api/enigma2_mqtt/relay/<token>`, without authentication, for ten minutes, to that receiver's IPv4

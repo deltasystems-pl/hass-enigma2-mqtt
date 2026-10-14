@@ -14,6 +14,60 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
 
 ### Added
 
+- **Stream facts, a stream address and a media source** (plugin 0.5.0, for a receiver that
+  claims the capability named with each; DOCUMENTATION.md §4.7 and
+  [ADR-0011](docs/adr/0011-stream-facts-addresses-and-a-media-source.md)). The integration
+  starts no stream, carries no video and makes no camera entity.
+  - **The media player says where the channel's stream is** (`stream`): the attributes
+    `stream_url` - the receiver's own stream address of the channel on the decoder, built at
+    the host Home Assistant already asks for picons, with the port and the path form the
+    receiver publishes - `stream_name`, a stable name derived from the service reference alone
+    (`ch_` and the reference lower-cased, every run of other characters one `_`), and
+    `stream_authentication`. No address is built while the receiver's stream server wants a
+    login, and none ever carries credentials.
+  - **A media source**, *Media -> Enigma2 MQTT*: receivers, bouquets, channels, each channel
+    resolving to that address as `video/mp2t`, for players that decode a transport stream
+    themselves (Kodi, VLC, Android TV players). It is built from the channel list already
+    held. The browser's own player and Chromecast are told, when a channel is picked, that
+    they cannot play it. Where the receiver claims `stream_playable` it is asked first whether
+    the channel could be played now; a "no" is refused with the reason, and no answer within
+    three seconds is not a "no".
+  - **„Klienci strumienia"** (*Stream clients*, `stream_clients`): a sensor with the number of
+    clients the receiver's stream server is serving, and the rows as an attribute that is not
+    recorded.
+  - **The action `enigma2_mqtt.stop_stream`** (`stream_stop`) ends one client's stream, named
+    by its address and, where the address has more than one, the service reference. It goes
+    through the command path with a command id; "not connected" is a translated refusal and
+    "not stopped" a translated failure.
+  - **Your own go2rtc, optional and off while empty**: a new section of the options form with
+    the address of a go2rtc you run, a stream name and a source template (default
+    `ffmpeg:{url}#video=h264#audio=opus#audio=aac`). While the address is set, Home Assistant
+    keeps that one stream on the channel the receiver is on with
+    `PUT /api/streams?name=..&src=..` at every channel change - not in standby, not for a
+    hidden channel, not while a login is wanted. A template with a space is refused on the
+    form, because go2rtc refuses such a source. A failure is one warning and one repair until
+    it works again. Home Assistant's own `go2rtc` and `stream` integrations are not used. The
+    media player names the stream in `go2rtc_stream`.
+  - **Hidden bouquets are hidden here too.** The plugin publishes every stream client and
+    every channel; a channel of a bouquet the option **Bouquets hidden from "Recently
+    watched"** names gets no stream address and no stream name, is not in the media source,
+    is not sent to go2rtc, and a client on it is listed without its channel. Such a client can
+    still be stopped, by its address alone. The option's name is unchanged; its help text says
+    what else it now hides.
+- **What is on the decoder** (plugin 0.5.0, `service_codecs`): four diagnostic sensors -
+  „Kodek obrazu", „Liczba klatek na sekundę", „Kodek dźwięku", „Język dźwięku" - and the
+  binary sensor „Obraz z przeplotem", disabled by default like the tuner's numbers. The audio
+  tracks of the service are the attribute `audio_tracks` of „Kodek dźwięku", which is not
+  recorded (DOCUMENTATION.md §4.3).
+- **The volume says when it has no effect** (plugin 0.5.0, `volume_passthrough`): while the
+  receiver hands the audio track being played to the television undecoded, its own volume
+  does nothing audible. The new binary sensor „Passthrough dźwięku" is on then, off while
+  the receiver decodes the track and `unknown` - not off - when it cannot tell, and „Głośność"
+  and the media player carry the same answer in the attribute `volume_passthrough`. The
+  volume entities stay available and settable (DOCUMENTATION.md §4.4).
+- The diagnostics download carries the stream facts as normalised, the stream clients as
+  counts only, and the state of the go2rtc option; the go2rtc address is redacted
+  (DOCUMENTATION.md §7).
 - **The channel list is read one bouquet a topic.** From plugin 0.5.0 on a receiver publishes
   its bouquets on `bouquets` and each bouquet's channels on `channels/<bouquet_slug>`, and says so
   with the capability `channel_topics`. A receiver whose channel list is too big for one MQTT
