@@ -1153,3 +1153,156 @@ def test_the_answer_is_cut_and_cleaned_before_it_is_logged() -> None:
     assert go2rtc._log_safe(b"\xff\xfe broken", source) == "broken"
     assert go2rtc._log_safe(b"peer 2001:db8::12 gone", source) == "peer ... gone"
     assert go2rtc._log_safe(b"peer 198.51.100.7 gone", source) == "peer ... gone"
+
+
+# ------------------------------------------------- back to the channel go2rtc last took
+
+
+async def _confirmed_then_failing(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    entry: MockConfigEntry,
+) -> None:
+    """go2rtc takes TVP 1 HD, then refuses TVN HD: a failure is pending."""
+    aioclient_mock.put(API, text="")
+    streaming(box_on_the_broker)
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+    await settle(hass)
+    answering(aioclient_mock, status=503)
+    await zap(hass, SERVICE_TWO)
+    assert issue(hass, entry) is not None
+    assert [url.query["src"] for url in puts(aioclient_mock)] == [source_for(SREF_TWO)]
+
+
+async def test_back_to_the_last_confirmed_channel_during_a_failure_is_sent(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Nothing is assumed about go2rtc after a failure: the zap back goes out, and clears it."""
+    entry = following(config_entry)
+    await _confirmed_then_failing(hass, aioclient_mock, box_on_the_broker, entry)
+
+    answering(aioclient_mock, text="")
+    await zap(hass, SERVICE)
+
+    assert [url.query["src"] for url in puts(aioclient_mock)] == [source_for(SREF)]
+    assert issue(hass, entry) is None
+    assert entry.runtime_data.go2rtc.async_status()["state"] == "ok"
+
+
+async def test_back_to_the_last_confirmed_channel_with_an_applied_400_clears_too(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    entry = following(config_entry)
+    await _confirmed_then_failing(hass, aioclient_mock, box_on_the_broker, entry)
+
+    answering(aioclient_mock, status=400, text=UNSAVED)
+    aioclient_mock.get(API, side_effect=holding(aioclient_mock))
+    await zap(hass, SERVICE)
+
+    assert [url.query["src"] for url in puts(aioclient_mock)] == [source_for(SREF)]
+    assert issue(hass, entry) is None
+
+
+async def test_back_to_the_last_confirmed_channel_still_failing_keeps_the_repair(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    entry = following(config_entry)
+    caplog.set_level(logging.INFO, logger="custom_components.enigma2_mqtt.own_go2rtc")
+    await _confirmed_then_failing(hass, aioclient_mock, box_on_the_broker, entry)
+
+    answering(aioclient_mock, status=502)
+    await zap(hass, SERVICE)
+
+    assert [url.query["src"] for url in puts(aioclient_mock)] == [source_for(SREF)]
+    raised = issue(hass, entry)
+    assert raised is not None
+    assert raised.translation_placeholders["status"] == "502"
+    assert caplog.text.count("did not take the stream") == 1
+
+
+async def test_outside_a_failure_an_unchanged_source_sends_nothing(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Republished, or back from a hidden channel: go2rtc already has it and was fine."""
+    aioclient_mock.put(API, text="")
+    streaming(box_on_the_broker)
+    entry = following(config_entry, history_hidden_bouquets=["Sport"])
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+    await settle(hass)
+    assert len(puts(aioclient_mock)) == 1
+
+    await zap(hass, {**SERVICE, "width": 1280})
+    await zap(hass, SERVICE_SPORT)
+    await zap(hass, SERVICE)
+
+    assert len(puts(aioclient_mock)) == 1
+    assert issue(hass, entry) is None
+
+
+async def test_the_retry_after_a_zap_back_sends_the_channel_wanted_now(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Failed on TVN HD, failed again back on TVP 1 HD: the timer sends TVP 1 HD."""
+    entry = following(config_entry)
+    await _confirmed_then_failing(hass, aioclient_mock, box_on_the_broker, entry)
+    answering(aioclient_mock, status=503)
+    await zap(hass, SERVICE)
+    assert [url.query["src"] for url in puts(aioclient_mock)] == [source_for(SREF)]
+
+    answering(aioclient_mock, text="")
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=301))
+    await settle(hass)
+
+    assert [url.query["src"] for url in puts(aioclient_mock)] == [source_for(SREF)]
+    assert issue(hass, entry) is None
+    # Done: the next five minutes send nothing more.
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=700))
+    await settle(hass)
+    assert len(puts(aioclient_mock)) == 1
+
+
+async def test_back_to_the_failed_channel_after_a_hidden_one_is_sent_at_once(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A channel change is a channel change, also back to the source that failed."""
+    entry = following(config_entry, history_hidden_bouquets=["Sport"])
+    await _confirmed_then_failing(hass, aioclient_mock, box_on_the_broker, entry)
+
+    answering(aioclient_mock, text="")
+    await zap(hass, SERVICE_SPORT)
+    assert puts(aioclient_mock) == []
+    await zap(hass, SERVICE_TWO)
+
+    assert [url.query["src"] for url in puts(aioclient_mock)] == [source_for(SREF_TWO)]
+    assert issue(hass, entry) is None
+    # The same channel published again is not a channel change, failure or not.
+    answering(aioclient_mock, status=503)
+    await zap(hass, SERVICE)
+    await zap(hass, {**SERVICE, "width": 1280})
+    assert [url.query["src"] for url in puts(aioclient_mock)] == [source_for(SREF)]

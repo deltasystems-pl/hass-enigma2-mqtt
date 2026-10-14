@@ -1667,7 +1667,10 @@ src  = ffmpeg:http://192.0.2.12:8001/1:0:19:283D:3FB:1:C00000:0:0:0:#video=h264#
 
 The same channel published again - the resolution became known, another audio track - sends
 nothing. Zapping through channels sends the requests that had time to finish and ends on the
-last channel.
+last channel. Going back to the channel go2rtc last took sends nothing either, while every
+request has worked; **while a failure is pending**, every channel change sends a request,
+also one back to that channel, because what go2rtc holds after a failure is not known - and
+the one that works clears the repair.
 
 **When it does not re-point**, and the stream stays on the last channel it was given:
 
@@ -1747,7 +1750,8 @@ Home Assistant logs one warning and raises one repair for the receiver, naming t
 the HTTP status. Both are said **once**, not at every channel change - also when the failure
 changes, from one status to another or to no answer at all; the one repair then says the
 latest - and the repair goes by itself with the first request that succeeds. A failed request is tried again at the next
-channel change and every five minutes. The address is named by its host alone in the log and
+channel change and every five minutes, always with the channel the receiver is on at that
+moment, never an older one. The address is named by its host alone in the log and
 in the repair, and is redacted in the diagnostics download: an address you typed can carry a
 user name and a password for go2rtc's API. Emptying the address switches all of it off and
 removes the repair.

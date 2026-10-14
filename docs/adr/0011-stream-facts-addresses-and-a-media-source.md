@@ -169,3 +169,10 @@ review, four points narrow what is decided above; nothing in it is reversed.
   old source, and keeps the receiver's stream of the previous channel open, until it
   reconnects - so the documentation says to open a card after the channel change. Nothing here
   can move such a viewer, and nothing tries.
+- **Decision 7: nothing is assumed about go2rtc while a failure is pending.** Outside a failure,
+  a source equal to the one go2rtc last took sends nothing. While a failure is pending - a
+  repair is up, or the last request was not confirmed - every channel change sends a request,
+  also one back to that source, and the five-minute retry sends the source wanted at that
+  moment. A request that works, or a read-back that confirms one, clears the repair by
+  effect. The same channel published again is not a channel change and still waits for the
+  timer.

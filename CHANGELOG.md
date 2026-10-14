@@ -50,7 +50,9 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
     `PUT /api/streams?name=..&src=..` at every channel change - not in standby, not for a
     hidden channel, not while a login is wanted. A template with a space is refused on the
     form, because go2rtc refuses such a source. A failure is one warning and one repair until
-    it works again. An error answer is read back first: go2rtc 1.9.14 answers 400 when it
+    it works again; while it is pending, every channel change sends a request, also one back
+    to the channel go2rtc last took, and the retry sends the channel the receiver is on now.
+    An error answer is read back first: go2rtc 1.9.14 answers 400 when it
     cannot save its configuration file although it did re-point the stream, and a stream
     found with exactly the source sent counts as done, with one warning that go2rtc could not
     save it. Every channel change rewrites the stream's entry in go2rtc's file, and a card

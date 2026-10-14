@@ -67,7 +67,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_call_later
 from yarl import URL
 
-from .box import Enigma2Box, Enigma2MqttConfigEntry
+from .box import Enigma2Box, Enigma2MqttConfigEntry, service_identity
 from .const import (
     CONF_GO2RTC_SOURCE,
     CONF_GO2RTC_STREAM,
@@ -248,6 +248,9 @@ class Go2rtcFollower:
         self._wanted: str | None = None
         self._task: asyncio.Task[None] | None = None
         self._retry: CALLBACK_TYPE | None = None
+        # The service last seen on the decoder, by identity ("" for none): a change of
+        # it is a channel change, which sends a request while a failure is pending.
+        self._seen_service: str = ""
         # Why the last request failed, None while the last one worked or none was made.
         self.problem: str | None = None
         self.http_status: int | None = None
@@ -325,9 +328,20 @@ class Go2rtcFollower:
         The same source again - `service` is published again when the resolution or the
         audio track becomes known - asks for nothing, also when the last request for it
         failed: that one is retried by the timer, not by every message.
+
+        While a failure is pending, though, every channel change sends a request - also
+        one back to the source go2rtc last took, which outside a failure would send
+        nothing (`_async_work`): what go2rtc holds after a failure is not known, so
+        nothing is assumed about it, and a request that works clears the repair.
         """
+        service = self.box.state.service or {}
+        sref = service_identity(service.get("sref")) if self.box.is_on else ""
+        zapped = sref != self._seen_service
+        self._seen_service = sref
         source = self._source()
-        if source is None or source == self._wanted:
+        if source is None:
+            return
+        if source == self._wanted and not (zapped and self.problem is not None):
             return
         self._wanted = source
         self._cancel_retry()
@@ -348,11 +362,21 @@ class Go2rtcFollower:
             self._retry()
             self._retry = None
 
+    def _pending(self) -> bool:
+        """Return whether go2rtc still has to be sent the source it should have.
+
+        A source other than the last one go2rtc took; and, while a failure is pending,
+        also that one - after a failure nothing is assumed about what go2rtc holds.
+        """
+        return self._wanted is not None and (
+            self._wanted != self._applied or self.problem is not None
+        )
+
     @callback
     def _async_retry(self, _now: datetime) -> None:
-        """Try the source that failed once more."""
+        """Try once more: the source wanted now, never an older one."""
         self._retry = None
-        if self._wanted != self._applied:
+        if self._pending():
             self._async_ensure_worker()
 
     async def _async_work(self) -> None:
@@ -364,7 +388,8 @@ class Go2rtcFollower:
         after `GO2RTC_RETRY_SECONDS`, a newer one at once.
         """
         try:
-            while self._wanted is not None and self._wanted != self._applied:
+            while self._pending():
+                assert self._wanted is not None
                 source = self._wanted
                 problem, status, unsaved = await self._async_put(source)
                 if problem is None:
