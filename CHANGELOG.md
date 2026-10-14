@@ -58,7 +58,10 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
     save it. Every channel change rewrites the stream's entry in go2rtc's file, and a card
     already open keeps the previous channel - and its tuner - until it is reopened. Home
     Assistant's own `go2rtc` and `stream` integrations are not used. The media player names
-    the stream in `go2rtc_stream`.
+    the stream in `go2rtc_stream`. Emptying the address switches it all off and removes the
+    repair; the stream itself stays in your go2rtc, under its name and on the last channel it
+    was sent, because the integration does not delete it - delete it in go2rtc's web interface
+    or with `DELETE <go2rtc address>/api/streams?src=<stream name>` (DOCUMENTATION.md §4.7).
   - **Hidden bouquets are hidden here too.** The plugin publishes every stream client and
     every channel; a channel of a bouquet the option **Bouquets hidden from "Recently
     watched"** names gets no stream address and no stream name, is not in the media source,
