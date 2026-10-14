@@ -533,9 +533,12 @@ async def test_a_question_the_receiver_refuses_is_unknown_at_once(
 
     await mqtt.async_subscribe(hass, command_topic("stream_playable"), _command_received)
 
+    started = asyncio.get_running_loop().time()
     play = await media_source.async_resolve_media(hass, channel_id(SREF), KODI)
 
     assert play.url == f"http://{IP}:8001/{SREF}"
+    # At once, not at the end of the thirty seconds the wait was given here.
+    assert asyncio.get_running_loop().time() - started < 5
 
 
 async def test_a_receiver_that_is_offline_is_not_asked(

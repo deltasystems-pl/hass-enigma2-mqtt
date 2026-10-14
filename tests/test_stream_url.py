@@ -240,6 +240,27 @@ async def test_a_channel_of_a_hidden_bouquet_gets_no_address_and_no_name(
     assert attributes(hass)["stream_url"] == URL
 
 
+@pytest.mark.parametrize("bouquet", [{"name": "Ulubione TV"}, ["Ulubione TV"], 7, None])
+async def test_a_bouquet_that_is_no_name_cannot_be_checked_and_hides_while_anything_is_hidden(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    bouquet: Any,
+) -> None:
+    """`service.bouquet` arrives from a broker; an object there must not raise."""
+    box_on_the_broker[SERVICE_TOPIC] = json.dumps({**SERVICE, "bouquet": bouquet})
+    streaming(box_on_the_broker)
+    entry = with_data(config_entry, options={"history_hidden_bouquets": ["Sport"]})
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+
+    shown = attributes(hass)
+    # The read ran to its end: the channel is the one this payload named.
+    assert shown["media_content_id"] == SREF
+    assert shown["stream_url"] is None
+    assert shown["stream_name"] is None
+
+
 async def test_a_retracted_stream_topic_takes_the_address_away(
     hass: HomeAssistant,
     mqtt_mock,

@@ -66,7 +66,7 @@ ROW_SPORT: dict[str, Any] = {
 CLIENTS: dict[str, Any] = {"count": 2, "clients": [ROW_VISIBLE, ROW_SPORT]}
 HIDDEN_ROW = {
     "host": HOST_V6, "sref": None, "name": None, "bouquet": None, "transcoded": True,
-    "hidden": True,
+    "hidden": True, "can_stop": True,
 }
 
 
@@ -130,8 +130,8 @@ async def test_the_count_is_the_state_and_the_rows_are_an_attribute(
     state = hass.states.get(SENSOR)
     assert state.state == "2"
     assert state.attributes["clients"] == [
-        {**ROW_VISIBLE, "hidden": False},
-        {**ROW_SPORT, "hidden": False},
+        {**ROW_VISIBLE, "hidden": False, "can_stop": True},
+        {**ROW_SPORT, "hidden": False, "can_stop": True},
     ]
 
 
@@ -257,7 +257,10 @@ async def test_a_client_on_a_hidden_bouquet_is_shown_without_its_channel(
 
     state = hass.states.get(SENSOR)
     assert state.state == "2"
-    assert state.attributes["clients"] == [{**ROW_VISIBLE, "hidden": False}, HIDDEN_ROW]
+    assert state.attributes["clients"] == [
+        {**ROW_VISIBLE, "hidden": False, "can_stop": True},
+        HIDDEN_ROW,
+    ]
     everything = json.dumps(state.as_dict(), default=str)
     assert EUROSPORT not in everything
     assert "Eurosport" not in everything
@@ -282,8 +285,24 @@ async def test_a_channel_of_a_hidden_bouquet_reached_through_another_is_hidden_t
     (shown,) = hass.states.get(SENSOR).attributes["clients"]
     assert shown == {
         "host": HOST, "sref": None, "name": None, "bouquet": None, "transcoded": False,
-        "hidden": True,
+        "hidden": True, "can_stop": True,
     }
+
+
+async def test_a_client_named_under_a_hidden_bouquet_is_hidden_whatever_the_list_holds(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The receiver says "Sport" for a channel the list here does not have in it yet."""
+    row = {**ROW_SPORT, "sref": "1:0:19:9999:3F3:1:C00000:0:0:0:", "name": "Nowy kanał"}
+    streaming(box_on_the_broker, {"count": 1, "clients": [row]})
+    entry = hiding(config_entry, "Sport")
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+
+    (shown,) = hass.states.get(SENSOR).attributes["clients"]
+    assert shown == HIDDEN_ROW
 
 
 @pytest.mark.parametrize(
@@ -326,7 +345,9 @@ async def test_the_same_client_is_shown_while_nothing_is_hidden(
     streaming(box_on_the_broker, {"count": 1, "clients": [row]})
     await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
 
-    assert hass.states.get(SENSOR).attributes["clients"] == [{**row, "hidden": False}]
+    assert hass.states.get(SENSOR).attributes["clients"] == [
+        {**row, "hidden": False, "can_stop": True}
+    ]
 
 
 async def test_every_client_is_hidden_while_a_hidden_bouquet_has_no_list(
@@ -365,6 +386,66 @@ async def test_a_changed_channel_list_is_applied_to_the_rows(
     await hass.async_block_till_done()
 
     assert hass.states.get(SENSOR).attributes["clients"][0]["hidden"] is True
+
+
+async def test_a_row_without_a_reference_cannot_be_stopped_and_says_so(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The plugin lists a client whose reference it will not publish; nothing can name it."""
+    row = {**ROW_VISIBLE, "sref": None, "name": None, "bouquet": None}
+    streaming(box_on_the_broker, {"count": 1, "clients": [row]})
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    assert hass.states.get(SENSOR).state == "1"
+    assert hass.states.get(SENSOR).attributes["clients"] == [
+        {**row, "hidden": False, "can_stop": False}
+    ]
+    with pytest.raises(ServiceValidationError) as raised:
+        await hass.services.async_call(
+            DOMAIN, "stop_stream", {ATTR_ENTITY_ID: PLAYER, "host": HOST}, blocking=True
+        )
+    assert raised.value.translation_key == "stream_client_unknown"
+    assert published_payloads(mqtt_mock, command_topic("stream_stop")) == []
+
+
+async def test_no_row_can_be_stopped_on_a_receiver_that_cannot_stop_one(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    box_on_the_broker[INFO_TOPIC] = info_with("stream_clients")
+    box_on_the_broker[CLIENTS_TOPIC] = json.dumps(CLIENTS)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    rows = hass.states.get(SENSOR).attributes["clients"]
+    assert [row["can_stop"] for row in rows] == [False, False]
+
+
+async def test_the_list_holds_only_while_the_receiver_is_online(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Nothing is retracted at a stop: the retained list of an offline receiver is stale."""
+    streaming(box_on_the_broker)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/{NODE_ID}/availability", "offline")
+    await hass.async_block_till_done()
+
+    assert hass.states.get(SENSOR).state == "unavailable"
+    assert config_entry.runtime_data.stream_client_rows() == []
+    with pytest.raises(ServiceValidationError) as raised:
+        await hass.services.async_call(
+            DOMAIN, "stop_stream", {ATTR_ENTITY_ID: PLAYER, "host": HOST}, blocking=True
+        )
+    assert raised.value.translation_key == "stream_client_unknown"
+    assert published_payloads(mqtt_mock, command_topic("stream_stop")) == []
 
 
 # ------------------------------------------------------------------ the action

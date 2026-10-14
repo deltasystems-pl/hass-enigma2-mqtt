@@ -51,6 +51,7 @@ from .const import (
     CAPABILITY_COMMAND_ID,
     CAPABILITY_SELF_UPDATE,
     CAPABILITY_STREAM,
+    CAPABILITY_STREAM_STOP,
     CAPABILITY_UNINSTALL,
     CHANNEL_TOPICS_SETTLE,
     CHANNELS_REFETCH_GRACE,
@@ -2821,9 +2822,21 @@ class Enigma2Box:
         options hide (`service_hidden`) loses its reference, its name and its bouquet,
         and says `hidden`. The count is not changed: how many clients hold a tuner is
         the fact the sensor is for.
+
+        `can_stop` says whether the stop action can end that row: the receiver claims
+        `stream_stop`, and the row has a reference - the plugin lists a client whose
+        reference it holds back, and nothing can name that one. A hidden row with a
+        reference can be stopped, by its host.
+
+        Nothing is offered for a receiver that is not online: the list stays retained
+        when the plugin stops, and is then a list of clients that have gone.
         """
+        if not self.available:
+            return []
+        stops = CAPABILITY_STREAM_STOP in self.capabilities
         rows: list[dict[str, Any]] = []
         for client in (self.state.stream_clients or {}).get("clients") or []:
+            can_stop = stops and client["sref"] is not None
             if self.service_hidden(client["sref"], client["bouquet"]):
                 rows.append(
                     {
@@ -2833,10 +2846,11 @@ class Enigma2Box:
                         "bouquet": None,
                         "transcoded": client["transcoded"],
                         "hidden": True,
+                        "can_stop": can_stop,
                     }
                 )
             else:
-                rows.append({**client, "hidden": False})
+                rows.append({**client, "hidden": False, "can_stop": can_stop})
         return rows
 
     def stream_client_references(self, host: str) -> list[str]:
@@ -2847,8 +2861,12 @@ class Enigma2Box:
         receiver's own payload is held, and goes nowhere but into the command. When the
         host has hidden streams, those are the ones meant - a shown one can be named by
         its reference. One service listed twice for a host - once transcoded, once not -
-        is one client to the receiver's command, and is returned once.
+        is one client to the receiver's command, and is returned once. A row without a
+        reference cannot be named and is not among them, and an offline receiver's
+        retained list names nobody.
         """
+        if not self.available:
+            return []
         rows = [
             client
             for client in (self.state.stream_clients or {}).get("clients") or []
