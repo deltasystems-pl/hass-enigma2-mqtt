@@ -31,14 +31,16 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
     held. The browser's own player and Chromecast are told, when a channel is picked, that
     they cannot play it. Where the receiver claims `stream_playable` it is asked first whether
     the channel could be played now; a "no" is refused with the reason, and no answer within
-    three seconds is not a "no".
+    three seconds is not a "no". Only one playable service is asked about, and a refusal of
+    the question is not a "no" either.
   - **„Klienci strumienia"** (*Stream clients*, `stream_clients`): a sensor with the number of
     clients the receiver's stream server is serving, and the rows as an attribute that is not
-    recorded.
+    recorded. It is `unknown`, never zero, while the receiver could not read its list - also
+    after a restart, when the broker holds nothing on the topic.
   - **The action `enigma2_mqtt.stop_stream`** (`stream_stop`) ends one client's stream, named
     by its address and, where the address has more than one, the service reference. It goes
     through the command path with a command id; "not connected" is a translated refusal and
-    "not stopped" a translated failure.
+    "not stopped" a translated failure. Nothing is sent for a receiver that is offline.
   - **Your own go2rtc, optional and off while empty**: a new section of the options form with
     the address of a go2rtc you run, a stream name and a source template (default
     `ffmpeg:{url}#video=h264#audio=opus#audio=aac`). While the address is set, Home Assistant
@@ -64,7 +66,9 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   does nothing audible. The new binary sensor „Passthrough dźwięku" is on then, off while
   the receiver decodes the track and `unknown` - not off - when it cannot tell, and „Głośność"
   and the media player carry the same answer in the attribute `volume_passthrough`. The
-  volume entities stay available and settable (DOCUMENTATION.md §4.4).
+  volume entities stay available and settable (DOCUMENTATION.md §4.4). The receiver follows
+  another track within five seconds, and a codec that changes under the same track within
+  thirty.
 - The diagnostics download carries the stream facts as normalised, the stream clients as
   counts only, and the state of the go2rtc option; the go2rtc address is redacted
   (DOCUMENTATION.md §7).

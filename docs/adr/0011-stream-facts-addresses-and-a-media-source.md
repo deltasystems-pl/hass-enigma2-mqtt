@@ -2,6 +2,7 @@
 
 **Status:** accepted 2026-10-13
 **Date:** 2026-10-13
+**Amended:** 2026-10-14 - checked against the plugin's stream area as submitted for review
 **Extends:** [ADR-0000](0000-prd.md) §7 - Home Assistant now also sends one request per channel
 change to a go2rtc address the user typed, and hands players the receiver's own stream address.
 No telemetry, no cloud service and nothing outside the household's network are unchanged.
@@ -123,3 +124,31 @@ passthrough sensor and the stream-clients sensor stay and say `unknown`.
   `stream_facts.py`, which holds every reader of these payloads. That module and `own_go2rtc.py`
   are named so that neither can be taken for a platform of Home Assistant's own `stream` or
   `go2rtc` integration.
+
+## Amendment - 2026-10-14: checked against the plugin's stream area as submitted for review
+
+The integration was written against an earlier draft of the plugin's half. Read against the
+plugin's TOPICS.md, contract.json and its ADR-0017, ADR-0018 and ADR-0019 as they stand for
+review, four points narrow what is decided above; nothing in it is reversed.
+
+- **Decision 6: the receiver is asked only about one playable service.** The plugin refuses
+  `cmd/stream_playable` for a bouquet, a marker, a service with alternatives and an entry hidden
+  in its bouquet - the flags in the reference's second field - and a refusal is retained on
+  `last_error`, where a household reads it as a fault. The channel list leaves those out by the
+  same test, so this only holds a list that broke the contract to it: such a reference is not
+  asked about, and its address is handed out as when no answer comes. A refusal of the question,
+  by its id or - from a plugin without ids - by the command's name, is "not known", never "no".
+- **Decision 9: "say `unknown`" includes a list the broker no longer holds.** The plugin empties
+  `stream_clients` when the image's list cannot be read, and a broker deletes a retained message
+  on an empty payload, so Home Assistant started afterwards receives nothing on the topic. The
+  stream-clients sensor is therefore available whenever the receiver is, and `unknown` until a
+  list arrives; only a published empty list is zero.
+- **Decision 5: a stop names what the plugin can stop.** A row is kept with a reference of at most
+  512 characters, the plugin's own bound; a longer one is no reference and the row cannot be
+  stopped. Only a well-formed dotted quad is taken out of the `::ffff:` form. A reference given
+  to the action is sent as it was typed, because the plugin matches it as text before it falls
+  back to the eleven-field rule. Nothing is sent for a receiver that is offline: nobody would
+  answer, and silence is what that path reads as success.
+- **Decision 7: one warning for a run of failures.** The warning is written for the first failure
+  after a success, whatever the failures that follow are; the one repair is replaced under its id
+  when the failure changes, so it says the latest.

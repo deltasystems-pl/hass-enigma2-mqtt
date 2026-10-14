@@ -813,7 +813,8 @@ notices another track picked on the remote within five seconds.
 open stream holds a tuner input, so this is the number behind "no free tuner". The attribute
 `clients` has one row for each, at most 32: `host`, `sref`, `name`, `bouquet`, `transcoded`,
 `hidden` and `can_stop`. The state is `unknown` while the plugin has emptied the topic because the
-image's list could not be read. The plugin looks every five seconds, so a client that came and
+image's list could not be read - also after a restart of Home Assistant, when the broker holds
+nothing on the topic at all - and `0` only for a published empty list. The plugin looks every five seconds, so a client that came and
 went between two looks was never on the list. [§4.7](#47-streams) says what `hidden` does and
 how to stop a client.
 
@@ -854,6 +855,13 @@ so it changes with the next programme or the next audio track, and a level set n
 level that applies then. Use the binary sensor to grey a volume slider out on a dashboard or
 to send the volume keys to the television instead. It says what the receiver is set to do,
 not what the television does with the bitstream.
+
+**How soon it follows.** The receiver reads it again with every reconciliation of the volume:
+within five seconds of an audio track picked on the remote or a setting changed in its menu,
+and **within thirty seconds** when a broadcaster changes the codec of the track being played
+without changing the track - the one case the receiver only re-reads every sixth time. An AAC
+track is `unknown` while the receiver's own AAC transcode (to AC-3 or DTS) is switched on, whatever
+its downmix setting says: what reaches the television is then neither of the two answers.
 
 ### 4.5 Buttons and update
 
@@ -1553,6 +1561,9 @@ holding, and the channel is refused with that sentence instead of a player openi
 that never starts. **No answer within three seconds is not a "no"**: the address is handed out
 and the player finds out. The answer is true for the moment it was asked - a recording that
 starts a second later takes the tuner it counted on. A receiver that is offline is not asked.
+Only one playable service is asked about - never a bouquet, a marker or a hidden entry, which
+the receiver would refuse; the channel list holds none of those anyway. A refusal of the
+question is not a "no" either: the address is handed out.
 
 #### Stream clients, and stopping one (`stream_clients`, `stream_stop`)
 
@@ -1570,9 +1581,10 @@ lists them:
 
 The list holds only while the receiver is online. The plugin retracts nothing when it stops,
 so the retained list of a receiver that is off is a list of clients that have gone: the sensor
-is unavailable then, like every other entity, and `stop_stream` finds no client. An emptied
-topic - the plugin could not read the image's list - is `unknown`, never "no clients"; only a
-published empty list is zero.
+is unavailable then, like every other entity, and `stop_stream` finds no client - also when
+it is given a reference, because nobody would answer the command. An emptied topic - the
+plugin could not read the image's list - is `unknown`, never "no clients", and so is a topic
+the broker no longer holds; only a published empty list is zero.
 
 **The plugin publishes every client; hiding is done here.** While the option **Bouquets hidden
 from "Recently watched"** names a bouquet, a client on a channel of such a bouquet is shown
@@ -1608,6 +1620,10 @@ data:
   a hidden and a shown stream, the host alone means the hidden one - the shown one can be
   named. A host with two shown streams, or two hidden ones, needs the reference and is
   refused without it: nothing here ever stops "all of them".
+- A reference is sent as it was given. The receiver first looks for a row of that host whose
+  `sref` is spelled exactly so, and only then for one that is the same service by its first
+  eleven fields - so of two rows of one channel in two spellings, copying the row's `sref`
+  ends that row.
 - The receiver answers at once and the connection ends a moment later; the list is read
   again two seconds after the command. **A player that reconnects by itself is back by then**:
   stopping a client is not blocking it.
@@ -1695,8 +1711,9 @@ opens the receiver's stream for it, and that stream holds a tuner until the card
 
 **When it fails** - go2rtc does not answer within ten seconds, or answers anything but a 2xx -
 Home Assistant logs one warning and raises one repair for the receiver, naming the host and
-the HTTP status. Both are said **once**, not at every channel change, and the repair goes by
-itself with the first request that succeeds. A failed request is tried again at the next
+the HTTP status. Both are said **once**, not at every channel change - also when the failure
+changes, from one status to another or to no answer at all; the one repair then says the
+latest - and the repair goes by itself with the first request that succeeds. A failed request is tried again at the next
 channel change and every five minutes. The address is named by its host alone in the log and
 in the repair, and is redacted in the diagnostics download: an address you typed can carry a
 user name and a password for go2rtc's API. Emptying the address switches all of it off and
