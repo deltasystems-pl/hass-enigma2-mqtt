@@ -8,6 +8,7 @@ to a stream that wants a login, and a failure is reported once.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 import json
 import logging
@@ -26,7 +27,10 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_mqtt_message,
     async_fire_time_changed,
 )
-from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
+from pytest_homeassistant_custom_component.test_util.aiohttp import (
+    AiohttpClientMocker,
+    AiohttpClientMockResponse,
+)
 
 from custom_components.enigma2_mqtt import own_go2rtc as go2rtc
 from custom_components.enigma2_mqtt.const import (
@@ -369,6 +373,80 @@ async def test_a_refusal_is_reported_once_and_cleared_when_it_works_again(
     assert caplog.text.count("did not take the stream") == 1
 
 
+@pytest.mark.parametrize("status", [200, 500])
+async def test_a_channel_changed_while_a_request_runs_is_sent_when_it_returns(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    status: int,
+) -> None:
+    """Whether the first request worked or not, the newer channel goes out at once."""
+    zapped: list[bool] = []
+
+    async def _answer(method: str, url: Any, data: Any) -> AiohttpClientMockResponse:
+        if not zapped:
+            zapped.append(True)
+            # Let the request be under way first, as a real one is before it answers.
+            await asyncio.sleep(0)
+            async_fire_mqtt_message(hass, SERVICE_TOPIC, json.dumps(SERVICE_TWO))
+            return AiohttpClientMockResponse(method, url, status=status)
+        return AiohttpClientMockResponse(method, url, status=200)
+
+    aioclient_mock.put(API, side_effect=_answer)
+    streaming(box_on_the_broker)
+    entry = following(config_entry)
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+    await settle(hass)
+
+    assert [url.query["src"] for url in puts(aioclient_mock)] == [
+        source_for(SREF),
+        source_for(SREF_TWO),
+    ]
+    assert issue(hass, entry) is None
+
+
+async def test_a_redirect_is_not_go2rtc_taking_the_stream(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    aioclient_mock.put(API, status=302, headers={"Location": "http://192.0.2.51/"})
+    streaming(box_on_the_broker)
+    entry = following(config_entry)
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+    await settle(hass)
+
+    raised = issue(hass, entry)
+    assert raised is not None
+    assert raised.translation_placeholders["status"] == "302"
+
+
+async def test_a_stored_name_or_template_that_cannot_be_used_is_the_default(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Options edited by hand past the form: nothing go2rtc would refuse is sent."""
+    aioclient_mock.put(API, text="")
+    streaming(box_on_the_broker)
+    entry = following(
+        config_entry,
+        **{CONF_GO2RTC_STREAM: "salon tv", CONF_GO2RTC_SOURCE: "ffmpeg:{url} #video=h264"},
+    )
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+    await settle(hass)
+
+    (url,) = puts(aioclient_mock)
+    assert url.query["name"] == NAME
+    assert url.query["src"] == source_for(SREF)
+
+
 async def test_a_failure_that_changes_its_kind_is_still_one_warning(
     hass: HomeAssistant,
     mqtt_mock,
@@ -618,8 +696,27 @@ async def test_the_section_is_offered_only_for_a_receiver_with_a_stream_server(
         CONF_GO2RTC_STREAM,
         CONF_GO2RTC_SOURCE,
     }
-    # Collapsed until somebody uses it.
+    # Collapsed until somebody uses it, with the default name to be seen.
     assert section.options == {"collapsed": True}
+    suggested = {
+        str(key): key.description["suggested_value"] for key in section.schema.schema
+    }
+    assert suggested[CONF_GO2RTC_STREAM] == NAME
+
+
+async def test_a_stored_address_is_offered_for_emptying_without_a_stream_server(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A receiver that stopped claiming `stream` must not leave the option stuck on."""
+    entry = following(config_entry)
+    await async_setup_box(hass, entry)
+
+    result = await _open_options(hass, entry)
+
+    assert "go2rtc" in result["data_schema"].schema
 
 
 async def test_saving_an_address_stores_it_and_the_defaults_are_not_stored(

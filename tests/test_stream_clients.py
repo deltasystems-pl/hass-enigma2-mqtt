@@ -840,3 +840,22 @@ async def test_a_reference_is_sent_as_it_was_given_for_the_receiver_to_match_as_
 
     (sent,) = published_payloads(mqtt_mock, command_topic("stream_stop"))
     assert json.loads(opened_command(sent)[1]) == {"host": HOST, "sref": named}
+
+
+async def test_one_hidden_service_in_two_spellings_is_one_stream_of_the_host(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """With and without its name behind it: one service, so the host alone names it."""
+    rows = [ROW_SPORT, {**ROW_SPORT, "sref": f"{EUROSPORT.lower()}:Eurosport 1"}]
+    streaming(box_on_the_broker, {"count": 2, "clients": rows})
+    entry = hiding(config_entry, "Sport")
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+    await async_arm_box_ack(hass, "stream_stop")
+
+    await _stop(hass, host=HOST_V6)
+
+    (sent,) = published_payloads(mqtt_mock, command_topic("stream_stop"))
+    assert json.loads(opened_command(sent)[1]) == {"host": HOST_V6, "sref": EUROSPORT}

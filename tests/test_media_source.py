@@ -18,6 +18,7 @@ from homeassistant.components import media_source, mqtt
 from homeassistant.components.media_player import BrowseError
 from homeassistant.components.mqtt import ReceiveMessage
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.setup import async_setup_component
 import pytest
@@ -662,3 +663,119 @@ async def test_a_list_entry_that_is_no_single_service_is_not_asked_about(
 )
 def test_one_playable_service_is_the_receivers_own_test(sref: Any, one: bool) -> None:
     assert stream_facts.one_playable_service(sref) is one
+
+
+async def test_a_question_that_cannot_be_published_is_unknown(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A publish that fails asked nothing, so nothing was answered "no"."""
+    await _setup(hass, config_entry, box_on_the_broker, "stream_playable", "command_id")
+
+    async def _refuse(*_args: Any, **_kwargs: Any) -> None:
+        raise HomeAssistantError("the broker is gone")
+
+    monkeypatch.setattr(config_entry.runtime_data, "async_publish_cmd", _refuse)
+
+    play = await media_source.async_resolve_media(hass, channel_id(SREF), KODI)
+
+    assert play.url == f"http://{IP}:8001/{SREF}"
+
+
+async def test_an_answer_that_is_no_boolean_answers_nothing(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """`playable` 0 is not the plugin's answer; the boolean that follows it is."""
+    await _setup(hass, config_entry, box_on_the_broker, "stream_playable")
+
+    @callback
+    def _command_received(msg: ReceiveMessage) -> None:
+        for playable in (0, "no", False):
+            async_fire_mqtt_message(
+                hass,
+                PLAYABLE_TOPIC,
+                json.dumps({"sref": SREF, "playable": playable, "ts": 1789459213}),
+            )
+
+    await mqtt.async_subscribe(hass, command_topic("stream_playable"), _command_received)
+
+    with pytest.raises(media_source.Unresolvable) as raised:
+        await media_source.async_resolve_media(hass, channel_id(SREF), KODI)
+
+    assert raised.value.translation_key == "stream_not_playable"
+
+
+async def test_what_arrives_before_the_question_goes_out_is_not_its_answer(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Another client's answer about the same channel, and a refusal, while subscribing.
+
+    Both arrive while the question waits for the subscription and before it is
+    published, so neither can be about it. Only the answer after the publish counts.
+    """
+    await _setup(hass, config_entry, box_on_the_broker, "stream_playable", "command_id")
+    box = config_entry.runtime_data
+    subscribed = box.async_wait_subscribed
+
+    async def _wait_subscribed(*args: Any, **kwargs: Any) -> None:
+        async_fire_mqtt_message(
+            hass,
+            PLAYABLE_TOPIC,
+            json.dumps({"sref": SREF, "playable": True, "ts": 1789459213}),
+        )
+        async_fire_mqtt_message(
+            hass,
+            LAST_ERROR_TOPIC,
+            json.dumps(
+                {"cmd": "stream_playable", "ts": 1789459213,
+                 "error": "this image cannot say whether a service can be played"}
+            ),
+        )
+        await hass.async_block_till_done()
+        await subscribed(*args, **kwargs)
+
+    monkeypatch.setattr(box, "async_wait_subscribed", _wait_subscribed)
+    await _arm_playable(hass, False)
+
+    with pytest.raises(media_source.Unresolvable) as raised:
+        await media_source.async_resolve_media(hass, channel_id(SREF), KODI)
+
+    assert raised.value.translation_key == "stream_not_playable"
+
+
+async def test_unloading_the_receiver_ends_the_wait(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A question still out when the entry goes is "not known" at once."""
+    monkeypatch.setattr(box_module, "STREAM_PLAYABLE_TIMEOUT", 30)
+    await _setup(hass, config_entry, box_on_the_broker, "stream_playable", "command_id")
+    box = config_entry.runtime_data
+    # A receiver that hears the question and has not answered yet.
+    heard: list[ReceiveMessage] = []
+    await mqtt.async_subscribe(hass, command_topic("stream_playable"), heard.append)
+    # Not a task Home Assistant waits for: the wait below is what is being tested.
+    waiting = asyncio.ensure_future(box.async_stream_playable(SREF))
+    async with asyncio.timeout(5):
+        while not heard:
+            await asyncio.sleep(0.01)
+    await hass.async_block_till_done()
+    assert not waiting.done()
+    assert [opened_command(msg.payload)[1] for msg in heard] == [SREF]
+
+    box.async_stop()
+
+    assert await asyncio.wait_for(waiting, 5) is None

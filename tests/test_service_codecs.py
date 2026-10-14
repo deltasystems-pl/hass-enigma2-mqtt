@@ -268,3 +268,19 @@ def test_the_track_list_is_bounded_and_its_text_is_cut() -> None:
     assert stream.active_audio_track({"audio_tracks": tracks}) is None
     assert stream.audio_tracks({"audio_tracks": []}) == []
     assert stream.audio_tracks({}) is None
+
+
+def test_only_true_marks_the_active_track() -> None:
+    """`active` is a boolean in the contract; 1 or "true" is not the plugin saying so."""
+    tracks = [
+        {"index": 0, "codec": "mp2", "active": 1},
+        {"index": 1, "codec": "ac3", "active": "true"},
+        {"index": 2, "codec": "eac3", "active": True},
+    ]
+
+    assert [track["active"] for track in stream.audio_tracks({"audio_tracks": tracks})] == [
+        False,
+        False,
+        True,
+    ]
+    assert stream.audio_codec({"audio_tracks": tracks}) == "eac3"

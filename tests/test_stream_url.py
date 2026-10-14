@@ -371,6 +371,9 @@ def test_the_reference_is_encoded_the_way_the_receiver_reads_it() -> None:
     assert stream.build_stream_url("http://192.0.2.12/", None, SREF) is None
     assert stream.build_stream_url("http://192.0.2.12/", read, "") is None
     assert stream.build_stream_url("http://192.0.2.12/", read, None) is None
+    # A payload whose port or path could not be used builds nothing at all.
+    assert stream.build_stream_url("http://192.0.2.12/", {**read, "path": None}, SREF) is None
+    assert stream.build_stream_url("http://192.0.2.12/", {**read, "port": None}, SREF) is None
 
 
 def test_the_stream_name_is_derived_from_the_reference_alone() -> None:
