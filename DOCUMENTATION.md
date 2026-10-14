@@ -1695,11 +1695,17 @@ the one that works clears the repair.
   measured case - it answers 400 (`yaml: line 7: did not find expected key`, or similar), after
   it has already re-pointed the stream in memory. So on any answer that is not a 2xx, Home
   Assistant reads the stream back (`GET <go2rtc address>/api/streams?src=<stream name>`, with
-  the same limits as the request). When the stream is there with exactly the source that was
-  sent, the channel change counts as done: no repair, no retry, and **one** warning in the
-  log for as long as Home Assistant runs, saying that go2rtc could not save its configuration,
-  with the status and the start of go2rtc's answer - cut short, and without anything that
-  could be an address. go2rtc's file then still holds an older source, which is what the
+  the same limits as the request). When the stream is there with exactly one producer, and
+  that producer has exactly the source that was sent, the channel change counts as done: no
+  repair, no retry, and **one** warning in the log - once until the entry is reloaded (saving
+  its options reloads it) or Home Assistant restarts - saying that go2rtc could not save its
+  configuration, with the status and the start of go2rtc's answer. Of that answer at most 512
+  bytes are read; it is percent-decoded (at most twice); then the source, the receiver's
+  stream address, the service reference and the receiver's host (as Home Assistant reaches it,
+  as typed and as reported) are removed wherever they appear, in any case; then only the first
+  line is kept, written IPv4 and IPv6 addresses and anything with a scheme (`http://...`,
+  `ffmpeg:...`) are removed, and the rest is cut to 80 printable ASCII characters. A host name
+  that is not the receiver's can remain. go2rtc's file then still holds an older source, which is what the
   stream is after a restart of go2rtc until the next channel change; writing `streams:` in
   block style, or removing it, ends that. A read-back that fails or shows another source
   leaves the failure as it was (below).
@@ -1773,7 +1779,7 @@ the platform an action was registered on, and one box has exactly one media play
 | `enigma2_mqtt.screenshot` | - |
 | `enigma2_mqtt.set_ha_mode` | `mode`: `discovery`, `integration` or `off` |
 | `enigma2_mqtt.get_epg_grid` | `bouquet` (optional) · **returns a response** |
-| `enigma2_mqtt.stop_stream` | `host`, `sref` (optional) · only on a receiver that names the `stream_stop` capability |
+| `enigma2_mqtt.stop_stream` | `host`, `sref` (optional) · on every receiver; refused before anything is sent unless it names the `stream_stop` capability ([§4.7](#47-streams)) |
 
 `begin` and `end` take a date and time or the epoch seconds the topics use; both end up as
 epoch seconds on the wire.

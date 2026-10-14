@@ -15,6 +15,7 @@ import logging
 from pathlib import Path
 import re
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 from homeassistant.core import HomeAssistant
@@ -41,6 +42,7 @@ from custom_components.enigma2_mqtt.const import (
     CONF_GO2RTC_SOURCE,
     CONF_GO2RTC_STREAM,
     CONF_GO2RTC_URL,
+    CONF_RECEIVER_HOST,
     DEFAULT_GO2RTC_SOURCE,
     DOMAIN,
 )
@@ -126,12 +128,15 @@ def holding(
     suffix: str = "",
     status: int = 200,
     pad: int = 0,
+    also: str | None = None,
 ) -> Any:
     """Return a read-back that answers with the source of the last PUT, or this one."""
 
     async def _answer(method: str, url: Any, data: Any) -> AiohttpClientMockResponse:
         held = source if source is not None else puts(aioclient_mock)[-1].query["src"]
         body: dict[str, Any] = {"producers": [{"url": held + suffix}], "consumers": None}
+        if also is not None:
+            body["producers"].append({"url": also})
         if pad:
             body["pad"] = "x" * pad
         return AiohttpClientMockResponse(method, url, status=status, json=body)
@@ -421,8 +426,8 @@ async def test_a_channel_changed_while_a_request_runs_is_sent_when_it_returns(
     async def _answer(method: str, url: Any, data: Any) -> AiohttpClientMockResponse:
         if not zapped:
             zapped.append(True)
-            # Let the request be under way first, as a real one is before it answers.
-            await asyncio.sleep(0)
+            # Inside a request that never pauses: Home Assistant starts the worker
+            # eagerly, so this arrives before its task is even stored.
             async_fire_mqtt_message(hass, SERVICE_TOPIC, json.dumps(SERVICE_TWO))
             return AiohttpClientMockResponse(method, url, status=status)
         return AiohttpClientMockResponse(method, url, status=200)
@@ -935,6 +940,7 @@ async def test_a_400_that_go2rtc_applied_anyway_is_a_success_said_once(
     assert issue(hass, entry) is None
     assert caplog.text.count("could not save it") == 1
     assert f"HTTP 400: {UNSAVED}" in caplog.text
+    assert "until the entry is reloaded or Home Assistant restarts" in caplog.text
     assert "did not take the stream" not in caplog.text
     status = entry.runtime_data.go2rtc.async_status()
     assert status["state"] == "ok"
@@ -1017,10 +1023,11 @@ async def test_a_400_whose_stream_has_another_source_is_a_failure(
         "longer",
         "matching-404",
         "matching-huge",
+        "two-producers",
     ],
     ids=[
         "error", "timeout", "garbage", "list", "producers", "no-producers", "404", "huge",
-        "longer", "matching-404", "matching-huge",
+        "longer", "matching-404", "matching-huge", "two-producers",
     ],
 )
 async def test_a_400_that_cannot_be_read_back_is_a_failure(
@@ -1040,6 +1047,11 @@ async def test_a_400_that_cannot_be_read_back_is_a_failure(
         aioclient_mock.get(API, side_effect=holding(aioclient_mock, status=404))
     elif read_back == "matching-huge":
         aioclient_mock.get(API, side_effect=holding(aioclient_mock, pad=70000))
+    elif read_back == "two-producers":
+        # The source sent is there, and so is another one nobody here asked for.
+        aioclient_mock.get(
+            API, side_effect=holding(aioclient_mock, also="ffmpeg:rtsp://198.51.100.9/x")
+        )
     else:
         aioclient_mock.get(API, **read_back)
     streaming(box_on_the_broker)
@@ -1143,16 +1155,16 @@ async def test_no_log_line_carries_the_receivers_address_or_channel(
 
 def test_the_answer_is_cut_and_cleaned_before_it_is_logged() -> None:
     source = source_for(SREF)
-    assert go2rtc._log_safe(UNSAVED.encode(), source) == UNSAVED
-    assert go2rtc._log_safe(b"", source) == ""
-    assert go2rtc._log_safe(b"\n\nlater", source) == ""
-    assert go2rtc._log_safe(("x" * 200).encode(), source) == "x" * 80
-    assert go2rtc._log_safe(f"bad {source} here".encode(), source) == "bad ... here"
-    assert go2rtc._log_safe(b"see rtsp://user:pw@198.51.100.7/a now", source) == "see ... now"
-    assert go2rtc._log_safe(b"tab\there \x1b[31mred", source) == "tabhere [31mred"
-    assert go2rtc._log_safe(b"\xff\xfe broken", source) == "broken"
-    assert go2rtc._log_safe(b"peer 2001:db8::12 gone", source) == "peer ... gone"
-    assert go2rtc._log_safe(b"peer 198.51.100.7 gone", source) == "peer ... gone"
+    assert go2rtc._log_safe(UNSAVED.encode(), (source,)) == UNSAVED
+    assert go2rtc._log_safe(b"", (source,)) == ""
+    assert go2rtc._log_safe(b"\n\nlater", (source,)) == ""
+    assert go2rtc._log_safe(("x" * 200).encode(), (source,)) == "x" * 80
+    assert go2rtc._log_safe(f"bad {source} here".encode(), (source,)) == "bad ... here"
+    assert go2rtc._log_safe(b"see rtsp://user:pw@198.51.100.7/a now", (source,)) == "see ... now"
+    assert go2rtc._log_safe(b"tab\there \x1b[31mred", (source,)) == "tabhere [31mred"
+    assert go2rtc._log_safe(b"\xff\xfe broken", (source,)) == "broken"
+    assert go2rtc._log_safe(b"peer 2001:db8::12 gone", (source,)) == "peer ... gone"
+    assert go2rtc._log_safe(b"peer 198.51.100.7 gone", (source,)) == "peer ... gone"
 
 
 # ------------------------------------------------- back to the channel go2rtc last took
@@ -1306,3 +1318,95 @@ async def test_back_to_the_failed_channel_after_a_hidden_one_is_sent_at_once(
     await zap(hass, SERVICE)
     await zap(hass, {**SERVICE, "width": 1280})
     assert [url.query["src"] for url in puts(aioclient_mock)] == [source_for(SREF)]
+
+
+
+def test_the_receiver_and_the_channel_are_removed_however_go2rtc_spells_them() -> None:
+    """Plain, percent-encoded once or twice, in any case: the receiver's host, its stream
+    address, the source and the service reference."""
+    host = "dekoder.local"
+    url = f"http://{host}:8001/{SREF}"
+    source = DEFAULT_GO2RTC_SOURCE.replace("{url}", url)
+    secrets = (source, url, SREF, host, "192.0.2.12")
+    once = quote(source, safe="")
+    cases = {
+        f"lookup {host}: no such host": "lookup ...: no such host",
+        f"lookup {host.upper()}: no such host": "lookup ...: no such host",
+        f"bad source {once}": "bad source ...",
+        f"bad source {quote(once, safe='')}": "bad source ...",
+        f"bad source {once.lower()}": "bad source ...",
+        f"no stream at {quote(url, safe='')}": "no stream at ...",
+        f"service {SREF} gone": "service ... gone",
+        f"service {quote(SREF, safe='')} gone": "service ... gone",
+        f"service {SREF.lower()} gone": "service ... gone",
+    }
+    for answer, logged in cases.items():
+        assert go2rtc._log_safe(answer.encode(), secrets) == logged, answer
+    # A name that is not the receiver's is not recognised: that is said, not hidden.
+    assert go2rtc._log_safe(b"lookup other.local: no such host", secrets) == (
+        "lookup other.local: no such host"
+    )
+
+
+async def test_a_typed_receiver_host_never_reaches_the_log(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """go2rtc saying back the source encoded, and the receiver's name in its own words."""
+    host = "dekoder.local"
+    source = DEFAULT_GO2RTC_SOURCE.replace("{url}", f"http://{host}:8001/{SREF}")
+    echo = (
+        f"lookup {host.upper()}: no such host; src={quote(source, safe='')} "
+        f"sref={quote(SREF, safe='')}"
+    )
+    aioclient_mock.put(API, status=400, text=echo)
+    aioclient_mock.get(API, side_effect=holding(aioclient_mock))
+    streaming(box_on_the_broker)
+    entry = MockConfigEntry(
+        domain=config_entry.domain,
+        title=config_entry.title,
+        unique_id=config_entry.unique_id,
+        data={**config_entry.data, CONF_RECEIVER_HOST: host},
+        options={CONF_GO2RTC_URL: GO2RTC},
+    )
+    caplog.set_level(logging.DEBUG, logger="custom_components.enigma2_mqtt")
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+    await settle(hass)
+
+    assert [url.query["src"] for url in puts(aioclient_mock)] == [source]
+    assert "could not save it" in caplog.text
+    ours = "\n".join(
+        record.getMessage()
+        for record in caplog.records
+        if record.name.startswith("custom_components.enigma2_mqtt.own_go2rtc")
+    ).lower()
+    assert host not in ours
+    assert SREF.lower() not in ours
+    assert quote(SREF, safe="").lower() not in ours
+    assert "lookup ...: no such host" in ours
+
+
+async def test_standby_and_back_during_a_failure_is_a_channel_change(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The receiver wakes on the channel that failed: that is sent at once, not in 5 min."""
+    entry = following(config_entry)
+    await _confirmed_then_failing(hass, aioclient_mock, box_on_the_broker, entry)
+
+    answering(aioclient_mock, text="")
+    async_fire_mqtt_message(hass, POWER_TOPIC, "standby")
+    await settle(hass)
+    assert puts(aioclient_mock) == []
+    async_fire_mqtt_message(hass, POWER_TOPIC, "on")
+    await settle(hass)
+
+    assert [url.query["src"] for url in puts(aioclient_mock)] == [source_for(SREF_TWO)]
+    assert issue(hass, entry) is None

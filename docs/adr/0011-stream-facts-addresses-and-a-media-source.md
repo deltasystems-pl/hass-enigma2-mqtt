@@ -161,10 +161,12 @@ review, four points narrow what is decided above; nothing in it is reversed.
   go2rtc cannot write it (a `streams` key in flow style) it answers 400 after it has already
   re-pointed the stream in memory. On any answer that is not a 2xx the stream is read back with
   `GET /api/streams?src=<name>` - same session, same bounded wait, no redirect followed - and a
-  stream whose producers include exactly the source sent counts as re-pointed: no repair, no
-  retry, and one warning in the run of the entry that go2rtc could not save its configuration,
-  with the status and a short head of the answer from which anything that could be an address
-  is removed. A read-back that fails, cannot be read or shows another source leaves the
+  stream with exactly one producer, whose url is exactly the source sent, counts as
+  re-pointed: no repair, no retry, and one warning until the entry is reloaded or Home
+  Assistant restarts, saying that go2rtc could not save its configuration, with the status and
+  a short head of the answer. That head is percent-decoded and loses the source, the stream
+  address, the service reference, the receiver's host, written IP addresses and anything with
+  a scheme; another machine's host name can remain. A read-back that fails, cannot be read or shows another source leaves the
   failure as it was. Also measured: a viewer already open when the source changes stays on the
   old source, and keeps the receiver's stream of the previous channel open, until it
   reconnects - so the documentation says to open a card after the channel change. Nothing here

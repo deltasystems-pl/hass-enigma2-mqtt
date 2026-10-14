@@ -39,9 +39,9 @@ Also measured against 1.9.14, and why an error answer is read back:
 - Every PUT that changes the source rewrites go2rtc's configuration file, and when go2rtc
   cannot write it - a `streams` key written in flow style, `streams: {}` - it answers 400
   after it has already re-pointed the stream in memory. An error answer is therefore
-  followed by `GET <address>/api/streams?src=<name>`; a stream whose producers include
-  exactly the source sent counts as re-pointed, with one warning in this run that go2rtc
-  could not save it (`_async_confirmed`).
+  followed by `GET <address>/api/streams?src=<name>`; a stream with exactly one producer,
+  with exactly the source sent, counts as re-pointed, with one warning until the entry is
+  reloaded that go2rtc could not save it (`_async_confirmed`).
 - A viewer already open stays on the source it opened, and keeps the receiver's stream of
   that channel open, until it reconnects. Nothing here can move it.
 
@@ -53,12 +53,13 @@ five minutes. Nothing here raises into whatever delivered the message.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 import json
 import logging
 import re
 from typing import Any
+from urllib.parse import unquote
 
 import aiohttp
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
@@ -72,6 +73,7 @@ from .const import (
     CONF_GO2RTC_SOURCE,
     CONF_GO2RTC_STREAM,
     CONF_GO2RTC_URL,
+    CONF_RECEIVER_HOST,
     DEFAULT_GO2RTC_SOURCE,
     DOMAIN,
     GO2RTC_RETRY_SECONDS,
@@ -121,15 +123,38 @@ _IPV6 = re.compile(r"[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,}")
 _NOT_PRINTABLE = re.compile(r"[^\x20-\x7e]")
 
 
-def _log_safe(head: bytes, source: str) -> str:
+def _log_safe(head: bytes, secrets: Iterable[str]) -> str:
     """Return the start of go2rtc's answer, safe to put into the log.
 
-    Its first line only, as printable ASCII, cut short - and without anything that could
-    be the source: go2rtc may echo what it was sent, and the source carries the
-    receiver's address and the reference of the channel that is on. Every occurrence of
-    the source is removed first, then anything with a scheme and any written address.
+    go2rtc may echo what it was sent, as it was sent or percent-encoded, and what it was
+    sent carries the receiver's address and the reference of the channel that is on. So,
+    in this order:
+
+    1. the answer is percent-decoded, at most twice, so that an encoded echo reads as
+       plain text;
+    2. every one of `secrets` - the source, the receiver's stream address, the service
+       reference, the receiver's host as Home Assistant reaches it and as it was typed
+       and reported - is removed wherever it appears, as given and percent-decoded,
+       without regard to case, the longest first;
+    3. only the first line is kept, and from it every written IPv6 and IPv4 address and
+       anything with a scheme (`word:` followed by more than white space) is removed;
+    4. what is left is cut to printable ASCII and 80 characters.
+
+    A host name that is not the receiver's - another machine go2rtc names - is not
+    recognised and can remain.
     """
-    text = head.decode("utf-8", "replace").replace(source, "...")
+    text = head.decode("utf-8", "replace")
+    for _ in range(2):
+        decoded = unquote(text)
+        if decoded == text:
+            break
+        text = decoded
+    forms: set[str] = set()
+    for secret in secrets:
+        if secret:
+            forms.update((secret, unquote(secret), unquote(unquote(secret))))
+    for form in sorted((form for form in forms if form), key=len, reverse=True):
+        text = re.sub(re.escape(form), "...", text, flags=re.IGNORECASE)
     text = text.splitlines()[0] if text.strip() else ""
     # Addresses before schemes: `db8::12` would otherwise read as a scheme and leave the
     # front of an IPv6 address behind.
@@ -246,7 +271,14 @@ class Go2rtcFollower:
         # bringing the two together.
         self._applied: str | None = None
         self._wanted: str | None = None
+        # The receiver's stream address and the service reference the wanted source was
+        # built from: what a line in the log must not carry (`_log_safe`).
+        self._wanted_parts: tuple[str, str] = ("", "")
         self._task: asyncio.Task[None] | None = None
+        # Set by the worker itself, at its very start: Home Assistant starts a task
+        # eagerly, so a request that does not pause can run - and a channel change
+        # arrive - before the task is stored above. Neither may start a second worker.
+        self._running: bool = False
         self._retry: CALLBACK_TYPE | None = None
         # The service last seen on the decoder, by identity ("" for none): a change of
         # it is a channel change, which sends a request while a failure is pending.
@@ -256,8 +288,9 @@ class Go2rtcFollower:
         self.http_status: int | None = None
         self.requests: int = 0
         # Whether the last source go2rtc took was taken without go2rtc saving it to its
-        # configuration file (`_async_confirmed`), and whether that has been logged in
-        # this run of the entry - it is said once, not at every channel change.
+        # configuration file (`_async_confirmed`), and whether that has been logged since
+        # the entry was set up - it is said once, not at every channel change; a reload,
+        # which an options save is, builds this anew and may say it again.
         self.unsaved: bool = False
         self._unsaved_logged: bool = False
 
@@ -305,21 +338,23 @@ class Go2rtcFollower:
             "unsaved": self.unsaved,
         }
 
-    def _source(self) -> str | None:
+    def _source(self) -> tuple[str, str, str] | None:
         """Return the source go2rtc should have now, or None to leave it as it is.
 
-        None in standby and while the receiver is offline, and whenever there is no
-        stream address for the service on the decoder: a hidden channel, a stream server
-        that wants a login, no `stream` facts, nothing playing.
+        With it, the stream address and the service reference it was built from. None
+        in standby and while the receiver is offline, and whenever there is no stream
+        address for the service on the decoder: a hidden channel, a stream server that
+        wants a login, no `stream` facts, nothing playing.
         """
         box = self.box
         if not box.is_on:
             return None
         service = box.state.service or {}
-        url = box.stream_url_for(service.get("sref"), service.get("bouquet"))
+        sref = service.get("sref")
+        url = box.stream_url_for(sref, service.get("bouquet"))
         if url is None:
             return None
-        return self._template.replace(URL_PLACEHOLDER, url)
+        return self._template.replace(URL_PLACEHOLDER, url), url, str(sref)
 
     @callback
     def _update(self) -> None:
@@ -338,19 +373,21 @@ class Go2rtcFollower:
         sref = service_identity(service.get("sref")) if self.box.is_on else ""
         zapped = sref != self._seen_service
         self._seen_service = sref
-        source = self._source()
-        if source is None:
+        wanted = self._source()
+        if wanted is None:
             return
+        source, url, sref = wanted
         if source == self._wanted and not (zapped and self.problem is not None):
             return
         self._wanted = source
+        self._wanted_parts = (url, sref)
         self._cancel_retry()
         self._async_ensure_worker()
 
     @callback
     def _async_ensure_worker(self) -> None:
         """Start the task that sends requests, unless one is running."""
-        if self._task is not None and not self._task.done():
+        if self._running or (self._task is not None and not self._task.done()):
             return
         self._task = self.entry.async_create_background_task(
             self.hass, self._async_work(), f"{DOMAIN} go2rtc {self.entry.entry_id}"
@@ -387,11 +424,12 @@ class Go2rtcFollower:
         ends on the last one. A failure ends the run; the same source is tried again
         after `GO2RTC_RETRY_SECONDS`, a newer one at once.
         """
+        self._running = True
         try:
             while self._pending():
                 assert self._wanted is not None
-                source = self._wanted
-                problem, status, unsaved = await self._async_put(source)
+                source, parts = self._wanted, self._wanted_parts
+                problem, status, unsaved = await self._async_put(source, parts)
                 if problem is None:
                     self._applied = source
                     self._async_succeeded()
@@ -414,9 +452,11 @@ class Go2rtcFollower:
                     self.box.node_id,
                 )
             self.problem = "error"
+        finally:
+            self._running = False
 
     async def _async_put(
-        self, source: str
+        self, source: str, parts: tuple[str, str] = ("", "")
     ) -> tuple[str | None, int | None, str | None]:
         """Send one request, and return what went wrong with it, if anything.
 
@@ -447,8 +487,22 @@ class Go2rtcFollower:
         if 200 <= status < 300:
             return None, status, None
         if await self._async_confirmed(source):
-            return None, status, _log_safe(head, source)
+            return None, status, _log_safe(head, (source, *parts, *self._receiver_hosts()))
         return PROBLEM_REFUSED, status, None
+
+    def _receiver_hosts(self) -> tuple[str, ...]:
+        """Return the receiver's host as Home Assistant reaches it, typed and reported."""
+        reached = self.box.picon_lookup_url
+        typed = self.entry.data.get(CONF_RECEIVER_HOST)
+        return tuple(
+            host.strip()
+            for host in (
+                URL(reached).host if reached else None,
+                typed if isinstance(typed, str) else None,
+                self.box.ip_address,
+            )
+            if isinstance(host, str) and host.strip()
+        )
 
     async def _async_confirmed(self, source: str) -> bool:
         """Return whether go2rtc holds the stream with exactly this source now.
@@ -458,7 +512,8 @@ class Go2rtcFollower:
         after it has already created or re-pointed the stream in memory. So an error
         answer is read back with `GET <address>/api/streams?src=<name>`, with the same
         session, the same bounded wait and no redirect followed; the stream counts as
-        re-pointed only when one of its producers has exactly the source that was sent.
+        re-pointed only when it has exactly one producer, with exactly the source that
+        was sent. A second producer is something this did not ask for.
         Anything else - no answer, an error, text that is not the stream's JSON object,
         another source - is "not confirmed", and the PUT's failure stands.
         """
@@ -491,14 +546,15 @@ class Go2rtcFollower:
         producers = stream.get("producers") if isinstance(stream, dict) else None
         if not isinstance(producers, list):
             return False
-        return any(
-            isinstance(producer, dict) and producer.get("url") == source
-            for producer in producers
+        return (
+            len(producers) == 1
+            and isinstance(producers[0], dict)
+            and producers[0].get("url") == source
         )
 
     @callback
     def _async_log_unsaved(self, status: int | None, head: str) -> None:
-        """Say once in this run that go2rtc took a source it could not save.
+        """Say once, until the entry is reloaded, that go2rtc took a source it could not save.
 
         The stream plays the new channel; what is lost is go2rtc's own copy, so after a
         restart of go2rtc the stream is whatever its configuration file still says,
@@ -512,7 +568,8 @@ class Go2rtcFollower:
         _LOGGER.warning(
             "go2rtc at %s re-pointed the stream %s of receiver %s but could not save it "
             "to its configuration file (HTTP %s: %s). The stream follows the channel; "
-            "go2rtc's file does not. Not logged again until Home Assistant restarts",
+            "go2rtc's file does not. Not logged again until the entry is reloaded or Home "
+            "Assistant restarts",
             URL(self._base).host or "?",
             self.stream_name,
             self.box.node_id,
