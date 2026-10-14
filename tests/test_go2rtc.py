@@ -12,6 +12,7 @@ from datetime import timedelta
 import json
 import logging
 from pathlib import Path
+import re
 from typing import Any
 
 import aiohttp
@@ -108,6 +109,13 @@ async def settle(hass: HomeAssistant) -> None:
 async def zap(hass: HomeAssistant, service: dict[str, Any]) -> None:
     async_fire_mqtt_message(hass, SERVICE_TOPIC, json.dumps(service))
     await settle(hass)
+
+
+def answering(aioclient_mock: AiohttpClientMocker, **response: Any) -> None:
+    """Make the go2rtc answer differently from now on; the receiver still has no picons."""
+    aioclient_mock.clear_requests()
+    aioclient_mock.put(API, **response)
+    aioclient_mock.get(re.compile(rf"^http://{re.escape(IP)}/"), status=404)
 
 
 def issue(hass: HomeAssistant, entry: MockConfigEntry) -> ir.IssueEntry | None:
@@ -359,6 +367,37 @@ async def test_a_refusal_is_reported_once_and_cleared_when_it_works_again(
     assert issue(hass, entry) is None
     assert caplog.text.count("takes the stream") == 1
     assert caplog.text.count("did not take the stream") == 1
+
+
+async def test_a_failure_that_changes_its_kind_is_still_one_warning(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """502, then no answer, then 503: one line until a request works; the repair follows."""
+    aioclient_mock.put(API, status=502, text="bad gateway")
+    streaming(box_on_the_broker)
+    entry = following(config_entry)
+    caplog.set_level(logging.INFO, logger="custom_components.enigma2_mqtt.own_go2rtc")
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+    await settle(hass)
+    assert issue(hass, entry).translation_placeholders["status"] == "502"
+
+    answering(aioclient_mock, exc=aiohttp.ClientConnectionError("refused"))
+    await zap(hass, SERVICE_TWO)
+    assert issue(hass, entry).translation_key == "go2rtc_unreachable"
+
+    answering(aioclient_mock, status=503, text="unavailable")
+    await zap(hass, SERVICE)
+
+    assert caplog.text.count("did not take the stream") == 1
+    raised = issue(hass, entry)
+    assert raised.translation_key == "go2rtc_refused"
+    assert raised.translation_placeholders["status"] == "503"
+    assert entry.runtime_data.go2rtc.async_status()["http_status"] == 503
 
 
 @pytest.mark.parametrize("failure", [aiohttp.ClientConnectionError("refused"), TimeoutError()])

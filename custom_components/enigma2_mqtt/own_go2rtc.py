@@ -379,9 +379,15 @@ class Go2rtcFollower:
     def _async_failed(self, problem: str, status: int | None) -> None:
         """Report a failure once: a line in the log and a repair, until it works again.
 
+        One warning for a run of failures, whatever they are: a go2rtc that answers 502
+        and then nothing at all is still one fault until a request succeeds. The one
+        repair is kept saying what the latest failure was - it is replaced, under the
+        same id, when the kind of failure or the status changes.
+
         The address is named by its host alone, here and in the repair: the address
         somebody typed can carry a user name and a password.
         """
+        first = self.problem is None
         again = self.problem == problem and self.http_status == status
         self.problem = problem
         self.http_status = status
@@ -389,16 +395,17 @@ class Go2rtcFollower:
             return
         assert self._base is not None
         host = URL(self._base).host or "?"
-        _LOGGER.warning(
-            "go2rtc at %s did not take the stream %s of receiver %s (%s); it still shows "
-            "an earlier channel. Tried again at the next channel change and every %d "
-            "minutes, and not logged again until it works",
-            host,
-            self.stream_name,
-            self.box.node_id,
-            "no answer" if status is None else f"HTTP {status}",
-            GO2RTC_RETRY_SECONDS // 60,
-        )
+        if first:
+            _LOGGER.warning(
+                "go2rtc at %s did not take the stream %s of receiver %s (%s); it still "
+                "shows an earlier channel. Tried again at the next channel change and "
+                "every %d minutes, and not logged again until it works",
+                host,
+                self.stream_name,
+                self.box.node_id,
+                "no answer" if status is None else f"HTTP {status}",
+                GO2RTC_RETRY_SECONDS // 60,
+            )
         placeholders = {
             "name": _named(
                 str(self.box.announcement.get("name") or ""),
