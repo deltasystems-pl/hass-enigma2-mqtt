@@ -1402,6 +1402,12 @@ ordinary operation and not a fault.
 history - the list its „History Zap" screen shows when NEXT or PREVIOUS is pressed - which the
 plugin publishes, newest first, on the retained `zap_history` topic. They exist while the
 receiver names the `zap_history` capability, and a receiver that stops naming it keeps them.
+**Until a history arrives they are `unknown` with no options**, not unavailable - like
+„Klienci strumienia". The plugin empties the retained topic when it withdraws the history, and a
+broker then holds nothing on it, so after a restart of Home Assistant no payload arrives at all;
+that is the same answer as the empty payload, and both are `unknown`. They are unavailable
+while the receiver is offline, and when it no longer names the capability and has published no
+history since Home Assistant started.
 
 - **The options are exactly the channels in that history**, in its order, numbered like
   „Kanał" when two carry the same name. Nothing is kept on this side: the history is the

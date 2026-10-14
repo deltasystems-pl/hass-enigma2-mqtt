@@ -531,6 +531,134 @@ async def test_both_are_unavailable_while_the_box_is(
     assert hass.states.get(CLEAR_BUTTON).state == STATE_UNAVAILABLE
 
 
+# ------------------------------------------------- a history the broker does not hold
+
+
+def assert_unknown_and_empty(hass: HomeAssistant, *entity_ids: str) -> None:
+    """Available, nothing selected and nothing offered."""
+    for entity_id in entity_ids:
+        state = hass.states.get(entity_id)
+        assert state.state == STATE_UNKNOWN, entity_id
+        assert state.attributes[ATTR_OPTIONS] == [], entity_id
+
+
+async def test_with_no_history_retained_both_are_unknown_not_unavailable(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A withdrawn history is deleted by the broker: after a restart the topic is absent.
+
+    The plugin empties `zap_history` with an empty retained payload, and a broker deletes
+    a retained message on an empty payload, so Home Assistant started later gets nothing
+    on the topic at all - which says the same as the empty payload did.
+    """
+    capable(box_on_the_broker)
+    enable_the_unfiltered_select(hass, config_entry)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    assert_unknown_and_empty(hass, HISTORY_SELECT, HISTORY_ALL_SELECT)
+
+
+async def test_a_withdrawn_history_is_still_unknown_after_a_restart(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Withdrawn while running, then Home Assistant restarts: unknown both times."""
+    capable(box_on_the_broker)
+    box_on_the_broker[ZAP_HISTORY_TOPIC] = history(TVP, TVN)
+    enable_the_unfiltered_select(hass, config_entry)
+    on_the_broker = dict(box_on_the_broker)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    assert options(hass, HISTORY_SELECT) == ["TVP 1 HD", "TVN HD"]
+
+    async_fire_mqtt_message(hass, ZAP_HISTORY_TOPIC, "")
+    await hass.async_block_till_done()
+    assert_unknown_and_empty(hass, HISTORY_SELECT, HISTORY_ALL_SELECT)
+
+    # What the broker holds now: everything but the history it deleted.
+    on_the_broker.pop(ZAP_HISTORY_TOPIC)
+    box_on_the_broker.update(on_the_broker)
+    await hass.config_entries.async_reload(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert not config_entry.runtime_data.seen & {"zap_history"}
+    assert_unknown_and_empty(hass, HISTORY_SELECT, HISTORY_ALL_SELECT)
+
+
+async def test_with_no_history_the_receiver_offline_is_still_unavailable(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Unknown follows the receiver: offline is unavailable, and back online unknown."""
+    capable(box_on_the_broker)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    assert_unknown_and_empty(hass, HISTORY_SELECT)
+
+    async_fire_mqtt_message(hass, AVAILABILITY_TOPIC, "offline")
+    await hass.async_block_till_done()
+    assert hass.states.get(HISTORY_SELECT).state == STATE_UNAVAILABLE
+
+    async_fire_mqtt_message(hass, AVAILABILITY_TOPIC, "online")
+    await hass.async_block_till_done()
+    assert_unknown_and_empty(hass, HISTORY_SELECT)
+
+
+async def test_a_history_that_arrives_later_is_shown_as_usual(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """From unknown to the list and the playing channel, and back on a withdrawal."""
+    capable(box_on_the_broker)
+    box_on_the_broker[SERVICE_TOPIC] = playing(SREF_TWO, "TVN HD")
+    enable_the_unfiltered_select(hass, config_entry)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    assert_unknown_and_empty(hass, HISTORY_SELECT, HISTORY_ALL_SELECT)
+
+    async_fire_mqtt_message(hass, ZAP_HISTORY_TOPIC, history(TVN, EURO, TVP))
+    await hass.async_block_till_done()
+    for entity_id in (HISTORY_SELECT, HISTORY_ALL_SELECT):
+        state = hass.states.get(entity_id)
+        assert state.attributes[ATTR_OPTIONS] == ["TVN HD", "Eurosport 1", "TVP 1 HD"]
+        assert state.state == "TVN HD"
+
+    async_fire_mqtt_message(hass, ZAP_HISTORY_TOPIC, "")
+    await hass.async_block_till_done()
+    assert_unknown_and_empty(hass, HISTORY_SELECT, HISTORY_ALL_SELECT)
+
+
+async def test_without_the_capability_and_with_no_history_it_is_unavailable(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A downgraded plugin keeps no history: the kept select has nothing to wait for.
+
+    The select is never removed when the capability goes quiet, so a receiver that no
+    longer names it would otherwise show an empty list for ever. One that still
+    publishes a history keeps it on offer, as before.
+    """
+    capable(box_on_the_broker)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    assert_unknown_and_empty(hass, HISTORY_SELECT)
+
+    async_fire_mqtt_message(hass, INFO_TOPIC, json.dumps(INFO))
+    await hass.async_block_till_done()
+    assert hass.states.get(HISTORY_SELECT).state == STATE_UNAVAILABLE
+
+    async_fire_mqtt_message(hass, ZAP_HISTORY_TOPIC, history(TVP, TVN))
+    await hass.async_block_till_done()
+    assert options(hass, HISTORY_SELECT) == ["TVP 1 HD", "TVN HD"]
+
+
 # ------------------------------------------------------------------------ the filter
 
 

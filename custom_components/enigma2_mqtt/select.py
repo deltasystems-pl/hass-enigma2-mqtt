@@ -27,7 +27,8 @@ out nothing and is disabled until somebody enables it. Their options are exactly
 channels in that history, newest first, and their state is the channel playing now when
 it is one of them - "what is on, and a quick way back". Choosing one goes through
 `cmd/zap_history`, the path the box's own screen takes, so the zap is recorded like
-any other.
+any other. Until a history arrives - and after the plugin withdraws it - they are
+`unknown` with no options, not unavailable.
 """
 
 from __future__ import annotations
@@ -405,19 +406,40 @@ class Enigma2ZapHistorySelect(Enigma2Select):
     be one of its options; that is what keeps the channels of a hidden bouquet out of
     this entity's recorded history. The unfiltered one has no such protection, which is
     why it is disabled until somebody enables it.
+
+    **Available whenever the receiver is and says it keeps a history, without waiting
+    for one.** The plugin empties `zap_history` when the history is withdrawn, and an
+    emptied retained topic is one a broker never delivers again - so after a restart of
+    Home Assistant that answer is a topic that never arrives. Either way the select is
+    `unknown` with no options, never unavailable for one and `unknown` for the other;
+    the stream-clients sensor answers the same situation the same way. A receiver that
+    no longer names the capability and has published no history in this run is
+    unavailable, as before: its plugin keeps none.
     """
 
     def __init__(self, box: Enigma2Box, key: str, *, filtered: bool) -> None:
-        """Follow the history, what is playing, and the channel list the filter needs."""
+        """Follow the history, what is playing, the channel list, and the capabilities.
+
+        The channel list is what the filter needs; `info` carries the capability that
+        says whether there is a history to wait for at all.
+        """
         super().__init__(
             box,
             key,
-            topics=(TOPIC_ZAP_HISTORY, TOPIC_SERVICE, TOPIC_CHANNELS),
-            requires=TOPIC_ZAP_HISTORY,
+            topics=(TOPIC_ZAP_HISTORY, TOPIC_SERVICE, TOPIC_CHANNELS, TOPIC_INFO),
+            requires=None,
         )
         self._filtered = filtered
         if not filtered:
             self._attr_entity_registry_enabled_default = False
+
+    @property
+    def available(self) -> bool:
+        """Return whether the receiver is there and keeps a zap history at all."""
+        return super().available and (
+            CAPABILITY_ZAP_HISTORY in self.box.capabilities
+            or TOPIC_ZAP_HISTORY in self.box.seen
+        )
 
     @callback
     def _async_read_state(self) -> None:

@@ -2507,9 +2507,10 @@ class Enigma2Box:
 
         The three answers of `_softcam_received`: an empty payload is a retraction and
         clears the list, a payload that is not JSON leaves the last good one alone, and
-        anything else is normalised and kept. A retraction leaves the topic in `seen`,
-        so the selects stay available with nothing to offer - an empty history, which is
-        what a receiver that has just restarted its interface has too.
+        anything else is normalised and kept. A retraction leaves the selects available
+        with nothing to offer - an empty history, which is what a receiver that has just
+        restarted its interface has too - and so does a topic the broker no longer holds
+        after a restart of Home Assistant: the selects do not wait for it.
         """
         if not (decode_payload(msg.payload) or "").strip():
             self.state.zap_history = None
