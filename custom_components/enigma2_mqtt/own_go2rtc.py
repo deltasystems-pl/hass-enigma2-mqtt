@@ -34,6 +34,17 @@ When it does not re-point - and leaves the stream on the last channel it was giv
   would break; the last shown channel stays;
 - while the receiver's stream server wants a login: no address is built then.
 
+Also measured against 1.9.14, and why an error answer is read back:
+
+- Every PUT that changes the source rewrites go2rtc's configuration file, and when go2rtc
+  cannot write it - a `streams` key written in flow style, `streams: {}` - it answers 400
+  after it has already re-pointed the stream in memory. An error answer is therefore
+  followed by `GET <address>/api/streams?src=<name>`; a stream whose producers include
+  exactly the source sent counts as re-pointed, with one warning in this run that go2rtc
+  could not save it (`_async_confirmed`).
+- A viewer already open stays on the source it opened, and keeps the receiver's stream of
+  that channel open, until it reconnects. Nothing here can move it.
+
 A failure is reported once: one line in the log and one repair for the receiver, until
 a request succeeds again. It is tried again at the next change of channel and every
 five minutes. Nothing here raises into whatever delivered the message.
@@ -44,6 +55,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from datetime import datetime
+import json
 import logging
 import re
 from typing import Any
@@ -93,6 +105,38 @@ PROBLEM_UNREACHABLE = "unreachable"
 PROBLEM_REFUSED = "refused"
 
 ISSUE_KEY = "go2rtc"
+
+# How much of go2rtc's answer to a refused PUT is read, and how much of its first line is
+# logged; and the most a read-back of one stream may be. Small on purpose: the log
+# needs a hint, and one stream's description is a few hundred bytes.
+ANSWER_HEAD_BYTES = 512
+ANSWER_LOG_CHARS = 80
+READ_BACK_MAX_BYTES = 65536
+
+# What can carry the receiver's address in a text go2rtc writes: anything with a scheme
+# (`ffmpeg:http://...`, `http://...`), a written IPv4 address and an IPv6 address.
+_WITH_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:\S+")
+_IPV4 = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}")
+_IPV6 = re.compile(r"[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,}")
+_NOT_PRINTABLE = re.compile(r"[^\x20-\x7e]")
+
+
+def _log_safe(head: bytes, source: str) -> str:
+    """Return the start of go2rtc's answer, safe to put into the log.
+
+    Its first line only, as printable ASCII, cut short - and without anything that could
+    be the source: go2rtc may echo what it was sent, and the source carries the
+    receiver's address and the reference of the channel that is on. Every occurrence of
+    the source is removed first, then anything with a scheme and any written address.
+    """
+    text = head.decode("utf-8", "replace").replace(source, "...")
+    text = text.splitlines()[0] if text.strip() else ""
+    # Addresses before schemes: `db8::12` would otherwise read as a scheme and leave the
+    # front of an IPv6 address behind.
+    for pattern in (_IPV6, _IPV4, _WITH_SCHEME):
+        text = pattern.sub("...", text)
+    text = _NOT_PRINTABLE.sub("", text).strip()
+    return text[:ANSWER_LOG_CHARS]
 
 
 def issue_id(entry_id: str) -> str:
@@ -208,6 +252,11 @@ class Go2rtcFollower:
         self.problem: str | None = None
         self.http_status: int | None = None
         self.requests: int = 0
+        # Whether the last source go2rtc took was taken without go2rtc saving it to its
+        # configuration file (`_async_confirmed`), and whether that has been logged in
+        # this run of the entry - it is said once, not at every channel change.
+        self.unsaved: bool = False
+        self._unsaved_logged: bool = False
 
     @property
     def enabled(self) -> bool:
@@ -250,6 +299,7 @@ class Go2rtcFollower:
             "problem": self.problem,
             "http_status": self.http_status,
             "requests": self.requests,
+            "unsaved": self.unsaved,
         }
 
     def _source(self) -> str | None:
@@ -316,10 +366,13 @@ class Go2rtcFollower:
         try:
             while self._wanted is not None and self._wanted != self._applied:
                 source = self._wanted
-                problem, status = await self._async_put(source)
+                problem, status, unsaved = await self._async_put(source)
                 if problem is None:
                     self._applied = source
                     self._async_succeeded()
+                    self.unsaved = unsaved is not None
+                    if unsaved is not None:
+                        self._async_log_unsaved(status, unsaved)
                     continue
                 self._async_failed(problem, status)
                 if self._wanted == source:
@@ -337,11 +390,17 @@ class Go2rtcFollower:
                 )
             self.problem = "error"
 
-    async def _async_put(self, source: str) -> tuple[str | None, int | None]:
+    async def _async_put(
+        self, source: str
+    ) -> tuple[str | None, int | None, str | None]:
         """Send one request, and return what went wrong with it, if anything.
 
         Home Assistant's shared session, a bounded wait, and no redirect followed: a
         go2rtc that answers 3xx is not taking the stream.
+
+        The third value is set when go2rtc answered with an error and yet took the
+        source (`_async_confirmed`): the request counts as done, and the value is the
+        start of go2rtc's answer, made safe to log (`_log_safe`).
         """
         assert self._base is not None
         self.requests += 1
@@ -349,17 +408,92 @@ class Go2rtcFollower:
             {"name": self.stream_name, "src": source}
         )
         session = async_get_clientsession(self.hass)
+        head = b""
         try:
             async with (
                 asyncio.timeout(GO2RTC_TIMEOUT),
                 session.put(url, allow_redirects=False) as response,
             ):
                 status = response.status
+                if not 200 <= status < 300:
+                    head = await response.content.read(ANSWER_HEAD_BYTES)
         except (TimeoutError, aiohttp.ClientError, ValueError):
-            return PROBLEM_UNREACHABLE, None
+            return PROBLEM_UNREACHABLE, None, None
         if 200 <= status < 300:
-            return None, status
-        return PROBLEM_REFUSED, status
+            return None, status, None
+        if await self._async_confirmed(source):
+            return None, status, _log_safe(head, source)
+        return PROBLEM_REFUSED, status, None
+
+    async def _async_confirmed(self, source: str) -> bool:
+        """Return whether go2rtc holds the stream with exactly this source now.
+
+        go2rtc 1.9.14 answers a PUT with 400 when it cannot write the stream into its
+        configuration file - a file whose `streams` is written in flow style, for one -
+        after it has already created or re-pointed the stream in memory. So an error
+        answer is read back with `GET <address>/api/streams?src=<name>`, with the same
+        session, the same bounded wait and no redirect followed; the stream counts as
+        re-pointed only when one of its producers has exactly the source that was sent.
+        Anything else - no answer, an error, text that is not the stream's JSON object,
+        another source - is "not confirmed", and the PUT's failure stands.
+        """
+        assert self._base is not None
+        url = (URL(self._base) / "api" / "streams").with_query({"src": self.stream_name})
+        session = async_get_clientsession(self.hass)
+        try:
+            async with (
+                asyncio.timeout(GO2RTC_TIMEOUT),
+                session.get(url, allow_redirects=False) as response,
+            ):
+                if not 200 <= response.status < 300:
+                    return False
+                body = await response.content.read(READ_BACK_MAX_BYTES + 1)
+        except Exception as error:  # every failure of the read-back is "not confirmed"
+            # The PUT has already failed and is reported as such; the read-back only
+            # decides whether that report is needed. Its own failure changes nothing.
+            _LOGGER.debug(
+                "Reading the stream %s back from go2rtc failed: %s",
+                self.stream_name,
+                type(error).__name__,
+            )
+            return False
+        if len(body) > READ_BACK_MAX_BYTES:
+            return False
+        try:
+            stream = json.loads(body)
+        except ValueError:
+            return False
+        producers = stream.get("producers") if isinstance(stream, dict) else None
+        if not isinstance(producers, list):
+            return False
+        return any(
+            isinstance(producer, dict) and producer.get("url") == source
+            for producer in producers
+        )
+
+    @callback
+    def _async_log_unsaved(self, status: int | None, head: str) -> None:
+        """Say once in this run that go2rtc took a source it could not save.
+
+        The stream plays the new channel; what is lost is go2rtc's own copy, so after a
+        restart of go2rtc the stream is whatever its configuration file still says,
+        until the next channel change. Nothing here can fix the file, so this is a line
+        in the log and no repair, and it is not said again at every channel change.
+        """
+        if self._unsaved_logged:
+            return
+        self._unsaved_logged = True
+        assert self._base is not None
+        _LOGGER.warning(
+            "go2rtc at %s re-pointed the stream %s of receiver %s but could not save it "
+            "to its configuration file (HTTP %s: %s). The stream follows the channel; "
+            "go2rtc's file does not. Not logged again until Home Assistant restarts",
+            URL(self._base).host or "?",
+            self.stream_name,
+            self.box.node_id,
+            status,
+            head or "no text",
+        )
 
     @callback
     def _async_succeeded(self) -> None:

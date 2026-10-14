@@ -156,3 +156,16 @@ review, four points narrow what is decided above; nothing in it is reversed.
 - **Decision 7: one warning for a run of failures.** The warning is written for the first failure
   after a success, whatever the failures that follow are; the one repair is replaced under its id
   when the failure changes, so it says the latest.
+- **Decision 7: an error answer is read back before it counts as a failure.** Measured on go2rtc
+  1.9.14: a PUT that changes a stream's source rewrites go2rtc's configuration file, and when
+  go2rtc cannot write it (a `streams` key in flow style) it answers 400 after it has already
+  re-pointed the stream in memory. On any answer that is not a 2xx the stream is read back with
+  `GET /api/streams?src=<name>` - same session, same bounded wait, no redirect followed - and a
+  stream whose producers include exactly the source sent counts as re-pointed: no repair, no
+  retry, and one warning in the run of the entry that go2rtc could not save its configuration,
+  with the status and a short head of the answer from which anything that could be an address
+  is removed. A read-back that fails, cannot be read or shows another source leaves the
+  failure as it was. Also measured: a viewer already open when the source changes stays on the
+  old source, and keeps the receiver's stream of the previous channel open, until it
+  reconnects - so the documentation says to open a card after the channel change. Nothing here
+  can move such a viewer, and nothing tries.

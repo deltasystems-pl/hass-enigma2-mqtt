@@ -85,7 +85,11 @@ carries no video. Two things about streams do leave it:
   Assistant sends that address `PUT /api/streams?name=<name>&src=<source>` when the channel
   on that receiver changes. **Home Assistant calls an address you typed**, whatever it is, and
   sends it the stream name and the source and nothing else - no token of Home Assistant's, no
-  body, no redirect followed, and the answer's body is not read. The source is your template
+  body, no redirect followed. When go2rtc answers with anything but a 2xx, Home Assistant
+  also reads the stream back from the same address (`GET /api/streams?src=<name>`, the same
+  limits), because go2rtc can answer 400 for a change it did make; at most the first 512
+  bytes of the error answer are read, and only a short first line of it reaches the log,
+  with anything that could be an address taken out. The source is your template
   with the receiver's stream address in it, which contains the receiver's address and the
   service reference of the channel that is on. If the address you typed carries a user name
   and a password, they are sent to that host as HTTP basic authentication, over plain HTTP

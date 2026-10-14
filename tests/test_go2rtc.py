@@ -102,10 +102,41 @@ def streaming(store: dict[str, str | bytes], stream: dict[str, Any] = STREAM) ->
 
 
 def puts(aioclient_mock: AiohttpClientMocker) -> list[Any]:
-    """Return the address of every request sent to the go2rtc, in order."""
+    """Return the address of every PUT sent to the go2rtc, in order."""
     return [
-        url for method, url, *_ in aioclient_mock.mock_calls if url.host == GO2RTC_HOST
+        url
+        for method, url, *_ in aioclient_mock.mock_calls
+        if url.host == GO2RTC_HOST and method.upper() == "PUT"
     ]
+
+
+def reads(aioclient_mock: AiohttpClientMocker) -> list[Any]:
+    """Return the address of every read-back sent to the go2rtc, in order."""
+    return [
+        url
+        for method, url, *_ in aioclient_mock.mock_calls
+        if url.host == GO2RTC_HOST and method.upper() == "GET"
+    ]
+
+
+def holding(
+    aioclient_mock: AiohttpClientMocker,
+    source: str | None = None,
+    *,
+    suffix: str = "",
+    status: int = 200,
+    pad: int = 0,
+) -> Any:
+    """Return a read-back that answers with the source of the last PUT, or this one."""
+
+    async def _answer(method: str, url: Any, data: Any) -> AiohttpClientMockResponse:
+        held = source if source is not None else puts(aioclient_mock)[-1].query["src"]
+        body: dict[str, Any] = {"producers": [{"url": held + suffix}], "consumers": None}
+        if pad:
+            body["pad"] = "x" * pad
+        return AiohttpClientMockResponse(method, url, status=status, json=body)
+
+    return _answer
 
 
 async def settle(hass: HomeAssistant) -> None:
@@ -437,7 +468,8 @@ async def test_a_redirect_is_not_go2rtc_taking_the_stream(
     await async_setup_box_then_retained(hass, entry, box_on_the_broker)
     await settle(hass)
 
-    assert sent_with == [False]
+    # The PUT, and the read-back of its error answer.
+    assert sent_with == [False, False]
     raised = issue(hass, entry)
     assert raised is not None
     assert raised.translation_placeholders["status"] == "302"
@@ -583,6 +615,7 @@ async def test_no_login_typed_into_the_address_reaches_a_log_a_repair_or_the_dow
         "problem": "refused",
         "http_status": 401,
         "requests": 1,
+        "unsaved": False,
     }
 
 
@@ -867,3 +900,256 @@ def test_home_assistants_own_stream_and_go2rtc_stay_out_of_the_manifest() -> Non
 
     named = {*manifest.get("dependencies", []), *manifest.get("after_dependencies", [])}
     assert not named & {"stream", "go2rtc", "camera"}
+
+
+# ------------------------------------------- an error answer that go2rtc applied anyway
+
+UNSAVED = "yaml: line 7: did not find expected key"
+
+
+async def test_a_400_that_go2rtc_applied_anyway_is_a_success_said_once(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """go2rtc 1.9.14 re-points the stream and then fails to write its file: done, said once."""
+    aioclient_mock.put(API, status=400, text=UNSAVED)
+    aioclient_mock.get(API, side_effect=holding(aioclient_mock))
+    streaming(box_on_the_broker)
+    entry = following(config_entry)
+    caplog.set_level(logging.INFO, logger="custom_components.enigma2_mqtt.own_go2rtc")
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+    await settle(hass)
+    await zap(hass, SERVICE_TWO)
+    await zap(hass, SERVICE)
+
+    assert [url.query["src"] for url in puts(aioclient_mock)] == [
+        source_for(SREF),
+        source_for(SREF_TWO),
+        source_for(SREF),
+    ]
+    assert [url.query["src"] for url in reads(aioclient_mock)] == [NAME] * 3
+    assert issue(hass, entry) is None
+    assert caplog.text.count("could not save it") == 1
+    assert f"HTTP 400: {UNSAVED}" in caplog.text
+    assert "did not take the stream" not in caplog.text
+    status = entry.runtime_data.go2rtc.async_status()
+    assert status["state"] == "ok"
+    assert status["unsaved"] is True
+    # Nothing is retried: the timer would send the same source again.
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=301))
+    await settle(hass)
+    assert len(puts(aioclient_mock)) == 3
+
+
+async def test_an_applied_400_ends_a_failure_and_its_repair_as_a_success_does(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """503, then an applied 400, then 503 again: two failure runs, one note on the file."""
+    aioclient_mock.put(API, status=503)
+    streaming(box_on_the_broker)
+    entry = following(config_entry)
+    caplog.set_level(logging.INFO, logger="custom_components.enigma2_mqtt.own_go2rtc")
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+    await settle(hass)
+    assert issue(hass, entry) is not None
+
+    answering(aioclient_mock, status=400, text=UNSAVED)
+    aioclient_mock.get(API, side_effect=holding(aioclient_mock))
+    await zap(hass, SERVICE_TWO)
+    assert issue(hass, entry) is None
+
+    answering(aioclient_mock, status=503)
+    await zap(hass, SERVICE)
+    assert issue(hass, entry) is not None
+
+    # A third channel: back on the second one, go2rtc already has it and nothing is sent.
+    answering(aioclient_mock, status=400, text=UNSAVED)
+    aioclient_mock.get(API, side_effect=holding(aioclient_mock))
+    await zap(hass, SERVICE_SPORT)
+
+    assert issue(hass, entry) is None
+    assert caplog.text.count("did not take the stream") == 2
+    assert caplog.text.count("could not save it") == 1
+
+
+async def test_a_400_whose_stream_has_another_source_is_a_failure(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    aioclient_mock.put(API, status=400, text=UNSAVED)
+    aioclient_mock.get(API, side_effect=holding(aioclient_mock, source_for(SREF_TWO)))
+    streaming(box_on_the_broker)
+    entry = following(config_entry)
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+    await settle(hass)
+
+    raised = issue(hass, entry)
+    assert raised is not None
+    assert raised.translation_placeholders["status"] == "400"
+    assert "could not save it" not in caplog.text
+    assert entry.runtime_data.go2rtc.async_status()["unsaved"] is False
+
+
+@pytest.mark.parametrize(
+    "read_back",
+    [
+        {"exc": aiohttp.ClientConnectionError("refused")},
+        {"exc": TimeoutError()},
+        {"text": "<html>not json</html>"},
+        {"json": [{"producers": []}]},
+        {"json": {"producers": "ffmpeg"}},
+        {"json": {"consumers": None}},
+        {"status": 404, "text": "stream not found"},
+        {"text": "x" * 70000},
+        "longer",
+        "matching-404",
+        "matching-huge",
+    ],
+    ids=[
+        "error", "timeout", "garbage", "list", "producers", "no-producers", "404", "huge",
+        "longer", "matching-404", "matching-huge",
+    ],
+)
+async def test_a_400_that_cannot_be_read_back_is_a_failure(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    read_back: dict[str, Any] | str,
+) -> None:
+    """Not confirmed is not done: the PUT's failure stands, with its repair and its retry."""
+    aioclient_mock.put(API, status=400, text=UNSAVED)
+    if read_back == "longer":
+        # The source sent, with more behind it, is another source.
+        aioclient_mock.get(API, side_effect=holding(aioclient_mock, suffix="#audio=pcm"))
+    elif read_back == "matching-404":
+        aioclient_mock.get(API, side_effect=holding(aioclient_mock, status=404))
+    elif read_back == "matching-huge":
+        aioclient_mock.get(API, side_effect=holding(aioclient_mock, pad=70000))
+    else:
+        aioclient_mock.get(API, **read_back)
+    streaming(box_on_the_broker)
+    entry = following(config_entry)
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+    await settle(hass)
+
+    raised = issue(hass, entry)
+    assert raised is not None
+    assert raised.translation_key == "go2rtc_refused"
+    assert entry.runtime_data.go2rtc.async_status()["state"] == "failed"
+
+
+async def test_a_500_that_is_not_confirmed_is_reported_as_before(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    aioclient_mock.put(API, status=500, text="internal error")
+    aioclient_mock.get(API, side_effect=holding(aioclient_mock, "ffmpeg:another#video=h264"))
+    streaming(box_on_the_broker)
+    entry = following(config_entry)
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+    await settle(hass)
+    await zap(hass, SERVICE_TWO)
+    await zap(hass, SERVICE)
+
+    raised = issue(hass, entry)
+    assert raised.translation_placeholders["status"] == "500"
+    assert caplog.text.count("did not take the stream") == 1
+    assert "could not save it" not in caplog.text
+
+
+async def test_unloading_during_the_read_back_ends_it_quietly(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    reading = asyncio.Event()
+
+    async def _never(method: str, url: Any, data: Any) -> AiohttpClientMockResponse:
+        reading.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    aioclient_mock.put(API, status=400, text=UNSAVED)
+    aioclient_mock.get(API, side_effect=_never)
+    streaming(box_on_the_broker)
+    entry = following(config_entry)
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+    async with asyncio.timeout(5):
+        await reading.wait()
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert issue(hass, entry) is None
+    assert "Traceback" not in caplog.text
+    assert "failed unexpectedly" not in caplog.text
+
+
+async def test_no_log_line_carries_the_receivers_address_or_channel(
+    hass: HomeAssistant,
+    mqtt_mock,
+    aioclient_mock: AiohttpClientMocker,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """go2rtc may say back what it was sent; the source names the receiver and the channel."""
+    echo = (
+        f"cannot save {source_for(SREF)}: {UNSAVED} at http://{IP}:8001/x and {IP} "
+        "or 2001:db8::12\nsecond line http://192.0.2.99/"
+    )
+    aioclient_mock.put(API, status=400, text=echo)
+    aioclient_mock.get(API, side_effect=holding(aioclient_mock))
+    streaming(box_on_the_broker)
+    entry = following(config_entry)
+    caplog.set_level(logging.DEBUG, logger="custom_components.enigma2_mqtt")
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+    await settle(hass)
+
+    assert "could not save it" in caplog.text
+    ours = "\n".join(
+        record.getMessage()
+        for record in caplog.records
+        if record.name.startswith("custom_components.enigma2_mqtt.own_go2rtc")
+    )
+    assert IP not in ours
+    assert SREF not in ours
+    assert "2001:db8" not in ours
+    assert "192.0.2.99" not in ours
+    assert "yaml: line 7" in ours
+
+
+def test_the_answer_is_cut_and_cleaned_before_it_is_logged() -> None:
+    source = source_for(SREF)
+    assert go2rtc._log_safe(UNSAVED.encode(), source) == UNSAVED
+    assert go2rtc._log_safe(b"", source) == ""
+    assert go2rtc._log_safe(b"\n\nlater", source) == ""
+    assert go2rtc._log_safe(("x" * 200).encode(), source) == "x" * 80
+    assert go2rtc._log_safe(f"bad {source} here".encode(), source) == "bad ... here"
+    assert go2rtc._log_safe(b"see rtsp://user:pw@198.51.100.7/a now", source) == "see ... now"
+    assert go2rtc._log_safe(b"tab\there \x1b[31mred", source) == "tabhere [31mred"
+    assert go2rtc._log_safe(b"\xff\xfe broken", source) == "broken"
+    assert go2rtc._log_safe(b"peer 2001:db8::12 gone", source) == "peer ... gone"
+    assert go2rtc._log_safe(b"peer 198.51.100.7 gone", source) == "peer ... gone"

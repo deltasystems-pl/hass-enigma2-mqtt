@@ -1684,6 +1684,28 @@ last channel.
   filter with spaces has to be a **named template** in your own `go2rtc.yaml`.
 - **go2rtc cannot read the receiver's stream port without `ffmpeg:`** in front of the address.
 - **WebRTC needs `#audio=opus`; MSE takes AAC.** The default template asks for both.
+- **Every channel change rewrites the stream's entry in go2rtc's configuration file.** A
+  request that changes the source makes go2rtc save it there; the same source again leaves the
+  file alone.
+- **A request can be answered 400 and still have worked.** When go2rtc cannot write its
+  configuration file - a `streams` key written in flow style, such as `streams: {}`, is one
+  measured case - it answers 400 (`yaml: line 7: did not find expected key`, or similar), after
+  it has already re-pointed the stream in memory. So on any answer that is not a 2xx, Home
+  Assistant reads the stream back (`GET <go2rtc address>/api/streams?src=<stream name>`, with
+  the same limits as the request). When the stream is there with exactly the source that was
+  sent, the channel change counts as done: no repair, no retry, and **one** warning in the
+  log for as long as Home Assistant runs, saying that go2rtc could not save its configuration,
+  with the status and the start of go2rtc's answer - cut short, and without anything that
+  could be an address. go2rtc's file then still holds an older source, which is what the
+  stream is after a restart of go2rtc until the next channel change; writing `streams:` in
+  block style, or removing it, ends that. A read-back that fails or shows another source
+  leaves the failure as it was (below).
+- **A card or player that is already open keeps showing the previous channel.** After a
+  re-point, a viewer that was connected stays on the old source - and go2rtc keeps the
+  receiver's stream of that channel open, and with it a tuner - until the viewer reconnects;
+  go2rtc lists it under no consumer meanwhile. Measured with an HTTP MP4 viewer
+  (`/api/stream.mp4`) on go2rtc 1.9.14. **Open the card after the channel change**, on a tap,
+  rather than leaving it open across one.
 
 **A recipe.** In your `go2rtc.yaml` (the add-on's configuration), a named template that
 deinterlaces - most broadcast channels are interlaced, and a browser shows the combing - and
@@ -1716,9 +1738,11 @@ The ingress token is the part after `/api/hassio_ingress/` in the address of the
 *Open Web UI* page. The stream name is the one in the options, and the media player's
 `go2rtc_stream` attribute. **Put that card where it opens on a tap** - a subview, a popup - and
 not on a dashboard that is always on a wall: the page starts playing when it loads, go2rtc
-opens the receiver's stream for it, and that stream holds a tuner until the card is gone.
+opens the receiver's stream for it, and that stream holds a tuner until the card is gone. A
+card left open across a channel change also goes on showing the channel it opened (above).
 
-**When it fails** - go2rtc does not answer within ten seconds, or answers anything but a 2xx -
+**When it fails** - go2rtc does not answer within ten seconds, or answers anything but a 2xx
+that the read-back above does not confirm -
 Home Assistant logs one warning and raises one repair for the receiver, naming the host and
 the HTTP status. Both are said **once**, not at every channel change - also when the failure
 changes, from one status to another or to no answer at all; the one repair then says the
