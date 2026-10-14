@@ -365,6 +365,20 @@ def receiver_without_a_web_interface(
 
 
 @pytest.fixture
+def entity_registry_enabled_by_default() -> Generator[None]:
+    """Create every entity enabled, also one that is disabled by default.
+
+    Several diagnostics here are disabled until somebody wants them. A test about what
+    such an entity says takes this fixture; a test about it being disabled does not.
+    """
+    with patch(
+        "homeassistant.helpers.entity.Entity.entity_registry_enabled_default",
+        return_value=True,
+    ):
+        yield
+
+
+@pytest.fixture
 def expected_lingering_timers() -> bool:
     """Tolerate the MQTT integration's own periodic timer.
 

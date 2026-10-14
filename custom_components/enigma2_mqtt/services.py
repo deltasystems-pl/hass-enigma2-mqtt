@@ -34,6 +34,7 @@ import voluptuous as vol
 
 from .box import Enigma2Box, Enigma2CommandError, normalise_key, same_service
 from .const import (
+    CAPABILITY_STREAM_STOP,
     DOMAIN,
     HA_MODES,
     MESSAGE_STYLE_POPUP,
@@ -41,6 +42,8 @@ from .const import (
     MESSAGE_STYLES,
     MESSAGE_TYPES,
     RECORD_ACTIONS,
+    STREAM_STOP_FAILURES,
+    STREAM_STOP_REASONS,
     TOPIC_BOUQUET,
     TOPIC_EPG_GRID,
     TOPIC_SCREEN,
@@ -58,6 +61,7 @@ SERVICE_RECORD = "record"
 SERVICE_SCREENSHOT = "screenshot"
 SERVICE_SET_HA_MODE = "set_ha_mode"
 SERVICE_GET_EPG_GRID = "get_epg_grid"
+SERVICE_STOP_STREAM = "stop_stream"
 
 ATTR_SREF = "sref"
 ATTR_NAME = "name"
@@ -73,6 +77,7 @@ ATTR_END = "end"
 ATTR_ACTION = "action"
 ATTR_MODE = "mode"
 ATTR_BOUQUET = "bouquet"
+ATTR_HOST = "host"
 
 # Epoch seconds, or anything Home Assistant can read as a moment in time. An automation
 # built in the UI hands over a `datetime`; one written by hand is as likely to have the
@@ -112,6 +117,10 @@ DELETE_TIMER_SCHEMA = {
 RECORD_SCHEMA = {vol.Required(ATTR_ACTION): vol.In(RECORD_ACTIONS)}
 SET_HA_MODE_SCHEMA = {vol.Required(ATTR_MODE): vol.In(HA_MODES)}
 GET_EPG_GRID_SCHEMA = {vol.Optional(ATTR_BOUQUET): cv.string}
+STOP_STREAM_SCHEMA = {
+    vol.Required(ATTR_HOST): cv.string,
+    vol.Optional(ATTR_SREF): cv.string,
+}
 
 
 def _epoch(value: datetime | int) -> int:
@@ -144,6 +153,52 @@ async def async_select_bouquet(box: Enigma2Box, sref: str) -> None:
             box.updates.get(TOPIC_BOUQUET, 0) > before
             and same_service((box.state.bouquet or {}).get("sref"), sref)
         ),
+    )
+
+
+async def async_stop_stream(box: Enigma2Box, host: str, sref: str | None = None) -> None:
+    """End one stream client's stream, named by its host and the service it is sent.
+
+    The receiver's command takes both and nothing else, so nothing here ever stops "all
+    of them". Without a reference the host has to have one stream open - or one whose
+    channel the options hide, which is the stream meant then, because its reference is
+    shown nowhere and the box supplies it (`Enigma2Box.stream_client_references`). Two
+    hidden services on one host cannot be told apart by anybody, and are refused with a
+    sentence of their own.
+
+    The command changes no state topic at once: the image answers and the connection
+    ends a moment later, and a player that reconnects by itself is back on the list by
+    the time it is read again. So the wait is only for a complaint, as for a key press.
+    `not_connected` is a refusal and `not_stopped` a failure, each with its own
+    sentence.
+    """
+    if CAPABILITY_STREAM_STOP not in box.capabilities:
+        raise _invalid("stream_stop_unsupported")
+    host = host.strip()
+    sref = (sref or "").strip() or None
+    # An offline receiver lists nobody - its retained list is of clients that have gone -
+    # and a command sent to it now is answered by nobody, which this path would report
+    # as done. An empty address names no client; the receiver would refuse it in English.
+    if not host or not box.available:
+        raise _invalid("stream_client_unknown", host=host)
+    if not sref:
+        references, hidden = box.stream_client_references(host)
+        if not references:
+            raise _invalid("stream_client_unknown", host=host)
+        if len(references) > 1:
+            # Two hidden services have no reference anybody could give, so asking for
+            # one would be asking the impossible: they are stopped on the receiver, or
+            # shown again first. Never all of them at once.
+            raise _invalid(
+                "stream_client_hidden_ambiguous" if hidden else "stream_client_ambiguous",
+                host=host,
+            )
+        sref = references[0]
+    await box.async_command(
+        "stream_stop",
+        json.dumps({"host": host, "sref": sref}),
+        reasons=STREAM_STOP_REASONS,
+        failures=STREAM_STOP_FAILURES,
     )
 
 
@@ -309,6 +364,10 @@ class Enigma2Actions:
                 translation_placeholders={"command": "ha_mode"},
             )
 
+    async def async_stop_stream(self, host: str, sref: str | None = None) -> None:
+        """End one stream the receiver is serving to another device."""
+        await async_stop_stream(self.box, host, sref)
+
     async def async_get_epg_grid(self, bouquet: str | None = None) -> ServiceResponse:
         """Return what is on, per bouquet, from the retained grid topics.
 
@@ -374,6 +433,9 @@ def async_setup_services() -> None:
     platform.async_register_entity_service(SERVICE_SCREENSHOT, None, "async_screenshot")
     platform.async_register_entity_service(
         SERVICE_SET_HA_MODE, SET_HA_MODE_SCHEMA, "async_set_ha_mode"
+    )
+    platform.async_register_entity_service(
+        SERVICE_STOP_STREAM, STOP_STREAM_SCHEMA, "async_stop_stream"
     )
     platform.async_register_entity_service(
         SERVICE_GET_EPG_GRID,

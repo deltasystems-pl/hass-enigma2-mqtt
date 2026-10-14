@@ -14,8 +14,14 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .box import Enigma2Box, Enigma2MqttConfigEntry
-from .const import TOPIC_VOLUME
+from .const import (
+    ATTR_VOLUME_PASSTHROUGH,
+    CAPABILITY_VOLUME_PASSTHROUGH,
+    TOPIC_INFO,
+    TOPIC_VOLUME,
+)
 from .entity import Enigma2Entity
+from .stream_facts import volume_passthrough
 
 PARALLEL_UPDATES = 0
 
@@ -39,14 +45,28 @@ class Enigma2Volume(Enigma2Entity, NumberEntity):
 
     def __init__(self, box: Enigma2Box) -> None:
         """Set up the volume."""
-        super().__init__(box, "volume", topics=(TOPIC_VOLUME,))
+        # `info` as well: it carries the capability the attribute below follows, and it
+        # can arrive after the volume. The volume topic stays the one that has to have
+        # arrived for the entity to be available.
+        super().__init__(box, "volume", topics=(TOPIC_VOLUME, TOPIC_INFO))
 
     @callback
     def _async_read_state(self) -> None:
-        """Read the level off the volume topic."""
+        """Read the level off the volume topic, and whether it acts on the audio.
+
+        The entity stays available and settable while the receiver passes the audio on
+        undecoded: the setting can change with the next track, and the level set now is
+        the one that applies then. The attribute is there only for a receiver that
+        claims the capability, and is None when the receiver cannot tell.
+        """
         level = (self.box.state.volume or {}).get("level")
         self._attr_native_value = (
             float(level) if isinstance(level, (int, float)) else None
+        )
+        self._attr_extra_state_attributes = (
+            {ATTR_VOLUME_PASSTHROUGH: volume_passthrough(self.box.state.volume)}
+            if CAPABILITY_VOLUME_PASSTHROUGH in self.box.capabilities
+            else {}
         )
 
     async def async_set_native_value(self, value: float) -> None:

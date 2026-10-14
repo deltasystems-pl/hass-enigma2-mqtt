@@ -125,3 +125,15 @@ def test_the_german_catalogue_speaks_to_the_reader_as_du_throughout() -> None:
     formal = {key: text for key, text in texts.items() if FORMAL_GERMAN.search(text)}
 
     assert formal == {}
+
+
+def test_no_string_carries_an_address() -> None:
+    """Home Assistant's hassfest refuses a translated string with a URL in it.
+
+    An example address belongs in a description placeholder, filled in by the form that
+    shows the string. `://` and `www.` are what such a string gives itself away by.
+    """
+    for path in (SOURCE, *(TRANSLATIONS / f"{language}.json" for language in LANGUAGES)):
+        for key, text in _flatten(json.loads(path.read_text(encoding="utf-8"))).items():
+            assert "://" not in text, f"{path.name}: {key}"
+            assert "www." not in text.lower(), f"{path.name}: {key}"

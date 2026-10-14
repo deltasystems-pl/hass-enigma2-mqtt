@@ -739,3 +739,74 @@ MANUFACTURERS: Final[dict[str, str]] = {
     "ax": "AX Technology",
     "formuler": "Formuler",
 }
+
+# What is on the decoder, from a plugin after 0.4.0: the `service` topic carries the video
+# codec, the scan, the frame rate and the audio tracks, and the capability says the image
+# can fill them in (the plugin's TOPICS.md, `service`). `stream_facts.py` reads the members.
+CAPABILITY_SERVICE_CODECS: Final = "service_codecs"
+
+# Whether the receiver's volume acts on the audio being played, from a plugin after 0.4.0:
+# `volume.passthrough` is true, false or null for "cannot be told", and the capability
+# says the image has at least one of the settings it is read from.
+CAPABILITY_VOLUME_PASSTHROUGH: Final = "volume_passthrough"
+# The attribute the two volume controls carry it in, and the binary sensor's key.
+ATTR_VOLUME_PASSTHROUGH: Final = "volume_passthrough"
+
+# Who the image's stream server is serving, from a plugin after 0.4.0: `stream_clients`
+# lists the clients, and `cmd/stream_stop` ends one of them. Each is claimed by itself -
+# an image whose server lists clients and cannot stop one claims the first only.
+TOPIC_STREAM_CLIENTS: Final = "stream_clients"
+CAPABILITY_STREAM_CLIENTS: Final = "stream_clients"
+CAPABILITY_STREAM_STOP: Final = "stream_stop"
+# The refusal codes of `cmd/stream_stop` this integration has a sentence for: the client
+# has left, and the image did not stop a client it listed - the second is a failure.
+STREAM_STOP_REASONS: Final = ("not_connected", "not_stopped")
+STREAM_STOP_FAILURES: Final = ("not_stopped",)
+
+# Where the image's stream server is, from a plugin after 0.4.0: `stream` carries the
+# port, the form of the request path and whether the server wants a login - no host and
+# no URL. The address is built in `stream_facts.py`, at the host the picon lookup asks.
+TOPIC_STREAM: Final = "stream"
+CAPABILITY_STREAM: Final = "stream"
+# The media player's attributes for it: the address of the service on the decoder, a
+# stable name for that channel's stream, and whether the stream server wants a login.
+ATTR_STREAM_URL: Final = "stream_url"
+ATTR_STREAM_NAME: Final = "stream_name"
+ATTR_STREAM_AUTHENTICATION: Final = "stream_authentication"
+
+# Whether a service could be played now, beside everything the receiver is doing, from a
+# plugin after 0.4.0: `cmd/stream_playable` is a question, and the one command answered
+# on a topic of its own - an event, never retained, carrying the question's id.
+TOPIC_STREAM_PLAYABLE: Final = "stream_playable"
+CAPABILITY_STREAM_PLAYABLE: Final = "stream_playable"
+# Seconds the answer is waited for before an address is handed to a player. The contract
+# says to treat no answer within a few seconds as "unknown", not as "no", and a media
+# browser is waiting on it.
+STREAM_PLAYABLE_TIMEOUT: Final = 3.0
+# What the receiver's stream server sends: an MPEG transport stream.
+STREAM_MIME_TYPE: Final = "video/mp2t"
+
+# The user's own go2rtc, in the options: the address of its API - empty is "off" - the
+# name of the one stream kept there, and the source it is given, with `{url}` where the
+# receiver's stream address goes (`own_go2rtc.py`). They sit in a section of the options
+# form of their own.
+SECTION_GO2RTC: Final = "go2rtc"
+CONF_GO2RTC_URL: Final = "go2rtc_url"
+CONF_GO2RTC_STREAM: Final = "go2rtc_stream"
+CONF_GO2RTC_SOURCE: Final = "go2rtc_source"
+GO2RTC_OPTIONS: Final = (CONF_GO2RTC_URL, CONF_GO2RTC_STREAM, CONF_GO2RTC_SOURCE)
+# `ffmpeg:` because go2rtc cannot read the receiver's stream port without it; H.264 for
+# every browser; Opus for WebRTC and AAC for MSE. No space anywhere: go2rtc refuses a
+# source that has one.
+DEFAULT_GO2RTC_SOURCE: Final = "ffmpeg:{url}#video=h264#audio=opus#audio=aac"
+# What the options form shows as an example of that address, and as its form when one
+# was mistyped. Placeholders, not translated text: Home Assistant's translation rules
+# allow no address inside a string.
+GO2RTC_EXAMPLE_URL: Final = "http://homeassistant.local:1984"
+GO2RTC_URL_FORM: Final = "http://host:1984"
+# Seconds one request to that go2rtc may take, and seconds until a failed one is tried
+# again without a channel change.
+GO2RTC_TIMEOUT: Final = 10
+GO2RTC_RETRY_SECONDS: Final = 300
+# The media player's attribute with the name of that stream, for a dashboard card.
+ATTR_GO2RTC_STREAM: Final = "go2rtc_stream"

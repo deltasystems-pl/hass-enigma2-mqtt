@@ -181,3 +181,19 @@ get_epg_grid:
       example: "Ulubione TV"
       selector:
         text:
+
+stop_stream:
+  target:
+    entity:
+      - integration: enigma2_mqtt
+        domain: media_player
+  fields:
+    host:
+      required: true
+      example: "192.0.2.20"
+      selector:
+        text:
+    sref:
+      example: "1:0:19:283D:3FB:1:C00000:0:0:0:"
+      selector:
+        text:

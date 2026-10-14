@@ -26,7 +26,7 @@ has to reach the receiver for it, and standby keeps the last one.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 import json
 import time
 from typing import Any
@@ -53,18 +53,28 @@ from .box import (
     service_identity,
 )
 from .const import (
+    ATTR_GO2RTC_STREAM,
+    ATTR_STREAM_AUTHENTICATION,
+    ATTR_STREAM_NAME,
+    ATTR_STREAM_URL,
+    ATTR_VOLUME_PASSTHROUGH,
+    CAPABILITY_STREAM,
+    CAPABILITY_VOLUME_PASSTHROUGH,
     DOMAIN,
     TOPIC_BOUQUET,
     TOPIC_CHANNELS,
     TOPIC_EPG,
+    TOPIC_INFO,
     TOPIC_POWER,
     TOPIC_SCREEN,
     TOPIC_SERVICE,
+    TOPIC_STREAM,
     TOPIC_VOLUME,
 )
 from .entity import Enigma2Entity
 from .picture import PendingPicon, Picture, PlayerPicture, player_picture_mode
 from .services import Enigma2Actions, async_select_bouquet, async_setup_services
+from .stream_facts import stream_name, volume_passthrough
 
 PARALLEL_UPDATES = 0
 
@@ -127,6 +137,11 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
                 # default, so a bouquet switched on the remote reshapes it - and a
                 # list that only reshapes on the next reload is a list that is wrong.
                 TOPIC_BOUQUET,
+                # The capabilities the extra attributes follow arrive here, and can
+                # arrive after everything else.
+                TOPIC_INFO,
+                # Where the stream server is; the stream address is built from it.
+                TOPIC_STREAM,
             ),
             requires=None,
         )
@@ -198,6 +213,39 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
             screenshots_off=self.box.screenshots_off,
         )
         self._attr_media_image_hash = shown.digest if shown is not None else None
+        self._attr_extra_state_attributes = self._extra_attributes()
+
+    def _extra_attributes(self) -> dict[str, Any]:
+        """Return what the receiver says beyond what a media player has a field for.
+
+        Each attribute is there only for a receiver that claims the capability behind
+        it, so a receiver on an older plugin has none of them.
+        """
+        attributes: dict[str, Any] = {}
+        if CAPABILITY_VOLUME_PASSTHROUGH in self.box.capabilities:
+            # True while the receiver hands the audio on undecoded and its volume does
+            # nothing audible; None when it cannot tell. The volume stays settable.
+            attributes[ATTR_VOLUME_PASSTHROUGH] = volume_passthrough(self.box.state.volume)
+        if CAPABILITY_STREAM in self.box.capabilities:
+            # The receiver's own stream of the channel on the decoder, for a player
+            # that decodes a transport stream itself, and a stable name for it. No
+            # address while the stream server wants a login - the third attribute
+            # says so - and neither an address nor a name for a channel of a bouquet
+            # the options hide.
+            service = self.box.state.service or {}
+            sref, bouquet = service.get("sref"), service.get("bouquet")
+            attributes[ATTR_STREAM_URL] = self.box.stream_url_for(sref, bouquet)
+            attributes[ATTR_STREAM_NAME] = (
+                None if self.box.service_hidden(sref, bouquet) else stream_name(sref)
+            )
+            attributes[ATTR_STREAM_AUTHENTICATION] = (self.box.state.stream or {}).get(
+                "authentication"
+            )
+            if (follower := self.box.go2rtc) is not None and follower.enabled:
+                # The name of the stream the user's own go2rtc is kept on this channel
+                # under, for a dashboard card to play.
+                attributes[ATTR_GO2RTC_STREAM] = follower.stream_name
+        return attributes
 
     @callback
     def _picon(self, sref: str) -> Picture | PendingPicon | None:
@@ -346,16 +394,7 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
         where there is none, as with an older OpenWebif - the name built from the service
         reference is used, as it always was.
         """
-        picons = self.box.picons
-        thumbnails = picons.async_thumbnails(bouquet) if picons else {}
-
-        def thumbnail(sref: Any) -> str | None:
-            if picons is None or not isinstance(sref, str):
-                return None
-            identity = service_identity(sref)
-            if identity in thumbnails:
-                return thumbnails[identity]
-            return picons.async_legacy_thumbnail(sref)
+        thumbnail = channel_thumbnail_lookup(self.box, bouquet)
 
         children: Sequence[BrowseMedia] = [
             BrowseMedia(
@@ -380,6 +419,30 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
             children_media_class=MediaClass.CHANNEL,
             children=children,
         )
+
+
+def channel_thumbnail_lookup(
+    box: Enigma2Box, bouquet: dict[str, Any]
+) -> Callable[[Any], str | None]:
+    """Return what gives a channel of one bouquet its thumbnail in a media browser.
+
+    Shared by the media player's own browser and the media source, so the two show the
+    same picons and ask the receiver's web interface the same single question for a
+    bouquet: the link it gave for the channel where one is held, and the name built
+    from the service reference until then.
+    """
+    picons = box.picons
+    thumbnails = picons.async_thumbnails(bouquet) if picons else {}
+
+    def thumbnail(sref: Any) -> str | None:
+        if picons is None or not isinstance(sref, str):
+            return None
+        identity = service_identity(sref)
+        if identity in thumbnails:
+            return thumbnails[identity]
+        return picons.async_legacy_thumbnail(sref)
+
+    return thumbnail
 
 
 async def async_zap_to_name(

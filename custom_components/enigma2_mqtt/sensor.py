@@ -58,7 +58,9 @@ from .const import (
     CAPABILITY_EPG_GRID,
     CAPABILITY_EPG_IMPORT,
     CAPABILITY_PROCESS,
+    CAPABILITY_SERVICE_CODECS,
     CAPABILITY_SOFTCAM,
+    CAPABILITY_STREAM_CLIENTS,
     CONF_CAM_TELEMETRY,
     CONF_OSCAM_TELEMETRY,
     DOMAIN,
@@ -68,6 +70,7 @@ from .const import (
     LOCAL_ERROR_TEXT_MAX,
     TOPIC_BOUQUET,
     TOPIC_CAM,
+    TOPIC_CHANNELS,
     TOPIC_EPG,
     TOPIC_EPG_GRID,
     TOPIC_EPG_IMPORT,
@@ -80,10 +83,12 @@ from .const import (
     TOPIC_RECORDING,
     TOPIC_SERVICE,
     TOPIC_SOFTCAM,
+    TOPIC_STREAM_CLIENTS,
     TOPIC_TUNER,
     WITHHELD_ATTRIBUTE_MAX,
 )
 from .entity import Enigma2Entity, OptionalEntities
+from .stream_facts import audio_attributes, audio_codec, audio_language, frame_rate, video_codec
 
 PARALLEL_UPDATES = 0
 
@@ -577,7 +582,47 @@ WITHHELD_SENSORS: tuple[Enigma2SensorDescription, ...] = (
     ),
 )
 
+# What is on the decoder, from the codec members of `service` (`stream_facts.py` reads them).
+# Technical facts about the current service, like the tuner's numbers: diagnostic, and
+# disabled until somebody wants them. The audio tracks ride on the audio codec's sensor
+# as an attribute the recorder is not given.
+SERVICE_CODEC_SENSORS: tuple[Enigma2SensorDescription, ...] = (
+    Enigma2SensorDescription(
+        key="video_codec",
+        topics=(TOPIC_SERVICE,),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value_fn=lambda state: video_codec(state.service),
+    ),
+    Enigma2SensorDescription(
+        key="frame_rate",
+        topics=(TOPIC_SERVICE,),
+        native_unit_of_measurement="fps",
+        suggested_display_precision=3,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value_fn=lambda state: frame_rate(state.service),
+    ),
+    Enigma2SensorDescription(
+        key="audio_codec",
+        topics=(TOPIC_SERVICE,),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value_fn=lambda state: audio_codec(state.service),
+        attributes_fn=lambda state: audio_attributes(state.service),
+    ),
+    Enigma2SensorDescription(
+        key="audio_language",
+        topics=(TOPIC_SERVICE,),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value_fn=lambda state: audio_language(state.service),
+    ),
+)
+
 KEY_EPG_ACTIVE_BOUQUET = "epg_active_bouquet"
+KEY_STREAM_CLIENTS = "stream_clients"
 
 # The grids to read, and the context that says which one is in use. A box that publishes
 # grids but no context has no „active" bouquet to speak of, and one with a context but no
@@ -681,6 +726,36 @@ async def async_setup_entry(
         ).start()
     )
 
+    entry.async_on_unload(
+        OptionalEntities(
+            hass,
+            box,
+            "sensor",
+            (KEY_STREAM_CLIENTS,),
+            lambda _key: Enigma2StreamClientsSensor(box),
+            lambda: CAPABILITY_STREAM_CLIENTS in box.capabilities,
+            # Never removed, for the reason the softcam sensor above gives.
+            lambda: False,
+            async_add_entities,
+        ).start()
+    )
+
+    codecs = {description.key: description for description in SERVICE_CODEC_SENSORS}
+    entry.async_on_unload(
+        OptionalEntities(
+            hass,
+            box,
+            "sensor",
+            list(codecs),
+            lambda key: Enigma2Sensor(box, codecs[key]),
+            lambda: CAPABILITY_SERVICE_CODECS in box.capabilities,
+            # Never removed, for the reason the softcam sensor above gives: an older
+            # plugin after a downgrade names no codecs, and that is no decision.
+            lambda: False,
+            async_add_entities,
+        ).start()
+    )
+
     withheld = {description.key: description for description in WITHHELD_SENSORS}
     # Whether this receiver has had the sensor before. Read once: the registry entry is
     # made by the first creation and nothing here ever removes it.
@@ -744,8 +819,9 @@ class Enigma2Sensor(Enigma2Entity, SensorEntity):
     entity_description: Enigma2SensorDescription
 
     # A plot summary and a list of running recordings are kilobytes that change every
-    # quarter of an hour. The state is worth recording; these are not.
-    _unrecorded_attributes = frozenset({"long", "recordings"})
+    # quarter of an hour. The state is worth recording; these are not. Nor is the list
+    # of a service's audio tracks, rewritten whenever another one is picked.
+    _unrecorded_attributes = frozenset({"long", "recordings", "audio_tracks"})
 
     def __init__(self, box: Enigma2Box, description: Enigma2SensorDescription) -> None:
         """Set up the sensor from its description."""
@@ -759,6 +835,57 @@ class Enigma2Sensor(Enigma2Entity, SensorEntity):
         self._attr_native_value = description.value_fn(self.box.state)
         if description.attributes_fn is not None:
             self._attr_extra_state_attributes = description.attributes_fn(self.box.state)
+
+
+class Enigma2StreamClientsSensor(Enigma2Entity, SensorEntity):
+    """How many clients the receiver's stream server is serving, and who they are.
+
+    The state is the image's own count - every open stream holds a tuner, so it is the
+    number that explains "no free tuner". The rows are the attribute `clients`: host,
+    channel, bouquet and whether the client is served through the encoder.
+
+    **The plugin publishes every client; hiding is done here.** A row whose service the
+    options hide is shown with its host and `transcoded` and without its name, its
+    reference and its bouquet (`Enigma2Box.stream_client_rows`), by the filter the zap
+    history uses. The channel list is listened to as well, because what is hidden
+    follows it.
+
+    `clients` is declared unrecorded: it is who watched what from which address, and it
+    changes with every client that comes and goes. The count is what history keeps.
+    """
+
+    _unrecorded_attributes = frozenset({"clients"})
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, box: Enigma2Box) -> None:
+        """Follow the client list, and the channel list the hiding is judged by.
+
+        Available whenever the receiver is, without waiting for a list: the plugin
+        empties the topic when the image's list cannot be read, and an emptied retained
+        topic is one a broker never delivers again - so after a restart of Home
+        Assistant that answer is a topic that never arrives. It is `unknown` either way,
+        never unavailable for one and unknown for the other.
+
+        `info` is followed too: `can_stop` is the capability `stream_stop`, which a
+        downgrade or an update changes without a new list.
+        """
+        super().__init__(
+            box,
+            KEY_STREAM_CLIENTS,
+            topics=(TOPIC_STREAM_CLIENTS, TOPIC_CHANNELS, TOPIC_INFO),
+            requires=None,
+        )
+
+    @callback
+    def _async_read_state(self) -> None:
+        """Read the count, and the rows as they may be shown."""
+        clients = self.box.state.stream_clients
+        self._attr_native_value = None if clients is None else clients["count"]
+        # No rows while the count is not known: `[]` would read as "no clients" to a
+        # template that counts the attribute.
+        self._attr_extra_state_attributes = {
+            "clients": None if clients is None else self.box.stream_client_rows()
+        }
 
 
 class Enigma2EpgActiveBouquetSensor(Enigma2Entity, SensorEntity):

@@ -39,6 +39,7 @@ from homeassistant.config_entries import (
     OptionsFlowWithReload,
 )
 from homeassistant.core import callback
+from homeassistant.data_entry_flow import section
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr, selector
 from homeassistant.helpers.service_info.mqtt import MqttServiceInfo
@@ -54,6 +55,7 @@ from .box import (
 )
 from .const import (
     ACK_TIMEOUT,
+    CAPABILITY_STREAM,
     CONF_BASE_TOPIC,
     CONF_BOUQUETS,
     CONF_CAM_TELEMETRY,
@@ -62,6 +64,9 @@ from .const import (
     CONF_CONFIRM_UNINSTALL,
     CONF_DANGEROUS_BUTTONS,
     CONF_DOWNGRADE_VERSION,
+    CONF_GO2RTC_SOURCE,
+    CONF_GO2RTC_STREAM,
+    CONF_GO2RTC_URL,
     CONF_HISTORY_HIDDEN_BOUQUETS,
     CONF_KEEP_SSH_CREDENTIALS,
     CONF_NAME,
@@ -87,6 +92,7 @@ from .const import (
     DEFAULT_BASE_TOPIC,
     DEFAULT_CAM_TELEMETRY,
     DEFAULT_CHECK_GITHUB_RELEASES,
+    DEFAULT_GO2RTC_SOURCE,
     DEFAULT_OSCAM_TELEMETRY,
     DEFAULT_PLAYER_PICTURE,
     DEFAULT_PUBLISH_KEYS,
@@ -97,6 +103,9 @@ from .const import (
     DEFAULT_SOURCE_LIST_SCOPE,
     DISCOVERY_PREFIX,
     DOMAIN,
+    GO2RTC_EXAMPLE_URL,
+    GO2RTC_OPTIONS,
+    GO2RTC_URL_FORM,
     HA_MODE_INTEGRATION,
     MAX_SCREENSHOT_DELAY,
     MAX_SCREENSHOT_INTERVAL,
@@ -107,6 +116,7 @@ from .const import (
     PLAYER_PICTURES,
     PROBE_TIMEOUT,
     SCREENSHOT_MODES,
+    SECTION_GO2RTC,
     SOURCE_LIST_SCOPES,
 )
 from .credentials import async_set_ssh_credentials, ssh_entry_data
@@ -125,6 +135,7 @@ from .installer import (
     async_preflight,
     async_probe_host_key,
 )
+from .own_go2rtc import default_stream_name, validate_options as validate_go2rtc_options
 from .plugin_versions import has_credentials
 from .release_index import release_of
 from .release_package import (
@@ -1069,6 +1080,26 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
             }
             if requested is not None:
                 local_data.update(requested)
+            # The user's own go2rtc: three fields in a section of their own, stored only
+            # where they say something - an empty address is "off" and a default is not
+            # stored. A form that did not carry the section - a receiver that does not
+            # claim `stream` is not shown it - changes none of them.
+            if SECTION_GO2RTC in user_input:
+                go2rtc, go2rtc_error = validate_go2rtc_options(
+                    user_input[SECTION_GO2RTC] or {}, self.config_entry.data[CONF_NODE_ID]
+                )
+                if go2rtc_error is not None:
+                    # On the form as a whole, with the field named in the sentence.
+                    errors["base"] = go2rtc_error
+                local_data.update(go2rtc)
+            else:
+                local_data.update(
+                    {
+                        key: self.config_entry.options[key]
+                        for key in GO2RTC_OPTIONS
+                        if key in self.config_entry.options
+                    }
+                )
             # Kept, not asked: the version chosen in „Wersja wtyczki do instalacji" lives in the
             # options too, but the select sets it, not this form - a save of the form must carry
             # it over rather than drop it.
@@ -1275,13 +1306,50 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
         if isinstance(settings, dict):
             suggested.update(settings)
 
+        # The user's own go2rtc, for a receiver that has a stream server to point it at -
+        # and for one that has an address stored, so that it can always be emptied.
+        # Collapsed until it is in use.
+        options = self.config_entry.options
+        if (
+            box is not None and CAPABILITY_STREAM in box.capabilities
+        ) or options.get(CONF_GO2RTC_URL):
+            schema = schema.extend(
+                {
+                    vol.Optional(SECTION_GO2RTC): section(
+                        vol.Schema(
+                            {
+                                vol.Optional(CONF_GO2RTC_URL, default=""): str,
+                                vol.Optional(CONF_GO2RTC_STREAM, default=""): str,
+                                vol.Optional(
+                                    CONF_GO2RTC_SOURCE, default=DEFAULT_GO2RTC_SOURCE
+                                ): str,
+                            }
+                        ),
+                        {"collapsed": not options.get(CONF_GO2RTC_URL)},
+                    )
+                }
+            )
+            suggested[SECTION_GO2RTC] = {
+                CONF_GO2RTC_URL: options.get(CONF_GO2RTC_URL, ""),
+                CONF_GO2RTC_STREAM: options.get(CONF_GO2RTC_STREAM)
+                or default_stream_name(self.config_entry.data[CONF_NODE_ID]),
+                CONF_GO2RTC_SOURCE: options.get(CONF_GO2RTC_SOURCE)
+                or DEFAULT_GO2RTC_SOURCE,
+            }
+
         return self.async_show_form(
             step_id="settings",
             data_schema=self.add_suggested_values_to_schema(
                 schema, user_input or suggested
             ),
             errors=errors,
-            description_placeholders={"mac": mac or UNKNOWN_PLACEHOLDER},
+            description_placeholders={
+                "mac": mac or UNKNOWN_PLACEHOLDER,
+                # Addresses go in as placeholders: Home Assistant refuses a translated
+                # string that contains one.
+                "go2rtc_example_url": GO2RTC_EXAMPLE_URL,
+                "go2rtc_url_form": GO2RTC_URL_FORM,
+            },
         )
 
     async def async_step_uninstall(

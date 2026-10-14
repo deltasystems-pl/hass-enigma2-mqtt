@@ -50,6 +50,8 @@ from .const import (
     CAPABILITY_CHANNEL_TOPICS,
     CAPABILITY_COMMAND_ID,
     CAPABILITY_SELF_UPDATE,
+    CAPABILITY_STREAM,
+    CAPABILITY_STREAM_STOP,
     CAPABILITY_UNINSTALL,
     CHANNEL_TOPICS_SETTLE,
     CHANNELS_REFETCH_GRACE,
@@ -102,6 +104,7 @@ from .const import (
     SOFTCAM_NAME_MAX,
     SOFTCAM_RESTART_REASONS,
     SOURCE_LIST_SCOPE_ACTIVE_BOUQUET,
+    STREAM_PLAYABLE_TIMEOUT,
     SUBSCRIBE_TIMEOUT,
     TOPIC_AVAILABILITY,
     TOPIC_BOUQUET,
@@ -126,14 +129,24 @@ from .const import (
     TOPIC_SCREEN,
     TOPIC_SERVICE,
     TOPIC_SOFTCAM,
+    TOPIC_STREAM,
+    TOPIC_STREAM_CLIENTS,
+    TOPIC_STREAM_PLAYABLE,
     TOPIC_TIMERS,
     TOPIC_TUNER,
     TOPIC_UPDATE,
     TOPIC_VOLUME,
     TOPIC_ZAP_HISTORY,
 )
+from .stream_facts import (
+    build_stream_url,
+    normalise_stream,
+    normalise_stream_clients,
+    same_client_host,
+)
 
 if TYPE_CHECKING:
+    from .own_go2rtc import Go2rtcFollower
     from .picture import PiconResolver
 
 _LOGGER = logging.getLogger(__name__)
@@ -902,6 +915,31 @@ class _Pending:
         self.future.set_exception(refusal)
 
 
+@dataclass(slots=True)
+class _PlayableQuestion:
+    """One `cmd/stream_playable` whose answer is being waited for."""
+
+    sref: str
+    future: asyncio.Future[bool | None]
+    # Whether the question has gone to the broker, and the id it went out with - None
+    # for one sent without an envelope. An answer that arrives before it has cannot be
+    # its answer.
+    sent: bool = False
+    command_id: str | None = None
+
+    @callback
+    def sent_as(self, command_id: str | None) -> None:
+        """Note that the question is being published, and under which id."""
+        self.sent = True
+        self.command_id = command_id
+
+    @callback
+    def answer(self, playable: bool | None) -> None:
+        """Give the answer: yes, no, or None for "the receiver could not say"."""
+        if not self.future.done():
+            self.future.set_result(playable)
+
+
 @callback
 def _discard(future: asyncio.Future[None]) -> None:
     """Retire a future nobody is going to wait on.
@@ -988,6 +1026,13 @@ class Enigma2State:
     # Whether the last `info` that was read arrived retained: the broker's replay of what a
     # plugin said earlier, and not a plugin speaking now.
     info_retained: bool = False
+    # Where the image's stream server is, normalised (`stream_facts.normalise_stream`).
+    # None until the topic arrives, and again after a retraction.
+    stream: dict[str, Any] | None = None
+    # Who the image's stream server is serving, normalised
+    # (`stream_facts.normalise_stream_clients`). None until the topic arrives, and again
+    # while the plugin has emptied it because the image's list could not be read.
+    stream_clients: dict[str, Any] | None = None
     last_error: dict[str, Any] | None = None
     # Whether the last complaint arrived with the retain flag set. A retained payload
     # is what the broker had before we subscribed, so it is a replay of something that
@@ -1027,6 +1072,8 @@ class Enigma2Box:
         self._listeners: list[_Listener] = []
         self._key_listeners: list[Callable[[str, str], None]] = []
         self._pending: list[_Pending] = []
+        # The `cmd/stream_playable` questions whose answers are being waited for.
+        self._questions: list[_PlayableQuestion] = []
         self._pending_cam: object = _NO_PENDING_CAM
         self._pending_oscam: object = _NO_PENDING_OSCAM
         self._subscribed = asyncio.Event()
@@ -1057,6 +1104,9 @@ class Enigma2Box:
         # Finds and fetches channel picons through the receiver's web interface: set
         # when the entry is set up, stopped with the box.
         self.picons: PiconResolver | None = None
+        # Keeps the user's own go2rtc on the channel that is on, where the options
+        # name one: set when the entry is set up.
+        self.go2rtc: Go2rtcFollower | None = None
         # The channel list last shown from the per-bouquet topics; None while the combined
         # `channels` topic is the source. See `channel_list`.
         self._topic_list: ChannelList | None = None
@@ -1663,6 +1713,8 @@ class Enigma2Box:
         for pending in self._pending:
             pending.fail("the receiver was removed from Home Assistant")
         self._pending.clear()
+        for question in self._questions:
+            question.answer(None)
 
     async def async_wait_subscribed(self, timeout: float = SUBSCRIBE_TIMEOUT) -> None:
         """Wait until the broker is actually sending this box's topics to us.
@@ -1889,6 +1941,12 @@ class Enigma2Box:
             self._epg_import_received(msg)
         elif suffix == TOPIC_ZAP_HISTORY:
             self._zap_history_received(msg)
+        elif suffix == TOPIC_STREAM:
+            self._stream_received(msg)
+        elif suffix == TOPIC_STREAM_PLAYABLE:
+            self._stream_playable_received(msg)
+        elif suffix == TOPIC_STREAM_CLIENTS:
+            self._stream_clients_received(msg)
         elif suffix.startswith(f"{TOPIC_EPG_GRID}/"):
             self._epg_grid_received(suffix[len(TOPIC_EPG_GRID) + 1 :], msg.payload)
         elif suffix == TOPIC_CHANNELS:
@@ -2559,11 +2617,7 @@ class Enigma2Box:
         entries = list((self.state.zap_history or {}).get("entries") or [])
         if not filtered:
             return entries
-        hidden = {
-            name
-            for name in self.entry.options.get(CONF_HISTORY_HIDDEN_BOUQUETS) or []
-            if isinstance(name, str) and name
-        }
+        hidden = self.hidden_bouquet_names
         if not hidden:
             return entries
         published = self.published_bouquets
@@ -2586,6 +2640,273 @@ class Enigma2Box:
                 continue
             visible.append(entry)
         return visible
+
+    @property
+    def hidden_bouquet_names(self) -> set[str]:
+        """Return the bouquets the options hide, by name. Empty hides nothing."""
+        return {
+            name
+            for name in self.entry.options.get(CONF_HISTORY_HIDDEN_BOUQUETS) or []
+            if isinstance(name, str) and name
+        }
+
+    def service_hidden(self, sref: Any, bouquet: Any) -> bool:
+        """Return whether a service is one the options hide.
+
+        The zap history's filter (`zap_history_entries`), asked about one service that
+        is not an entry of the history: the channel on the decoder, a channel a client
+        is streaming. `bouquet` is the name the receiver gives with it - the first of
+        its configured bouquets that holds the service, or nothing. With the option
+        empty nothing is hidden. With it set, a service is shown only when **both**
+        hold:
+
+        1. the bouquet named with it is a published bouquet, and not a hidden one; and
+        2. the service is not a member of any hidden bouquet - so a channel of a hidden
+           bouquet that the receiver names under another one stays hidden.
+
+        **It fails toward hiding**, exactly as that filter does: no bouquet named, a
+        bouquet the receiver does not publish, no reference, or a hidden bouquet that
+        is on the list without its channels - which then hides every service, because
+        which channels to hide is what is not known.
+
+        This decides what Home Assistant shows and offers. The receiver publishes
+        every service and every stream client to anybody on the broker.
+        """
+        hidden = self.hidden_bouquet_names
+        if not hidden:
+            return False
+        published = self.published_bouquets
+        self._warn_missing_hidden(hidden, published)
+        if (hidden_members := self._members_of_hidden(hidden, published)) is None:
+            return True
+        if not isinstance(bouquet, str) or bouquet in hidden:
+            return True
+        if not any(candidate.get("name") == bouquet for candidate in published):
+            return True
+        identity = service_identity(sref)
+        return not identity or identity in hidden_members
+
+    def stream_url_for(self, sref: Any, bouquet: Any) -> str | None:
+        """Return the address the receiver streams one service at, or None for none.
+
+        Built at the address Home Assistant itself asks the receiver at
+        (`picon_lookup_url`: the typed host when there is one, and never the reported
+        address then), with the port and path the receiver publishes on `stream`.
+
+        None - no address at all, never a partial or a guessed one - when the receiver
+        does not claim `stream` or has published no usable `stream`; when its stream
+        server wants a login, because an address is never built with credentials and
+        one without them only answers 401; when the service is one the options hide
+        (`service_hidden`, with the bouquet the receiver names for it); and when there
+        is no address to ask the receiver at.
+        """
+        if CAPABILITY_STREAM not in self.capabilities:
+            return None
+        stream = self.state.stream
+        if stream is None or stream["authentication"] is True:
+            return None
+        if self.service_hidden(sref, bouquet):
+            return None
+        return build_stream_url(self.picon_lookup_url, stream, sref)
+
+    @callback
+    def _stream_received(self, msg: ReceiveMessage) -> None:
+        """Cache where the stream server is, normalised.
+
+        An empty payload is a retraction and clears it, a payload that is not a JSON
+        object leaves the last good one alone, and anything else is normalised and kept.
+        """
+        if not (decode_payload(msg.payload) or "").strip():
+            self.state.stream = None
+            self._async_updated(TOPIC_STREAM)
+            return
+        if (payload := parse_json_payload(msg.payload)) is None:
+            return
+        self.state.stream = normalise_stream(payload)
+        self._async_updated(TOPIC_STREAM)
+
+    def streamable_bouquets(self) -> list[dict[str, Any]]:
+        """Return the bouquets a stream may be offered from, without their channels.
+
+        Read from the one channel list every reader shares (`channel_list`): the
+        bouquets the options offer, without the hidden ones. Each is the list's own
+        object; `streamable_channels` gives the channels of one of them. The two are
+        apart so that listing the bouquets, or one bouquet, does not judge every
+        channel of every bouquet - thousands on a large list.
+        """
+        hidden = self.hidden_bouquet_names
+        return [bouquet for bouquet in self.bouquets if bouquet.get("name") not in hidden]
+
+    def streamable_channels(self, bouquet: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return the channels of one streamable bouquet that may be shown.
+
+        The ones with a reference that the options do not hide (`service_hidden`) - a
+        channel of a hidden bouquet is left out of every other bouquet too.
+        """
+        return [
+            channel
+            for channel in bouquet["channels"]
+            if self.channel_streamable(bouquet, channel)
+        ]
+
+    def channel_streamable(self, bouquet: dict[str, Any], channel: Any) -> bool:
+        """Return whether one entry of a streamable bouquet is a channel that may be shown."""
+        return (
+            isinstance(channel, dict)
+            and isinstance(channel.get("sref"), str)
+            and bool(channel["sref"])
+            and not self.service_hidden(channel["sref"], bouquet.get("name"))
+        )
+
+    async def async_stream_playable(
+        self, sref: str, timeout: float | None = None
+    ) -> bool | None:
+        """Ask the receiver whether a service could be played now; None for unknown.
+
+        `cmd/stream_playable` is a question, answered by one message on the event
+        topic `stream_playable` - never retained, true for the moment it was asked.
+        The answer is this question's when it says the id the question was sent with;
+        an answer without an id is told by its reference, which is all a plugin that
+        takes no ids - or dropped this one - has to go by (`_stream_playable_received`).
+
+        None is every way of not knowing: no answer within the timeout, a refusal on
+        `last_error` (the image will not say), a question that could not be published.
+        A caller treats it as "not known", never as "no".
+        """
+        question = _PlayableQuestion(sref=sref, future=self.hass.loop.create_future())
+        self._questions.append(question)
+        try:
+            await self.async_publish_cmd("stream_playable", sref, sent_as=question.sent_as)
+            async with asyncio.timeout(
+                STREAM_PLAYABLE_TIMEOUT if timeout is None else timeout
+            ):
+                return await question.future
+        except TimeoutError:
+            return None
+        except HomeAssistantError as error:
+            _LOGGER.debug(
+                "Could not ask %s whether a service can be played: %s", self.node_id, error
+            )
+            return None
+        finally:
+            self._questions.remove(question)
+            if not question.future.done():
+                question.future.cancel()
+
+    @callback
+    def _stream_playable_received(self, msg: ReceiveMessage) -> None:
+        """Hand an answer on `stream_playable` to the question it answers.
+
+        An event, not state: nothing is stored and no listener is woken. A retained
+        message is a leftover - the plugin never retains this topic - and an answer
+        about tuners that have moved on. `playable` has to be a boolean; anything else
+        answers nothing and the question runs into its timeout, which is "unknown".
+        """
+        if msg.retain or (answer := parse_json_payload(msg.payload)) is None:
+            return
+        playable = answer.get("playable")
+        if not isinstance(playable, bool):
+            return
+        said = refusal_id(answer)
+        sref = answer.get("sref")
+        for question in list(self._questions):
+            if not question.sent:
+                continue
+            if said is not None:
+                if said == question.command_id:
+                    question.answer(playable)
+            elif isinstance(sref, str) and same_service(sref, question.sref):
+                question.answer(playable)
+
+    def stream_client_rows(self) -> list[dict[str, Any]]:
+        """Return the stream clients as they may be shown, the hidden ones without a channel.
+
+        Every row keeps its host and whether it is transcoded. A row whose service the
+        options hide (`service_hidden`) loses its reference, its name and its bouquet,
+        and says `hidden`. The count is not changed: how many clients hold a tuner is
+        the fact the sensor is for.
+
+        `can_stop` says whether the stop action can end that row: the receiver claims
+        `stream_stop`, and the row has a reference - the plugin lists a client whose
+        reference it holds back, and nothing can name that one. A hidden row with a
+        reference can be stopped by its host alone, but only while it is the host's one
+        hidden stream: with two hidden services on one host nothing here can say which
+        is meant, and the stop is refused (`stream_client_references`).
+
+        Nothing is offered for a receiver that is not online: the list stays retained
+        when the plugin stops, and is then a list of clients that have gone.
+        """
+        if not self.available:
+            return []
+        stops = CAPABILITY_STREAM_STOP in self.capabilities
+        rows: list[dict[str, Any]] = []
+        for client in (self.state.stream_clients or {}).get("clients") or []:
+            can_stop = stops and client["sref"] is not None
+            if self.service_hidden(client["sref"], client["bouquet"]):
+                if can_stop:
+                    references, _hidden = self.stream_client_references(client["host"])
+                    can_stop = len(references) == 1
+                rows.append(
+                    {
+                        "host": client["host"],
+                        "sref": None,
+                        "name": None,
+                        "bouquet": None,
+                        "transcoded": client["transcoded"],
+                        "hidden": True,
+                        "can_stop": can_stop,
+                    }
+                )
+            else:
+                rows.append({**client, "hidden": False, "can_stop": can_stop})
+        return rows
+
+    def stream_client_references(self, host: str) -> tuple[list[str], bool]:
+        """Return the services one host is being streamed, for a stop that names no service.
+
+        A hidden row has no reference anywhere a caller could read it, so a stop of it
+        can only name the host; the reference is supplied from here, where the
+        receiver's own payload is held, and goes nowhere but into the command. When the
+        host has hidden streams, those are the ones meant - a shown one can be named by
+        its reference - and the second value says so. One service listed twice for a
+        host - once transcoded, once not - is one client to the receiver's command, and
+        is returned once. A row without a reference cannot be named and is not among
+        them, and an offline receiver's retained list names nobody.
+        """
+        if not self.available:
+            return [], False
+        rows = [
+            client
+            for client in (self.state.stream_clients or {}).get("clients") or []
+            if client["sref"] is not None and same_client_host(client["host"], host)
+        ]
+        hidden = [
+            client
+            for client in rows
+            if self.service_hidden(client["sref"], client["bouquet"])
+        ]
+        references: dict[str, str] = {}
+        for client in hidden or rows:
+            references.setdefault(service_identity(client["sref"]), client["sref"])
+        return list(references.values()), bool(hidden)
+
+    @callback
+    def _stream_clients_received(self, msg: ReceiveMessage) -> None:
+        """Cache who the stream server is serving, normalised.
+
+        The three answers of `_zap_history_received`: an empty payload is the plugin
+        saying the image's list could not be read, and clears it - a list that names a
+        client that has left is worse than none; a payload that is not a JSON object
+        leaves the last good one alone; anything else is normalised and kept.
+        """
+        if not (decode_payload(msg.payload) or "").strip():
+            self.state.stream_clients = None
+            self._async_updated(TOPIC_STREAM_CLIENTS)
+            return
+        if (payload := parse_json_payload(msg.payload)) is None:
+            return
+        self.state.stream_clients = normalise_stream_clients(payload)
+        self._async_updated(TOPIC_STREAM_CLIENTS)
 
     def _members_of_hidden(
         self, hidden: set[str], published: list[dict[str, Any]]
@@ -2777,6 +3098,16 @@ class Enigma2Box:
                         self.node_id,
                         pending.cmd,
                     )
+            # A question that could not be asked is refused here and answered nowhere:
+            # its wait ends as "the receiver could not say".
+            said = refusal_id(error)
+            for question in list(self._questions):
+                if question.sent and (
+                    said == question.command_id
+                    if said is not None
+                    else error.get("cmd") == "stream_playable"
+                ):
+                    question.answer(None)
         self._async_updated(TOPIC_LAST_ERROR)
 
     # ------------------------------------------------------------ channel list

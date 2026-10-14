@@ -48,6 +48,15 @@
         "state": {
           "off": "mdi:lock-open-variant"
         }
+      },
+      "interlaced": {
+        "default": "mdi:reorder-horizontal"
+      },
+      "volume_passthrough": {
+        "default": "mdi:volume-off",
+        "state": {
+          "off": "mdi:volume-high"
+        }
       }
     },
     "button": {
@@ -219,6 +228,21 @@
       },
       "withheld_payloads": {
         "default": "mdi:package-variant-closed-remove"
+      },
+      "video_codec": {
+        "default": "mdi:video"
+      },
+      "frame_rate": {
+        "default": "mdi:filmstrip"
+      },
+      "audio_codec": {
+        "default": "mdi:surround-sound"
+      },
+      "audio_language": {
+        "default": "mdi:translate"
+      },
+      "stream_clients": {
+        "default": "mdi:cast-connected"
       }
     },
     "switch": {
@@ -285,6 +309,9 @@
     },
     "zap": {
       "service": "mdi:television-classic"
+    },
+    "stop_stream": {
+      "service": "mdi:stop-circle-outline"
     }
   }
 }
