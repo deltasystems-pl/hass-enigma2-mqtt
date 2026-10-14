@@ -2,7 +2,9 @@
 
 **Status:** accepted 2026-10-13
 **Date:** 2026-10-13
-**Amended:** 2026-10-14 - checked against the plugin's stream area as submitted for review
+**Amended:** 2026-10-14 - checked against the plugin's stream area as submitted for review;
+2026-10-14 - the zap-history selects are `unknown` until a history arrives, as decision 9 says
+for the stream clients
 **Extends:** [ADR-0000](0000-prd.md) §7 - Home Assistant now also sends one request per channel
 change to a go2rtc address the user typed, and hands players the receiver's own stream address.
 No telemetry, no cloud service and nothing outside the household's network are unchanged.
@@ -178,3 +180,24 @@ review, four points narrow what is decided above; nothing in it is reversed.
   moment. A request that works, or a read-back that confirms one, clears the repair by
   effect. The same channel published again is not a channel change and still waits for the
   timer.
+
+## Amendment - 2026-10-14: the zap-history selects answer an absent topic the same way
+
+Decision 9's "`unknown` until a list arrives" now also covers the two zap-history selects,
+„Ostatnio oglądane" and „Ostatnio oglądane (wszystkie)". They were unavailable until
+`zap_history` had arrived, the integration's general rule for an entity that reads a topic. The
+plugin empties that retained topic when it withdraws the history, and a broker deletes a
+retained message on an empty payload, so Home Assistant started afterwards never receives the
+topic: both selects stayed unavailable until the next zap, while the same withdrawal received
+live left them available with nothing to offer. Both cases now read alike.
+
+- Each select is available while the receiver is online **and** either names the `zap_history`
+  capability or has published `zap_history` since Home Assistant started. Until a history
+  arrives, and after an empty payload, it is `unknown` with an empty list of options and
+  nothing selected; a later payload gives the usual list and state.
+- The capability is part of the condition, unlike for the stream-clients sensor, because these
+  selects are never removed when it goes quiet. A downgraded plugin that keeps no history would
+  otherwise leave an available select with an empty list for ever; it is unavailable instead,
+  and comes back the moment a history is published.
+- The filter for hidden bouquets, the recorder exclusions and the unfiltered select being
+  disabled by default are unchanged.
