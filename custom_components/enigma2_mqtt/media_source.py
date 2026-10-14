@@ -45,6 +45,7 @@ from .const import (
     STREAM_MIME_TYPE,
 )
 from .media_player import channel_thumbnail_lookup
+from .stream_facts import one_playable_service
 
 KIND_BOUQUET = "b"
 KIND_CHANNEL = "c"
@@ -221,9 +222,14 @@ class Enigma2MediaSource(MediaSource):
         if url is None:
             raise Unresolvable(translation_domain=DOMAIN, translation_key="stream_no_address")
 
+        # Asked only about one playable service: the receiver refuses a bouquet, a
+        # marker, a service with alternatives and a hidden entry on `last_error`, where
+        # the household would read the refusal as a fault. The channel list holds none
+        # of those, so this only keeps a list that broke the contract from making one.
         if (
             CAPABILITY_STREAM_PLAYABLE in box.capabilities
             and box.available
+            and one_playable_service(channel["sref"])
             and await box.async_stream_playable(channel["sref"]) is False
         ):
             raise Unresolvable(

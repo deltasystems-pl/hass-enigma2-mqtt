@@ -220,6 +220,34 @@ def same_client_host(one: str, other: str) -> bool:
     return plain(one) == plain(other)
 
 
+# The flags in a service reference's second field that make it something other than
+# one playable service: a directory (a bouquet, the list of bouquets, a service with
+# alternatives), a marker, a numbered marker and an entry hidden in its bouquet. The
+# plugin's channel list leaves these out, and its `cmd/stream_playable` refuses them by
+# the same test.
+_NOT_ONE_SERVICE = 1 | 2 | 64 | 256 | 512
+_REFERENCE_MIN_FIELDS = 4
+
+
+def one_playable_service(sref: Any) -> bool:
+    """Return whether a reference is one playable service by the receiver's own test.
+
+    What the plugin's channel list keeps and what `cmd/stream_playable` takes: at least
+    four colon-separated fields, and a second field that is a number without any of
+    the flags above. Anything else would only be refused on `last_error`.
+    """
+    if not isinstance(sref, str):
+        return False
+    parts = sref.strip().split(":")
+    if len(parts) < _REFERENCE_MIN_FIELDS:
+        return False
+    try:
+        flags = int(parts[1])
+    except ValueError:
+        return False
+    return not flags & _NOT_ONE_SERVICE
+
+
 # -------------------------------------------------------------------- `stream`
 
 # The form of the stream server's request path: a plain path with `{sref}` where the

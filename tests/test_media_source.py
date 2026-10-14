@@ -26,7 +26,7 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_mqtt_message,
 )
 
-from custom_components.enigma2_mqtt import box as box_module
+from custom_components.enigma2_mqtt import box as box_module, stream_facts
 from custom_components.enigma2_mqtt.const import CONF_BOUQUETS
 
 from .conftest import (
@@ -555,3 +555,110 @@ async def test_a_receiver_that_is_offline_is_not_asked(
 
     assert play.url == f"http://{IP}:8001/{SREF}"
     assert published_payloads(mqtt_mock, command_topic("stream_playable")) == []
+
+
+async def test_a_refusal_without_an_id_ends_the_wait_as_unknown(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A plugin without ids refuses by name: the refusal is about `stream_playable`.
+
+    "takes the reference of one playable service" is what the plugin says for a bouquet,
+    a marker or a hidden entry. It is not a "no", and the address is handed out.
+    """
+    monkeypatch.setattr(box_module, "STREAM_PLAYABLE_TIMEOUT", 30)
+    await _setup(hass, config_entry, box_on_the_broker, "stream_playable")
+
+    @callback
+    def _command_received(msg: ReceiveMessage) -> None:
+        async_fire_mqtt_message(
+            hass,
+            LAST_ERROR_TOPIC,
+            json.dumps(
+                {"cmd": "stream_playable", "ts": 1789459213,
+                 "error": "cmd/stream_playable takes the reference of one playable service"}
+            ),
+        )
+
+    await mqtt.async_subscribe(hass, command_topic("stream_playable"), _command_received)
+
+    started = asyncio.get_running_loop().time()
+    play = await media_source.async_resolve_media(hass, channel_id(SREF), KODI)
+
+    assert play.url == f"http://{IP}:8001/{SREF}"
+    assert asyncio.get_running_loop().time() - started < 5
+
+
+async def test_a_refusal_of_another_command_does_not_end_the_wait(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A zap refused while the question is out is the zap's, and the answer still counts."""
+    await _setup(hass, config_entry, box_on_the_broker, "stream_playable")
+
+    @callback
+    def _command_received(msg: ReceiveMessage) -> None:
+        async_fire_mqtt_message(
+            hass,
+            LAST_ERROR_TOPIC,
+            json.dumps({"cmd": "zap", "ts": 1789459213, "error": "no such channel"}),
+        )
+        async_fire_mqtt_message(
+            hass,
+            PLAYABLE_TOPIC,
+            json.dumps({"sref": SREF, "playable": False, "ts": 1789459213}),
+        )
+
+    await mqtt.async_subscribe(hass, command_topic("stream_playable"), _command_received)
+
+    with pytest.raises(media_source.Unresolvable) as raised:
+        await media_source.async_resolve_media(hass, channel_id(SREF), KODI)
+
+    assert raised.value.translation_key == "stream_not_playable"
+
+
+async def test_a_list_entry_that_is_no_single_service_is_not_asked_about(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The plugin's channel list holds none, and its question refuses them on `last_error`."""
+    marker = "1:64:0:0:0:0:0:0:0:0::Sport"
+    channels = json.loads(json.dumps(CHANNELS))
+    channels["bouquets"][0]["channels"].append({"sref": marker, "name": "Sport"})
+    box_on_the_broker[CHANNELS_TOPIC] = json.dumps(channels)
+    await _setup(hass, config_entry, box_on_the_broker, "stream_playable", "command_id")
+    await _arm_playable(hass, False)
+
+    play = await media_source.async_resolve_media(hass, channel_id(marker), KODI)
+
+    assert play.url.startswith(f"http://{IP}:8001/1:64:0:0:0:0:0:0:0:0::")
+    assert published_payloads(mqtt_mock, command_topic("stream_playable")) == []
+
+
+@pytest.mark.parametrize(
+    ("sref", "one"),
+    [
+        (SREF, True),
+        ("4097:0:1:0:0:0:0:0:0:0:http%3a//example.org/x.ts:IPTV", True),
+        (" 1:0:19:283D:3FB:1:C00000:0:0:0: ", True),
+        ("1:7:1:0:0:0:0:0:0:0:FROM BOUQUET \"userbouquet.fav.tv\"", False),
+        ("1:134:1:0:0:0:0:0:0:0:FROM BOUQUET \"alternatives.x.tv\"", False),
+        ("1:64:0:0:0:0:0:0:0:0::Marker", False),
+        ("1:320:0:0:0:0:0:0:0:0::Numbered", False),
+        ("1:512:19:283D:3FB:1:C00000:0:0:0:", False),
+        ("1:2:0:0:0:0:0:0:0:0:", False),
+        ("1:x:19:283D", False),
+        ("1:0:19", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_one_playable_service_is_the_receivers_own_test(sref: Any, one: bool) -> None:
+    assert stream_facts.one_playable_service(sref) is one
