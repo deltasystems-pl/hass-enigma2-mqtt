@@ -162,7 +162,9 @@ async def async_stop_stream(box: Enigma2Box, host: str, sref: str | None = None)
     The receiver's command takes both and nothing else, so nothing here ever stops "all
     of them". Without a reference the host has to have one stream open - or one whose
     channel the options hide, which is the stream meant then, because its reference is
-    shown nowhere and the box supplies it (`Enigma2Box.stream_client_references`).
+    shown nowhere and the box supplies it (`Enigma2Box.stream_client_references`). Two
+    hidden services on one host cannot be told apart by anybody, and are refused with a
+    sentence of their own.
 
     The command changes no state topic at once: the image answers and the connection
     ends a moment later, and a player that reconnects by itself is back on the list by
@@ -180,11 +182,17 @@ async def async_stop_stream(box: Enigma2Box, host: str, sref: str | None = None)
     if not host or not box.available:
         raise _invalid("stream_client_unknown", host=host)
     if not sref:
-        references = box.stream_client_references(host)
+        references, hidden = box.stream_client_references(host)
         if not references:
             raise _invalid("stream_client_unknown", host=host)
         if len(references) > 1:
-            raise _invalid("stream_client_ambiguous", host=host)
+            # Two hidden services have no reference anybody could give, so asking for
+            # one would be asking the impossible: they are stopped on the receiver, or
+            # shown again first. Never all of them at once.
+            raise _invalid(
+                "stream_client_hidden_ambiguous" if hidden else "stream_client_ambiguous",
+                host=host,
+            )
         sref = references[0]
     await box.async_command(
         "stream_stop",

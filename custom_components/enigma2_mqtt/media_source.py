@@ -113,9 +113,11 @@ class Enigma2MediaSource(MediaSource):
         if kind is None:
             return self._browse_receiver(box)
         if kind == KIND_BOUQUET:
-            for bouquet, channels in box.streamable_bouquets():
+            for bouquet in box.streamable_bouquets():
                 if bouquet.get("sref") == reference:
-                    return self._browse_bouquet(box, bouquet, channels)
+                    return self._browse_bouquet(
+                        box, bouquet, box.streamable_channels(bouquet)
+                    )
         raise _unknown(BrowseError)
 
     def _browse_root(self) -> BrowseMediaSource:
@@ -157,9 +159,7 @@ class Enigma2MediaSource(MediaSource):
 
     def _browse_receiver(self, box: Enigma2Box) -> BrowseMediaSource:
         receiver = self._receiver(box)
-        receiver.children = [
-            self._bouquet(box, bouquet) for bouquet, _channels in box.streamable_bouquets()
-        ]
+        receiver.children = [self._bouquet(box, bouquet) for bouquet in box.streamable_bouquets()]
         return receiver
 
     def _browse_bouquet(
@@ -188,8 +188,9 @@ class Enigma2MediaSource(MediaSource):
         """Return the receiver's stream address for one channel of the tree.
 
         Refused, with a sentence in the household's language: a channel that is not in
-        the tree; a player that cannot play a transport stream; a stream server that
-        wants a login; no address to reach the receiver at; and a channel the receiver
+        the tree; a player that cannot play a transport stream; no usable `stream`
+        facts from the receiver; a stream server that wants a login; no address to
+        reach the receiver at; and a channel the receiver
         says it cannot play now, beside everything it is doing - asked just before the
         address is handed out, where the receiver can be asked. No answer to that
         question in time is not a "no": the address is handed out and the player finds
@@ -199,12 +200,16 @@ class Enigma2MediaSource(MediaSource):
         box = self._box(node_id)
         if box is None or kind != KIND_CHANNEL or not reference:
             raise _unknown(Unresolvable)
+        # The first bouquet, in the list's order, that shows the channel: a channel is
+        # judged in the bouquet it is found in, and only there.
         found = next(
             (
                 (bouquet, channel)
-                for bouquet, channels in box.streamable_bouquets()
-                for channel in channels
-                if same_service(channel["sref"], reference)
+                for bouquet in box.streamable_bouquets()
+                for channel in bouquet["channels"]
+                if isinstance(channel, dict)
+                and same_service(channel.get("sref"), reference)
+                and box.channel_streamable(bouquet, channel)
             ),
             None,
         )
@@ -214,7 +219,12 @@ class Enigma2MediaSource(MediaSource):
 
         self._check_player(item.target_media_player)
 
-        if (box.state.stream or {}).get("authentication") is True:
+        stream = box.state.stream
+        if stream is None or stream["port"] is None or stream["path"] is None:
+            # Not an address problem: the receiver has said nothing usable about its
+            # stream server yet, or retracted it.
+            raise Unresolvable(translation_domain=DOMAIN, translation_key="stream_no_facts")
+        if stream["authentication"] is True:
             raise Unresolvable(
                 translation_domain=DOMAIN, translation_key="stream_login_required"
             )

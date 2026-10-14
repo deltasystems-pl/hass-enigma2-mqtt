@@ -20,6 +20,7 @@ import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.util.dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import (
@@ -31,6 +32,7 @@ from pytest_homeassistant_custom_component.test_util.aiohttp import (
     AiohttpClientMocker,
     AiohttpClientMockResponse,
 )
+from yarl import URL
 
 from custom_components.enigma2_mqtt import own_go2rtc as go2rtc
 from custom_components.enigma2_mqtt.const import (
@@ -414,12 +416,28 @@ async def test_a_redirect_is_not_go2rtc_taking_the_stream(
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
+    """A 3xx is a failure, and the request asks aiohttp not to follow one.
+
+    The mocked session never follows a redirect, so the status alone would pass with
+    the flag gone; what the request was sent with is read off the session itself.
+    """
+    sent_with: list[Any] = []
+    session = async_get_clientsession(hass)
+    answer = aioclient_mock.match_request
+
+    async def _request(method: str, url: Any, **kwargs: Any) -> Any:
+        if URL(str(url)).host == GO2RTC_HOST:
+            sent_with.append(kwargs.get("allow_redirects"))
+        return await answer(method, url, **kwargs)
+
+    object.__setattr__(session, "_request", _request)
     aioclient_mock.put(API, status=302, headers={"Location": "http://192.0.2.51/"})
     streaming(box_on_the_broker)
     entry = following(config_entry)
     await async_setup_box_then_retained(hass, entry, box_on_the_broker)
     await settle(hass)
 
+    assert sent_with == [False]
     raised = issue(hass, entry)
     assert raised is not None
     assert raised.translation_placeholders["status"] == "302"

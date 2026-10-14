@@ -182,11 +182,13 @@ async def test_an_emptied_topic_is_unknown_and_a_later_list_is_read(
     await hass.async_block_till_done()
     state = hass.states.get(SENSOR)
     assert state.state == "unknown"
-    assert state.attributes["clients"] == []
+    # No rows, and not "no clients": a template counting the attribute must not read 0.
+    assert state.attributes["clients"] is None
 
     async_fire_mqtt_message(hass, CLIENTS_TOPIC, json.dumps({"count": 0, "clients": []}))
     await hass.async_block_till_done()
     assert hass.states.get(SENSOR).state == "0"
+    assert hass.states.get(SENSOR).attributes["clients"] == []
 
 
 async def test_a_payload_that_is_not_json_changes_nothing(
@@ -281,7 +283,7 @@ async def test_a_list_the_broker_no_longer_holds_is_unknown_and_not_unavailable(
 
     state = hass.states.get(SENSOR)
     assert state.state == "unknown"
-    assert state.attributes["clients"] == []
+    assert state.attributes["clients"] is None
 
     async_fire_mqtt_message(hass, CLIENTS_TOPIC, json.dumps(CLIENTS), retain=True)
     await hass.async_block_till_done()
@@ -854,8 +856,73 @@ async def test_one_hidden_service_in_two_spellings_is_one_stream_of_the_host(
     entry = hiding(config_entry, "Sport")
     await async_setup_box_then_retained(hass, entry, box_on_the_broker)
     await async_arm_box_ack(hass, "stream_stop")
+    shown = hass.states.get(SENSOR).attributes["clients"]
+    assert [row["can_stop"] for row in shown] == [True, True]
 
     await _stop(hass, host=HOST_V6)
 
     (sent,) = published_payloads(mqtt_mock, command_topic("stream_stop"))
     assert json.loads(opened_command(sent)[1]) == {"host": HOST_V6, "sref": EUROSPORT}
+
+
+async def test_the_rows_are_none_before_any_list_has_arrived(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The capability is claimed and nothing has been said yet: unknown, with no rows."""
+    box_on_the_broker[INFO_TOPIC] = info_with("stream_clients", "stream_stop")
+    box_on_the_broker.pop(CLIENTS_TOPIC, None)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    state = hass.states.get(SENSOR)
+    assert state.state == "unknown"
+    assert state.attributes["clients"] is None
+
+
+async def test_two_hidden_services_of_one_host_cannot_be_stopped_by_the_host(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Nobody can give the reference of either, so neither row offers a stop.
+
+    The host alone is refused with a sentence that says why and what to do instead:
+    never a request for a reference the user cannot see, and never "all of them".
+    """
+    other = "1:0:19:5678:3F3:1:C00000:0:0:0:"
+    rows = [ROW_VISIBLE, ROW_SPORT, {**ROW_SPORT, "sref": other, "name": "TVN HD"}]
+    streaming(box_on_the_broker, {"count": 3, "clients": rows})
+    entry = hiding(config_entry, "Sport")
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+
+    shown = hass.states.get(SENSOR).attributes["clients"]
+    assert [(row["host"], row["hidden"], row["can_stop"]) for row in shown] == [
+        (HOST, False, True),
+        (HOST_V6, True, False),
+        (HOST_V6, True, False),
+    ]
+    with pytest.raises(ServiceValidationError) as raised:
+        await _stop(hass, host=HOST_V6)
+
+    assert raised.value.translation_key == "stream_client_hidden_ambiguous"
+    assert raised.value.translation_placeholders == {"host": HOST_V6}
+    assert published_payloads(mqtt_mock, command_topic("stream_stop")) == []
+
+
+async def test_a_hidden_stream_beside_a_shown_one_stays_stoppable_by_the_host(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """One hidden service is the one the host alone means; the shown one has its reference."""
+    rows = [{**ROW_VISIBLE, "host": HOST_V6}, ROW_SPORT]
+    streaming(box_on_the_broker, {"count": 2, "clients": rows})
+    entry = hiding(config_entry, "Sport")
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+
+    shown = hass.states.get(SENSOR).attributes["clients"]
+    assert [(row["hidden"], row["can_stop"]) for row in shown] == [(False, True), (True, True)]

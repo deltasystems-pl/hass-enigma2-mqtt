@@ -757,10 +757,12 @@
     "stream_player_cast": {"message": "Chromecast nie odtworzy strumienia transportowego dekodera. Wybierz odtwarzacz, który sam go dekoduje, na przykład Kodi, VLC albo odtwarzacz na Android TV."},
     "stream_login_required": {"message": "Serwer strumieni dekodera wymaga logowania, a Home Assistant nigdy nie wpisuje danych logowania do adresu strumienia. Wyłącz logowanie w ustawieniach strumieniowania dekodera, aby odtwarzać stąd jego kanały."},
     "stream_no_address": {"message": "Home Assistant nie zna adresu, pod którym działa serwer strumieni dekodera. Wpisz adres dekodera w „Skonfiguruj ponownie”."},
+    "stream_no_facts": {"message": "Dekoder ma serwer strumieni, ale nie opublikował jeszcze o nim nic użytecznego. Sprawdź, czy wtyczka działa: przy każdym połączeniu publikuje, gdzie jest jej serwer strumieni."},
     "stream_not_playable": {"message": "Kanału {channel} nie da się teraz strumieniować: potrzebny mu tuner jest zajęty przez telewizor, nagranie albo inny strumień."},
     "stream_stop_unsupported": {"message": "Ten dekoder nie potrafi zatrzymać klienta strumienia: serwer strumieni jego obrazu tego nie oferuje albo wtyczka jest starsza niż 0.5.0."},
     "stream_client_unknown": {"message": "Na liście dekodera nie ma klienta strumienia o adresie {host}."},
     "stream_client_ambiguous": {"message": "{host} ma otwarty więcej niż jeden strumień. Podaj referencję usługi tego, który ma zostać zatrzymany."},
+    "stream_client_hidden_ambiguous": {"message": "{host} ma otwarty więcej niż jeden strumień kanałów z ukrytych bukietów, a ich referencje usług nie są nigdzie pokazane. Zatrzymaj je na dekoderze albo ponownie pokaż bukiet w opcjach."},
     "stream_stop_not_connected": {"message": "Ten klient strumienia nie jest już połączony z dekoderem."},
     "stream_stop_not_stopped": {"message": "Dekoder nie zatrzymał tego klienta strumienia."},
     "mqtt_not_available": {

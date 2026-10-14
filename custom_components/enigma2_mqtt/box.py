@@ -2725,35 +2725,38 @@ class Enigma2Box:
         self.state.stream = normalise_stream(payload)
         self._async_updated(TOPIC_STREAM)
 
-    def streamable_bouquets(self) -> list[tuple[dict[str, Any], list[dict[str, Any]]]]:
-        """Return the bouquets a stream may be offered from, each with its channels.
+    def streamable_bouquets(self) -> list[dict[str, Any]]:
+        """Return the bouquets a stream may be offered from, without their channels.
 
         Read from the one channel list every reader shares (`channel_list`): the
-        bouquets the options offer, without the hidden ones, and each without the
-        channels the options hide (`service_hidden`) - a channel of a hidden bouquet
-        is left out of every other bouquet too. The bouquet is the list's own object;
-        the channels are the ones of it that have a reference and may be shown.
+        bouquets the options offer, without the hidden ones. Each is the list's own
+        object; `streamable_channels` gives the channels of one of them. The two are
+        apart so that listing the bouquets, or one bouquet, does not judge every
+        channel of every bouquet - thousands on a large list.
         """
         hidden = self.hidden_bouquet_names
-        offered: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
-        for bouquet in self.bouquets:
-            name = bouquet.get("name")
-            if name in hidden:
-                continue
-            offered.append(
-                (
-                    bouquet,
-                    [
-                        channel
-                        for channel in bouquet["channels"]
-                        if isinstance(channel, dict)
-                        and isinstance(channel.get("sref"), str)
-                        and channel["sref"]
-                        and not self.service_hidden(channel["sref"], name)
-                    ],
-                )
-            )
-        return offered
+        return [bouquet for bouquet in self.bouquets if bouquet.get("name") not in hidden]
+
+    def streamable_channels(self, bouquet: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return the channels of one streamable bouquet that may be shown.
+
+        The ones with a reference that the options do not hide (`service_hidden`) - a
+        channel of a hidden bouquet is left out of every other bouquet too.
+        """
+        return [
+            channel
+            for channel in bouquet["channels"]
+            if self.channel_streamable(bouquet, channel)
+        ]
+
+    def channel_streamable(self, bouquet: dict[str, Any], channel: Any) -> bool:
+        """Return whether one entry of a streamable bouquet is a channel that may be shown."""
+        return (
+            isinstance(channel, dict)
+            and isinstance(channel.get("sref"), str)
+            and bool(channel["sref"])
+            and not self.service_hidden(channel["sref"], bouquet.get("name"))
+        )
 
     async def async_stream_playable(
         self, sref: str, timeout: float | None = None
@@ -2826,7 +2829,9 @@ class Enigma2Box:
         `can_stop` says whether the stop action can end that row: the receiver claims
         `stream_stop`, and the row has a reference - the plugin lists a client whose
         reference it holds back, and nothing can name that one. A hidden row with a
-        reference can be stopped, by its host.
+        reference can be stopped by its host alone, but only while it is the host's one
+        hidden stream: with two hidden services on one host nothing here can say which
+        is meant, and the stop is refused (`stream_client_references`).
 
         Nothing is offered for a receiver that is not online: the list stays retained
         when the plugin stops, and is then a list of clients that have gone.
@@ -2838,6 +2843,9 @@ class Enigma2Box:
         for client in (self.state.stream_clients or {}).get("clients") or []:
             can_stop = stops and client["sref"] is not None
             if self.service_hidden(client["sref"], client["bouquet"]):
+                if can_stop:
+                    references, _hidden = self.stream_client_references(client["host"])
+                    can_stop = len(references) == 1
                 rows.append(
                     {
                         "host": client["host"],
@@ -2853,20 +2861,20 @@ class Enigma2Box:
                 rows.append({**client, "hidden": False, "can_stop": can_stop})
         return rows
 
-    def stream_client_references(self, host: str) -> list[str]:
+    def stream_client_references(self, host: str) -> tuple[list[str], bool]:
         """Return the services one host is being streamed, for a stop that names no service.
 
         A hidden row has no reference anywhere a caller could read it, so a stop of it
         can only name the host; the reference is supplied from here, where the
         receiver's own payload is held, and goes nowhere but into the command. When the
         host has hidden streams, those are the ones meant - a shown one can be named by
-        its reference. One service listed twice for a host - once transcoded, once not -
-        is one client to the receiver's command, and is returned once. A row without a
-        reference cannot be named and is not among them, and an offline receiver's
-        retained list names nobody.
+        its reference - and the second value says so. One service listed twice for a
+        host - once transcoded, once not - is one client to the receiver's command, and
+        is returned once. A row without a reference cannot be named and is not among
+        them, and an offline receiver's retained list names nobody.
         """
         if not self.available:
-            return []
+            return [], False
         rows = [
             client
             for client in (self.state.stream_clients or {}).get("clients") or []
@@ -2880,7 +2888,7 @@ class Enigma2Box:
         references: dict[str, str] = {}
         for client in hidden or rows:
             references.setdefault(service_identity(client["sref"]), client["sref"])
-        return list(references.values())
+        return list(references.values()), bool(hidden)
 
     @callback
     def _stream_clients_received(self, msg: ReceiveMessage) -> None:

@@ -40,7 +40,9 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   - **The action `enigma2_mqtt.stop_stream`** (`stream_stop`) ends one client's stream, named
     by its address and, where the address has more than one, the service reference. It goes
     through the command path with a command id; "not connected" is a translated refusal and
-    "not stopped" a translated failure. Nothing is sent for a receiver that is offline.
+    "not stopped" a translated failure. Nothing is sent for a receiver that is offline, and
+    two hidden streams to one host are refused with a sentence of their own: neither
+    reference is shown anywhere, so they are stopped on the receiver.
   - **Your own go2rtc, optional and off while empty**: a new section of the options form with
     the address of a go2rtc you run, a stream name and a source template (default
     `ffmpeg:{url}#video=h264#audio=opus#audio=aac`). While the address is set, Home Assistant

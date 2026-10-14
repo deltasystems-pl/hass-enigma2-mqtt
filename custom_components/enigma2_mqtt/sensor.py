@@ -881,7 +881,11 @@ class Enigma2StreamClientsSensor(Enigma2Entity, SensorEntity):
         """Read the count, and the rows as they may be shown."""
         clients = self.box.state.stream_clients
         self._attr_native_value = None if clients is None else clients["count"]
-        self._attr_extra_state_attributes = {"clients": self.box.stream_client_rows()}
+        # No rows while the count is not known: `[]` would read as "no clients" to a
+        # template that counts the attribute.
+        self._attr_extra_state_attributes = {
+            "clients": None if clients is None else self.box.stream_client_rows()
+        }
 
 
 class Enigma2EpgActiveBouquetSensor(Enigma2Entity, SensorEntity):

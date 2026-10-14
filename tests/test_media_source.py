@@ -255,8 +255,10 @@ async def test_a_channel_of_a_hidden_bouquet_is_left_out_of_every_other_bouquet(
     bouquet = await media_source.async_browse_media(hass, bouquet_id(FAVOURITES))
 
     assert [child.title for child in bouquet.children] == ["TVP 1 HD"]
-    with pytest.raises(media_source.Unresolvable):
+    # Not in the tree at all - not "a channel with no address".
+    with pytest.raises(media_source.Unresolvable) as raised:
         await media_source.async_resolve_media(hass, channel_id(SREF_TWO), KODI)
+    assert raised.value.translation_key == "stream_source_unknown"
 
 
 # ------------------------------------------------------------------ resolving
@@ -370,14 +372,47 @@ async def test_a_stream_server_that_wants_a_login_does_not_resolve(
     assert raised.value.translation_key == "stream_login_required"
 
 
-async def test_no_stream_facts_is_no_address(
+@pytest.mark.parametrize(
+    "stream",
+    [None, {**STREAM, "port": "8001"}, {**STREAM, "path": "/?{sref}"}],
+    ids=["absent", "port", "path"],
+)
+async def test_no_usable_stream_facts_is_said_as_such(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    stream: dict[str, Any] | None,
+) -> None:
+    """The capability is claimed and the topic has not arrived, or cannot be used.
+
+    That is not the receiver's address being unknown, and "enter the host with
+    Reconfigure" would send somebody to fix what is not broken.
+    """
+    await _setup(hass, config_entry, box_on_the_broker, stream=stream)
+
+    with pytest.raises(media_source.Unresolvable) as raised:
+        await media_source.async_resolve_media(hass, channel_id(SREF), KODI)
+
+    assert raised.value.translation_key == "stream_no_facts"
+
+
+async def test_no_address_for_the_receiver_is_said_as_such(
     hass: HomeAssistant,
     mqtt_mock,
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """The capability is claimed and the topic has not arrived."""
-    await _setup(hass, config_entry, box_on_the_broker, stream=None)
+    """Loopback is not where a receiver is: the facts are there, an address is not."""
+    await _setup(hass, config_entry, box_on_the_broker)
+    async_fire_mqtt_message(
+        hass,
+        INFO_TOPIC,
+        json.dumps(
+            {**INFO, "ip": "127.0.0.1", "capabilities": [*INFO["capabilities"], "stream"]}
+        ),
+    )
+    await hass.async_block_till_done()
 
     with pytest.raises(media_source.Unresolvable) as raised:
         await media_source.async_resolve_media(hass, channel_id(SREF), KODI)

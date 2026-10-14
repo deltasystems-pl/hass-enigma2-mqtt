@@ -784,10 +784,12 @@
     "stream_player_cast": {"message": "Chromecast cannot play a receiver's transport stream. Choose a media player that decodes it itself, such as Kodi, VLC or an Android TV player."},
     "stream_login_required": {"message": "The receiver's stream server asks for a login, and Home Assistant never puts a login into a stream address. Switch the login off in the receiver's streaming settings to play its channels from here."},
     "stream_no_address": {"message": "Home Assistant has no address at which to reach the receiver's stream server. Enter the receiver's host with Reconfigure."},
+    "stream_no_facts": {"message": "The receiver has a stream server but has published nothing usable about it yet. Check that the plugin is running: it publishes where its stream server is every time it connects."},
     "stream_not_playable": {"message": "{channel} cannot be streamed right now: the tuner it needs is in use by the television, a recording or another stream."},
     "stream_stop_unsupported": {"message": "This receiver cannot stop a stream client: its image's stream server does not offer it, or the plugin is older than 0.5.0."},
     "stream_client_unknown": {"message": "No stream client with the address {host} is on the receiver's list."},
     "stream_client_ambiguous": {"message": "{host} has more than one stream open. Give the service reference of the one to stop."},
+    "stream_client_hidden_ambiguous": {"message": "{host} has more than one stream open on channels of hidden bouquets, and their service references are shown nowhere. Stop them on the receiver, or show the bouquet again in the options."},
     "stream_stop_not_connected": {"message": "That stream client is no longer connected to the receiver."},
     "stream_stop_not_stopped": {"message": "The receiver did not stop that stream client."},
     "mqtt_not_available": {

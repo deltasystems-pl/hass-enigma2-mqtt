@@ -814,7 +814,9 @@ open stream holds a tuner input, so this is the number behind "no free tuner". T
 `clients` has one row for each, at most 32: `host`, `sref`, `name`, `bouquet`, `transcoded`,
 `hidden` and `can_stop`. The state is `unknown` while the plugin has emptied the topic because the
 image's list could not be read - also after a restart of Home Assistant, when the broker holds
-nothing on the topic at all - and `0` only for a published empty list. The plugin looks every five seconds, so a client that came and
+nothing on the topic at all - and `0` only for a published empty list. While the state is
+`unknown`, `clients` is `null` rather than an empty list, so a template that counts the rows
+does not read "no clients". The plugin looks every five seconds, so a client that came and
 went between two looks was never on the list. [§4.7](#47-streams) says what `hidden` does and
 how to stop a client.
 
@@ -1545,6 +1547,7 @@ Resolving is refused, with a sentence in your language, when:
 |---|---|
 | the player is the browser's own | a browser does not play MPEG-TS. Home Assistant resolves without naming a media player only for the browser, which is how it is told |
 | the player is a Chromecast | the same; told by the `cast` platform its entity belongs to |
+| the receiver has published nothing usable about its stream server | no `stream` payload has arrived, or its port or path cannot be used; check that the plugin is running - it publishes `stream` at every connect |
 | the receiver's stream server wants a login | no address is built with credentials |
 | there is no address to reach the receiver at | type the receiver's host with *Reconfigure* |
 | the receiver says the channel cannot be played now | see below |
@@ -1598,9 +1601,10 @@ other. 🔴 As with that option everywhere, this is a filter in Home Assistant a
 privacy on the network**: the receiver publishes every client with its channel, retained, to
 any broker login, and its own OpenWebif page shows them all.
 
-`enigma2_mqtt.stop_stream` ends one client's stream. It is offered only by a receiver that
-claims `stream_stop`; an image whose stream server lists its clients and cannot stop one
-claims only `stream_clients`, and the action is then refused before anything is sent.
+`enigma2_mqtt.stop_stream` ends one client's stream. The action is there for every receiver's
+media player, and works for one that claims `stream_stop`; for any other - an image whose
+stream server lists its clients and cannot stop one claims only `stream_clients` - it is
+refused before anything is sent.
 
 ```yaml
 action: enigma2_mqtt.stop_stream
@@ -1618,8 +1622,13 @@ data:
   this integration, so nobody could type it. Home Assistant takes it from the receiver's
   payload, which it holds, and puts it into the command and nowhere else. When a host has both
   a hidden and a shown stream, the host alone means the hidden one - the shown one can be
-  named. A host with two shown streams, or two hidden ones, needs the reference and is
-  refused without it: nothing here ever stops "all of them".
+  named. A host with two shown streams needs the reference and is refused without it:
+  nothing here ever stops "all of them".
+- **Two hidden streams to one host cannot be stopped from Home Assistant.** Neither reference
+  is shown anywhere, so nothing could say which one is meant: both rows say `can_stop`
+  `false`, and the host alone is refused with a sentence that says so. Stop them on the
+  receiver, or take the bouquet off the hidden list first. One channel listed twice for a
+  host, once transcoded or in two spellings, is one stream and stays stoppable.
 - A reference is sent as it was given. The receiver first looks for a row of that host whose
   `sref` is spelled exactly so, and only then for one that is the same service by its first
   eleven fields - so of two rows of one channel in two spellings, copying the row's `sref`

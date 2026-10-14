@@ -757,10 +757,12 @@
     "stream_player_cast": {"message": "Chromecast kann den Transportstrom eines Receivers nicht abspielen. Wähle einen Media Player, der ihn selbst dekodiert, etwa Kodi, VLC oder einen Player auf Android TV."},
     "stream_login_required": {"message": "Der Streamserver des Receivers verlangt eine Anmeldung, und Home Assistant schreibt nie Zugangsdaten in eine Stream-Adresse. Schalte die Anmeldung in den Streaming-Einstellungen des Receivers aus, um seine Sender von hier abzuspielen."},
     "stream_no_address": {"message": "Home Assistant kennt keine Adresse, unter der der Streamserver des Receivers erreichbar ist. Trage die Adresse des Receivers über „Neu konfigurieren“ ein."},
+    "stream_no_facts": {"message": "Der Receiver hat einen Streamserver, hat darüber aber noch nichts Brauchbares veröffentlicht. Prüfe, ob das Plugin läuft: Es veröffentlicht bei jeder Verbindung, wo sein Streamserver ist."},
     "stream_not_playable": {"message": "{channel} lässt sich gerade nicht streamen: Der dafür nötige Tuner ist durch den Fernseher, eine Aufnahme oder einen anderen Stream belegt."},
     "stream_stop_unsupported": {"message": "Dieser Receiver kann keinen Stream-Client stoppen: Der Streamserver seines Images bietet das nicht an, oder das Plugin ist älter als 0.5.0."},
     "stream_client_unknown": {"message": "Auf der Liste des Receivers steht kein Stream-Client mit der Adresse {host}."},
     "stream_client_ambiguous": {"message": "{host} hat mehr als einen Stream offen. Gib die Service-Referenz des Streams an, der gestoppt werden soll."},
+    "stream_client_hidden_ambiguous": {"message": "{host} hat mehr als einen Stream auf Kanälen ausgeblendeter Bouquets offen, und deren Service-Referenzen werden nirgends angezeigt. Stoppe sie am Receiver oder blende das Bouquet in den Optionen wieder ein."},
     "stream_stop_not_connected": {"message": "Dieser Stream-Client ist nicht mehr mit dem Receiver verbunden."},
     "stream_stop_not_stopped": {"message": "Der Receiver hat diesen Stream-Client nicht gestoppt."},
     "mqtt_not_available": {

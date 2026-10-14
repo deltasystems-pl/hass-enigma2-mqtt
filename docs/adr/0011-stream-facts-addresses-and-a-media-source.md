@@ -148,7 +148,11 @@ review, four points narrow what is decided above; nothing in it is reversed.
   stopped. Only a well-formed dotted quad is taken out of the `::ffff:` form. A reference given
   to the action is sent as it was typed, because the plugin matches it as text before it falls
   back to the eleven-field rule. Nothing is sent for a receiver that is offline: nobody would
-  answer, and silence is what that path reads as success.
+  answer, and silence is what that path reads as success. Two hidden services streamed to one
+  host cannot be stopped by the host alone - neither reference is shown, so nothing can say
+  which is meant: both rows say `can_stop` false, and the action refuses with a sentence that
+  sends the user to the receiver or to the option, never one that asks for a reference. No
+  opaque id is added for them, and they are never stopped together.
 - **Decision 7: one warning for a run of failures.** The warning is written for the first failure
   after a success, whatever the failures that follow are; the one repair is replaced under its id
   when the failure changes, so it says the latest.
