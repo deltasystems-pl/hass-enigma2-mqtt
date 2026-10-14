@@ -187,7 +187,7 @@
               "go2rtc_source": "Quellvorlage"
             },
             "data_description": {
-              "go2rtc_url": "Die Adresse der API deines go2rtc, zum Beispiel `http://homeassistant.local:1984` für das go2rtc-Add-on. Bei jedem Senderwechsel schickt Home Assistant den Namen und die Quelle von unten dorthin, und sonst nichts.",
+              "go2rtc_url": "Die Adresse der API deines go2rtc, zum Beispiel `{go2rtc_example_url}` für das go2rtc-Add-on. Bei jedem Senderwechsel schickt Home Assistant den Namen und die Quelle von unten dorthin, und sonst nichts.",
               "go2rtc_stream": "Der Name des einen Streams, den Home Assistant dort aktuell hält. Nur Buchstaben, Ziffern, `_`, `-` und `.`. Leer gelassen ist es `enigma2_` gefolgt von der Knoten-ID des Receivers.",
               "go2rtc_source": "Was go2rtc zum Abspielen bekommt. Die Stream-Adresse des Receivers kommt an die Stelle, an der der Standardwert seinen Platzhalter in geschweiften Klammern hat. Keine Leerzeichen: go2rtc lehnt eine Quelle mit Leerzeichen ab, ein Filter mit Leerzeichen gehört also als benannte Vorlage in die Konfiguration von go2rtc selbst. Lass `ffmpeg:` vorn stehen; ohne das kann go2rtc den Stream des Receivers nicht lesen."
             }
@@ -241,7 +241,7 @@
     "error": {
       "plugin_unavailable": "Der Receiver ist nicht verbunden; seine Datenschutzeinstellungen wurden nicht geändert. Versuche es erneut, wenn er online ist.",
       "plugin_config_failed": "Der Receiver hat die neuen Datenschutzeinstellungen nicht bestätigt. Die bisherigen Receiver-Einstellungen und Home-Assistant-Optionen wurden beibehalten.",
-      "go2rtc_invalid_url": "Die go2rtc-Adresse ist keine Webadresse. Schreibe sie als `http://host:1984`, ohne etwas hinter der Adresse, oder lass das Feld leer, um das auszuschalten.",
+      "go2rtc_invalid_url": "Die go2rtc-Adresse ist keine Webadresse. Schreibe sie als `{go2rtc_url_form}`, ohne etwas hinter der Adresse, oder lass das Feld leer, um das auszuschalten.",
       "go2rtc_invalid_stream": "Der go2rtc-Stream-Name darf nur Buchstaben, Ziffern, `_`, `-` und `.` enthalten, höchstens 64 Zeichen.",
       "go2rtc_source_spaces": "Die go2rtc-Quellvorlage enthält ein Leerzeichen, und go2rtc lehnt eine solche Quelle ab. Lege einen Filter, der Leerzeichen braucht, als benannte Vorlage in der Konfiguration von go2rtc selbst an und nenne sie hier, zum Beispiel `#video=tv`.",
       "go2rtc_source_placeholder": "Die go2rtc-Quellvorlage muss den Platzhalter für die Stream-Adresse des Receivers genau einmal enthalten, so wie der Standardwert.",

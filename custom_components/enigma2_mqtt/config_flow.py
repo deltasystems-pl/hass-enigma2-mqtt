@@ -103,7 +103,9 @@ from .const import (
     DEFAULT_SOURCE_LIST_SCOPE,
     DISCOVERY_PREFIX,
     DOMAIN,
+    GO2RTC_EXAMPLE_URL,
     GO2RTC_OPTIONS,
+    GO2RTC_URL_FORM,
     HA_MODE_INTEGRATION,
     MAX_SCREENSHOT_DELAY,
     MAX_SCREENSHOT_INTERVAL,
@@ -1341,7 +1343,13 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
                 schema, user_input or suggested
             ),
             errors=errors,
-            description_placeholders={"mac": mac or UNKNOWN_PLACEHOLDER},
+            description_placeholders={
+                "mac": mac or UNKNOWN_PLACEHOLDER,
+                # Addresses go in as placeholders: Home Assistant refuses a translated
+                # string that contains one.
+                "go2rtc_example_url": GO2RTC_EXAMPLE_URL,
+                "go2rtc_url_form": GO2RTC_URL_FORM,
+            },
         )
 
     async def async_step_uninstall(

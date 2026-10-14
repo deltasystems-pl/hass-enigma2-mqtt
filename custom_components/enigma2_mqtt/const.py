@@ -799,6 +799,11 @@ GO2RTC_OPTIONS: Final = (CONF_GO2RTC_URL, CONF_GO2RTC_STREAM, CONF_GO2RTC_SOURCE
 # every browser; Opus for WebRTC and AAC for MSE. No space anywhere: go2rtc refuses a
 # source that has one.
 DEFAULT_GO2RTC_SOURCE: Final = "ffmpeg:{url}#video=h264#audio=opus#audio=aac"
+# What the options form shows as an example of that address, and as its form when one
+# was mistyped. Placeholders, not translated text: Home Assistant's translation rules
+# allow no address inside a string.
+GO2RTC_EXAMPLE_URL: Final = "http://homeassistant.local:1984"
+GO2RTC_URL_FORM: Final = "http://host:1984"
 # Seconds one request to that go2rtc may take, and seconds until a failed one is tried
 # again without a channel change.
 GO2RTC_TIMEOUT: Final = 10

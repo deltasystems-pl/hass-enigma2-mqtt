@@ -214,7 +214,7 @@
               "go2rtc_source": "Source template"
             },
             "data_description": {
-              "go2rtc_url": "The address of your go2rtc's API, for example `http://homeassistant.local:1984` for the go2rtc add-on. At every channel change Home Assistant sends it the name and the source below, and nothing else.",
+              "go2rtc_url": "The address of your go2rtc's API, for example `{go2rtc_example_url}` for the go2rtc add-on. At every channel change Home Assistant sends it the name and the source below, and nothing else.",
               "go2rtc_stream": "The name of the one stream Home Assistant keeps up to date there. Letters, digits, `_`, `-` and `.` only. Left empty, it is `enigma2_` followed by the receiver's node ID.",
               "go2rtc_source": "What go2rtc is given to play. The receiver's stream address goes where the default has its placeholder in curly brackets. No spaces: go2rtc refuses a source that contains one, so a filter with spaces belongs in a named template in go2rtc's own configuration. Keep `ffmpeg:` in front; go2rtc cannot read the receiver's stream without it."
             }
@@ -268,7 +268,7 @@
     "error": {
       "plugin_unavailable": "The receiver is not connected, so its privacy settings were not changed. Try again when it is online.",
       "plugin_config_failed": "The receiver did not confirm the new privacy settings. Its previous settings and these Home Assistant options were kept.",
-      "go2rtc_invalid_url": "The go2rtc address is not a web address. Write it as `http://host:1984`, with nothing after the address, or leave it empty to switch this off.",
+      "go2rtc_invalid_url": "The go2rtc address is not a web address. Write it as `{go2rtc_url_form}`, with nothing after the address, or leave it empty to switch this off.",
       "go2rtc_invalid_stream": "The go2rtc stream name may hold only letters, digits, `_`, `-` and `.`, and at most 64 characters.",
       "go2rtc_source_spaces": "The go2rtc source template contains a space, and go2rtc refuses such a source. Put a filter that needs spaces into a named template in go2rtc's own configuration and name it here, for example `#video=tv`.",
       "go2rtc_source_placeholder": "The go2rtc source template has to contain the placeholder for the receiver's stream address exactly once, as the default value does.",

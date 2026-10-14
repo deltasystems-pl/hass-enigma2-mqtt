@@ -187,7 +187,7 @@
               "go2rtc_source": "Szablon źródła"
             },
             "data_description": {
-              "go2rtc_url": "Adres API twojego go2rtc, na przykład `http://homeassistant.local:1984` dla dodatku go2rtc. Przy każdej zmianie kanału Home Assistant wysyła tam nazwę i źródło podane niżej, i nic więcej.",
+              "go2rtc_url": "Adres API twojego go2rtc, na przykład `{go2rtc_example_url}` dla dodatku go2rtc. Przy każdej zmianie kanału Home Assistant wysyła tam nazwę i źródło podane niżej, i nic więcej.",
               "go2rtc_stream": "Nazwa jednego strumienia, który Home Assistant tam aktualizuje. Tylko litery, cyfry, `_`, `-` i `.`. Puste — `enigma2_` i identyfikator węzła dekodera.",
               "go2rtc_source": "To, co go2rtc dostaje do odtwarzania. Adres strumienia dekodera trafia w miejsce, w którym wartość domyślna ma znacznik w nawiasach klamrowych. Bez spacji: go2rtc odrzuca źródło ze spacją, więc filtr ze spacjami trzeba zapisać jako nazwany szablon w konfiguracji samego go2rtc. Zostaw `ffmpeg:` na początku; bez niego go2rtc nie odczyta strumienia dekodera."
             }
@@ -241,7 +241,7 @@
     "error": {
       "plugin_unavailable": "Dekoder nie jest połączony, więc jego ustawienia prywatności nie zostały zmienione. Spróbuj ponownie, gdy będzie dostępny.",
       "plugin_config_failed": "Dekoder nie potwierdził nowych ustawień prywatności. Zachowano poprzednie ustawienia dekodera i opcje Home Assistanta.",
-      "go2rtc_invalid_url": "Adres go2rtc nie jest adresem WWW. Wpisz go jako `http://host:1984`, bez niczego po adresie, albo zostaw pole puste, żeby to wyłączyć.",
+      "go2rtc_invalid_url": "Adres go2rtc nie jest adresem internetowym. Wpisz go jako `{go2rtc_url_form}`, bez niczego po adresie, albo zostaw pole puste, żeby to wyłączyć.",
       "go2rtc_invalid_stream": "Nazwa strumienia go2rtc może zawierać tylko litery, cyfry, `_`, `-` i `.`, najwyżej 64 znaki.",
       "go2rtc_source_spaces": "Szablon źródła go2rtc zawiera spację, a go2rtc odrzuca takie źródło. Filtr, który wymaga spacji, zapisz jako nazwany szablon w konfiguracji samego go2rtc i podaj tu jego nazwę, na przykład `#video=tv`.",
       "go2rtc_source_placeholder": "Szablon źródła go2rtc musi zawierać znacznik adresu strumienia dekodera dokładnie raz, tak jak wartość domyślna.",

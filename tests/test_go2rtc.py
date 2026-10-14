@@ -1410,3 +1410,53 @@ async def test_standby_and_back_during_a_failure_is_a_channel_change(
 
     assert [url.query["src"] for url in puts(aioclient_mock)] == [source_for(SREF_TWO)]
     assert issue(hass, entry) is None
+
+
+
+def _go2rtc_placeholders() -> set[str]:
+    """Return the placeholders the go2rtc strings of the options form leave open."""
+    strings = json.loads(
+        (Path(go2rtc.__file__).parent / "strings.json").read_text(encoding="utf-8")
+    )
+    options = strings["options"]
+    texts = [
+        *options["step"]["settings"]["sections"]["go2rtc"]["data_description"].values(),
+        *(text for key, text in options["error"].items() if key.startswith("go2rtc_")),
+    ]
+    return {name for text in texts for name in re.findall(r"\{([a-z0-9_]+)\}", text)}
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        None,
+        {CONF_GO2RTC_SOURCE: "ffmpeg:{url}#video=h264 #audio=opus"},
+        {CONF_GO2RTC_SOURCE: "ffmpeg:#video=h264"},
+        {CONF_GO2RTC_URL: "192.0.2.50:1984"},
+        {CONF_GO2RTC_STREAM: "salon tv"},
+    ],
+    ids=["first-show", "spaces", "placeholder", "url", "stream"],
+)
+async def test_the_form_fills_in_the_example_addresses_on_every_show(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    fields: dict[str, str] | None,
+) -> None:
+    """The example address is a placeholder now; a form that drops it shows `{...}`."""
+    assert _go2rtc_placeholders() == {"go2rtc_example_url", "go2rtc_url_form"}
+    streaming(box_on_the_broker)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    result = await _open_options(hass, config_entry)
+    if fields is not None:
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], _form(**{CONF_GO2RTC_URL: GO2RTC, **fields})
+        )
+        assert result["type"] is FlowResultType.FORM
+        assert result["errors"]
+
+    placeholders = result["description_placeholders"]
+    assert placeholders["go2rtc_example_url"] == "http://homeassistant.local:1984"
+    assert placeholders["go2rtc_url_form"] == "http://host:1984"
+    assert _go2rtc_placeholders() <= set(placeholders)
