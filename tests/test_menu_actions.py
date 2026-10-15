@@ -13,6 +13,7 @@ import pytest
 from pytest_homeassistant_custom_component.common import (
     async_capture_events,
     async_fire_mqtt_message,
+    async_mock_service,
 )
 
 from custom_components.enigma2_mqtt.const import EVENT_MENU_ACTION
@@ -24,6 +25,8 @@ from .menu_common import (
     claim_menu,
     fire_action,
     group,
+    items_by_id,
+    last_menu,
     menu_entry,
     row,
 )
@@ -524,22 +527,50 @@ async def test_a_row_whose_registry_id_names_nothing_cannot_be_acted_on(
     assert "(unavailable" in caplog.text
 
 
+@pytest.mark.parametrize(
+    ("domain", "state", "control", "action", "value"),
+    [
+        ("switch", "off", "slider", "set", 50),
+        # On and off like a switch, but with no service to toggle it: without the check
+        # this would reach for the lock pair and call `binary_sensor.unlock`.
+        ("binary_sensor", "on", "toggle", "toggle", None),
+    ],
+)
 async def test_a_registry_id_now_naming_another_domain_is_not_acted_on(
     hass: HomeAssistant,
     mqtt_mock,
     box_on_the_broker: dict[str, str | bytes],
     calls: list[ServiceCall],
     caplog: pytest.LogCaptureFixture,
+    domain: str,
+    state: str,
+    control: str,
+    action: str,
+    value: Any,
 ) -> None:
-    """A slider bound by registry id to an entity that cannot be one is shown, never moved."""
-    entity = er.async_get(hass).async_get_or_create("switch", "demo", "k", suggested_object_id="k")
-    hass.states.async_set(entity.entity_id, "off")
+    """A control bound by registry id to an entity that cannot be one is shown greyed."""
+    entity = er.async_get(hass).async_get_or_create(domain, "demo", "k", suggested_object_id="k")
+    hass.states.async_set(entity.entity_id, state)
+    unlocks = async_mock_service(hass, "binary_sensor", "unlock")
     claim_menu(box_on_the_broker)
-    entry = menu_entry([row("r_odd", entity.id, "slider")])
+    entry = menu_entry([row("r_odd", entity.id, control)])
     await async_setup_box(hass, entry)
 
-    fire_action(hass, "r_odd", "set", 50)
+    assert items_by_id(last_menu(mqtt_mock))["r_odd"]["available"] is False
+    fire_action(hass, "r_odd", action, value)
     await hass.async_block_till_done()
 
     assert calls == []
+    assert unlocks == []
     assert "(unavailable" in caplog.text
+
+
+@pytest.mark.parametrize("ts", ['"x"', "null", "true", '"1792050000"'])
+def test_a_ts_that_is_not_a_number_is_malformed(ts: str) -> None:
+    """Refused as what it is, not as an action from 1970."""
+    payload = (
+        '{"id":"3f9c2e4a1b7d","rev":1,"row":"r_a","action":"toggle","ts":' + ts + "}"
+    ).encode()
+    with pytest.raises(Refused) as caught:
+        parse_action(payload, now=1792050000)
+    assert (caught.value.cause, caught.value.detail) == ("malformed", "ts")

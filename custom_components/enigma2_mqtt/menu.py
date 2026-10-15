@@ -894,7 +894,9 @@ def parse_action(payload: Any, now: float | None = None) -> MenuAction:
     if action == ACTION_SET and "value" not in data:
         raise Refused("malformed", "value")
     if "ts" in data:
-        if (ts := _float(data["ts"])) is None:
+        # A number, as the contract says - not a text that reads as one.
+        raw_ts = data["ts"]
+        if not isinstance(raw_ts, (int, float)) or (ts := _float(raw_ts)) is None:
             raise Refused("malformed", "ts")
         now = dt_util.utcnow().timestamp() if now is None else now
         if now - ts > MAX_ACTION_AGE:
