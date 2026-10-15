@@ -18,12 +18,15 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   "Receiver menu" and [ADR-0012](docs/adr/0012-receiver-menu.md)). The options gain *Receiver
   menu* („Menu na dekoderze"): up to 8 groups and 24 entries per list of controls bound to
   entities, scenes and scripts with the entity picker, each a button, switch, indicator, list of
-  options, slider or text field as its domain allows. Home Assistant publishes the whole menu,
+  options, slider or text field as its domain allows - any entity can be an indicator. Entries
+  can be moved up and down within their list, and a control stores the entity's registry id, so
+  it follows a renamed entity. Colours say "all good" in green. Home Assistant publishes the whole menu,
   retained, on `enigma2mqtt/menu/<node_id>` - at setup, after a save, when the receiver comes
   back, and debounced to at most one publish every half second when a bound entity changes -
   with state texts in the household's language, under 64 KiB. A viewer's OK arrives as
   `menu_action`; Home Assistant performs it only for a row the saved menu holds, with that row's
-  action and a value the entity accepts, and refuses anything else with one log line per cause.
+  action and a value the entity accepts, and refuses anything else - also an action more than
+  120 seconds old - with one log line per cause.
   The event `enigma2_mqtt_menu_action` follows every performed action. Removing the entry
   retracts the menu, and so does reconfiguring to a new node ID for the old node. No entity is
   added.

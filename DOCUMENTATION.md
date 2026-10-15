@@ -394,18 +394,25 @@ row and - for a slider, a list or a text - which value. Home Assistant performs 
 The menu is **one level of groups**, each a list of controls, plus controls at the top. At most
 **8 groups**, at most **24 entries** in the top list (groups and controls together) and at most 24
 controls in each group. The step shows the menu as it stands and offers *Add a group*, *Add a
-control*, *Change a group*, *Change a control*, *Remove groups or controls* and *Save the menu*.
+control*, *Change a group*, *Change a control*, *Move a group or a control*, *Remove groups or
+controls* and *Save the menu*.
 **Nothing changes until you save**; closing the dialog discards the edits. Saving stores the
 menu in the entry's options and reloads the entry, and the reload publishes it.
 
 - **A group** has a name (shown cut at 60 characters) and an icon.
-- **A control** is an entity, a scene or a script picked with Home Assistant's entity picker, the
+- **A control** is any entity, scene or script picked with Home Assistant's entity picker, the
   place it goes (the top list or a group), and optionally a name and an icon. Without a name the
   row shows the entity's own name; without an icon it gets one that fits the entity. When the
   entity can be shown in more than one way - a light as a switch or as a brightness slider - a
-  second step asks which.
+  second step asks which. An entity of a domain the table below does not list is shown as an
+  indicator, with its state.
+- A control stores the entity's **registry id**, so it follows the entity when its entity ID is
+  renamed: the row keeps showing it and acting on it under the new ID, without opening the
+  options. An entity that has no registry entry is stored by its entity ID.
 - New groups and controls go to the end of the list they are put in. Changing a control's place
-  moves it to the end of the new list.
+  moves it to the end of the new list. *Move a group or a control* moves one entry one place up or
+  down within its own list - the top list, or the group it is in; at the end of its list it
+  stays.
 
 The icons are the plugin's own, by name: `neutral`, `lamp`, `ceiling-light`, `blinds`, `scene`,
 `script`, `power`, `fan`, `lock`, `radiator`, `thermometer`, `tv`, `speaker`, `door`, `gate`,
@@ -415,10 +422,16 @@ The icons are the plugin's own, by name: `neutral`, `lamp`, `ceiling-light`, `bl
 |---|---|---|---|
 | Button | `script`, `scene`, `button`, `input_button`, `automation` | `script.turn_on`, `scene.turn_on`, `button.press`, `input_button.press`, `automation.trigger` | nothing on the right |
 | Switch | `light`, `switch`, `input_boolean`, `fan`, `cover`, `lock` | the domain's `toggle`; for a cover `close_cover` when it showed open and `open_cover` when it showed closed; for a lock `unlock` when it showed locked and `lock` when it showed unlocked | the state in your language, green while on (open, locked), red while off |
-| Indicator | every domain above except the buttons' | nothing - it cannot be acted on | the state in your language; on/off states are coloured as for a switch, except a binary sensor whose "on" needs attention (door, window, opening, garage door, smoke, gas, carbon monoxide, moisture, safety, problem, tamper, lock, battery, heat, cold), which is green while off. A sensor shows its reading with its unit |
+| Indicator | any entity except a script, scene, button, input button or automation, which are buttons only | nothing - it cannot be acted on | the state in your language, coloured where it is on or off; a sensor shows its reading with its unit, and a state that is neither on nor off has no colour |
 | List of options | `select`, `input_select`, `climate` (HVAC mode) | `select_option`, or `climate.set_hvac_mode` | the current option; a climate's modes in your language |
 | Slider | `light` (brightness), `cover` (position), `media_player` (volume), `number`, `input_number` | `light.turn_on` with `brightness_pct`, `cover.set_cover_position`, `media_player.volume_set`, `set_value` | the value with its unit. Brightness, position and volume run 0-100 % in steps of 10; a number runs over its own range, its step made coarser where it would have more than 200 |
 | Text field | `input_text`, `text` | `set_value` | the text, cut at 24 characters; the receiver's keyboard takes the entity's maximum length, at most 255. **A field in password mode never has its text published** |
+
+**Green means all good, red means look at it.** A switch is green while on (a cover open, a lock
+locked) and red while off. An indicator follows the same rule, except for a binary sensor whose
+"on" needs attention - door, window, opening, garage door, smoke, gas, carbon monoxide, moisture,
+safety, problem, tamper, lock, battery, heat, cold - which is green while off: a closed door is
+green, an open one red.
 
 A light that is only on or off is not offered as a slider, nor a cover without a position or a
 player whose volume cannot be set. An entity that is unavailable, or that no longer exists, is
@@ -441,7 +454,10 @@ claims `menu`, only for a row the saved menu holds now, with the action that row
 takes, on an entity that is available, and with a value inside what the entity accepts now - an
 option it offers, a number inside the slider's range (put on its step), a text no longer than
 its maximum. Anything else is refused with a warning in the log, once per kind of refusal, and
-nothing is called. A retained action and one whose id was just seen are refused too. A row keeps
+nothing is called. A retained action, one whose id was just seen, and **one more than 120 seconds
+old** by the time it carries (`ts`, the receiver's clock) and Home Assistant's clock are refused
+too; an action without a time is accepted. Keep the receiver's clock right - an action from a
+receiver whose clock is more than two minutes behind is always refused. A row keeps
 its id across restarts and while only its name or icon change; bound to another entity or shown
 as another control, it gets a new id, so a press the receiver sent for the old binding cannot
 reach the new one. A service call that fails is logged; there is no repair.

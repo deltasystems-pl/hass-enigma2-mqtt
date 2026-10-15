@@ -34,9 +34,12 @@ decided here from the options. The integration publishes no service name and no 
 **2. `menu_action` is untrusted input, and the menu is the whole of its power.** An action is
 performed only for a receiver whose `info` claims `menu`; only when it is not retained and its id
 was not just seen; only for a row the saved options hold now, with the action that row's control
-takes; only on an entity that is available; and only with a value inside what the entity accepts
+takes; only on an entity that is available; only with a value inside what the entity accepts
 now - an option it offers, a number inside the slider's range snapped to its step, a text no
-longer than the entity's maximum. Anything else is refused with a log line - a warning the first
+longer than the entity's maximum; and only when its `ts` is at most 120 seconds before Home
+Assistant's clock. The plugin never queues an action across a disconnect, so an older one was
+pressed for a screen that is gone; an action without `ts` is accepted, and one whose `ts` is not
+a number is refused. Anything else is refused with a log line - a warning the first
 time for each cause, then debug, because anyone on the broker can send these and the log must
 not be theirs to fill - and nothing is called. A text that reads as a number is not a number.
 
@@ -51,11 +54,11 @@ that changed in between cannot be reached by an id that no longer exists. Random
 counted, so a removed row's id is never handed to the next one.
 
 **4. The control follows from the domain, with a choice where a domain allows two.** Scripts,
-scenes, buttons and automations are buttons; lights, switches, input booleans, fans, covers and
-locks are switches - a light also a brightness slider and a cover also a position slider; select,
-input select and a climate's HVAC mode are lists of options; numbers, input numbers and a
-player's volume are sliders; input texts and texts are text fields; and every domain above that
-is not a button can be an indicator, as can binary sensors and sensors. A cover and a lock take
+scenes, buttons and automations are buttons and nothing else; lights, switches, input booleans,
+fans, covers and locks are switches - a light also a brightness slider and a cover also a
+position slider; select, input select and a climate's HVAC mode are lists of options; numbers,
+input numbers and a player's volume are sliders; input texts and texts are text fields; and any
+other entity, of any domain, can be an indicator showing its state. A cover and a lock take
 the explicit pair by the state the row showed (open -> close, locked -> unlock) rather than a
 toggle, and refuse when that state is neither. Percent sliders move in tens, because they are
 moved with the arrow keys of a remote; an entity's own range keeps its step, coarsened by a whole
@@ -65,10 +68,11 @@ multiple to at most 200 steps.
 language.** The lookup is the frontend's - the entity's translation key, its device class, its
 domain - over the translations loaded for the bound domains. A climate's modes are shown in that
 language and mapped back to the entity's own word on `set`; two options that read the same once
-translated or cut fall back to the entity's word, or are left out. Colours: on, open and locked
-are green and their opposites red, except that a binary sensor whose "on" needs attention - a
-door, a window, smoke, a leak, a problem - is green while off, as the contract's example of a
-closed door shows. A field in password mode is published without its text.
+translated or cut fall back to the entity's word, or are left out. **Green means all good**: on,
+open and locked are green and their opposites red, except that a binary sensor whose "on" needs
+attention - a door, a window, smoke, a leak, a problem - is green while off, as the contract's
+example of a closed door shows. The plugin draws the colour it is given; the rule is this
+integration's. A field in password mode is published without its text.
 
 **6. Publishing follows the contract's bounds and debounce.** At setup, after the options are
 saved, when the receiver comes back online, and when a bound entity changes: the first change at
@@ -87,9 +91,17 @@ reload.
 length the user decides; sections are a fixed set of fields, and eight groups of 24 rows would be
 hundreds of mostly empty fields. A menu step with add, change and remove, each a short form with
 Home Assistant's own selectors - the entity picker, a list of the plugin's icons, the controls the
-entity allows - edits a working copy that is stored only by *Save the menu*. The step is offered
-for a receiver that claims `menu` and for any entry that holds a menu, so a menu can always be
-emptied.
+entity allows - edits a working copy that is stored only by *Save the menu*. A move step puts an
+entry one place up or down within its own list. The step is offered for a receiver that claims
+`menu` and for any entry that holds a menu, so a menu can always be emptied.
+
+**10. A row stores the entity's registry id.** So a row follows its entity through a rename of
+its entity id: the state, the label and the service calls use the entity id the registry gives
+now, and the state is followed under the new id from the moment the registry says so. An entity
+without a registry entry is stored by its entity id; both forms are read, and a row stored by
+entity id that is saved again once the entity has a registry entry keeps its row id. A registry
+id that names nothing any more, or now names an entity the row's control does not fit, shows the
+row greyed and refuses every action on it.
 
 **9. An event follows every performed action.** `enigma2_mqtt_menu_action` with the device, the
 node, the row, the entity, the action and the value applied, fired after the service call
@@ -106,5 +118,7 @@ nothing. No entity is added for the menu.
 - The icon names are a contract shared with the plugin: the options offer exactly the plugin's
   list, and a name the plugin does not know is drawn as the neutral icon, so the list may only
   grow on the plugin's side first.
-- An entity renamed in the registry is no longer found under its old id; its row shows greyed
-  until it is bound again.
+- A receiver whose clock is more than two minutes behind Home Assistant's has every action
+  refused; the log says why.
+- Removing an entity from the registry greys its row; it stays in the options until it is
+  removed or bound again.
