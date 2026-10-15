@@ -686,6 +686,35 @@ async def test_a_downgrade_that_withdraws_the_history_is_unavailable_at_once(
     assert hass.states.get(HISTORY_SELECT).state == STATE_UNAVAILABLE
 
 
+async def test_a_published_empty_history_counts_and_a_retraction_does_not(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Without the capability, a history with no entries is still a history.
+
+    The receiver says it holds none - that is an answer, and the selects show it as
+    `unknown` with nothing to offer. Only the retraction withdraws it.
+    """
+    capable(box_on_the_broker)
+    enable_the_unfiltered_select(hass, config_entry)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    async_fire_mqtt_message(hass, INFO_TOPIC, json.dumps(INFO))
+    await hass.async_block_till_done()
+    for entity_id in (HISTORY_SELECT, HISTORY_ALL_SELECT):
+        assert hass.states.get(entity_id).state == STATE_UNAVAILABLE
+
+    async_fire_mqtt_message(hass, ZAP_HISTORY_TOPIC, history())
+    await hass.async_block_till_done()
+    assert_unknown_and_empty(hass, HISTORY_SELECT, HISTORY_ALL_SELECT)
+
+    async_fire_mqtt_message(hass, ZAP_HISTORY_TOPIC, "")
+    await hass.async_block_till_done()
+    for entity_id in (HISTORY_SELECT, HISTORY_ALL_SELECT):
+        assert hass.states.get(entity_id).state == STATE_UNAVAILABLE
+
+
 async def test_the_zap_history_capability_alone_is_enough(
     hass: HomeAssistant,
     mqtt_mock,
