@@ -30,6 +30,15 @@ why the Home Assistant Mosquitto add-on does not enforce it. The credential live
 most Enigma2 images ship with a default root password and an open telnet or SSH service, so treat
 the receiver as the least trusted device on the network and change that password.
 
+**The receiver menu.** The receiver's menu ([DOCUMENTATION.md](DOCUMENTATION.md#receiver-menu))
+makes Home Assistant call services on a message from the broker, `menu_action`. Anyone who can
+publish to the broker can send one, so the integration treats it as untrusted input: it performs
+only an action on a row the user put into the menu, with that row's action and a value the bound
+entity accepts, and refuses everything else ([ADR-0012](docs/adr/0012-receiver-menu.md)). Put into
+the menu only what you would hand to anyone holding the remote. The menu - the names and states
+of the entities in it - is retained on the broker for any login to read; a text field in password
+mode is published without its text.
+
 **SSH password.** The guided installer asks for the receiver's SSH password. It is
 **discarded after a successful install** unless you explicitly ask to keep it for later plugin
 updates. If you do keep it, it is stored in the config entry - and Home Assistant's `.storage`
