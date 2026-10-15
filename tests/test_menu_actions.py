@@ -7,6 +7,8 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import (
     async_capture_events,
@@ -465,3 +467,77 @@ def test_parse_action_reads_every_field() -> None:
     )
     with pytest.raises(Refused):
         parse_action(None)
+
+
+
+@pytest.mark.parametrize(("age", "performed"), [(0, True), (100, True), (-30, True),
+                                                (125, False), (3600, False)])
+async def test_an_action_older_than_two_minutes_is_refused(
+    hass: HomeAssistant,
+    menu_box: Any,
+    calls: list[ServiceCall],
+    caplog: pytest.LogCaptureFixture,
+    age: int,
+    performed: bool,
+) -> None:
+    """Pressed for a screen that is long gone; a receiver clock ahead of ours is no reason."""
+    fire_action(hass, "r_switch", "toggle", ts=int(dt_util.utcnow().timestamp()) - age)
+    await hass.async_block_till_done()
+
+    assert (len(calls) == 1) is performed
+    assert ("(stale" in caplog.text) is not performed
+
+
+@pytest.mark.parametrize(
+    ("now", "refused"),
+    [(1120.0, False), (1120.001, True), (1000.0, False), (900.0, False)],
+)
+def test_the_age_limit_is_120_seconds(now: float, refused: bool) -> None:
+    """At exactly 120 s an action still counts; a moment later it does not."""
+    payload = b'{"id":"3f9c2e4a1b7d","rev":1,"row":"r_a","action":"toggle","ts":1000}'
+    if refused:
+        with pytest.raises(Refused) as caught:
+            parse_action(payload, now=now)
+        assert caught.value.cause == "stale"
+    else:
+        assert parse_action(payload, now=now).row == "r_a"
+
+
+async def test_a_row_whose_registry_id_names_nothing_cannot_be_acted_on(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    calls: list[ServiceCall],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The entity was deleted: the row is greyed and an action on it is refused."""
+    claim_menu(box_on_the_broker)
+    entry = menu_entry([row("r_gone", "0123456789abcdef0123456789abcdef", "toggle")])
+    await async_setup_box(hass, entry)
+
+    fire_action(hass, "r_gone", "toggle")
+    await hass.async_block_till_done()
+
+    assert calls == []
+    assert "(unavailable" in caplog.text
+
+
+async def test_a_registry_id_now_naming_another_domain_is_not_acted_on(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    calls: list[ServiceCall],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A slider bound by registry id to an entity that cannot be one is shown, never moved."""
+    entity = er.async_get(hass).async_get_or_create("switch", "demo", "k", suggested_object_id="k")
+    hass.states.async_set(entity.entity_id, "off")
+    claim_menu(box_on_the_broker)
+    entry = menu_entry([row("r_odd", entity.id, "slider")])
+    await async_setup_box(hass, entry)
+
+    fire_action(hass, "r_odd", "set", 50)
+    await hass.async_block_till_done()
+
+    assert calls == []
+    assert "(unavailable" in caplog.text

@@ -18,6 +18,7 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.enigma2_mqtt.menu import (
     MAX_PAYLOAD_BYTES,
+    async_menu_texts,
     build_menu,
     coarsen,
     encode_menu,
@@ -535,3 +536,73 @@ async def test_a_menu_that_had_to_leave_something_out_says_so_once(
     assert len(payload.encode("utf-8")) < MAX_PAYLOAD_BYTES
     assert caplog.text.count("to stay under 64 KiB") == 1
     assert MENU_TOPIC
+
+
+
+def test_the_stored_menu_reads_both_forms_of_a_binding() -> None:
+    """A registry id or an entity id; a registry id cannot say its domain, so any control."""
+    menu = stored_menu(
+        {
+            "menu": [
+                row("r_reg", "0123456789abcdef0123456789abcdef", "slider"),
+                row("r_ent", "person.anna", "indicator"),
+                row("r_bad_reg", "0123456789ABCDEF0123456789abcdef", "toggle"),
+                row("r_bad_ctl", "0123456789abcdef0123456789abcdef", "dial"),
+                row("r_person_toggle", "person.anna", "toggle"),
+                row("r_script_indicator", "script.movie", "indicator"),
+            ]
+        }
+    )
+
+    assert [item["id"] for item in menu] == ["r_reg", "r_ent"]
+
+
+async def test_any_entity_is_shown_as_an_indicator_with_its_state(hass: HomeAssistant) -> None:
+    """A domain the menu cannot act on: its state in the household's words, no colour."""
+    hass.states.async_set("person.anna", "not_home", {"friendly_name": "Anna"})
+    hass.states.async_set("alarm_control_panel.house", "armed_away", {"friendly_name": "Alarm"})
+    menu = stored_menu(
+        {
+            "menu": [
+                row("r_anna", "person.anna", "indicator"),
+                row("r_alarm", "alarm_control_panel.house", "indicator"),
+            ]
+        }
+    )
+    texts = await async_menu_texts(hass, menu)
+
+    items, _views, _notes = build_menu(hass, menu, texts)
+
+    assert items[0]["state"] == "Away"
+    assert items[0]["icon"] == "home"
+    assert items[0]["value"] is None and items[0]["color"] is None
+    assert items[1]["state"] == "Armed away"
+    assert items[1]["icon"] == "alarm"
+
+
+async def test_a_rename_republishes_and_is_followed(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+) -> None:
+    """Without anybody opening the options, the row follows the entity to its new id."""
+    from homeassistant.helpers import entity_registry as er
+
+    registry = er.async_get(hass)
+    entity = registry.async_get_or_create("light", "demo", "l1", suggested_object_id="desk")
+    hass.states.async_set("light.desk", "on", {"friendly_name": "Desk"})
+    claim_menu(box_on_the_broker)
+    await async_setup_box(hass, menu_entry([row("r_desk", entity.id, "toggle")]))
+    assert items_by_id(last_menu(mqtt_mock))["r_desk"]["label"] == "Desk"
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=2))
+    await hass.async_block_till_done()
+
+    registry.async_update_entity("light.desk", new_entity_id="light.study")
+    hass.states.async_set("light.study", "off", {"friendly_name": "Study"})
+    await hass.async_block_till_done()
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=4))
+    await hass.async_block_till_done()
+
+    shown = items_by_id(last_menu(mqtt_mock))["r_desk"]
+    assert shown["label"] == "Study"
+    assert shown["value"] is False

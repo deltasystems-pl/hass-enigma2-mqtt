@@ -6,7 +6,7 @@ twenty-four rows would be a form of hundreds of fields, nearly all of them empty
 step that offers add, edit and remove, each a short form of its own, is how Home Assistant's
 own helpers edit a list, and every form in it uses the native selectors - the entity picker
 for what a row is bound to, a list of the plugin's icons, and the controls the chosen entity
-can be.
+can be. A row stores the entity's registry id, so a renamed entity stays in the menu.
 
 The edits are made to a working copy and saved only by "Save the menu", which stores the
 whole menu in the entry's options and reloads the entry; the reload publishes it. Closing
@@ -18,14 +18,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigFlowResult
-from homeassistant.core import split_entity_id, valid_entity_id
+from homeassistant.core import valid_entity_id
 from homeassistant.helpers import entity_registry as er, selector
 from homeassistant.helpers.translation import async_get_translations
 import voluptuous as vol
 
 from .const import CAPABILITY_MENU, CONF_MENU, DOMAIN, MENU_ICON_NEUTRAL, MENU_ICONS
 from .menu import (
-    CONTROLS_BY_DOMAIN,
     GROUP_ROWS,
     ITEM_ICON,
     ITEM_ID,
@@ -36,7 +35,6 @@ from .menu import (
     MAX_ENTRIES,
     MAX_GROUPS,
     MAX_LABEL,
-    MENU_DOMAINS,
     ROW_CONTROL,
     ROW_ENTITY,
     allowed_controls,
@@ -44,7 +42,9 @@ from .menu import (
     menu_ids,
     menu_rows,
     new_item_id,
+    resolve_entity,
     row_label,
+    stored_binding,
     stored_menu,
 )
 
@@ -59,6 +59,9 @@ FIELD_PLACE = "place"
 FIELD_GROUP = "group"
 FIELD_ROW = "row"
 FIELD_REMOVE = "remove"
+FIELD_ITEM = "item"
+FIELD_DIRECTION = "direction"
+DIRECTIONS = ("up", "down")
 # The place of a row that is in no group.
 PLACE_TOP = "top"
 
@@ -147,7 +150,8 @@ class ReceiverMenuSteps:
         control = self._text(
             texts, f"selector.menu_control.options.{row[ROW_CONTROL]}", row[ROW_CONTROL]
         )
-        return f"{row_label(self.hass, row)} - {row[ROW_ENTITY]} ({control})"
+        entity_id = resolve_entity(self.hass, row[ROW_ENTITY]) or row[ROW_ENTITY]
+        return f"{row_label(self.hass, row)} - {entity_id} ({control})"
 
     def _outline(self, texts: dict[str, str]) -> str:
         """The menu as a list, for the menu step's description."""
@@ -196,6 +200,8 @@ class ReceiverMenuSteps:
             options.append("menu_edit_group")
         if menu_rows(self._menu()):
             options.append("menu_edit_row")
+        if self._movable():
+            options.append("menu_move")
         if self._menu():
             options.append("menu_remove")
         options.append("menu_save")
@@ -359,14 +365,17 @@ class ReceiverMenuSteps:
             entity_id = self._resolve_entity(user_input.get(ROW_ENTITY))
             place = user_input.get(FIELD_PLACE) or PLACE_TOP
             container = self._container(place)
-            if entity_id is None or split_entity_id(entity_id)[0] not in CONTROLS_BY_DOMAIN:
+            if entity_id is None:
                 errors[ROW_ENTITY] = "menu_entity_not_supported"
             elif container is None or (
                 place != current_place and len(container) >= MAX_ENTRIES
             ):
                 errors[FIELD_PLACE] = "menu_place_full"
             else:
-                draft: dict[str, Any] = {KIND: KIND_ROW, ROW_ENTITY: entity_id}
+                draft: dict[str, Any] = {
+                    KIND: KIND_ROW,
+                    ROW_ENTITY: stored_binding(self.hass, entity_id),
+                }
                 label = " ".join(str(user_input.get(ITEM_LABEL) or "").split())
                 if label:
                     draft[ITEM_LABEL] = label[:MAX_LABEL]
@@ -390,9 +399,7 @@ class ReceiverMenuSteps:
         ]
         schema = vol.Schema(
             {
-                vol.Required(ROW_ENTITY): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=list(MENU_DOMAINS))
-                ),
+                vol.Required(ROW_ENTITY): selector.EntitySelector(),
                 vol.Required(FIELD_PLACE, default=PLACE_TOP): selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=places, mode=selector.SelectSelectorMode.DROPDOWN
@@ -405,7 +412,8 @@ class ReceiverMenuSteps:
         suggested: dict[str, Any] = dict(user_input or {})
         if user_input is None and existing is not None:
             suggested = {
-                ROW_ENTITY: existing[ROW_ENTITY],
+                ROW_ENTITY: resolve_entity(self.hass, existing[ROW_ENTITY])
+                or existing[ROW_ENTITY],
                 FIELD_PLACE: current_place or PLACE_TOP,
                 **{key: existing[key] for key in (ITEM_LABEL, ITEM_ICON) if key in existing},
             }
@@ -423,7 +431,8 @@ class ReceiverMenuSteps:
         draft = self._menu_draft
         if draft is None:
             return await self.async_step_receiver_menu()
-        controls = allowed_controls(self.hass, draft[ROW_ENTITY])
+        entity_id = resolve_entity(self.hass, draft[ROW_ENTITY]) or ""
+        controls = allowed_controls(self.hass, entity_id)
         if user_input is not None and user_input.get(ROW_CONTROL) in controls:
             return await self._async_commit_row(user_input[ROW_CONTROL])
         existing = (
@@ -461,9 +470,12 @@ class ReceiverMenuSteps:
         menu = self._menu()
         existing = find_row(menu, self._menu_editing) if self._menu_editing else None
         row = {**draft, ROW_CONTROL: control}
+        # The same entity whichever form either is stored in: a row stored by its entity id
+        # before the entity had a registry entry is still the same binding.
         if (
             existing is not None
-            and existing[ROW_ENTITY] == row[ROW_ENTITY]
+            and resolve_entity(self.hass, existing[ROW_ENTITY])
+            == resolve_entity(self.hass, row[ROW_ENTITY])
             and existing[ROW_CONTROL] == control
         ):
             row[ITEM_ID] = existing[ITEM_ID]
@@ -508,6 +520,57 @@ class ReceiverMenuSteps:
                             mode=selector.SelectSelectorMode.LIST,
                         )
                     )
+                }
+            ),
+        )
+
+    def _lists(self) -> list[list[dict[str, Any]]]:
+        """Every list the menu has: the top list and each group's rows."""
+        return [self._menu(), *(group[GROUP_ROWS] for group in self._groups())]
+
+    def _movable(self) -> bool:
+        return any(len(entries) > 1 for entries in self._lists())
+
+    def _move(self, item_id: str, direction: str) -> None:
+        """Swap an entry with its neighbour in its own list; at an end it stays."""
+        for entries in self._lists():
+            index = next(
+                (i for i, entry in enumerate(entries) if entry[ITEM_ID] == item_id), None
+            )
+            if index is None:
+                continue
+            other = index - 1 if direction == "up" else index + 1
+            if 0 <= other < len(entries):
+                entries[index], entries[other] = entries[other], entries[index]
+            return
+
+    async def async_step_menu_move(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Move a group or a control one place up or down within its own list."""
+        if user_input is not None:
+            if user_input.get(FIELD_DIRECTION) in DIRECTIONS:
+                self._move(str(user_input.get(FIELD_ITEM)), user_input[FIELD_DIRECTION])
+            return await self.async_step_receiver_menu()
+        if not self._movable():
+            return await self.async_step_receiver_menu()
+        return self.async_show_form(
+            step_id="menu_move",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(FIELD_ITEM): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=self._choices(groups=True),
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Required(FIELD_DIRECTION, default="up"): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=list(DIRECTIONS),
+                            translation_key="menu_direction",
+                            mode=selector.SelectSelectorMode.LIST,
+                        )
+                    ),
                 }
             ),
         )

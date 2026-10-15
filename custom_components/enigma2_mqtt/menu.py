@@ -18,6 +18,9 @@ A row's id is generated once, when the row is added in the options, and stored w
 changes only when the row's binding does - another entity, or another control - so an
 action aimed at a binding that no longer exists names a row the menu no longer holds and is
 refused, whatever `rev` it carries.
+
+A row stores the entity's registry id, so it follows the entity through a rename; an entity
+that has no registry entry is stored by its entity id. Both forms are read wherever a row is.
 """
 
 from __future__ import annotations
@@ -48,12 +51,14 @@ from homeassistant.core import (
     State,
     callback,
     split_entity_id,
+    valid_entity_id,
 )
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.translation import async_get_translations
+from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
 from .box import Enigma2Box, Enigma2MqttConfigEntry, decode_payload
@@ -75,7 +80,7 @@ _LOGGER = logging.getLogger(__name__)
 MENU_VERSION = 1
 MENU_TITLE = "Home Assistant"
 
-# The contract's bounds (decision D24): eight groups, twenty-four entries in the top list and
+# The contract's bounds (ADR-0012): eight groups, twenty-four entries in the top list and
 # in every group, labels at 60 characters, state texts at 24, a selector's options at 24 of
 # 60 characters each, a unit at 8, at most 200 steps on a slider, and a text field of at most
 # 255 characters.
@@ -98,8 +103,12 @@ PUBLISH_COOLDOWN = 0.5
 ACTION_MAX_BYTES = 4096
 # How many action ids are remembered to drop a redelivered message.
 ACTION_IDS_REMEMBERED = 64
+# Seconds an action may be old, by its `ts` and this Home Assistant's clock (ADR-0012).
+# The plugin never queues an action across a disconnect; one older than this was pressed for
+# a screen that is long gone. An action without `ts` is accepted.
+MAX_ACTION_AGE = 120
 
-# The six controls (decision D12), and the action the receiver sends for each.
+# The six controls of the contract, and the action the receiver sends for each.
 BUTTON = "button"
 TOGGLE = "toggle"
 INDICATOR = "indicator"
@@ -119,10 +128,10 @@ ACTION_FOR_CONTROL: dict[str, str] = {
 }
 
 # The domains a row may be bound to, and the controls each can be shown as - the first is
-# the one a new row gets unless the user chooses another (decision D55). Every domain whose
-# state is a thing to look at can also be a plain indicator. What the menu runs - a script,
-# a scene, a button, an automation - is a button only: its state is whether it is running
-# or when it last ran, which is nothing to show on a television.
+# the one a new row gets unless the user chooses another (ADR-0012). Any entity can be a
+# plain indicator showing its state - a domain not in this table is nothing
+# else. What the menu runs - a script, a scene, a button, an automation - is a button only:
+# its state is whether it is running or when it last ran, which is nothing to show.
 CONTROLS_BY_DOMAIN: dict[str, tuple[str, ...]] = {
     "script": (BUTTON,),
     "scene": (BUTTON,),
@@ -146,7 +155,12 @@ CONTROLS_BY_DOMAIN: dict[str, tuple[str, ...]] = {
     "input_text": (INPUT, INDICATOR),
     "text": (INPUT, INDICATOR),
 }
-MENU_DOMAINS = tuple(CONTROLS_BY_DOMAIN)
+
+
+def controls_for_domain(domain: str) -> tuple[str, ...]:
+    """The controls an entity of this domain may be shown as, the default first."""
+    return CONTROLS_BY_DOMAIN.get(domain, (INDICATOR,))
+
 
 # The service a button row calls.
 BUTTON_SERVICES: dict[str, str] = {
@@ -224,12 +238,20 @@ _ICON_BY_DOMAIN: dict[str, str] = {
     "media_player": "speaker",
     "input_text": "note",
     "text": "note",
+    "alarm_control_panel": "alarm",
+    "camera": "camera",
+    "person": "home",
+    "device_tracker": "home",
+    "water_heater": "radiator",
 }
 
 ROW_ID = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 ACTION_ID = re.compile(r"^[0-9a-f]{12}$")
+# An entity registry id, as Home Assistant writes one.
+REGISTRY_ID = re.compile(r"^[0-9a-f]{32}$")
 
-# What a stored group and a stored row look like in the options.
+# What a stored group and a stored row look like in the options. A row's `entity_id` holds
+# the entity's registry id, or its entity id where it has no registry entry.
 KIND = "type"
 KIND_GROUP = "group"
 KIND_ROW = "row"
@@ -242,6 +264,48 @@ ROW_CONTROL = "control"
 
 # Texts of this integration a row may show, keyed as in `common` of the translations.
 _TEXT_KEYS = (STATE_UNAVAILABLE, STATE_UNKNOWN)
+
+
+def domain_of(entity_id: str | None) -> str:
+    """The domain of an entity id; empty for anything that is not one."""
+    return split_entity_id(entity_id)[0] if entity_id and valid_entity_id(entity_id) else ""
+
+
+def resolve_entity(hass: HomeAssistant, stored: Any) -> str | None:
+    """The entity id a stored binding names now: a registry id followed through a rename.
+
+    An entity id is taken as it is - the entity may simply not exist yet - and a registry id
+    that names no entry any more is None.
+    """
+    if not isinstance(stored, str) or not stored:
+        return None
+    if valid_entity_id(stored):
+        return stored
+    return er.async_resolve_entity_id(er.async_get(hass), stored)
+
+
+def stored_binding(hass: HomeAssistant, entity_id: str) -> str:
+    """What a row stores for an entity: its registry id, else its entity id."""
+    entry = er.async_get(hass).async_get(entity_id)
+    return entry.id if entry is not None else entity_id
+
+
+def resolved_row(hass: HomeAssistant, row: Mapping[str, Any]) -> dict[str, Any]:
+    """A stored row with its binding read as the entity id it names now ("" for none)."""
+    return {**row, ROW_ENTITY: resolve_entity(hass, row[ROW_ENTITY]) or ""}
+
+
+def resolved_menu(hass: HomeAssistant, menu: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """A stored menu with every row's binding resolved."""
+    resolved: list[dict[str, Any]] = []
+    for item in menu:
+        if item.get(KIND) == KIND_GROUP:
+            resolved.append(
+                {**item, GROUP_ROWS: [resolved_row(hass, row) for row in item[GROUP_ROWS]]}
+            )
+        else:
+            resolved.append(resolved_row(hass, item))
+    return resolved
 
 
 def menu_topic(node_id: str) -> str:
@@ -277,9 +341,14 @@ def _clean_row(raw: Any) -> dict[str, Any] | None:
     row_id, entity_id, control = raw.get(ITEM_ID), raw.get(ROW_ENTITY), raw.get(ROW_CONTROL)
     if not isinstance(row_id, str) or not ROW_ID.match(row_id):
         return None
-    if not isinstance(entity_id, str) or "." not in entity_id:
+    if not isinstance(entity_id, str):
         return None
-    if control not in CONTROLS_BY_DOMAIN.get(split_entity_id(entity_id)[0], ()):
+    if valid_entity_id(entity_id):
+        if control not in controls_for_domain(domain_of(entity_id)):
+            return None
+    elif not REGISTRY_ID.match(entity_id) or control not in CONTROLS:
+        # A registry id says nothing of the domain; the control is checked against the
+        # entity it names when the row is shown and when it is acted on.
         return None
     row: dict[str, Any] = {
         KIND: KIND_ROW,
@@ -367,12 +436,12 @@ def find_row(menu: Iterable[Mapping[str, Any]], row_id: str) -> dict[str, Any] |
 def allowed_controls(hass: HomeAssistant, entity_id: str) -> list[str]:
     """The controls a row bound to this entity may be, the default first.
 
-    The domain decides (decision D55); what the entity says it supports narrows it, where it
+    The domain decides (ADR-0012); what the entity says it supports narrows it, where it
     says: a light that is only on/off has no brightness, a cover that cannot be put at a
     position and a player whose volume cannot be set have no slider. An entity that has no
     state yet keeps the whole list - it may be one that is still starting.
     """
-    controls = list(CONTROLS_BY_DOMAIN.get(split_entity_id(entity_id)[0], ()))
+    controls = list(controls_for_domain(domain_of(entity_id)))
     if SLIDER not in controls or (state := hass.states.get(entity_id)) is None:
         return controls
     domain = state.domain
@@ -461,6 +530,8 @@ class RowView:
 
     payload: dict[str, Any]
     available: bool
+    # The entity the row is bound to now; "" when its binding names nothing.
+    entity_id: str = ""
     value: Any = None
     # A selector's shown option -> the entity's own option.
     options: dict[str, str] = field(default_factory=dict)
@@ -483,8 +554,11 @@ def row_label(hass: HomeAssistant, row: Mapping[str, Any]) -> str:
     """What a row is called: the user's label, else the entity's name, else its id."""
     if label := row.get(ITEM_LABEL):
         return str(label)
-    state = hass.states.get(row[ROW_ENTITY])
-    return state.name if state is not None else row[ROW_ENTITY]
+    entity_id = resolve_entity(hass, row[ROW_ENTITY])
+    state = hass.states.get(entity_id) if entity_id else None
+    if state is not None:
+        return state.name
+    return entity_id or row[ROW_ENTITY]
 
 
 class _Translator:
@@ -524,10 +598,10 @@ def render_row(
 ) -> RowView:
     """One stored row as the contract's row object, from the bound entity's state now."""
     translator = _Translator(hass, texts)
-    entity_id: str = row[ROW_ENTITY]
-    domain = split_entity_id(entity_id)[0]
+    entity_id = resolve_entity(hass, row[ROW_ENTITY]) or ""
+    domain = domain_of(entity_id)
     control: str = row[ROW_CONTROL]
-    state = hass.states.get(entity_id)
+    state = hass.states.get(entity_id) if entity_id else None
     device_class = state.attributes.get("device_class") if state is not None else None
     payload: dict[str, Any] = {
         "type": control,
@@ -535,8 +609,14 @@ def render_row(
         "label": _cut(row_label(hass, row), MAX_LABEL),
         "icon": row.get(ITEM_ICON) or default_icon(domain, device_class),
     }
-    available = state is not None and state.state != STATE_UNAVAILABLE
-    view = RowView(payload=payload, available=available)
+    # A registry id now naming an entity of a domain this control does not fit is shown,
+    # never acted on.
+    available = (
+        state is not None
+        and state.state != STATE_UNAVAILABLE
+        and control in controls_for_domain(domain)
+    )
+    view = RowView(payload=payload, available=available, entity_id=entity_id)
     shown = (
         _cut(translator.state(state), MAX_STATE)
         if state is not None
@@ -786,8 +866,12 @@ class Refused(Exception):
         self.detail = detail
 
 
-def parse_action(payload: Any) -> MenuAction:
-    """Read one `menu_action`, or raise `Refused` with what was wrong with it."""
+def parse_action(payload: Any, now: float | None = None) -> MenuAction:
+    """Read one `menu_action`, or raise `Refused` with what was wrong with it.
+
+    `now` is this Home Assistant's clock in epoch seconds; an action whose `ts` is more than
+    `MAX_ACTION_AGE` seconds before it is refused as stale.
+    """
     if isinstance(payload, (bytes, bytearray)) and len(payload) > ACTION_MAX_BYTES:
         raise Refused("unreadable", f"{len(payload)} bytes")
     if (text := decode_payload(payload)) is None or len(text) > ACTION_MAX_BYTES:
@@ -809,8 +893,12 @@ def parse_action(payload: Any) -> MenuAction:
         raise Refused("malformed", "action")
     if action == ACTION_SET and "value" not in data:
         raise Refused("malformed", "value")
-    if "ts" in data and _float(data["ts"]) is None:
-        raise Refused("malformed", "ts")
+    if "ts" in data:
+        if (ts := _float(data["ts"])) is None:
+            raise Refused("malformed", "ts")
+        now = dt_util.utcnow().timestamp() if now is None else now
+        if now - ts > MAX_ACTION_AGE:
+            raise Refused("stale", f"{now - ts:.0f} s old")
     return MenuAction(action_id, rev, row, action, data.get("value"))
 
 
@@ -823,8 +911,8 @@ def service_call(
     and a value outside what the entity accepts.
     """
     control = row[ROW_CONTROL]
-    entity_id = row[ROW_ENTITY]
-    domain = split_entity_id(entity_id)[0]
+    entity_id = view.entity_id or row[ROW_ENTITY]
+    domain = domain_of(view.entity_id)
     expected = ACTION_FOR_CONTROL.get(control)
     if expected is None:
         raise Refused("not_actionable", f"{control} row {row[ITEM_ID]}")
@@ -872,6 +960,34 @@ def service_call(
     return domain, "set_value", {"value": value}, value
 
 
+async def async_menu_texts(
+    hass: HomeAssistant, rows: Iterable[Mapping[str, Any]]
+) -> dict[str, str]:
+    """Load the state translations the rows need, and this integration's own words."""
+    language = hass.config.language
+    entity_ids = [
+        entity_id for row in rows if (entity_id := resolve_entity(hass, row[ROW_ENTITY]))
+    ]
+    domains = {domain_of(entity_id) for entity_id in entity_ids} - {""}
+    registry = er.async_get(hass)
+    platforms = {
+        entry.platform
+        for entity_id in entity_ids
+        if (entry := registry.async_get(entity_id)) is not None
+    }
+    texts: dict[str, str] = {}
+    if domains:
+        texts.update(
+            await async_get_translations(hass, language, "entity_component", domains)
+        )
+    if platforms:
+        texts.update(await async_get_translations(hass, language, "entity", platforms))
+    common = await async_get_translations(hass, language, "common", {DOMAIN})
+    for key in _TEXT_KEYS:
+        texts[key] = common.get(f"component.{DOMAIN}.common.menu_state_{key}") or key
+    return texts
+
+
 # ---------------------------------------------------------------------- publisher
 
 
@@ -887,6 +1003,9 @@ class ReceiverMenu:
         self.box = box
         self.menu = stored_menu(entry.options)
         self._unsubscribes: list[CALLBACK_TYPE] = []
+        # Following the bound entities' states, and which entity ids that is for.
+        self._untrack: CALLBACK_TYPE | None = None
+        self._tracked: list[str] = []
         self._debouncer: Debouncer[Any] = Debouncer(
             hass,
             _LOGGER,
@@ -910,9 +1029,12 @@ class ReceiverMenu:
 
     async def async_start(self) -> None:
         """Publish the menu now, and again whenever what it shows changes."""
-        if entity_ids := sorted({row[ROW_ENTITY] for row in menu_rows(self.menu)}):
+        self._async_track()
+        if self.menu:
             self._unsubscribes.append(
-                async_track_state_change_event(self.hass, entity_ids, self._state_changed)
+                self.hass.bus.async_listen(
+                    er.EVENT_ENTITY_REGISTRY_UPDATED, self._registry_changed
+                )
             )
         self._unsubscribes.append(
             self.box.async_add_listener(self._box_changed, topics=(TOPIC_AVAILABILITY,))
@@ -924,7 +1046,39 @@ class ReceiverMenu:
         """Stop following the entities. The retained menu stays; removal retracts it."""
         while self._unsubscribes:
             self._unsubscribes.pop()()
+        if self._untrack is not None:
+            self._untrack()
+            self._untrack = None
         self._debouncer.async_shutdown()
+
+    def _bound_entities(self) -> list[str]:
+        """The entity ids the rows name now."""
+        return sorted(
+            {
+                entity_id
+                for row in menu_rows(self.menu)
+                if (entity_id := resolve_entity(self.hass, row[ROW_ENTITY]))
+            }
+        )
+
+    @callback
+    def _async_track(self) -> None:
+        """Follow the state of every entity the rows name now."""
+        if self._untrack is not None:
+            self._untrack()
+            self._untrack = None
+        self._tracked = self._bound_entities()
+        if self._tracked:
+            self._untrack = async_track_state_change_event(
+                self.hass, self._tracked, self._state_changed
+            )
+
+    @callback
+    def _registry_changed(self, _event: Event[er.EventEntityRegistryUpdatedData]) -> None:
+        """A bound entity was renamed, added or removed: follow it under its new id."""
+        if self._bound_entities() != self._tracked:
+            self._async_track()
+            self._debouncer.async_schedule_call()
 
     @callback
     def _state_changed(self, _event: Event[EventStateChangedData]) -> None:
@@ -940,27 +1094,7 @@ class ReceiverMenu:
         self._was_available = available
 
     async def _async_texts(self, rows: Iterable[Mapping[str, Any]]) -> dict[str, str]:
-        """Load the state translations the rows need, and this integration's own words."""
-        language = self.hass.config.language
-        rows = list(rows)
-        domains = {split_entity_id(row[ROW_ENTITY])[0] for row in rows}
-        registry = er.async_get(self.hass)
-        platforms = {
-            entry.platform
-            for row in rows
-            if (entry := registry.async_get(row[ROW_ENTITY])) is not None
-        }
-        texts: dict[str, str] = {}
-        if domains:
-            texts.update(
-                await async_get_translations(self.hass, language, "entity_component", domains)
-            )
-        if platforms:
-            texts.update(await async_get_translations(self.hass, language, "entity", platforms))
-        common = await async_get_translations(self.hass, language, "common", {DOMAIN})
-        for key in _TEXT_KEYS:
-            texts[key] = common.get(f"component.{DOMAIN}.common.menu_state_{key}") or key
-        return texts
+        return await async_menu_texts(self.hass, rows)
 
     def _next_rev(self) -> int:
         """The next revision: one more than the last this Home Assistant run published."""
@@ -1041,13 +1175,12 @@ class ReceiverMenu:
             if (row := find_row(self.menu, action.row)) is None:
                 raise Refused("unknown_row", action.row)
             texts = await self._async_texts([row])
-            domain, service, data, applied = service_call(
-                row, render_row(self.hass, row, texts), action
-            )
+            view = render_row(self.hass, row, texts)
+            domain, service, data, applied = service_call(row, view, action)
         except Refused as refusal:
             self._log_refusal(refusal)
             return
-        entity_id = row[ROW_ENTITY]
+        entity_id = view.entity_id
         try:
             await self.hass.services.async_call(
                 domain, service, {ATTR_ENTITY_ID: entity_id, **data}, blocking=True

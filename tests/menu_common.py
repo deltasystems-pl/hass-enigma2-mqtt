@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_mqtt_message
 
 from custom_components.enigma2_mqtt.const import (
@@ -108,7 +109,8 @@ def fire_action(
         "rev": rev,
         "row": row_id,
         "action": action,
-        "ts": 1792050000,
+        # Now, by this Home Assistant's clock: an action older than 120 s is refused.
+        "ts": int(dt_util.utcnow().timestamp()),
     }
     if action == "set":
         payload["value"] = value

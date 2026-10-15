@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 import json
 import re
 from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_fire_time_changed,
+    async_mock_service,
+)
 
 from custom_components.enigma2_mqtt.const import (
     CONF_BASE_TOPIC,
@@ -27,6 +34,7 @@ from .menu_common import (
     MENU_INFO,
     MENU_TOPIC,
     claim_menu,
+    fire_action,
     group,
     items_by_id,
     last_menu,
@@ -241,7 +249,7 @@ async def test_a_full_top_list_offers_no_new_row_unless_a_group_has_room(
     result = await _open_menu(hass, config_entry)
 
     assert result["menu_options"] == [
-        "menu_edit_row", "menu_remove", "menu_save",
+        "menu_edit_row", "menu_move", "menu_remove", "menu_save",
     ]
 
 
@@ -439,3 +447,160 @@ async def test_reconfiguring_to_a_new_node_id_retracts_the_old_nodes_menu(
         if call.args[0] == "enigma2mqtt/menu/vuuno4kse_0053ff"
     ]
     assert json.loads(new_menu[-1])["items"][0]["id"] == "r_top"
+
+
+async def test_moving_groups_and_controls_within_their_own_list(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes]
+) -> None:
+    """One place up or down; a group's rows move inside the group, an end stays an end."""
+    hass.states.async_set("script.movie", "off")
+    claim_menu(box_on_the_broker)
+    config_entry = menu_entry(
+        [
+            group("g_a", "A", [row("r_1", "script.movie", "button"),
+                               row("r_2", "script.movie", "button")]),
+            group("g_b", "B", []),
+            row("r_top", "script.movie", "button"),
+        ]
+    )
+    await async_setup_box(hass, config_entry)
+
+    result = await _open_menu(hass, config_entry)
+    for item, direction in (
+        ("r_2", "up"),
+        ("g_b", "up"),
+        ("r_top", "down"),
+        ("r_1", "down"),
+        ("g_b", "up"),
+    ):
+        result = await _step(hass, result, "menu_move")
+        assert result["step_id"] == "menu_move"
+        choices = result["data_schema"].schema["item"].config["options"]
+        assert {choice["value"] for choice in choices} == {"g_a", "r_1", "r_2", "g_b", "r_top"}
+        result = await _form(hass, result, {"item": item, "direction": direction})
+        assert result["step_id"] == "receiver_menu"
+    await _save(hass, result)
+
+    stored = config_entry.options[CONF_MENU]
+    assert [item["id"] for item in stored] == ["g_b", "g_a", "r_top"]
+    assert [r["id"] for r in stored[1]["rows"]] == ["r_2", "r_1"]
+    published = last_menu(mqtt_mock)
+    assert [item["id"] for item in published["items"]] == ["g_b", "g_a", "r_top"]
+
+
+async def test_moving_is_offered_only_where_a_list_has_two_entries(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes]
+) -> None:
+    hass.states.async_set("script.movie", "off")
+    claim_menu(box_on_the_broker)
+    config_entry = menu_entry([group("g_a", "A", [row("r_1", "script.movie", "button")])])
+    await async_setup_box(hass, config_entry)
+
+    result = await _open_menu(hass, config_entry)
+
+    assert "menu_move" not in result["menu_options"]
+
+
+async def test_a_row_stores_the_registry_id_and_follows_a_rename(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes]
+) -> None:
+    """Renaming the entity's id keeps the row bound, shown and acting on the new id."""
+    registry = er.async_get(hass)
+    entity = registry.async_get_or_create(
+        "switch", "demo", "kettle-1", suggested_object_id="kettle"
+    )
+    assert entity.entity_id == "switch.kettle"
+    hass.states.async_set("switch.kettle", "off", {"friendly_name": "Kettle"})
+    claim_menu(box_on_the_broker)
+    config_entry = menu_entry(None)
+    await async_setup_box(hass, config_entry)
+
+    result = await _open_menu(hass, config_entry)
+    result = await _step(hass, result, "menu_add_row")
+    result = await _form(hass, result, {"entity_id": "switch.kettle", "place": "top"})
+    result = await _form(hass, result, {"control": "toggle"})
+    await _save(hass, result)
+    stored = config_entry.options[CONF_MENU][0]
+    assert stored["entity_id"] == entity.id
+    row_id = stored["id"]
+
+    registry.async_update_entity("switch.kettle", new_entity_id="switch.water_kettle")
+    hass.states.async_remove("switch.kettle")
+    hass.states.async_set("switch.water_kettle", "on", {"friendly_name": "Water kettle"})
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=2))
+    await hass.async_block_till_done()
+
+    published = items_by_id(last_menu(mqtt_mock))[row_id]
+    assert published["label"] == "Water kettle"
+    assert published["value"] is True
+    assert published["available"] is True
+
+    # Its state is followed under the new id.
+    hass.states.async_set("switch.water_kettle", "off", {"friendly_name": "Water kettle"})
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=4))
+    await hass.async_block_till_done()
+    assert items_by_id(last_menu(mqtt_mock))[row_id]["value"] is False
+
+    # And an action reaches it there.
+    calls = async_mock_service(hass, "switch", "toggle")
+    fire_action(hass, row_id, "toggle")
+    await hass.async_block_till_done()
+    assert [call.data["entity_id"] for call in calls] == ["switch.water_kettle"]
+
+    # Editing the row shows the entity under its new id, and keeps the row's id.
+    result = await _open_menu(hass, config_entry)
+    result = await _step(hass, result, "menu_edit_row")
+    result = await _form(hass, result, {"row": row_id})
+    suggested = {
+        str(key): key.description.get("suggested_value")
+        for key in result["data_schema"].schema
+        if key.description
+    }
+    assert suggested["entity_id"] == "switch.water_kettle"
+    result = await _form(hass, result, {"entity_id": "switch.water_kettle", "place": "top"})
+    result = await _form(hass, result, {"control": "toggle"})
+    await _save(hass, result)
+    assert config_entry.options[CONF_MENU][0]["id"] == row_id
+
+
+async def test_a_row_stored_by_entity_id_keeps_its_id_once_the_entity_is_registered(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes]
+) -> None:
+    """Both forms name the same binding: re-saving does not turn the row into a new one."""
+    claim_menu(box_on_the_broker)
+    config_entry = menu_entry([row("r_kettle", "switch.kettle", "toggle")])
+    entity = er.async_get(hass).async_get_or_create(
+        "switch", "demo", "kettle-1", suggested_object_id="kettle"
+    )
+    hass.states.async_set("switch.kettle", "off")
+    await async_setup_box(hass, config_entry)
+
+    result = await _open_menu(hass, config_entry)
+    result = await _step(hass, result, "menu_edit_row")
+    result = await _form(hass, result, {"row": "r_kettle"})
+    result = await _form(hass, result, {"entity_id": "switch.kettle", "place": "top"})
+    result = await _form(hass, result, {"control": "toggle"})
+    await _save(hass, result)
+
+    assert config_entry.options[CONF_MENU] == [row("r_kettle", entity.id, "toggle")]
+
+
+async def test_any_entity_can_be_an_indicator(
+    hass: HomeAssistant, mqtt_mock, entry: MockConfigEntry
+) -> None:
+    """A domain the menu cannot act on is shown with its state - and asks nothing more."""
+    hass.states.async_set("person.anna", "home", {"friendly_name": "Anna"})
+
+    result = await _open_menu(hass, entry)
+    result = await _step(hass, result, "menu_add_row")
+    result = await _form(hass, result, {"entity_id": "person.anna", "place": "top"})
+    assert result["step_id"] == "receiver_menu"
+    await _save(hass, result)
+
+    stored = entry.options[CONF_MENU][0]
+    assert stored["control"] == "indicator"
+    shown = items_by_id(last_menu(mqtt_mock))[stored["id"]]
+    assert shown["state"] == "Home"
+    assert shown["icon"] == "home"
+    assert shown["value"] is None
+    assert shown["color"] is None
