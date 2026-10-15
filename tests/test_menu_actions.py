@@ -458,9 +458,11 @@ async def test_an_action_for_a_row_removed_since_is_refused(
 
 
 def test_parse_action_reads_every_field() -> None:
+    # `now` given: a fixed `ts` must not age into a refusal as the test suite gets older.
     action = parse_action(
         b'{"id":"3f9c2e4a1b7d","rev":42,"row":"r_blind","action":"set","value":60,'
-        b'"ts":1792050000,"later":"ignored"}'
+        b'"ts":1792050000,"later":"ignored"}',
+        now=1792050030,
     )
     assert (action.action_id, action.rev, action.row, action.action, action.value) == (
         "3f9c2e4a1b7d", 42, "r_blind", "set", 60,
