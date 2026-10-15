@@ -1,6 +1,10 @@
 {
   "title": "Enigma2 MQTT",
   "common": {
+    "menu_top_level": "Lista główna",
+    "menu_empty": "Menu jest puste.",
+    "menu_state_unavailable": "Niedostępne",
+    "menu_state_unknown": "Nieznany",
     "force_reinstall_interface_stopped": "Interfejs dekodera pozostaje zatrzymany, tak jak zostawiła go przerwana aktualizacja lub instalacja wtyczki, więc dekoder nie daje obrazu. Aby go uruchomić, wyłącz dekoder i włącz go ponownie wyłącznikiem zasilania lub wtyczką albo usuń przyczynę podaną wyżej i ponownie wykonaj wymuszoną reinstalację wtyczki, która go uruchomi.",
     "force_reinstall_update_running": "Interfejs dekodera jest zatrzymany, bo aktualizacja wtyczki wciąż przywraca poprzednią wtyczkę i sama uruchomi interfejs, gdy skończy. Poczekaj, aż skończy - trwa to kilka minut - i nie wyłączaj w tym czasie dekodera, bo przerwałoby to ją w połowie. Wymuszoną reinstalację wtyczki wykonaj ponownie tylko wtedy, gdy potem nadal nie będzie obrazu.",
     "force_reinstall_unexpected": "Wymuszoną reinstalację wtyczki przerwał nieoczekiwany błąd ({error}); szczegóły są w dzienniku Home Assistanta.",
@@ -173,7 +177,14 @@
   },
   "options": {
     "step": {
-      "init": {"title": "Opcje dekodera", "description": "Zmień opcje po tej stronie połączenia albo zmień wtyczkę na dekoderze przez SSH. Usunięcie wtyczki jest dostępne tylko wtedy, gdy dekoder na nie zezwala; to zezwolenie ustawia się na samym dekoderze.", "menu_options": {"settings": "Opcje", "uninstall": "Usuń wtyczkę z dekodera", "downgrade": "Zainstaluj starszą wersję wtyczki"}},
+      "init": {"title": "Opcje dekodera", "description": "Zmień opcje po tej stronie połączenia albo zmień wtyczkę na dekoderze przez SSH. Usunięcie wtyczki jest dostępne tylko wtedy, gdy dekoder na nie zezwala; to zezwolenie ustawia się na samym dekoderze. Tutaj buduje się też menu, które dekoder pokazuje z Home Assistant, gdy dekoder potrafi je pokazać.", "menu_options": {"settings": "Opcje", "receiver_menu": "Menu na dekoderze", "uninstall": "Usuń wtyczkę z dekodera", "downgrade": "Zainstaluj starszą wersję wtyczki"}},
+      "receiver_menu": {"title": "Menu na dekoderze", "description": "Menu, które dekoder pokazuje z Home Assistant: do {groups} grup i do {entries} pozycji na liście głównej i w każdej grupie. Dekoder mówi tylko, który wiersz wybrano; wykonuje go Home Assistant. Wiersz może wybrać każdy, kto może publikować na Twoim brokerze MQTT, więc umieść tu tylko to, czym może sterować każdy z pilotem w ręku. Nic się nie zmienia, dopóki nie zapiszesz menu.\n\n{menu}", "menu_options": {"menu_add_group": "Dodaj grupę", "menu_add_row": "Dodaj pozycję", "menu_edit_group": "Zmień grupę", "menu_edit_row": "Zmień pozycję", "menu_remove": "Usuń grupy lub pozycje", "menu_save": "Zapisz menu"}},
+      "menu_group": {"title": "Grupa", "description": "Podmenu menu na dekoderze. Nowe grupy trafiają na koniec listy głównej.", "data": {"label": "Nazwa", "icon": "Ikona"}, "data_description": {"label": "Wyświetlana na dekoderze, przycięta do {label_max} znaków.", "icon": "Rysowana na dekoderze obok nazwy."}},
+      "menu_row": {"title": "Pozycja", "description": "Wiersz menu na dekoderze, powiązany z encją, sceną lub skryptem. Nowe pozycje trafiają na koniec listy, do której je dodano.", "data": {"entity_id": "Encja", "place": "Miejsce", "label": "Nazwa", "icon": "Ikona"}, "data_description": {"entity_id": "Co wiersz pokazuje i czym steruje. Sposób wyświetlania wynika z encji: przycisk dla sceny lub skryptu, przełącznik dla światła, lista opcji dla wyboru i tak dalej.", "place": "Lista główna albo jedna z grup.", "label": "Zostaw puste, aby użyć nazwy encji. Przycinana do {label_max} znaków.", "icon": "Zostaw puste, aby dobrać ikonę do encji."}},
+      "menu_row_control": {"title": "Sposób wyświetlania", "description": "{entity} można pokazać na więcej niż jeden sposób.", "data": {"control": "Element"}},
+      "menu_edit_group": {"title": "Zmień grupę", "data": {"group": "Grupa"}},
+      "menu_edit_row": {"title": "Zmień pozycję", "data": {"row": "Pozycja"}},
+      "menu_remove": {"title": "Usuń grupy lub pozycje", "description": "Grupa jest usuwana razem ze wszystkimi swoimi pozycjami.", "data": {"remove": "Usuń"}},
       "settings": {
         "title": "Opcje dekodera",
         "description": "Dekoder zgłasza adres MAC {mac}. Pakiety budzące trafią tam, o ile poniżej nie zostanie podany inny.",
@@ -239,6 +250,10 @@
       "downgrade_confirm": {"title": "Zainstaluj wtyczkę {version} zamiast {installed}", "description": "Wtyczka {version} zostanie pobrana ze strony wydań wtyczki (chyba że to wtyczka dołączona do integracji), sprawdzona z podpisaną listą wersji i zainstalowana przez SSH w miejsce {installed}. Dekoder musi być włączony: w trybie czuwania instalacja zostanie odrzucona, bo ponowne uruchomienie interfejsu by go wybudziło. Interfejs dekodera uruchomi się ponownie; dekoder zachowa kanał, a jego własne ustawienia pozostaną bez zmian - ustawienia, których starsza wersja nie zna, wrócą ze swoimi wartościami po następnej aktualizacji.\n\n**Co przestanie działać** do czasu ponownej aktualizacji wtyczki - encje pozostaną w Home Assistant, ale nic nie będzie ich aktualizować:\n\n{lost}\n\nNieudana instalacja przywróci {installed}.", "data": {"confirm_downgrade": "Zainstaluj starszą wersję"}}
     },
     "error": {
+      "menu_label_required": "Nadaj grupie nazwę.",
+      "menu_full": "W menu nie zmieści się więcej grup.",
+      "menu_entity_not_supported": "Tej encji nie można umieścić w menu na dekoderze.",
+      "menu_place_full": "Tam nie ma już miejsca; wybierz inne.",
       "plugin_unavailable": "Dekoder nie jest połączony, więc jego ustawienia prywatności nie zostały zmienione. Spróbuj ponownie, gdy będzie dostępny.",
       "plugin_config_failed": "Dekoder nie potwierdził nowych ustawień prywatności. Zachowano poprzednie ustawienia dekodera i opcje Home Assistanta.",
       "go2rtc_invalid_url": "Adres go2rtc nie jest adresem internetowym. Wpisz go jako `{go2rtc_url_form}`, bez niczego po adresie, albo zostaw pole puste, żeby to wyłączyć.",
@@ -698,6 +713,45 @@
     }
   },
   "selector": {
+    "menu_icon": {
+      "options": {
+        "neutral": "Neutralna",
+        "lamp": "Lampa",
+        "ceiling-light": "Lampa sufitowa",
+        "blinds": "Rolety",
+        "scene": "Scena",
+        "script": "Skrypt",
+        "power": "Zasilanie",
+        "fan": "Wentylator",
+        "lock": "Zamek",
+        "radiator": "Grzejnik",
+        "thermometer": "Termometr",
+        "tv": "Telewizor",
+        "speaker": "Głośnik",
+        "door": "Drzwi",
+        "gate": "Brama",
+        "garage": "Garaż",
+        "alarm": "Alarm",
+        "camera": "Kamera",
+        "sofa": "Sofa",
+        "bed": "Łóżko",
+        "kitchen": "Kuchnia",
+        "garden": "Ogród",
+        "movie": "Film",
+        "note": "Notatka",
+        "home": "Dom"
+      }
+    },
+    "menu_control": {
+      "options": {
+        "button": "Przycisk",
+        "toggle": "Przełącznik",
+        "indicator": "Wskaźnik (tylko odczyt)",
+        "selector": "Lista opcji",
+        "slider": "Suwak",
+        "input": "Pole tekstowe"
+      }
+    },
     "message_style": {
       "options": {
         "popup": "Okienko",

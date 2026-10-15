@@ -1,6 +1,10 @@
 {
   "title": "Enigma2 MQTT",
   "common": {
+    "menu_top_level": "Top list",
+    "menu_empty": "The menu is empty.",
+    "menu_state_unavailable": "Unavailable",
+    "menu_state_unknown": "Unknown",
     "force_reinstall_interface_stopped": "The receiver's interface stays stopped, as an interrupted update or installation of the plugin left it, so the receiver shows no picture. To start it, switch the receiver off and on again at its power switch or plug, or deal with the cause above and run the forced plugin reinstall again, which starts it.",
     "force_reinstall_update_running": "The receiver's interface is stopped because a plugin update is still putting the previous plugin back, and that update starts the interface itself when it finishes. Wait for it to finish - it takes a few minutes - and do not switch the receiver off in the meantime, which would cut it off half-way. Run the forced plugin reinstall again only if there is still no picture afterwards.",
     "force_reinstall_unexpected": "The forced plugin reinstall stopped on an unexpected error ({error}); the Home Assistant log has the details.",
@@ -200,7 +204,14 @@
   },
   "options": {
     "step": {
-      "init": {"title": "Receiver options", "description": "Change the options for this end of the link, or act on the plugin on the receiver over SSH. Removing the plugin is offered only while the receiver permits it; that permission is set on the box itself.", "menu_options": {"settings": "Options", "uninstall": "Remove the plugin from the receiver", "downgrade": "Install an older plugin version"}},
+      "init": {"title": "Receiver options", "description": "Change the options for this end of the link, or act on the plugin on the receiver over SSH. Removing the plugin is offered only while the receiver permits it; that permission is set on the box itself. The menu the receiver shows from Home Assistant is built here as well, once the receiver can show one.", "menu_options": {"settings": "Options", "receiver_menu": "Receiver menu", "uninstall": "Remove the plugin from the receiver", "downgrade": "Install an older plugin version"}},
+      "receiver_menu": {"title": "Receiver menu", "description": "The menu the receiver shows from Home Assistant: up to {groups} groups, and up to {entries} entries in the top list and in each group. The receiver only says which row was chosen; Home Assistant performs it. Anyone who can publish to your MQTT broker can choose a row too, so only put here what you would hand to anyone holding the remote. Nothing changes until you save the menu.\n\n{menu}", "menu_options": {"menu_add_group": "Add a group", "menu_add_row": "Add a control", "menu_edit_group": "Change a group", "menu_edit_row": "Change a control", "menu_remove": "Remove groups or controls", "menu_save": "Save the menu"}},
+      "menu_group": {"title": "Group", "description": "A submenu of the receiver menu. New groups go to the end of the top list.", "data": {"label": "Name", "icon": "Icon"}, "data_description": {"label": "Shown on the receiver, cut at {label_max} characters.", "icon": "Drawn beside the name on the receiver."}},
+      "menu_row": {"title": "Control", "description": "A row of the receiver menu, bound to an entity, a scene or a script. New controls go to the end of the list they are put in.", "data": {"entity_id": "Entity", "place": "Where", "label": "Name", "icon": "Icon"}, "data_description": {"entity_id": "What the row shows and acts on. How it is shown follows from the entity: a button for a scene or a script, a switch for a light, a list of options for a select, and so on.", "place": "The top list, or one of the groups.", "label": "Leave empty to use the entity's name. Cut at {label_max} characters.", "icon": "Leave empty to pick one that fits the entity."}},
+      "menu_row_control": {"title": "How to show it", "description": "{entity} can be shown in more than one way.", "data": {"control": "Control"}},
+      "menu_edit_group": {"title": "Change a group", "data": {"group": "Group"}},
+      "menu_edit_row": {"title": "Change a control", "data": {"row": "Control"}},
+      "menu_remove": {"title": "Remove groups or controls", "description": "A group is removed with every control in it.", "data": {"remove": "Remove"}},
       "settings": {
         "title": "Receiver options",
         "description": "The receiver reports the MAC address {mac}. Magic packets go there unless another one is given below.",
@@ -266,6 +277,10 @@
       "downgrade_confirm": {"title": "Install plugin {version} instead of {installed}", "description": "Plugin {version} is downloaded from the plugin's release site - unless it is the plugin bundled with this integration - checked against its signed release index and installed over SSH in place of {installed}. The receiver has to be switched on: in standby the install is refused, because the restart would wake it. Its interface restarts; it keeps its channel, and the receiver's own settings stay as they are - settings the older version does not know come back with their values after the next upgrade.\n\n**What stops working** until the plugin is upgraded again - the entities stay in Home Assistant, but nothing updates them:\n\n{lost}\n\nA failed install puts {installed} back.", "data": {"confirm_downgrade": "Install the older version"}}
     },
     "error": {
+      "menu_label_required": "Give the group a name.",
+      "menu_full": "The menu holds no more groups.",
+      "menu_entity_not_supported": "This entity cannot be put into the receiver menu.",
+      "menu_place_full": "There is no room left there; choose another place.",
       "plugin_unavailable": "The receiver is not connected, so its privacy settings were not changed. Try again when it is online.",
       "plugin_config_failed": "The receiver did not confirm the new privacy settings. Its previous settings and these Home Assistant options were kept.",
       "go2rtc_invalid_url": "The go2rtc address is not a web address. Write it as `{go2rtc_url_form}`, with nothing after the address, or leave it empty to switch this off.",
@@ -725,6 +740,45 @@
     }
   },
   "selector": {
+    "menu_icon": {
+      "options": {
+        "neutral": "Neutral",
+        "lamp": "Lamp",
+        "ceiling-light": "Ceiling light",
+        "blinds": "Blinds",
+        "scene": "Scene",
+        "script": "Script",
+        "power": "Power",
+        "fan": "Fan",
+        "lock": "Lock",
+        "radiator": "Radiator",
+        "thermometer": "Thermometer",
+        "tv": "TV",
+        "speaker": "Speaker",
+        "door": "Door",
+        "gate": "Gate",
+        "garage": "Garage",
+        "alarm": "Alarm",
+        "camera": "Camera",
+        "sofa": "Sofa",
+        "bed": "Bed",
+        "kitchen": "Kitchen",
+        "garden": "Garden",
+        "movie": "Movie",
+        "note": "Note",
+        "home": "Home"
+      }
+    },
+    "menu_control": {
+      "options": {
+        "button": "Button",
+        "toggle": "Switch",
+        "indicator": "Indicator (read only)",
+        "selector": "List of options",
+        "slider": "Slider",
+        "input": "Text field"
+      }
+    },
     "message_style": {
       "options": {
         "popup": "Popup",
