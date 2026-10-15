@@ -276,7 +276,12 @@ class Enigma2Select(Enigma2Entity, SelectEntity):
     """A list built from the box's topics, with the reference behind every row."""
 
     def __init__(
-        self, box: Enigma2Box, key: str, *, topics: Iterable[str], requires: str
+        self,
+        box: Enigma2Box,
+        key: str,
+        *,
+        topics: Iterable[str],
+        requires: str | None,
     ) -> None:
         """Set up the list, empty until the first payload fills it."""
         super().__init__(box, key, topics=topics, requires=requires)
@@ -413,8 +418,10 @@ class Enigma2ZapHistorySelect(Enigma2Select):
     Home Assistant that answer is a topic that never arrives. Either way the select is
     `unknown` with no options, never unavailable for one and `unknown` for the other;
     the stream-clients sensor answers the same situation the same way. A receiver that
-    no longer names the capability and has published no history in this run is
-    unavailable, as before: its plugin keeps none.
+    no longer names the capability is unavailable unless it holds a history published in
+    this run: its plugin keeps none. An empty payload is not a history - it is how a
+    plugin being downgraded withdraws the topic - so it never keeps the select available
+    on its own.
     """
 
     def __init__(self, box: Enigma2Box, key: str, *, filtered: bool) -> None:
@@ -438,7 +445,7 @@ class Enigma2ZapHistorySelect(Enigma2Select):
         """Return whether the receiver is there and keeps a zap history at all."""
         return super().available and (
             CAPABILITY_ZAP_HISTORY in self.box.capabilities
-            or TOPIC_ZAP_HISTORY in self.box.seen
+            or self.box.state.zap_history is not None
         )
 
     @callback

@@ -204,9 +204,10 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   zap. They are now available whenever the receiver is and names the `zap_history` capability,
   with nothing selected and no options until a history arrives - the answer an emptied topic
   already gave while Home Assistant was running, and the one „Klienci strumienia" gives. They are
-  still unavailable while the receiver is offline, and on a receiver that no longer names the
-  capability and has published no history since Home Assistant started. The filter for hidden
-  bouquets and what is recorded are unchanged (DOCUMENTATION.md §4.6).
+  still unavailable while the receiver is offline, and on a receiver that does not name the
+  capability unless it holds a history published since Home Assistant started - an empty
+  payload is not one, so a downgrade that withdraws the topic makes them unavailable at once.
+  The filter for hidden bouquets and what is recorded are unchanged (DOCUMENTATION.md §4.6).
 - **A complaint made before a command was sent no longer fails it.** A command waits for the
   broker to confirm Home Assistant's subscription before it is published, and a fresh
   `last_error` about a command of the same name in that wait was taken for its refusal - by

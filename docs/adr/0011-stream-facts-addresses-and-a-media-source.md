@@ -192,12 +192,16 @@ topic: both selects stayed unavailable until the next zap, while the same withdr
 live left them available with nothing to offer. Both cases now read alike.
 
 - Each select is available while the receiver is online **and** either names the `zap_history`
-  capability or has published `zap_history` since Home Assistant started. Until a history
-  arrives, and after an empty payload, it is `unknown` with an empty list of options and
-  nothing selected; a later payload gives the usual list and state.
+  capability or holds a history it published since Home Assistant started. Only a payload
+  that is a history counts: an empty payload is a retraction and withdraws what was held.
+  Until a history arrives, and after an empty payload, a receiver that names the capability
+  has the select `unknown` with an empty list of options and nothing selected; a later
+  payload gives the usual list and state.
 - The capability is part of the condition, unlike for the stream-clients sensor, because these
   selects are never removed when it goes quiet. A downgraded plugin that keeps no history would
   otherwise leave an available select with an empty list for ever; it is unavailable instead,
-  and comes back the moment a history is published.
+  and comes back the moment a history is published. A plugin downgraded while Home Assistant
+  runs withdraws its topics, so the retraction and the `info` without the capability make the
+  select unavailable at once, in either order.
 - The filter for hidden bouquets, the recorder exclusions and the unfiltered select being
   disabled by default are unchanged.

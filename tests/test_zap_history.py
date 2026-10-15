@@ -656,7 +656,52 @@ async def test_without_the_capability_and_with_no_history_it_is_unavailable(
 
     async_fire_mqtt_message(hass, ZAP_HISTORY_TOPIC, history(TVP, TVN))
     await hass.async_block_till_done()
+    assert hass.states.get(HISTORY_SELECT).state != STATE_UNAVAILABLE
     assert options(hass, HISTORY_SELECT) == ["TVP 1 HD", "TVN HD"]
+
+
+@pytest.mark.parametrize("retraction_first", [False, True])
+async def test_a_downgrade_that_withdraws_the_history_is_unavailable_at_once(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    retraction_first: bool,
+) -> None:
+    """A retraction is not a history: with the capability gone it keeps nothing available.
+
+    A plugin downgraded while Home Assistant runs withdraws its retained topics and
+    announces an `info` without the capability; the order is the plugin's business.
+    """
+    capable(box_on_the_broker)
+    box_on_the_broker[ZAP_HISTORY_TOPIC] = history(TVP, TVN)
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+    assert options(hass, HISTORY_SELECT) == ["TVP 1 HD", "TVN HD"]
+
+    messages = [(INFO_TOPIC, json.dumps(INFO)), (ZAP_HISTORY_TOPIC, "")]
+    for topic, payload in reversed(messages) if retraction_first else messages:
+        async_fire_mqtt_message(hass, topic, payload)
+        await hass.async_block_till_done()
+
+    assert hass.states.get(HISTORY_SELECT).state == STATE_UNAVAILABLE
+
+
+async def test_the_zap_history_capability_alone_is_enough(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """`zap_history` without `history_clear`, and no history yet: available and unknown."""
+    capabilities = [*INFO["capabilities"], CAPABILITY_ZAP_HISTORY]
+    box_on_the_broker[INFO_TOPIC] = json.dumps({**INFO, "capabilities": capabilities})
+    box_on_the_broker[ANNOUNCEMENT_TOPIC] = json.dumps(
+        {**ANNOUNCEMENT, "capabilities": capabilities}
+    )
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    assert er.async_get(hass).async_get(CLEAR_BUTTON) is None
+    assert_unknown_and_empty(hass, HISTORY_SELECT)
 
 
 # ------------------------------------------------------------------------ the filter

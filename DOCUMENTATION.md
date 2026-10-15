@@ -1406,8 +1406,10 @@ receiver names the `zap_history` capability, and a receiver that stops naming it
 „Klienci strumienia". The plugin empties the retained topic when it withdraws the history, and a
 broker then holds nothing on it, so after a restart of Home Assistant no payload arrives at all;
 that is the same answer as the empty payload, and both are `unknown`. They are unavailable
-while the receiver is offline, and when it no longer names the capability and has published no
-history since Home Assistant started.
+while the receiver is offline, and while it does not name the capability unless it has published
+a history since Home Assistant started that it has not withdrawn since. An empty payload is not
+a history: a plugin downgraded to one without the capability withdraws the topic, and both
+selects are unavailable at once.
 
 - **The options are exactly the channels in that history**, in its order, numbered like
   „Kanał" when two carry the same name. Nothing is kept on this side: the history is the
