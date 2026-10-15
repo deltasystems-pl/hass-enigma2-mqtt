@@ -372,7 +372,7 @@ receiver that claims the `stream` capability, and collapsed until it is in use. 
 
 | Field | Default | What it is |
 |---|---|---|
-| **go2rtc address** | empty, which is "off" | The address of the API of a go2rtc you run yourself, for example `http://homeassistant.local:1984` for the go2rtc add-on. `http://` or `https://`, a host, optionally a port and a path in front of the API; nothing after it. |
+| **go2rtc address** | empty, which is "off" | The address of the API of a go2rtc you run yourself, for example `http://homeassistant.local:1984` for the go2rtc add-on. `http://` or `https://`, a host, optionally a port and a path in front of the API; nothing after it. Emptying it switches the feature off; the stream stays in your go2rtc ([§4.7](#47-streams)). |
 | **Stream name** | `enigma2_<node_id>` | The one stream Home Assistant keeps up to date there. Letters, digits, `_`, `-` and `.`, at most 64 characters - this integration's own, conservative rule. |
 | **Source template** | `ffmpeg:{url}#video=h264#audio=opus#audio=aac` | What go2rtc is given to play, with `{url}` - exactly once - where the receiver's stream address goes. **No white space**: go2rtc refuses a source that contains a space, so the form refuses the template with a sentence that says so. |
 
@@ -1402,6 +1402,14 @@ ordinary operation and not a fault.
 history - the list its „History Zap" screen shows when NEXT or PREVIOUS is pressed - which the
 plugin publishes, newest first, on the retained `zap_history` topic. They exist while the
 receiver names the `zap_history` capability, and a receiver that stops naming it keeps them.
+**Until a history arrives they are `unknown` with no options**, not unavailable - like
+„Klienci strumienia". The plugin empties the retained topic when it withdraws the history, and a
+broker then holds nothing on it, so after a restart of Home Assistant no payload arrives at all;
+that is the same answer as the empty payload, and both are `unknown`. They are unavailable
+while the receiver is offline, and while it does not name the capability unless it has published
+a history since Home Assistant started that it has not withdrawn since. An empty payload is not
+a history: a plugin downgraded to one without the capability withdraws the topic, and both
+selects are unavailable at once.
 
 - **The options are exactly the channels in that history**, in its order, numbered like
   „Kanał" when two carry the same name. Nothing is kept on this side: the history is the
@@ -1760,7 +1768,10 @@ channel change and every five minutes, always with the channel the receiver is o
 moment, never an older one. The address is named by its host alone in the log and
 in the repair, and is redacted in the diagnostics download: an address you typed can carry a
 user name and a password for go2rtc's API. Emptying the address switches all of it off and
-removes the repair.
+removes the repair. **The stream itself stays in your go2rtc**, under its name and on the last
+channel it was sent: this integration does not delete it. Delete it there if you no longer
+want it - in go2rtc's web interface, or with
+`DELETE <go2rtc address>/api/streams?src=<stream name>` on its API.
 
 ## 5. Actions
 

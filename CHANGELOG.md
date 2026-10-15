@@ -58,7 +58,10 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
     save it. Every channel change rewrites the stream's entry in go2rtc's file, and a card
     already open keeps the previous channel - and its tuner - until it is reopened. Home
     Assistant's own `go2rtc` and `stream` integrations are not used. The media player names
-    the stream in `go2rtc_stream`.
+    the stream in `go2rtc_stream`. Emptying the address switches it all off and removes the
+    repair; the stream itself stays in your go2rtc, under its name and on the last channel it
+    was sent, because the integration does not delete it - delete it in go2rtc's web interface
+    or with `DELETE <go2rtc address>/api/streams?src=<stream name>` (DOCUMENTATION.md §4.7).
   - **Hidden bouquets are hidden here too.** The plugin publishes every stream client and
     every channel; a channel of a bouquet the option **Bouquets hidden from "Recently
     watched"** names gets no stream address and no stream name, is not in the media source,
@@ -194,6 +197,17 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
 
 ### Fixed
 
+- **„Ostatnio oglądane" and „Ostatnio oglądane (wszystkie)" are `unknown`, not unavailable,
+  while no zap history is held.** The plugin empties the retained `zap_history` topic when it
+  withdraws the history, and a broker then deletes the retained message, so after a restart of
+  Home Assistant the topic never arrived and both selects stayed unavailable until the next
+  zap. They are now available whenever the receiver is and names the `zap_history` capability,
+  with nothing selected and no options until a history arrives - the answer an emptied topic
+  already gave while Home Assistant was running, and the one „Klienci strumienia" gives. They are
+  still unavailable while the receiver is offline, and on a receiver that does not name the
+  capability unless it holds a history published since Home Assistant started - an empty
+  payload is not one, so a downgrade that withdraws the topic makes them unavailable at once.
+  The filter for hidden bouquets and what is recorded are unchanged (DOCUMENTATION.md §4.6).
 - **A complaint made before a command was sent no longer fails it.** A command waits for the
   broker to confirm Home Assistant's subscription before it is published, and a fresh
   `last_error` about a command of the same name in that wait was taken for its refusal - by
