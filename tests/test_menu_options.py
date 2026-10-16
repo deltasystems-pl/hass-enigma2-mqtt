@@ -604,3 +604,38 @@ async def test_any_entity_can_be_an_indicator(
     assert shown["icon"] == "home"
     assert shown["value"] is None
     assert shown["color"] is None
+
+
+async def test_moving_is_offered_where_a_group_has_two_rows(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes]
+) -> None:
+    """The top list holds one group; its two rows are what can be moved."""
+    hass.states.async_set("script.movie", "off")
+    claim_menu(box_on_the_broker)
+    config_entry = menu_entry(
+        [group("g_a", "A", [row("r_1", "script.movie", "button"),
+                            row("r_2", "script.movie", "button")])]
+    )
+    await async_setup_box(hass, config_entry)
+
+    result = await _open_menu(hass, config_entry)
+
+    assert "menu_move" in result["menu_options"]
+
+
+async def test_the_outline_names_a_row_by_its_entity_id_not_its_registry_id(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes]
+) -> None:
+    entity = er.async_get(hass).async_get_or_create(
+        "switch", "demo", "kettle-1", suggested_object_id="kettle"
+    )
+    hass.states.async_set("switch.kettle", "off", {"friendly_name": "Kettle"})
+    claim_menu(box_on_the_broker)
+    config_entry = menu_entry([row("r_kettle", entity.id, "toggle")])
+    await async_setup_box(hass, config_entry)
+
+    result = await _open_menu(hass, config_entry)
+
+    outline = result["description_placeholders"]["menu"]
+    assert "Kettle - switch.kettle (" in outline
+    assert entity.id not in outline

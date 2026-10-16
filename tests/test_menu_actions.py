@@ -574,3 +574,13 @@ def test_a_ts_that_is_not_a_number_is_malformed(ts: str) -> None:
     with pytest.raises(Refused) as caught:
         parse_action(payload, now=1792050000)
     assert (caught.value.cause, caught.value.detail) == ("malformed", "ts")
+
+
+def test_a_ts_with_a_fraction_is_a_number() -> None:
+    """Epoch seconds may carry a fraction; it is aged like any other number."""
+    payload = b'{"id":"3f9c2e4a1b7d","rev":1,"row":"r_a","action":"toggle","ts":1000.25}'
+
+    assert parse_action(payload, now=1060.0).row == "r_a"
+    with pytest.raises(Refused) as caught:
+        parse_action(payload, now=1120.5)
+    assert caught.value.cause == "stale"

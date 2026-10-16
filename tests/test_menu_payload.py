@@ -8,6 +8,7 @@ import logging
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import (
@@ -606,3 +607,143 @@ async def test_a_rename_republishes_and_is_followed(
     shown = items_by_id(last_menu(mqtt_mock))["r_desk"]
     assert shown["label"] == "Study"
     assert shown["value"] is False
+
+
+# Binary sensor classes whose "on" needs looking at - open, wet, burning, low.
+ATTENTION = [
+    "battery",
+    "carbon_monoxide",
+    "cold",
+    "door",
+    "garage_door",
+    "gas",
+    "heat",
+    "lock",
+    "moisture",
+    "opening",
+    "problem",
+    "safety",
+    "smoke",
+    "tamper",
+    "window",
+]
+
+
+@pytest.mark.parametrize(
+    ("device_class", "state", "color"),
+    [
+        *[(device_class, "off", "green") for device_class in ATTENTION],
+        *[(device_class, "on", "red") for device_class in ATTENTION],
+        ("motion", "on", "green"),
+        ("motion", "off", "red"),
+        ("connectivity", "on", "green"),
+        ("running", "off", "red"),
+        (None, "on", "green"),
+    ],
+)
+async def test_an_indicator_is_green_while_all_is_good(
+    hass: HomeAssistant, device_class: str | None, state: str, color: str
+) -> None:
+    """A door is good closed and a smoke detector quiet; a link or a motion is good on."""
+    attributes = {"device_class": device_class} if device_class else {}
+    hass.states.async_set("binary_sensor.probe", state, attributes)
+    menu = stored_menu({"menu": [row("r_probe", "binary_sensor.probe", "indicator")]})
+
+    items, _views, _notes = build_menu(hass, menu, TEXTS)
+
+    assert items[0]["color"] == color
+
+
+async def test_only_a_binary_sensor_reads_its_class_as_needing_attention(
+    hass: HomeAssistant,
+) -> None:
+    """A cover that is a door is opened on purpose: open is its "on", and green."""
+    hass.states.async_set(
+        "cover.garage", "open", {"device_class": "door", "current_position": 100,
+                                 "supported_features": 15}
+    )
+    menu = stored_menu(
+        {
+            "menu": [
+                row("r_toggle", "cover.garage", "toggle"),
+                row("r_indicator", "cover.garage", "indicator"),
+            ]
+        }
+    )
+
+    items, _views, _notes = build_menu(hass, menu, TEXTS)
+
+    assert [(item["value"], item["color"]) for item in items] == [
+        (True, "green"), (True, "green"),
+    ]
+
+
+@pytest.mark.parametrize("domain", ["script", "scene", "button", "input_button", "automation"])
+def test_what_the_menu_runs_is_only_ever_a_button(domain: str) -> None:
+    """Its state is whether it runs or when it last ran - nothing to show as an indicator."""
+    menu = stored_menu(
+        {
+            "menu": [
+                row("r_button", f"{domain}.x", "button"),
+                row("r_indicator", f"{domain}.x", "indicator"),
+            ]
+        }
+    )
+
+    assert [item["id"] for item in menu] == ["r_button"]
+
+
+async def test_a_registered_entity_without_a_state_is_named_by_its_entity_id(
+    hass: HomeAssistant,
+) -> None:
+    """Never by its registry id, which means nothing to anybody at the television."""
+    entity = er.async_get(hass).async_get_or_create(
+        "switch", "demo", "k1", suggested_object_id="kettle"
+    )
+    menu = stored_menu({"menu": [row("r_kettle", entity.id, "toggle")]})
+
+    items, _views, _notes = build_menu(hass, menu, TEXTS)
+
+    assert items[0]["label"] == "switch.kettle"
+    assert items[0]["available"] is False
+
+
+async def test_a_row_bound_by_registry_id_shows_its_state_in_the_households_words(
+    hass: HomeAssistant,
+) -> None:
+    """The translations are loaded for the entity the registry id names."""
+    entity = er.async_get(hass).async_get_or_create(
+        "binary_sensor", "demo", "d1", suggested_object_id="front_door"
+    )
+    hass.states.async_set(entity.entity_id, "off", {"device_class": "door"})
+    menu = stored_menu({"menu": [row("r_door", entity.id, "indicator")]})
+    texts = await async_menu_texts(hass, menu)
+
+    items, _views, _notes = build_menu(hass, menu, texts)
+
+    assert items[0]["state"] == "Closed"
+
+
+async def test_a_rename_alone_republishes(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+) -> None:
+    """No state change needed: the row names the entity's new id as soon as it has one."""
+    registry = er.async_get(hass)
+    entity = registry.async_get_or_create("light", "demo", "l1", suggested_object_id="desk")
+    hass.states.async_set("light.desk", "on", {"friendly_name": "Desk"})
+    claim_menu(box_on_the_broker)
+    await async_setup_box(hass, menu_entry([row("r_desk", entity.id, "toggle")]))
+    assert items_by_id(last_menu(mqtt_mock))["r_desk"]["label"] == "Desk"
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=2))
+    await hass.async_block_till_done()
+
+    registry.async_update_entity("light.desk", new_entity_id="light.study")
+    await hass.async_block_till_done()
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=4))
+    await hass.async_block_till_done()
+
+    shown = items_by_id(last_menu(mqtt_mock))["r_desk"]
+    assert shown["label"] == "light.study"
+    assert shown["available"] is False
