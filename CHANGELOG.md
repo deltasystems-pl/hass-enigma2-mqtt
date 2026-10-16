@@ -33,7 +33,12 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   that pass every other check count - with one log line per cause. A
   receiver whose clock is behind gets a repair, „the receiver's clock is behind", at the first
   action refused for it; the next accepted action removes it.
-  The event `enigma2_mqtt_menu_action` follows every performed action. Removing the entry
+  A button - a script, a scene, an automation, a button entity - does not wait for what it
+  starts: its row takes the next press once Home Assistant accepted the call. Every other
+  control waits for its call for at most 30 seconds, then takes the next press and leaves the
+  call to finish. The event `enigma2_mqtt_menu_action` follows every performed action - for a
+  button when Home Assistant accepted the call, for the rest when the call returned without an
+  error. Removing the entry
   retracts the menu, and so does reconfiguring to a new node ID for the old node. No entity is
   added.
 

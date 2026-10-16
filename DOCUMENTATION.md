@@ -463,7 +463,12 @@ action per control at a time, and at most five a second from one receiver**: an 
 control whose last action is still being carried out is refused, and so is every action beyond
 five in any second - a key held down, or anyone on the broker, does not become a stream of
 service calls. Only actions that pass every other check count towards the five, so refused
-ones cost nothing and cannot crowd out a real press. Keep the
+ones cost nothing and cannot crowd out a real press. **A button does not wait for what it
+starts**: a script, a scene, an automation or a button entity takes the next OK as soon as Home
+Assistant accepted the call, so a script with a long delay can be pressed again while it runs.
+Every other control waits for its service call, but **at most 30 seconds**: then it takes the
+next OK, with one warning in the log, and the call that has not returned is left to finish, not
+cancelled. Keep the
 receiver's clock right - an action from a receiver whose clock is more than two minutes behind
 or ahead is always refused. A clock behind also raises a repair, „the receiver's clock is
 behind", at the first such refusal; it goes by itself at the next action Home Assistant accepts
@@ -472,7 +477,11 @@ its id across restarts and while only its name or icon change; bound to another 
 as another control, it gets a new id, so a press the receiver sent for the old binding cannot
 reach the new one. A service call that fails is logged; there is no repair.
 
-After an action was performed, Home Assistant fires the event **`enigma2_mqtt_menu_action`**:
+After an action was performed, Home Assistant fires the event **`enigma2_mqtt_menu_action`** -
+for a button once Home Assistant accepted the call (what the script or automation does after
+that is not waited for, and an error inside it is in Home Assistant's own log), for every other
+control once the service call returned without an error, even when that took longer than the 30
+seconds after which the control was freed. A call that fails fires nothing:
 
 | Field | What it holds |
 |---|---|

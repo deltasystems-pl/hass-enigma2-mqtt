@@ -48,7 +48,15 @@ action its control takes, its entity's availability and the value, all checked b
 action is counted - so an action refused for any cause costs nothing, and junk on the broker
 cannot use up the second a real press needs; a key held down, or anyone on the broker, cannot
 turn the menu into a stream of service calls. A selector's value is checked against the options
-in the words of the last menu published, which are the words the receiver shows. Anything else is refused with a log line - a warning the first
+in the words of the last menu published, which are the words the receiver shows. "Still being
+performed" depends on the control. A button - a script, a scene, an automation, a button
+entity - is fire-and-forget: its call is made without waiting for what it starts, so a script
+with a long delay does not keep its row busy for the whole run, and the row is free again as
+soon as Home Assistant accepted the call. Every other row waits for its call, because the next
+toggle or value should go by what the last one did - but for at most 30 seconds; then the row
+takes the next action, with one warning in the log, and the call goes on, uncancelled, since a
+device in the middle of a command is not interrupted for the menu's sake. Any exception a
+service raises is logged as one line and performs nothing more. Anything else is refused with a log line - a warning the first
 time for each cause, then debug, because anyone on the broker can send these and the log must
 not be theirs to fill - and nothing is called. A text that reads as a number is not a number.
 
@@ -112,8 +120,11 @@ entry one place up or down within its own list. The step is offered for a receiv
 `menu` and for any entry that holds a menu, so a menu can always be emptied.
 
 **9. An event follows every performed action.** `enigma2_mqtt_menu_action` with the device, the
-node, the row, the entity, the action and the value applied, fired after the service call
-returned, so an automation can follow what the viewer did. A failing call is logged and fires
+node, the row, the entity, the action and the value applied, so an automation can follow what
+the viewer did. For a button it is fired once Home Assistant accepted the call, since nothing
+waits for more; for every other row once the service call returned without an error - also
+when that was after the 30 seconds that freed the row, because the event says what was
+performed, and a call that has not returned has not been. A failing call is logged and fires
 nothing. No entity is added for the menu.
 
 **10. A row stores the entity's registry id.** So a row follows its entity through a rename of

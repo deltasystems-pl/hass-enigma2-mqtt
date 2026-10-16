@@ -25,6 +25,7 @@ that has no registry entry is stored by its entity id. Both forms are read where
 
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -114,6 +115,9 @@ MAX_ACTION_AGE = 120
 # held down, or anyone on the broker, must not turn into a stream of service calls.
 ACTIONS_PER_SECOND = 5
 FLOOD_WINDOW = 1.0
+# Seconds a row other than a button waits for its service call before it takes the next
+# action anyway (ADR-0012). The call is not cancelled then; a button does not wait at all.
+ROW_RELEASE_AFTER = 30
 # The repair raised when an action is refused as stale: the receiver's clock is behind, and
 # every OK in its menu is refused until it is right. One per config entry.
 CLOCK_ISSUE_KEY = "menu_clock_behind"
@@ -1347,29 +1351,72 @@ class ReceiverMenu:
         self._in_flight.add(action.row)
 
     async def _async_perform(self, action: MenuAction, call: PlannedCall) -> None:
-        """Perform an action, and let its row take the next one once it is done."""
+        """Perform an action, and let its row take the next one once it may.
+
+        A button - a script, a scene, an automation, a button entity - is fire-and-forget:
+        its call is handed to Home Assistant without waiting for what it starts, which may
+        run for minutes, and the row is free again as soon as Home Assistant accepted it.
+        Every other row waits for its call, but no longer than `ROW_RELEASE_AFTER`: then
+        the row takes the next action and the call goes on, uncancelled - a device in the
+        middle of a command is not interrupted for the menu's sake.
+        """
         try:
-            await self._async_call(action, call)
+            if call.control == BUTTON:
+                await self._async_call(action, call, blocking=False)
+                return
+            performing = self.entry.async_create_background_task(
+                self.hass,
+                self._async_call(action, call, blocking=True),
+                f"{DOMAIN} menu_action {self.box.node_id} {call.domain}.{call.service}",
+            )
+            # Started eagerly: a call that is already done frees its row at once, without
+            # a turn of the loop in between.
+            if performing.done():
+                return
+            done, _pending = await asyncio.wait((performing,), timeout=ROW_RELEASE_AFTER)
+            if not done:
+                _LOGGER.warning(
+                    "The menu of %s waited %s s for %s.%s for %s; the row takes the next "
+                    "action now, and the event follows only if the call returns",
+                    self.box.node_id,
+                    ROW_RELEASE_AFTER,
+                    call.domain,
+                    call.service,
+                    call.entity_id,
+                )
         finally:
             self._in_flight.discard(action.row)
 
-    async def _async_call(self, action: MenuAction, call: PlannedCall) -> None:
-        """Make the service call, and fire the event once it returned without an error."""
+    async def _async_call(
+        self, action: MenuAction, call: PlannedCall, *, blocking: bool
+    ) -> None:
+        """Make the service call, and fire the event once it returned without an error.
+
+        Blocking, it returns when the service is done; not blocking, when Home Assistant
+        accepted the call - the entity exists, the data is valid - and a failure of what
+        the call started is Home Assistant's to log. Any exception is the service's, not
+        this integration's: it is logged as one line and fires nothing.
+        """
         try:
             await self.hass.services.async_call(
                 call.domain,
                 call.service,
                 {ATTR_ENTITY_ID: call.entity_id, **call.data},
-                blocking=True,
+                blocking=blocking,
             )
-        except (HomeAssistantError, vol.Invalid) as error:
+        except Exception as error:  # noqa: BLE001 - a service is somebody else's code
+            reason = (
+                str(error)
+                if isinstance(error, (HomeAssistantError, vol.Invalid))
+                else f"{type(error).__name__}: {error}"
+            )
             _LOGGER.warning(
                 "The menu of %s could not call %s.%s for %s: %s",
                 self.box.node_id,
                 call.domain,
                 call.service,
                 call.entity_id,
-                error,
+                reason,
             )
             return
         self.hass.bus.async_fire(

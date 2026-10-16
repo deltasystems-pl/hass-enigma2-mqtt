@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 import logging
 from typing import Any
 from unittest.mock import patch
@@ -15,6 +16,7 @@ import pytest
 from pytest_homeassistant_custom_component.common import (
     async_capture_events,
     async_fire_mqtt_message,
+    async_fire_time_changed,
     async_mock_service,
 )
 
@@ -822,3 +824,121 @@ async def test_at_most_five_actions_a_second_and_the_window_recovers(
             fire_action(hass, "r_switch", "toggle", action_id=f"0000000000b{n}")
             await hass.async_block_till_done(wait_background_tasks=True)
         assert len(calls) == 11
+
+
+async def _settle() -> None:
+    """Let the loop run what is ready, without waiting for a service that never ends."""
+    for _ in range(20):
+        await asyncio.sleep(0)
+
+
+@pytest.mark.parametrize(
+    ("row_id", "domain", "service"),
+    [
+        ("r_movie", "script", "turn_on"),
+        ("r_automation", "automation", "trigger"),
+        ("r_scene", "scene", "turn_on"),
+        ("r_button", "button", "press"),
+        ("r_input_button", "input_button", "press"),
+    ],
+)
+async def test_a_button_does_not_wait_for_what_it_started(
+    hass: HomeAssistant,
+    menu_box: Any,
+    caplog: pytest.LogCaptureFixture,
+    row_id: str,
+    domain: str,
+    service: str,
+) -> None:
+    """A script or an automation with a long delay leaves its row free for the next press.
+
+    The event follows each press as soon as Home Assistant accepted the call.
+    """
+    events = async_capture_events(hass, EVENT_MENU_ACTION)
+    release = asyncio.Event()
+    started: list[ServiceCall] = []
+
+    async def _long(call: ServiceCall) -> None:
+        started.append(call)
+        await release.wait()
+
+    hass.services.async_register(domain, service, _long)
+    fire_action(hass, row_id, "press", action_id="000000000001")
+    await _settle()
+    fire_action(hass, row_id, "press", action_id="000000000002")
+    await _settle()
+
+    assert len(started) == 2
+    assert "(busy" not in caplog.text
+    assert [event.data["row_id"] for event in events] == [row_id, row_id]
+
+    release.set()
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert len(events) == 2
+
+
+async def test_a_hung_call_releases_its_row_after_thirty_seconds(
+    hass: HomeAssistant, menu_box: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Busy until then; then the next press is taken, and the hung call is not cancelled.
+
+    No event while the call has not returned; it follows if the call returns after all.
+    """
+    events = async_capture_events(hass, EVENT_MENU_ACTION)
+    release = asyncio.Event()
+    toggled: list[ServiceCall] = []
+
+    async def _hung(call: ServiceCall) -> None:
+        toggled.append(call)
+        await release.wait()
+
+    hass.services.async_register("switch", "toggle", _hung)
+    fire_action(hass, "r_switch", "toggle", action_id="000000000001")
+    await hass.async_block_till_done()
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=29))
+    await hass.async_block_till_done()
+    fire_action(hass, "r_switch", "toggle", action_id="000000000002")
+    await hass.async_block_till_done()
+    assert len(toggled) == 1
+    assert "(busy: row r_switch)" in caplog.text
+    assert "waited" not in caplog.text
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=30))
+    await hass.async_block_till_done()
+    assert (
+        f"The menu of {NODE_ID} waited 30 s for switch.toggle for switch.kettle" in caplog.text
+    )
+    assert events == []
+    fire_action(hass, "r_switch", "toggle", action_id="000000000003")
+    await hass.async_block_till_done()
+    assert len(toggled) == 2
+
+    release.set()
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert [event.data["row_id"] for event in events] == ["r_switch", "r_switch"]
+
+
+async def test_a_service_raising_any_exception_is_one_log_line(
+    hass: HomeAssistant, menu_box: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Not only Home Assistant's own errors: the row is free again and nothing is fired."""
+    events = async_capture_events(hass, EVENT_MENU_ACTION)
+    attempts: list[ServiceCall] = []
+
+    async def _broken(call: ServiceCall) -> None:
+        attempts.append(call)
+        raise ValueError("no such speed")
+
+    hass.services.async_register("switch", "toggle", _broken)
+    for action_id in ("000000000001", "000000000002"):
+        fire_action(hass, "r_switch", "toggle", action_id=action_id)
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert len(attempts) == 2
+    assert events == []
+    assert caplog.text.count(
+        "could not call switch.toggle for switch.kettle: ValueError: no such speed"
+    ) == 2
+    assert "never retrieved" not in caplog.text
+    assert not [record for record in caplog.records if record.exc_info]
