@@ -379,6 +379,8 @@ def test_a_value_snaps_to_the_grid() -> None:
     assert snap(54, (0, 100, 10)) == 50
     assert snap(10.3, (10, 30, 0.5)) == 10.5
     assert snap(100, (0, 100, 10)) == 100
+    # 7 is nearer 8 on a grid of two, and 8 is past the end: the end it is.
+    assert snap(7, (0, 7, 2)) == 7
 
 
 def test_the_stored_menu_drops_what_it_cannot_read() -> None:
@@ -560,15 +562,25 @@ async def test_a_menu_that_had_to_leave_something_out_says_so_once(
         for n in range(8)
     ]
     claim_menu(box_on_the_broker)
-    await async_setup_box(hass, menu_entry(menu))
+    entry = menu_entry(menu)
+    await async_setup_box(hass, entry)
     published = last_menu(mqtt_mock)
 
     assert published is not None
     payload, _qos, _retain = menu_publishes(mqtt_mock)[-1]
     assert len(payload.encode("utf-8")) < MAX_PAYLOAD_BYTES
-    assert caplog.text.count("to stay under 64 KiB") == 1
-    assert MENU_TOPIC
+    # Dropped from the end: what was put first survives.
+    shown = [item_id for item_id in items_by_id(published) if item_id.startswith("r_")]
+    assert shown[0] == "r_0_0"
+    assert 0 < len(shown) < 200
 
+    # The same menu published again leaves the same out, and does not say it again.
+    before = len(menu_publishes(mqtt_mock))
+    receiver_menu = entry.runtime_data.menu_action_handler.__self__
+    receiver_menu._force = True
+    await receiver_menu._async_publish()
+    assert len(menu_publishes(mqtt_mock)) == before + 1
+    assert caplog.text.count("to stay under 64 KiB") == 1
 
 
 def test_the_stored_menu_reads_both_forms_of_a_binding() -> None:

@@ -1480,7 +1480,7 @@ async def test_deleting_the_entry_never_uninstalls(
     permission: bool,
     online: bool,
 ) -> None:
-    """🔴 The whole of what deleting an entry sends is three messages, and none uninstalls.
+    """The whole of what deleting an entry sends is three messages, and none uninstalls.
 
     Deleting a configuration entry is a decision about Home Assistant, reached from a page
     people delete things on by accident. Uninstalling is always a separate, named,

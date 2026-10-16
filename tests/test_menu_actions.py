@@ -325,24 +325,32 @@ async def test_a_toggle_whose_state_is_unknown_is_refused(
 
 
 @pytest.mark.parametrize(
-    "payload",
+    ("payload", "cause"),
     [
-        b"",
-        b"not json",
-        b"[1, 2]",
-        b'{"id": "XYZ", "rev": 1, "row": "r_lamp", "action": "toggle"}',
-        b'{"id": "3f9c2e4a1b7", "rev": 1, "row": "r_lamp", "action": "toggle"}',
-        b'{"id": "3f9c2e4a1b7d", "rev": -1, "row": "r_lamp", "action": "toggle"}',
-        b'{"id": "3f9c2e4a1b7d", "rev": true, "row": "r_lamp", "action": "toggle"}',
-        b'{"id": "3f9c2e4a1b7d", "rev": "1", "row": "r_lamp", "action": "toggle"}',
-        b'{"id": "3f9c2e4a1b7d", "rev": 1, "row": "r lamp", "action": "toggle"}',
-        b'{"id": "3f9c2e4a1b7d", "rev": 1, "row": "r_lamp", "action": "flip"}',
-        b'{"id": "3f9c2e4a1b7d", "rev": 1, "row": "r_dim", "action": "set"}',
-        b'{"id": "3f9c2e4a1b7d", "rev": 1, "row": "r_lamp", "action": "toggle", "ts": "x"}',
-        b"\xff\xfe",
-        b'{"id": "3f9c2e4a1b7d", "rev": 1, "row": "r_lamp", "action": "toggle", "pad": "'
-        + b"x" * 5000
-        + b'"}',
+        (b"", "(unreadable: empty, too long or not UTF-8)"),
+        (b"not json", "(unreadable: not JSON)"),
+        (b"[1, 2]", "(unreadable: not a JSON object)"),
+        (b'{"id": "XYZ", "rev": 1, "row": "r_lamp", "action": "toggle"}', "(malformed: id)"),
+        (b'{"id": "3f9c2e4a1b7", "rev": 1, "row": "r_lamp", "action": "toggle"}',
+         "(malformed: id)"),
+        (b'{"id": "3f9c2e4a1b7d", "rev": -1, "row": "r_lamp", "action": "toggle"}',
+         "(malformed: rev)"),
+        (b'{"id": "3f9c2e4a1b7d", "rev": true, "row": "r_lamp", "action": "toggle"}',
+         "(malformed: rev)"),
+        (b'{"id": "3f9c2e4a1b7d", "rev": "1", "row": "r_lamp", "action": "toggle"}',
+         "(malformed: rev)"),
+        (b'{"id": "3f9c2e4a1b7d", "rev": 1, "row": "r lamp", "action": "toggle"}',
+         "(malformed: row)"),
+        (b'{"id": "3f9c2e4a1b7d", "rev": 1, "row": "r_lamp", "action": "flip"}',
+         "(malformed: action)"),
+        (b'{"id": "3f9c2e4a1b7d", "rev": 1, "row": "r_dim", "action": "set"}',
+         "(malformed: value)"),
+        (b'{"id": "3f9c2e4a1b7d", "rev": 1, "row": "r_lamp", "action": "toggle", "ts": "x"}',
+         "(malformed: ts)"),
+        (b"\xff\xfe", "(unreadable: empty, too long or not UTF-8)"),
+        (b'{"id": "3f9c2e4a1b7d", "rev": 1, "row": "r_lamp", "action": "toggle", "pad": "'
+         + b"x" * 5000
+         + b'"}', "(unreadable: 5"),
     ],
 )
 async def test_a_message_that_is_not_an_action_is_refused(
@@ -351,12 +359,14 @@ async def test_a_message_that_is_not_an_action_is_refused(
     calls: list[ServiceCall],
     caplog: pytest.LogCaptureFixture,
     payload: bytes,
+    cause: str,
 ) -> None:
+    """Refused, and the log says what was wrong with it."""
     async_fire_mqtt_message(hass, MENU_ACTION_TOPIC, payload)
     await hass.async_block_till_done()
 
     assert calls == []
-    assert "Refused a menu action" in caplog.text
+    assert f"Refused a menu action from {NODE_ID} {cause}" in caplog.text
 
 
 async def test_an_older_rev_is_accepted(
