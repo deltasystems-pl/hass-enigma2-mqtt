@@ -33,6 +33,7 @@ import logging
 import math
 import re
 import secrets
+import time
 from typing import Any
 
 from homeassistant.components import mqtt
@@ -109,6 +110,10 @@ ACTION_IDS_REMEMBERED = 64
 # a screen that is long gone. One stamped more than this ahead is refused as well. An action
 # without `ts` is accepted.
 MAX_ACTION_AGE = 120
+# At most this many actions from one receiver in any second; more are refused. A remote
+# held down, or anyone on the broker, must not turn into a stream of service calls.
+ACTIONS_PER_SECOND = 5
+FLOOD_WINDOW = 1.0
 # The repair raised when an action is refused as stale: the receiver's clock is behind, and
 # every OK in its menu is refused until it is right. One per config entry.
 CLOCK_ISSUE_KEY = "menu_clock_behind"
@@ -315,6 +320,11 @@ def resolved_menu(hass: HomeAssistant, menu: Iterable[Mapping[str, Any]]) -> lis
         else:
             resolved.append(resolved_row(hass, item))
     return resolved
+
+
+def _monotonic() -> float:
+    """The clock the flood limit counts by, apart so that a test can move it."""
+    return time.monotonic()
 
 
 def menu_topic(node_id: str) -> str:
@@ -1059,6 +1069,10 @@ class ReceiverMenu:
         self._logged_notes: set[str] = set()
         # Whether this run raised the repair about the receiver's clock.
         self._clock_issue = False
+        # The rows an action is being performed on, and when the last actions were taken
+        # on, for the flood limit.
+        self._in_flight: set[str] = set()
+        self._admitted: deque[float] = deque()
 
     @property
     def topic(self) -> str:
@@ -1198,6 +1212,7 @@ class ReceiverMenu:
             if action.action_id in self._recent_ids:
                 raise Refused("duplicate", action.action_id)
             self._recent_ids.append(action.action_id)
+            self._admit(action)
         except Refused as refusal:
             if refusal.cause == "stale":
                 self._raise_clock_issue()
@@ -1213,7 +1228,32 @@ class ReceiverMenu:
             f"{DOMAIN} menu_action {self.box.node_id}",
         )
 
+    @callback
+    def _admit(self, action: MenuAction) -> None:
+        """Take the action on, or refuse it as a flood.
+
+        One action per row at a time: a row whose last action is still being performed
+        refuses the next. And at most `ACTIONS_PER_SECOND` from this receiver in any
+        second, counted over the actions taken on, so refused ones cost nothing.
+        """
+        if action.row in self._in_flight:
+            raise Refused("busy", f"row {action.row}")
+        now = _monotonic()
+        while self._admitted and now - self._admitted[0] >= FLOOD_WINDOW:
+            self._admitted.popleft()
+        if len(self._admitted) >= ACTIONS_PER_SECOND:
+            raise Refused("flood", f"more than {ACTIONS_PER_SECOND} a second")
+        self._admitted.append(now)
+        self._in_flight.add(action.row)
+
     async def _async_perform(self, action: MenuAction) -> None:
+        """Perform an action, and let its row take the next one once it is done."""
+        try:
+            await self._async_perform_row(action)
+        finally:
+            self._in_flight.discard(action.row)
+
+    async def _async_perform_row(self, action: MenuAction) -> None:
         """Perform an action against the row the options hold now, or refuse it."""
         try:
             if (row := find_row(self.menu, action.row)) is None:

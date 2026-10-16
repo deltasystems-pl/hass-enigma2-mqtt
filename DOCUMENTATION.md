@@ -456,7 +456,11 @@ option it offers, a number inside the slider's range (put on its step), a text n
 its maximum. Anything else is refused with a warning in the log, once per kind of refusal, and
 nothing is called. A retained action, one whose id was just seen, and **one whose time is more
 than 120 seconds off** - older, or ahead - by the time it carries (`ts`, the receiver's clock)
-and Home Assistant's clock are refused too; an action without a time is accepted. Keep the
+and Home Assistant's clock are refused too; an action without a time is accepted. **One
+action per control at a time, and at most five a second from one receiver**: an OK on a
+control whose last action is still being carried out is refused, and so is every action beyond
+five in any second - a key held down, or anyone on the broker, does not become a stream of
+service calls. Keep the
 receiver's clock right - an action from a receiver whose clock is more than two minutes behind
 or ahead is always refused. A clock behind also raises a repair, „the receiver's clock is
 behind", at the first such refusal; it goes by itself at the next action Home Assistant accepts

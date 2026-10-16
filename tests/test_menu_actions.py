@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 from unittest.mock import patch
@@ -430,7 +431,7 @@ async def test_a_refusal_is_a_warning_once_per_cause(
     caplog.set_level(logging.DEBUG, logger="custom_components.enigma2_mqtt.menu")
     for n in range(5):
         fire_action(hass, "r_nothing", "press", action_id=f"00000000000{n}")
-    await hass.async_block_till_done()
+        await hass.async_block_till_done()
 
     warnings = [
         record for record in caplog.records
@@ -698,3 +699,79 @@ async def test_unloading_keeps_and_removing_deletes_the_clock_repair(
     assert await hass.config_entries.async_remove(menu_box.entry_id)
     await hass.async_block_till_done()
     assert _clock_issue(hass, menu_box) is None
+
+
+async def test_five_hundred_rapid_toggles_call_a_bounded_number_of_services(
+    hass: HomeAssistant, menu_box: Any, calls: list[ServiceCall], caplog
+) -> None:
+    """A remote held down, or anyone on the broker, is not a stream of service calls."""
+    rows = ["r_switch", "r_bool", "r_fan", "r_lamp"]
+    with patch("custom_components.enigma2_mqtt.menu._monotonic", return_value=1000.0):
+        for n in range(500):
+            fire_action(hass, rows[n % 4], "toggle", action_id=f"{n:012x}")
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+    # Inside one second: five, whatever the rows; the other 495 are refused.
+    assert len(calls) == 5
+    assert "(flood" in caplog.text
+
+
+async def test_a_row_takes_one_action_at_a_time(
+    hass: HomeAssistant, menu_box: Any, calls: list[ServiceCall], caplog
+) -> None:
+    """Refused while its last one is still being performed; another row is not held up."""
+    release = asyncio.Event()
+    toggled: list[ServiceCall] = []
+
+    async def _slow(call: ServiceCall) -> None:
+        toggled.append(call)
+        await release.wait()
+
+    hass.services.async_register("switch", "toggle", _slow)
+    fire_action(hass, "r_switch", "toggle", action_id="000000000001")
+    await hass.async_block_till_done()
+    assert len(toggled) == 1
+
+    fire_action(hass, "r_switch", "toggle", action_id="000000000002")
+    fire_action(hass, "r_bool", "toggle", action_id="000000000003")
+    await hass.async_block_till_done()
+    assert len(toggled) == 1
+    assert "(busy: row r_switch)" in caplog.text
+    assert [call.domain for call in calls] == ["input_boolean"]
+
+    release.set()
+    await hass.async_block_till_done(wait_background_tasks=True)
+    fire_action(hass, "r_switch", "toggle", action_id="000000000004")
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert len(toggled) == 2
+
+
+async def test_at_most_five_actions_a_second_and_the_window_recovers(
+    hass: HomeAssistant, menu_box: Any, calls: list[ServiceCall], caplog
+) -> None:
+    """Counted over the actions taken on; a second later there is room again."""
+    clock = [1000.0]
+    with patch(
+        "custom_components.enigma2_mqtt.menu._monotonic", side_effect=lambda: clock[0]
+    ):
+        for n in range(8):
+            fire_action(hass, "r_switch", "toggle", action_id=f"{n:012x}")
+            await hass.async_block_till_done(wait_background_tasks=True)
+            clock[0] += 0.1
+        assert len(calls) == 5
+        assert "(flood" in caplog.text
+
+        # 1.0 s after the first: it has left the window, and one more is taken.
+        clock[0] = 1001.0
+        fire_action(hass, "r_switch", "toggle", action_id="0000000000a0")
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert len(calls) == 6
+        fire_action(hass, "r_switch", "toggle", action_id="0000000000a1")
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert len(calls) == 6
+
+        clock[0] = 1003.0
+        for n in range(5):
+            fire_action(hass, "r_switch", "toggle", action_id=f"0000000000b{n}")
+            await hass.async_block_till_done(wait_background_tasks=True)
+        assert len(calls) == 11

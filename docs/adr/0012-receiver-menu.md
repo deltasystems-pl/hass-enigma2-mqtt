@@ -40,7 +40,11 @@ longer than the entity's maximum; and only when its `ts` is at most 120 seconds 
 Home Assistant's clock. The plugin never queues an action across a disconnect, so an older one
 was pressed for a screen that is gone; one stamped further ahead comes from a clock the age
 limit cannot judge, and would pass it for as long as that clock is ahead. An action without `ts`
-is accepted, and one whose `ts` is not a number is refused. Anything else is refused with a log line - a warning the first
+is accepted, and one whose `ts` is not a number is refused. And only one at a time per row and
+five a second per receiver: an action on a row whose last action is still being performed is
+refused, and so is one beyond five in any second, counted over the actions taken on, so the
+refused ones cost nothing - a key held down, or anyone on the broker, cannot turn the menu
+into a stream of service calls. Anything else is refused with a log line - a warning the first
 time for each cause, then debug, because anyone on the broker can send these and the log must
 not be theirs to fill - and nothing is called. A text that reads as a number is not a number.
 
