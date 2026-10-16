@@ -19,6 +19,7 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed,
     async_mock_service,
 )
+import voluptuous as vol
 
 from custom_components.enigma2_mqtt.const import DOMAIN, EVENT_MENU_ACTION
 from custom_components.enigma2_mqtt.menu import Refused, parse_action
@@ -919,8 +920,21 @@ async def test_a_hung_call_releases_its_row_after_thirty_seconds(
     assert [event.data["row_id"] for event in events] == ["r_switch", "r_switch"]
 
 
+@pytest.mark.parametrize(
+    ("error", "said"),
+    [
+        (ValueError("no such speed"), "ValueError: no such speed"),
+        # Home Assistant's own errors are messages for people; they go as they are.
+        (HomeAssistantError("the kettle is empty"), "the kettle is empty"),
+        (vol.Invalid("not a speed"), "not a speed"),
+    ],
+)
 async def test_a_service_raising_any_exception_is_one_log_line(
-    hass: HomeAssistant, menu_box: Any, caplog: pytest.LogCaptureFixture
+    hass: HomeAssistant,
+    menu_box: Any,
+    caplog: pytest.LogCaptureFixture,
+    error: Exception,
+    said: str,
 ) -> None:
     """Not only Home Assistant's own errors: the row is free again and nothing is fired."""
     events = async_capture_events(hass, EVENT_MENU_ACTION)
@@ -928,7 +942,7 @@ async def test_a_service_raising_any_exception_is_one_log_line(
 
     async def _broken(call: ServiceCall) -> None:
         attempts.append(call)
-        raise ValueError("no such speed")
+        raise error
 
     hass.services.async_register("switch", "toggle", _broken)
     for action_id in ("000000000001", "000000000002"):
@@ -937,8 +951,6 @@ async def test_a_service_raising_any_exception_is_one_log_line(
 
     assert len(attempts) == 2
     assert events == []
-    assert caplog.text.count(
-        "could not call switch.toggle for switch.kettle: ValueError: no such speed"
-    ) == 2
+    assert caplog.text.count(f"could not call switch.toggle for switch.kettle: {said}\n") == 2
     assert "never retrieved" not in caplog.text
     assert not [record for record in caplog.records if record.exc_info]
