@@ -851,6 +851,17 @@ def build_menu(
     return items, views, notes
 
 
+def published_rows(items: Iterable[Mapping[str, Any]]) -> set[str]:
+    """The ids of the rows a payload's `items` carry, groups' rows included."""
+    rows: set[str] = set()
+    for item in items:
+        if item.get("type") == KIND_GROUP:
+            rows.update(child["id"] for child in item.get("rows") or [])
+        else:
+            rows.add(item["id"])
+    return rows
+
+
 def encode_menu(payload: Mapping[str, Any]) -> bytes:
     """The payload as it goes on the wire: compact JSON in UTF-8."""
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -1075,6 +1086,9 @@ class ReceiverMenu:
         self._admitted: deque[float] = deque()
         # Set when the entry stops: a publish still under way must not land after it.
         self._stopped = False
+        # The ids of the rows the last menu carried: a row left out to stay inside the
+        # contract's bounds is not on the receiver, and is not acted on.
+        self._published_rows: set[str] = set()
 
     @property
     def topic(self) -> str:
@@ -1156,41 +1170,52 @@ class ReceiverMenu:
     async def _async_texts(self, rows: Iterable[Mapping[str, Any]]) -> dict[str, str]:
         return await async_menu_texts(self.hass, rows)
 
-    def _next_rev(self) -> int:
-        """The next revision: one more than the last this Home Assistant run published."""
+    def _revs(self) -> dict[str, int]:
+        """The last revision published for each receiver in this Home Assistant run."""
         revs: dict[str, int] = self.hass.data.setdefault(f"{DOMAIN}_menu_rev", {})
-        revs[self.box.node_id] = revs.get(self.box.node_id, 0) + 1
-        return revs[self.box.node_id]
+        return revs
+
+    def _next_rev(self) -> int:
+        """The next revision: one more than the last this Home Assistant run published.
+
+        Only read here; `_async_publish` stores it once the menu carrying it goes out.
+        """
+        return self._revs().get(self.box.node_id, 0) + 1
 
     async def _async_publish(self) -> None:
         """Publish the whole menu, unless it is the one already published."""
         if self._stopped:
             return
         force, self._force = self._force, False
-        if not self.menu:
-            wire = b""
-        else:
+        rev = 0
+        rows: set[str] = set()
+        encoded = wire = b""
+        if self.menu:
             texts = await self._async_texts(menu_rows(self.menu))
             if self._stopped:
                 return
             items, _views, notes = build_menu(self.hass, self.menu, texts)
+            # Fitted with the revision it goes out with: a longer number is a longer payload.
+            rev = self._next_rev()
             payload: dict[str, Any] = {
                 "v": MENU_VERSION,
-                "rev": 0,
+                "rev": rev,
                 "title": MENU_TITLE,
                 "items": items,
             }
-            _encoded, dropped = fit_menu(payload)
+            encoded, dropped = fit_menu(payload)
             if dropped:
                 notes.append(f"{dropped} entr(ies) from the end, to stay under 64 KiB")
             self._log_notes(notes)
+            rows = published_rows(payload["items"])
             wire = encode_menu(payload["items"]) if payload["items"] else b""
         if wire == self._published and not force:
             return
         self._published = wire
+        self._published_rows = rows
         if wire:
-            payload["rev"] = self._next_rev()
-            text = encode_menu(payload).decode("utf-8")
+            self._revs()[self.box.node_id] = rev
+            text = encoded.decode("utf-8")
         else:
             text = ""
         try:
@@ -1270,6 +1295,8 @@ class ReceiverMenu:
         try:
             if (row := find_row(self.menu, action.row)) is None:
                 raise Refused("unknown_row", action.row)
+            if action.row not in self._published_rows:
+                raise Refused("unknown_row", f"{action.row} (left out of the menu)")
             texts = await self._async_texts([row])
             view = render_row(self.hass, row, texts)
             domain, service, data, applied = service_call(row, view, action)

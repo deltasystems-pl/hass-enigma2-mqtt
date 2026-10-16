@@ -443,7 +443,8 @@ receiver comes back online, and whenever a bound entity's state changes in a way
 the first change at once, a burst of changes as one publish half a second later. An attribute
 the menu does not show (a player's position) publishes nothing. The whole payload stays under
 64 KiB; whatever would not fit, or would break a bound above (more than 24 options in a list,
-for example), is left out from the end with one warning in the log. An empty menu is published
+for example), is left out from the end with one warning in the log, and an action on a control
+that was left out is refused. An empty menu is published
 as the empty payload, which the receiver reads as "no menu". **Removing the entry retracts the
 menu**, and reconfiguring to a new node ID retracts the old node's; unloading or reloading
 leaves it as it is.

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 from datetime import timedelta
 import json
 import logging
 from typing import Any
+from unittest.mock import patch
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
@@ -16,6 +18,7 @@ from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_fire_mqtt_message,
     async_fire_time_changed,
+    async_mock_service,
 )
 
 from custom_components.enigma2_mqtt.menu import (
@@ -29,10 +32,11 @@ from custom_components.enigma2_mqtt.menu import (
     stored_menu,
 )
 
-from .conftest import AVAILABILITY_TOPIC, async_setup_box
+from .conftest import AVAILABILITY_TOPIC, NODE_ID, async_setup_box
 from .menu_common import (
     MENU_TOPIC,
     claim_menu,
+    fire_action,
     group,
     items_by_id,
     last_menu,
@@ -819,3 +823,90 @@ async def test_a_publish_under_way_when_the_entry_stops_publishes_nothing(
     assert menu_publishes(mqtt_mock) == before
     if then == "remove":
         assert before[-1] == ("", 1, True)
+
+
+def _button(row_id: str, label: str = "") -> dict[str, Any]:
+    return {"type": "button", "id": row_id, "label": label, "icon": "neutral",
+            "state": None, "available": True}
+
+
+def _sized(size: int, rev: int) -> dict[str, Any]:
+    """A payload of exactly `size` bytes at this rev: a long first row and a short last one."""
+    payload = {"v": 1, "rev": rev, "title": "Home Assistant",
+               "items": [_button("r_long"), _button("r_last")]}
+    pad = size - len(encode_menu(payload))
+    payload["items"][0]["label"] = "x" * pad
+    assert len(encode_menu(payload)) == size
+    return payload
+
+
+@pytest.mark.parametrize(("size", "dropped"), [(MAX_PAYLOAD_BYTES - 1, 0), (MAX_PAYLOAD_BYTES, 1)])
+def test_the_payload_bound_is_exact(size: int, dropped: int) -> None:
+    """65535 bytes is under 64 KiB and goes as it is; 65536 is not."""
+    payload = _sized(size, 123456)
+
+    encoded, count = fit_menu(payload)
+
+    assert count == dropped
+    assert len(encoded) == (size if not dropped else len(encode_menu(payload)))
+    assert len(encoded) < MAX_PAYLOAD_BYTES
+
+
+async def test_the_menu_is_fitted_with_the_rev_it_goes_out_with(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+) -> None:
+    """Under 64 KiB at rev 0 is not under 64 KiB at rev 123456; a row left out is not acted on."""
+    hass.states.async_set("script.long", "off")
+    hass.states.async_set("script.last", "off")
+    pressed = async_mock_service(hass, "script", "turn_on")
+    hass.data["enigma2_mqtt_menu_rev"] = {NODE_ID: 123455}
+    # 65535 bytes at rev 0, five more at rev 123456.
+    items = _sized(MAX_PAYLOAD_BYTES - 1, 0)["items"]
+    claim_menu(box_on_the_broker)
+    entry = menu_entry([row("r_long", "script.long", "button"),
+                        row("r_last", "script.last", "button")])
+    with patch(
+        "custom_components.enigma2_mqtt.menu.build_menu",
+        side_effect=lambda *_args: (copy.deepcopy(items), {}, []),
+    ):
+        await async_setup_box(hass, entry)
+        payload, _qos, _retain = menu_publishes(mqtt_mock)[-1]
+
+    assert len(payload.encode("utf-8")) < MAX_PAYLOAD_BYTES
+    published = json.loads(payload)
+    assert published["rev"] == 123456
+    assert list(items_by_id(published)) == ["r_long"]
+
+    fire_action(hass, "r_last", "press", action_id="000000000001")
+    await hass.async_block_till_done()
+    assert pressed == []
+    fire_action(hass, "r_long", "press", action_id="000000000002")
+    await hass.async_block_till_done()
+    assert len(pressed) == 1
+
+
+async def test_a_row_past_the_contracts_bounds_is_not_acted_on(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The 25th entry of the top list is not on the receiver; an action naming it is refused."""
+    hass.states.async_set("script.x", "off")
+    pressed = async_mock_service(hass, "script", "turn_on")
+    claim_menu(box_on_the_broker)
+    await async_setup_box(
+        hass, menu_entry([row(f"r_{n}", "script.x", "button") for n in range(25)])
+    )
+    assert "r_24" not in items_by_id(last_menu(mqtt_mock))
+
+    fire_action(hass, "r_24", "press", action_id="000000000001")
+    await hass.async_block_till_done()
+    assert pressed == []
+    assert "(unknown_row: r_24 (left out of the menu))" in caplog.text
+
+    fire_action(hass, "r_23", "press", action_id="000000000002")
+    await hass.async_block_till_done()
+    assert len(pressed) == 1

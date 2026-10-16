@@ -76,8 +76,7 @@ language and mapped back to the entity's own word on `set`; two options that rea
 translated or cut fall back to the entity's word, or are left out. **Green means all good**: on,
 open and locked are green and their opposites red, except that a binary sensor whose "on" needs
 attention - a door, a window, smoke, a leak, a problem, an update waiting, a vibration, a
-sound - is green while off, as the contract's
-example of a closed door shows. The plugin draws the colour it is given; the rule is this
+sound - is green while off, as the contract's example of a closed door shows. The plugin draws the colour it is given; the rule is this
 integration's. An entity in password mode is published without its text - no `state` text and
 no text `value` - whatever control the row shows it as, an indicator included.
 
@@ -86,8 +85,10 @@ saved, when the receiver comes back online, and when a bound entity changes: the
 once and a burst after it as one publish half a second later, which keeps both "at most one every
 0.5 s" and "within 1 s of a change". A change the payload does not show publishes nothing. Eight
 groups, 24 entries per list, labels at 60, state texts at 24, options at 24 of 60, units at 8; the
-whole payload under 64 KiB, dropping from the end with one warning per thing left out. `rev`
-counts the publishes of one Home Assistant run and survives reloads within it.
+whole payload under 64 KiB - measured with the `rev` it goes out with - dropping from the end
+with one warning per thing left out. A row left out is not on the receiver, and an action naming
+it is refused as an unknown row. `rev` counts the publishes of one Home Assistant run and
+survives reloads within it.
 
 **7. The menu goes with the entry.** Removing the entry publishes the empty retained payload,
 which the receiver reads as "no menu". Reconfiguring to a new node ID retracts the old node's
