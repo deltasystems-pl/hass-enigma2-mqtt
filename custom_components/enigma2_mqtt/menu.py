@@ -74,7 +74,7 @@ from .const import (
     TOPIC_AVAILABILITY,
     TOPIC_MENU_PREFIX,
 )
-from .withheld import _named
+from .withheld import plain_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1368,7 +1368,7 @@ class ReceiverMenu:
             severity=ir.IssueSeverity.WARNING,
             translation_key=CLOCK_ISSUE_KEY,
             translation_placeholders={
-                "name": _named(
+                "name": plain_name(
                     str(self.box.announcement.get("name") or ""),
                     self.box.name,
                     self.entry.title,

@@ -848,11 +848,11 @@ SEEN = ["\u1161", "\ufdff", "\ufe10", "\u180a", "\u1810", "\u17b3", "\u17b6"]
 
 @pytest.mark.parametrize("character", UNSEEN, ids=[ascii(item) for item in UNSEEN])
 def test_a_character_that_is_drawn_as_nothing_is_taken_out_of_a_name(character: str) -> None:
-    from custom_components.enigma2_mqtt.withheld import _named, _visible  # noqa: PLC0415
+    from custom_components.enigma2_mqtt.withheld import _visible, plain_name  # noqa: PLC0415
 
     assert _visible(f"Sp{character}ort{character}") == "Sport"
     # And a name made of nothing else falls back like an empty one.
-    assert _named(character * 3, "sport_hd") == "sport_hd"
+    assert plain_name(character * 3, "sport_hd") == "sport_hd"
 
 
 @pytest.mark.parametrize("character", SEEN, ids=[ascii(item) for item in SEEN])
@@ -903,11 +903,11 @@ async def test_a_name_that_reduces_to_nothing_is_replaced_by_the_next_best_one(
 
 def test_a_device_whose_every_name_reduces_to_nothing_is_still_called_something() -> None:
     """The name given here, then the node id, then the placeholder."""
-    from custom_components.enigma2_mqtt.withheld import NO_NAME, _named  # noqa: PLC0415
+    from custom_components.enigma2_mqtt.withheld import NO_NAME, plain_name  # noqa: PLC0415
 
-    assert _named(RLO, "***", "vuuno4kse_005301") == "vuuno4kse_005301"
-    assert _named("", None, ZWSP) == NO_NAME == "?"
-    assert _named("Sport", "sport") == "Sport"
+    assert plain_name(RLO, "***", "vuuno4kse_005301") == "vuuno4kse_005301"
+    assert plain_name("", None, ZWSP) == NO_NAME == "?"
+    assert plain_name("Sport", "sport") == "Sport"
 
 
 def test_a_slug_keeps_its_underscores() -> None:
