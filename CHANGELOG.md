@@ -29,8 +29,8 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   `menu_action`; Home Assistant performs it only for a row the saved menu holds, with that row's
   action and a value the entity accepts, and refuses anything else - also an action stamped more
   than 120 seconds before or after Home Assistant's clock, one on a control whose last action is
-  still being carried out, and any beyond five a second from one receiver - with one log line
-  per cause. A
+  still being carried out, and any beyond five a second from one receiver, where only actions
+  that pass every other check count - with one log line per cause. A
   receiver whose clock is behind gets a repair, „the receiver's clock is behind", at the first
   action refused for it; the next accepted action removes it.
   The event `enigma2_mqtt_menu_action` follows every performed action. Removing the entry

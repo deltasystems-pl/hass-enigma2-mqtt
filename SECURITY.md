@@ -34,8 +34,8 @@ the receiver as the least trusted device on the network and change that password
 makes Home Assistant call services on a message from the broker, `menu_action`. Anyone who can
 publish to the broker can send one, so the integration treats it as untrusted input: it performs
 only an action on a row the user put into the menu, with that row's action and a value the bound
-entity accepts, one action per row at a time and at most five a second per receiver, and refuses
-everything else ([ADR-0012](docs/adr/0012-receiver-menu.md)). Put into
+entity accepts, one action per row at a time and at most five a second per receiver (refused
+actions do not count towards the five), and refuses everything else ([ADR-0012](docs/adr/0012-receiver-menu.md)). Put into
 the menu only what you would hand to anyone holding the remote. The menu - the names and states
 of the entities in it - is retained on the broker for any login to read; a text entity in password
 mode is published without its text, whether the menu shows it as a text field or as an indicator.

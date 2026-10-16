@@ -462,7 +462,8 @@ and Home Assistant's clock are refused too; an action without a time is accepted
 action per control at a time, and at most five a second from one receiver**: an OK on a
 control whose last action is still being carried out is refused, and so is every action beyond
 five in any second - a key held down, or anyone on the broker, does not become a stream of
-service calls. Keep the
+service calls. Only actions that pass every other check count towards the five, so refused
+ones cost nothing and cannot crowd out a real press. Keep the
 receiver's clock right - an action from a receiver whose clock is more than two minutes behind
 or ahead is always refused. A clock behind also raises a repair, „the receiver's clock is
 behind", at the first such refusal; it goes by itself at the next action Home Assistant accepts

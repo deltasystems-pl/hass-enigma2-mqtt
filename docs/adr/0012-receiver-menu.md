@@ -42,9 +42,13 @@ was pressed for a screen that is gone; one stamped further ahead comes from a cl
 limit cannot judge, and would pass it for as long as that clock is ahead. An action without `ts`
 is accepted, and one whose `ts` is not a number is refused. And only one at a time per row and
 five a second per receiver: an action on a row whose last action is still being performed is
-refused, and so is one beyond five in any second, counted over the actions taken on, so the
-refused ones cost nothing - a key held down, or anyone on the broker, cannot turn the menu
-into a stream of service calls. Anything else is refused with a log line - a warning the first
+refused, and so is one beyond five in any second. The five are counted only over actions that
+passed every check that needs no service call - the row, whether the last menu carried it, the
+action its control takes, its entity's availability and the value, all checked before the
+action is counted - so an action refused for any cause costs nothing, and junk on the broker
+cannot use up the second a real press needs; a key held down, or anyone on the broker, cannot
+turn the menu into a stream of service calls. A selector's value is checked against the options
+in the words of the last menu published, which are the words the receiver shows. Anything else is refused with a log line - a warning the first
 time for each cause, then debug, because anyone on the broker can send these and the log must
 not be theirs to fill - and nothing is called. A text that reads as a number is not a number.
 

@@ -726,6 +726,43 @@ async def test_five_hundred_rapid_toggles_call_a_bounded_number_of_services(
     assert "(flood" in caplog.text
 
 
+@pytest.mark.parametrize(
+    ("row_id", "action", "value", "cause"),
+    [
+        ("r_nothing", "press", None, "unknown_row"),
+        ("r_movie", "toggle", None, "wrong_action"),
+        ("r_door", "toggle", None, "not_actionable"),
+        ("r_off", "toggle", None, "unavailable"),
+        ("r_lock", "toggle", None, "state_unknown"),
+        ("r_dim", "set", 101, "invalid_value"),
+        # The entity's own word, not the one the menu offered.
+        ("r_heat", "set", "auto", "invalid_value"),
+    ],
+)
+async def test_refused_actions_do_not_spend_the_flood_budget(
+    hass: HomeAssistant,
+    menu_box: Any,
+    calls: list[ServiceCall],
+    caplog: pytest.LogCaptureFixture,
+    row_id: str,
+    action: str,
+    value: Any,
+    cause: str,
+) -> None:
+    """Five junk actions in a second leave room for a real press in the same second."""
+    hass.states.async_set("lock.front", "jammed")
+    with patch("custom_components.enigma2_mqtt.menu._monotonic", return_value=1000.0):
+        for n in range(5):
+            fire_action(hass, row_id, action, value, action_id=f"{n:012x}")
+        await hass.async_block_till_done(wait_background_tasks=True)
+        fire_action(hass, "r_switch", "toggle", action_id="0000000000ff")
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert f"({cause}" in caplog.text
+    assert "(flood" not in caplog.text
+    assert _performed(calls) == [("switch", "toggle", {"entity_id": "switch.kettle"})]
+
+
 async def test_a_row_takes_one_action_at_a_time(
     hass: HomeAssistant, menu_box: Any, calls: list[ServiceCall], caplog
 ) -> None:

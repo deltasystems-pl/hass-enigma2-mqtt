@@ -1019,6 +1019,20 @@ def service_call(
     return domain, "set_value", {"value": value}, value
 
 
+@dataclass(slots=True, frozen=True)
+class PlannedCall:
+    """The service call an action makes, decided before the action is taken on."""
+
+    row_id: str
+    control: str
+    entity_id: str
+    domain: str
+    service: str
+    data: dict[str, Any]
+    # The value the event reports: the entity's own option, the number on its step, the text.
+    applied: Any
+
+
 async def async_menu_texts(
     hass: HomeAssistant, rows: Iterable[Mapping[str, Any]]
 ) -> dict[str, str]:
@@ -1091,6 +1105,9 @@ class ReceiverMenu:
         # The ids of the rows the last menu carried: a row left out to stay inside the
         # contract's bounds is not on the receiver, and is not acted on.
         self._published_rows: set[str] = set()
+        # The translations that menu was built with: an action is checked against the words
+        # the receiver shows, without waiting for a translation load before it is admitted.
+        self._texts: dict[str, str] = {}
 
     @property
     def topic(self) -> str:
@@ -1206,6 +1223,7 @@ class ReceiverMenu:
         force, self._force = self._force, False
         rev = 0
         rows: set[str] = set()
+        texts: dict[str, str] = {}
         encoded = wire = b""
         if self.menu:
             texts = await self._async_texts(menu_rows(self.menu))
@@ -1230,6 +1248,7 @@ class ReceiverMenu:
             return
         self._published = wire
         self._published_rows = rows
+        self._texts = texts
         if wire:
             self._revs()[self.box.node_id] = rev
             text = encoded.decode("utf-8")
@@ -1266,6 +1285,7 @@ class ReceiverMenu:
             if action.action_id in self._recent_ids:
                 raise Refused("duplicate", action.action_id)
             self._recent_ids.append(action.action_id)
+            call = self._planned_call(action)
             self._admit(action)
         except Refused as refusal:
             if refusal.cause == "stale":
@@ -1278,17 +1298,43 @@ class ReceiverMenu:
             async_delete_clock_issue(self.hass, self.entry.entry_id)
         self.entry.async_create_background_task(
             self.hass,
-            self._async_perform(action),
+            self._async_perform(action, call),
             f"{DOMAIN} menu_action {self.box.node_id}",
+        )
+
+    @callback
+    def _planned_call(self, action: MenuAction) -> PlannedCall:
+        """The service call an action makes on the row the options hold now, or `Refused`.
+
+        Every check that needs no service call happens here, before the action is admitted:
+        the row, whether the last menu carried it, the action its control takes, whether
+        its entity is available, and the value. The texts are the ones the last menu was
+        built with, so a selector's option is the word the receiver shows.
+        """
+        if (row := find_row(self.menu, action.row)) is None:
+            raise Refused("unknown_row", action.row)
+        if action.row not in self._published_rows:
+            raise Refused("unknown_row", f"{action.row} (left out of the menu)")
+        view = render_row(self.hass, row, self._texts)
+        domain, service, data, applied = service_call(row, view, action)
+        return PlannedCall(
+            row_id=row[ITEM_ID],
+            control=row[ROW_CONTROL],
+            entity_id=view.entity_id,
+            domain=domain,
+            service=service,
+            data=data,
+            applied=applied,
         )
 
     @callback
     def _admit(self, action: MenuAction) -> None:
         """Take the action on, or refuse it as a flood.
 
-        One action per row at a time: a row whose last action is still being performed
-        refuses the next. And at most `ACTIONS_PER_SECOND` from this receiver in any
-        second, counted over the actions taken on, so refused ones cost nothing.
+        Called for an action that passed every other check. One action per row at a time:
+        a row whose last action is still being performed refuses the next. And at most
+        `ACTIONS_PER_SECOND` from this receiver in any second, counted over the actions
+        taken on, so an action refused for any cause costs nothing.
         """
         if action.row in self._in_flight:
             raise Refused("busy", f"row {action.row}")
@@ -1300,38 +1346,29 @@ class ReceiverMenu:
         self._admitted.append(now)
         self._in_flight.add(action.row)
 
-    async def _async_perform(self, action: MenuAction) -> None:
+    async def _async_perform(self, action: MenuAction, call: PlannedCall) -> None:
         """Perform an action, and let its row take the next one once it is done."""
         try:
-            await self._async_perform_row(action)
+            await self._async_call(action, call)
         finally:
             self._in_flight.discard(action.row)
 
-    async def _async_perform_row(self, action: MenuAction) -> None:
-        """Perform an action against the row the options hold now, or refuse it."""
-        try:
-            if (row := find_row(self.menu, action.row)) is None:
-                raise Refused("unknown_row", action.row)
-            if action.row not in self._published_rows:
-                raise Refused("unknown_row", f"{action.row} (left out of the menu)")
-            texts = await self._async_texts([row])
-            view = render_row(self.hass, row, texts)
-            domain, service, data, applied = service_call(row, view, action)
-        except Refused as refusal:
-            self._log_refusal(refusal)
-            return
-        entity_id = view.entity_id
+    async def _async_call(self, action: MenuAction, call: PlannedCall) -> None:
+        """Make the service call, and fire the event once it returned without an error."""
         try:
             await self.hass.services.async_call(
-                domain, service, {ATTR_ENTITY_ID: entity_id, **data}, blocking=True
+                call.domain,
+                call.service,
+                {ATTR_ENTITY_ID: call.entity_id, **call.data},
+                blocking=True,
             )
         except (HomeAssistantError, vol.Invalid) as error:
             _LOGGER.warning(
                 "The menu of %s could not call %s.%s for %s: %s",
                 self.box.node_id,
-                domain,
-                service,
-                entity_id,
+                call.domain,
+                call.service,
+                call.entity_id,
                 error,
             )
             return
@@ -1340,10 +1377,10 @@ class ReceiverMenu:
             {
                 ATTR_DEVICE_ID: self.box.device_id,
                 ATTR_NODE_ID: self.box.node_id,
-                "row_id": row[ITEM_ID],
-                ATTR_ENTITY_ID: entity_id,
+                "row_id": call.row_id,
+                ATTR_ENTITY_ID: call.entity_id,
                 "action": action.action,
-                "value": applied,
+                "value": call.applied,
             },
         )
 
