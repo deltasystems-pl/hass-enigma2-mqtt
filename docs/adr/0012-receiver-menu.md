@@ -55,7 +55,8 @@ with a long delay does not keep its row busy for the whole run, and the row is f
 soon as Home Assistant accepted the call. Every other row waits for its call, because the next
 toggle or value should go by what the last one did - but for at most 30 seconds; then the row
 takes the next action, with one warning in the log, and the call goes on, uncancelled, since a
-device in the middle of a command is not interrupted for the menu's sake. Any exception a
+device in the middle of a command is not interrupted for the menu's sake. Only unloading the
+entry cancels it, and then no event follows. Any exception a
 service raises is logged as one line and performs nothing more. Anything else is refused with a log line - a warning the first
 time for each cause, then debug, because anyone on the broker can send these and the log must
 not be theirs to fill - and nothing is called. A text that reads as a number is not a number.

@@ -468,7 +468,7 @@ starts**: a script, a scene, an automation or a button entity takes the next OK 
 Assistant accepted the call, so a script with a long delay can be pressed again while it runs.
 Every other control waits for its service call, but **at most 30 seconds**: then it takes the
 next OK, with one warning in the log, and the call that has not returned is left to finish, not
-cancelled. Keep the
+cancelled - until the integration is reloaded or removed, which cancels it without an event. Keep the
 receiver's clock right - an action from a receiver whose clock is more than two minutes behind
 or ahead is always refused. A clock behind also raises a repair, „the receiver's clock is
 behind", at the first such refusal; it goes by itself at the next action Home Assistant accepts

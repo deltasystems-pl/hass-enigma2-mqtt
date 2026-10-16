@@ -116,7 +116,8 @@ MAX_ACTION_AGE = 120
 ACTIONS_PER_SECOND = 5
 FLOOD_WINDOW = 1.0
 # Seconds a row other than a button waits for its service call before it takes the next
-# action anyway (ADR-0012). The call is not cancelled then; a button does not wait at all.
+# action anyway (ADR-0012). The call is not cancelled then (only an unload cancels it); a
+# button does not wait at all.
 ROW_RELEASE_AFTER = 30
 # The repair raised when an action is refused as stale: the receiver's clock is behind, and
 # every OK in its menu is refused until it is right. One per config entry.
