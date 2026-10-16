@@ -36,10 +36,11 @@ performed only for a receiver whose `info` claims `menu`; only when it is not re
 was not just seen; only for a row the saved options hold now, with the action that row's control
 takes; only on an entity that is available; only with a value inside what the entity accepts
 now - an option it offers, a number inside the slider's range snapped to its step, a text no
-longer than the entity's maximum; and only when its `ts` is at most 120 seconds before Home
-Assistant's clock. The plugin never queues an action across a disconnect, so an older one was
-pressed for a screen that is gone; an action without `ts` is accepted, and one whose `ts` is not
-a number is refused. Anything else is refused with a log line - a warning the first
+longer than the entity's maximum; and only when its `ts` is at most 120 seconds before or after
+Home Assistant's clock. The plugin never queues an action across a disconnect, so an older one
+was pressed for a screen that is gone; one stamped further ahead comes from a clock the age
+limit cannot judge, and would pass it for as long as that clock is ahead. An action without `ts`
+is accepted, and one whose `ts` is not a number is refused. Anything else is refused with a log line - a warning the first
 time for each cause, then debug, because anyone on the broker can send these and the log must
 not be theirs to fill - and nothing is called. A text that reads as a number is not a number.
 
@@ -119,7 +120,7 @@ nothing. No entity is added for the menu.
 - The icon names are a contract shared with the plugin: the options offer exactly the plugin's
   list, and a name the plugin does not know is drawn as the neutral icon, so the list may only
   grow on the plugin's side first.
-- A receiver whose clock is more than two minutes behind Home Assistant's has every action
-  refused; the log says why.
+- A receiver whose clock is more than two minutes behind or ahead of Home Assistant's has every
+  action refused; the log says why.
 - Removing an entity from the registry greys its row; it stays in the options until it is
   removed or bound again.

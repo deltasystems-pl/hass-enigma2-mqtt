@@ -475,35 +475,40 @@ def test_parse_action_reads_every_field() -> None:
 
 
 
-@pytest.mark.parametrize(("age", "performed"), [(0, True), (100, True), (-30, True),
-                                                (125, False), (3600, False)])
-async def test_an_action_older_than_two_minutes_is_refused(
+@pytest.mark.parametrize(
+    ("age", "cause"),
+    [(0, None), (100, None), (-30, None), (-100, None),
+     (125, "stale"), (3600, "stale"), (-125, "future"), (-3600, "future")],
+)
+async def test_an_action_more_than_two_minutes_off_is_refused(
     hass: HomeAssistant,
     menu_box: Any,
     calls: list[ServiceCall],
     caplog: pytest.LogCaptureFixture,
     age: int,
-    performed: bool,
+    cause: str | None,
 ) -> None:
-    """Pressed for a screen that is long gone; a receiver clock ahead of ours is no reason."""
+    """Pressed for a screen that is long gone, or stamped by a clock far ahead of ours."""
     fire_action(hass, "r_switch", "toggle", ts=int(dt_util.utcnow().timestamp()) - age)
     await hass.async_block_till_done()
 
-    assert (len(calls) == 1) is performed
-    assert ("(stale" in caplog.text) is not performed
+    assert (len(calls) == 1) is (cause is None)
+    assert ("(stale" in caplog.text) is (cause == "stale")
+    assert ("(future" in caplog.text) is (cause == "future")
 
 
 @pytest.mark.parametrize(
-    ("now", "refused"),
-    [(1120.0, False), (1120.001, True), (1000.0, False), (900.0, False)],
+    ("now", "cause"),
+    [(1120.0, None), (1120.001, "stale"), (1000.0, None), (900.0, None),
+     (880.0, None), (879.999, "future")],
 )
-def test_the_age_limit_is_120_seconds(now: float, refused: bool) -> None:
-    """At exactly 120 s an action still counts; a moment later it does not."""
+def test_the_age_limit_is_120_seconds_either_way(now: float, cause: str | None) -> None:
+    """At exactly 120 s an action still counts; a moment later, or earlier, it does not."""
     payload = b'{"id":"3f9c2e4a1b7d","rev":1,"row":"r_a","action":"toggle","ts":1000}'
-    if refused:
+    if cause is not None:
         with pytest.raises(Refused) as caught:
             parse_action(payload, now=now)
-        assert caught.value.cause == "stale"
+        assert caught.value.cause == cause
     else:
         assert parse_action(payload, now=now).row == "r_a"
 

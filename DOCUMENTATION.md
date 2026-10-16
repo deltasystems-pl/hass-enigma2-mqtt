@@ -454,10 +454,11 @@ claims `menu`, only for a row the saved menu holds now, with the action that row
 takes, on an entity that is available, and with a value inside what the entity accepts now - an
 option it offers, a number inside the slider's range (put on its step), a text no longer than
 its maximum. Anything else is refused with a warning in the log, once per kind of refusal, and
-nothing is called. A retained action, one whose id was just seen, and **one more than 120 seconds
-old** by the time it carries (`ts`, the receiver's clock) and Home Assistant's clock are refused
-too; an action without a time is accepted. Keep the receiver's clock right - an action from a
-receiver whose clock is more than two minutes behind is always refused. A row keeps
+nothing is called. A retained action, one whose id was just seen, and **one whose time is more
+than 120 seconds off** - older, or ahead - by the time it carries (`ts`, the receiver's clock)
+and Home Assistant's clock are refused too; an action without a time is accepted. Keep the
+receiver's clock right - an action from a receiver whose clock is more than two minutes behind
+or ahead is always refused. A row keeps
 its id across restarts and while only its name or icon change; bound to another entity or shown
 as another control, it gets a new id, so a press the receiver sent for the old binding cannot
 reach the new one. A service call that fails is logged; there is no repair.

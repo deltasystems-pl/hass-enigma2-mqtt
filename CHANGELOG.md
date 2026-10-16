@@ -26,8 +26,8 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   with state texts in the household's language, under 64 KiB, and never the text of an entity
   in password mode, whatever control it is shown as. A viewer's OK arrives as
   `menu_action`; Home Assistant performs it only for a row the saved menu holds, with that row's
-  action and a value the entity accepts, and refuses anything else - also an action more than
-  120 seconds old - with one log line per cause.
+  action and a value the entity accepts, and refuses anything else - also an action stamped more
+  than 120 seconds before or after Home Assistant's clock - with one log line per cause.
   The event `enigma2_mqtt_menu_action` follows every performed action. Removing the entry
   retracts the menu, and so does reconfiguring to a new node ID for the old node. No entity is
   added.

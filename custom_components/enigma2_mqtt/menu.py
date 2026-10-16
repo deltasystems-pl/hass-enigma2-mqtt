@@ -105,7 +105,8 @@ ACTION_MAX_BYTES = 4096
 ACTION_IDS_REMEMBERED = 64
 # Seconds an action may be old, by its `ts` and this Home Assistant's clock (ADR-0012).
 # The plugin never queues an action across a disconnect; one older than this was pressed for
-# a screen that is long gone. An action without `ts` is accepted.
+# a screen that is long gone. One stamped more than this ahead is refused as well. An action
+# without `ts` is accepted.
 MAX_ACTION_AGE = 120
 
 # The six controls of the contract, and the action the receiver sends for each.
@@ -876,7 +877,8 @@ def parse_action(payload: Any, now: float | None = None) -> MenuAction:
     """Read one `menu_action`, or raise `Refused` with what was wrong with it.
 
     `now` is this Home Assistant's clock in epoch seconds; an action whose `ts` is more than
-    `MAX_ACTION_AGE` seconds before it is refused as stale.
+    `MAX_ACTION_AGE` seconds before it is refused as stale, and one more than that after it
+    as from the future.
     """
     if isinstance(payload, (bytes, bytearray)) and len(payload) > ACTION_MAX_BYTES:
         raise Refused("unreadable", f"{len(payload)} bytes")
@@ -907,6 +909,10 @@ def parse_action(payload: Any, now: float | None = None) -> MenuAction:
         now = dt_util.utcnow().timestamp() if now is None else now
         if now - ts > MAX_ACTION_AGE:
             raise Refused("stale", f"{now - ts:.0f} s old")
+        if ts - now > MAX_ACTION_AGE:
+            # The receiver's clock is ahead: an action stamped for later is not one the
+            # age limit can judge, and it would pass it for as long as the clock is ahead.
+            raise Refused("future", f"{ts - now:.0f} s ahead")
     return MenuAction(action_id, rev, row, action, data.get("value"))
 
 
