@@ -39,6 +39,8 @@ actions do not count towards the five), and refuses everything else ([ADR-0012](
 the menu only what you would hand to anyone holding the remote. The menu - the names and states
 of the entities in it - is retained on the broker for any login to read; a text entity in password
 mode is published without its text, whether the menu shows it as a text field or as an indicator.
+Anyone who can publish to the broker can also raise and clear the repair about the receiver's
+clock - a nuisance only, since it changes nothing but what that repair says.
 
 **SSH password.** The guided installer asks for the receiver's SSH password. It is
 **discarded after a successful install** unless you explicitly ask to keep it for later plugin

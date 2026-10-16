@@ -503,7 +503,9 @@ triggers:
 🔴 **Anyone who can publish to your broker can press a row.** The Mosquitto add-on does not
 enforce an ACL, and `menu_action` carries no secret. What it can do is exactly what you put into
 the menu and nothing more, so **only put into it what you would hand to anyone holding the
-remote**. The menu's states are on the broker too, retained, for any login to read.
+remote**. The menu's states are on the broker too, retained, for any login to read. Anyone on
+the broker can also raise the repair about the receiver's clock, with an action stamped in the
+past, and clear it, with an action stamped now - a nuisance, nothing more.
 
 ### Reconfigure
 
