@@ -300,10 +300,12 @@ end of the link rather than about the box; saving them reloads the entry, so a c
 effect without a restart.
 
 When there is more to offer than this form, *Configure* opens on a menu instead: **Options**,
-which is this form; **Install an older plugin version** („Zainstaluj starszą wersję wtyczki"),
-described below; and, on a receiver that permits its own removal, **Remove the plugin from the
-receiver** („Usuń wtyczkę z dekodera"), described in [§8](#removing-the-plugin-from-the-receiver).
-With neither on offer - the usual case - it opens straight on the form, as before.
+which is this form; **Receiver menu** („Menu na dekoderze"), on a receiver that can show one or
+an entry that holds one, described in [Receiver menu](#receiver-menu); **Install an older plugin
+version** („Zainstaluj starszą wersję wtyczki"), described below; and, on a receiver that permits
+its own removal, **Remove the plugin from the receiver** („Usuń wtyczkę z dekodera"), described in
+[§8](#removing-the-plugin-from-the-receiver). With none of them on offer it opens straight on the
+form, as before.
 
 **Install an older plugin version** is the only way back to an older plugin: never over MQTT and
 never from the update card. It is offered only with SSH credentials stored, once the receiver has
@@ -379,6 +381,132 @@ receiver that claims the `stream` capability, and collapsed until it is in use. 
 Nothing is stored for a field left at its default, and nothing at all while the address is
 empty. [§4.7](#47-streams) says what is sent, when, and what the template is for.
 
+### Receiver menu
+
+*Configure -> Receiver menu* („Menu na dekoderze"), for a receiver on plugin 0.5.0 or later that
+claims the `menu` capability. The plugin then shows a **"Home Assistant" menu on the television**,
+opened from the receiver's *Extensions* menu and by a key on the remote (long HELP unless changed
+on the receiver), and this is where its contents are chosen. The receiver never learns what a row
+does: it shows what Home Assistant publishes and, when the viewer presses OK, sends back which
+row and - for a slider, a list or a text - which value. Home Assistant performs it
+([ADR-0012](docs/adr/0012-receiver-menu.md)).
+
+The menu is **one level of groups**, each a list of controls, plus controls at the top. At most
+**8 groups**, at most **24 entries** in the top list (groups and controls together) and at most 24
+controls in each group. The step shows the menu as it stands and offers *Add a group*, *Add a
+control*, *Change a group*, *Change a control*, *Move a group or a control*, *Remove groups or
+controls* and *Save the menu*.
+**Nothing changes until you save**; closing the dialog discards the edits. Saving stores the
+menu in the entry's options and reloads the entry, and the reload publishes it.
+
+- **A group** has a name (shown cut at 60 characters) and an icon.
+- **A control** is any entity, scene or script picked with Home Assistant's entity picker, the
+  place it goes (the top list or a group), and optionally a name and an icon. Without a name the
+  row shows the entity's own name; without an icon it gets one that fits the entity. When the
+  entity can be shown in more than one way - a light as a switch or as a brightness slider - a
+  second step asks which. An entity of a domain the table below does not list is shown as an
+  indicator, with its state.
+- A control stores the entity's **registry id**, so it follows the entity when its entity ID is
+  renamed: the row keeps showing it and acting on it under the new ID, without opening the
+  options. An entity that has no registry entry is stored by its entity ID.
+- New groups and controls go to the end of the list they are put in. Changing a control's place
+  moves it to the end of the new list. *Move a group or a control* moves one entry one place up or
+  down within its own list - the top list, or the group it is in; at the end of its list it
+  stays.
+
+The icons are the plugin's own, by name: `neutral`, `lamp`, `ceiling-light`, `blinds`, `scene`,
+`script`, `power`, `fan`, `lock`, `radiator`, `thermometer`, `tv`, `speaker`, `door`, `gate`,
+`garage`, `alarm`, `camera`, `sofa`, `bed`, `kitchen`, `garden`, `movie`, `note`, `home`.
+
+| Control | Entities | What OK does | What the row shows |
+|---|---|---|---|
+| Button | `script`, `scene`, `button`, `input_button`, `automation` | `script.turn_on`, `scene.turn_on`, `button.press`, `input_button.press`, `automation.trigger` | nothing on the right |
+| Switch | `light`, `switch`, `input_boolean`, `fan`, `cover`, `lock` | the domain's `toggle`; for a cover `close_cover` when it is open and `open_cover` when it is closed; for a lock `unlock` when it is locked and `lock` when it is unlocked - by the state when OK arrives, not the one the row showed | the state in your language, green while on (open, locked), red while off |
+| Indicator | any entity except a script, scene, button, input button or automation, which are buttons only | nothing - it cannot be acted on | the state in your language, coloured where it is on or off; a sensor shows its reading with its unit, and a state that is neither on nor off has no colour |
+| List of options | `select`, `input_select`, `climate` (HVAC mode) | `select_option`, or `climate.set_hvac_mode` | the current option; a climate's modes in your language |
+| Slider | `light` (brightness), `cover` (position), `media_player` (volume), `number`, `input_number` | `light.turn_on` with `brightness_pct`, `cover.set_cover_position`, `media_player.volume_set`, `set_value` | the value with its unit. Brightness, position and volume run 0-100 % in steps of 10; a number runs over its own range, its step made coarser where it would have more than 200 |
+| Text field | `input_text`, `text` | `set_value` | the text, cut at 24 characters; the receiver's keyboard takes the entity's maximum length, at most 255. **A field in password mode never has its text published** - neither here nor as an indicator |
+
+**Green means all good, red means look at it.** A switch is green while on (a cover open, a lock
+locked) and red while off. An indicator follows the same rule, except for a binary sensor whose
+"on" needs attention - door, window, opening, garage door, smoke, gas, carbon monoxide, moisture,
+safety, problem, tamper, lock, battery, heat, cold, update, vibration, sound - which is green
+while off: a closed door is green, an open one red. A connection is green while connected.
+
+A light that is only on or off is not offered as a slider, nor a cover without a position or a
+player whose volume cannot be set. An entity that is unavailable, or that no longer exists, is
+shown greyed and cannot be acted on.
+
+**When it is published.** Retained, QoS 1, on `enigma2mqtt/menu/<node_id>` - outside the
+receiver's base topic, because it is this integration's - at setup, after every save, when the
+receiver comes back online, when Home Assistant's connection to the broker comes back, and
+whenever a bound entity's state changes in a way the menu shows:
+the first change at once, a burst of changes as one publish half a second later. An attribute
+the menu does not show (a player's position) publishes nothing. The whole payload stays under
+64 KiB; whatever would not fit, or would break a bound above (more than 24 options in a list,
+for example), is left out from the end with one warning in the log, and an action on a control
+that was left out is refused. An empty menu is published
+as the empty payload, which the receiver reads as "no menu". **Removing the entry retracts the
+menu**, and reconfiguring to a new node ID retracts the old node's; unloading or reloading
+leaves it as it is.
+
+**When the viewer presses OK.** The receiver sends one `menu_action` on
+`<base_topic>/<node_id>/menu_action`. Home Assistant performs it only for a receiver that
+claims `menu`, only for a row the saved menu holds now, with the action that row's control
+takes, on an entity that is available, and with a value inside what the entity accepts now - an
+option it offers, a number inside the slider's range (put on its step), a text no longer than
+its maximum. Anything else is refused with a warning in the log, once per kind of refusal, and
+nothing is called. A retained action, one whose id was just seen, and **one whose time is more
+than 120 seconds off** - older, or ahead - by the time it carries (`ts`, the receiver's clock)
+and Home Assistant's clock are refused too; an action without a time is accepted. **One
+action per control at a time, and at most five a second from one receiver**: an OK on a
+control whose last action is still being carried out is refused, and so is every action beyond
+five in any second - a key held down, or anyone on the broker, does not become a stream of
+service calls. Only actions that pass every other check count towards the five, so refused
+ones cost nothing and cannot crowd out a real press. **A button does not wait for what it
+starts**: a script, a scene, an automation or a button entity takes the next OK as soon as Home
+Assistant accepted the call, so a script with a long delay can be pressed again while it runs.
+Every other control waits for its service call, but **at most 30 seconds**: then it takes the
+next OK, with one warning in the log, and the call that has not returned is left to finish, not
+cancelled - until the integration is reloaded or removed, which cancels it without an event. Keep the
+receiver's clock right - an action from a receiver whose clock is more than two minutes behind
+or ahead is always refused. A clock behind also raises a repair, „the receiver's clock is
+behind", at the first such refusal; it goes by itself at the next action Home Assistant accepts
+([§8](#8-troubleshooting)). A row keeps
+its id across restarts and while only its name or icon change; bound to another entity or shown
+as another control, it gets a new id, so a press the receiver sent for the old binding cannot
+reach the new one. A service call that fails is logged; there is no repair.
+
+After an action was performed, Home Assistant fires the event **`enigma2_mqtt_menu_action`** -
+for a button once Home Assistant accepted the call (what the script or automation does after
+that is not waited for, and an error inside it is in Home Assistant's own log), for every other
+control once the service call returned without an error, even when that took longer than the 30
+seconds after which the control was freed. A call that fails fires nothing:
+
+| Field | What it holds |
+|---|---|
+| `device_id` | the receiver's device |
+| `node_id` | the receiver's node ID |
+| `row_id` | the row's id |
+| `entity_id` | the entity the row is bound to |
+| `action` | `press`, `toggle` or `set` |
+| `value` | for `set`, the value applied (the entity's own option, the number on its step, the text); otherwise `null` |
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: enigma2_mqtt_menu_action
+    event_data:
+      entity_id: script.movie_night
+```
+
+🔴 **Anyone who can publish to your broker can press a row.** The Mosquitto add-on does not
+enforce an ACL, and `menu_action` carries no secret. What it can do is exactly what you put into
+the menu and nothing more, so **only put into it what you would hand to anyone holding the
+remote**. The menu's states are on the broker too, retained, for any login to read. Anyone on
+the broker can also raise the repair about the receiver's clock, with an action stamped in the
+past, and clear it, with an action stamped now - a nuisance, nothing more.
+
 ### Reconfigure
 
 *...-> Enigma2 MQTT -> the receiver -> Reconfigure.* This is for following a box whose **node ID**
@@ -389,7 +517,8 @@ really answers on the new topic before it saves anything.
 with a new node ID is, as far as Home Assistant can tell, a different device doing the same
 job. The old device is removed - with its entities and their history - and the reload builds
 the box again under its new name. Changing only the base topic or the display name keeps
-everything.
+everything. The [receiver menu](#receiver-menu) moves with it: the old node's is retracted and
+the reload publishes it under the new one.
 
 ## 4. Entities
 
@@ -2040,6 +2169,15 @@ it runs by itself.
   with a very large channel list and plugin 0.4.0 or older.** That plugin sends the oversize
   payload and the broker closes the connection each time. Update the plugin to 0.5.0, or
   narrow `bouquets_for_select` on the receiver.
+- **A repair says „the receiver's clock is behind", and nothing in the receiver menu does
+  anything.** An action from the [receiver menu](#receiver-menu) was stamped more than two
+  minutes before Home Assistant's clock, so it was refused, and so is every other OK while the
+  clock stays behind. Let the receiver take its time from the internet (NTP) or from the
+  transponder in its time settings, check its time zone, and check Home Assistant's own clock.
+  The repair is raised at the first such refusal and goes by itself at the next action Home
+  Assistant accepts, or when the receiver is removed; unloading the receiver leaves it. A clock
+  **ahead** by more than two minutes raises no repair: those actions are refused too, and the log
+  says `future`.
 
 ### The plugin does not start, and Home Assistant cannot help
 
@@ -2092,12 +2230,13 @@ use it only if you accept that.
 
 Delete the entry in *Settings -> Devices & Services*. On the way out the integration publishes
 `cmd/ha_mode = discovery`, so the plugin announces itself again and the core MQTT integration
-rebuilds its own entities - a box that was taken over here is handed straight back. That
-publish is best effort: if the receiver is off or the broker is unreachable the entry is still
+rebuilds its own entities - a box that was taken over here is handed straight back. It also
+retracts the [receiver menu](#receiver-menu), whose rows nothing would perform any more. These
+publishes are best effort: if the receiver is off or the broker is unreachable the entry is still
 removed, and the mode can be set on the plugin's setup screen afterwards.
 
 🔴 **Deleting the entry never uninstalls anything**, whatever the entry holds and whatever the
-receiver permits: the one `cmd/ha_mode` publish above is the whole of what it sends, and it opens
+receiver permits: the `cmd/ha_mode` publish above is the only command it sends, and it opens
 no SSH connection. Removing the plugin is the separate action below
 ([ADR-0004](docs/adr/0004-remote-uninstall.md), [ADR-0006](docs/adr/0006-remote-uninstall-plugin-acts-ssh-verifies.md)).
 
@@ -2249,6 +2388,10 @@ reference of the channel that is on - as `media_content_id` already does. The on
 this section that leaves Home Assistant is the request to **your own go2rtc**, and only
 while you set its address: it carries the stream name and the source, which contains that
 same address and reference.
+
+The [receiver menu](#receiver-menu) publishes the names and states of the entities you put
+into it, retained, on the broker, for any login to read; an `input_text` or `text` in password
+mode is published without its text, whether it is a text field or an indicator. Leave out of the menu what the broker's users should not see.
 
 The [options](#options) can switch key publishing off, select `off`, `on_zap` or `interval`
 screenshots, set the interval and choose how long an on-zap capture waits for the new picture.

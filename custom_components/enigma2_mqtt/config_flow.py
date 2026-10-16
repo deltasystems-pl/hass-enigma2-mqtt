@@ -69,6 +69,7 @@ from .const import (
     CONF_GO2RTC_URL,
     CONF_HISTORY_HIDDEN_BOUQUETS,
     CONF_KEEP_SSH_CREDENTIALS,
+    CONF_MENU,
     CONF_NAME,
     CONF_NODE_ID,
     CONF_OSCAM_TELEMETRY,
@@ -135,6 +136,8 @@ from .installer import (
     async_preflight,
     async_probe_host_key,
 )
+from .menu import async_retract_menu
+from .menu_flow import ReceiverMenuSteps, menu_offered
 from .own_go2rtc import default_stream_name, validate_options as validate_go2rtc_options
 from .plugin_versions import has_credentials
 from .release_index import release_of
@@ -634,6 +637,12 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 if node_id != entry.data[CONF_NODE_ID]:
                     self._async_forget_device(entry.data[CONF_NODE_ID], entry.entry_id)
+                    # The old node's menu would stay on the broker for a receiver that
+                    # no longer reads it; the reload publishes it under the new id.
+                    try:
+                        await async_retract_menu(self.hass, entry.data[CONF_NODE_ID])
+                    except HomeAssistantError as error:
+                        _LOGGER.debug("Could not retract the old node's menu: %s", error)
                 return self.async_update_reload_and_abort(
                     entry,
                     unique_id=node_id,
@@ -831,7 +840,7 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
         }
 
 
-class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
+class Enigma2MqttOptionsFlow(ReceiverMenuSteps, OptionsFlowWithReload):
     """Preferences for the entities and the privacy-sensitive plugin publishers."""
 
     def __init__(self) -> None:
@@ -854,13 +863,17 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
         """Open on the options, or on a menu when there is more than the options to offer.
 
         The menu exists only while removing the plugin or installing an older version of it
-        is on offer, so for nearly every receiver Configure opens straight on the form, as it
-        always has. Both are menu entries rather than buttons because Home Assistant has no
+        is on offer, or while the receiver can show a menu of its own, so for a receiver
+        without any of them Configure opens straight on the form, as it always has. The
+        first two are menu entries rather than buttons because Home Assistant has no
         confirmation for a button or an action: a flow step is the only place a change of
-        this weight can be stated before it is made (ADR-0004, ADR-0008).
+        this weight can be stated before it is made (ADR-0004, ADR-0008). The receiver menu
+        is one because it is a list the user builds in steps (ADR-0012).
         """
         box = self._box()
         options = ["settings"]
+        if menu_offered(box, self.config_entry.options):
+            options.append("receiver_menu")
         if await self._async_downgrade_versions():
             options.append("downgrade")
         if box is not None and box.uninstall_offered:
@@ -1105,6 +1118,9 @@ class Enigma2MqttOptionsFlow(OptionsFlowWithReload):
             # it over rather than drop it.
             if (target := self.config_entry.options.get(CONF_PLUGIN_TARGET_VERSION)) is not None:
                 local_data[CONF_PLUGIN_TARGET_VERSION] = target
+            # Kept as well: the receiver menu is built in steps of its own (ADR-0012).
+            if (menu := self.config_entry.options.get(CONF_MENU)) is not None:
+                local_data[CONF_MENU] = menu
             # Nothing is sent to the receiver and no other step is entered while a field
             # on this form is wrong: a user correcting the address would otherwise have
             # already changed the box's privacy settings, or be three steps into an SSH

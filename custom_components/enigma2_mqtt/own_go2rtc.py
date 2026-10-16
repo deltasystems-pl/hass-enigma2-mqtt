@@ -84,7 +84,7 @@ from .const import (
     TOPIC_SERVICE,
     TOPIC_STREAM,
 )
-from .withheld import _named
+from .withheld import plain_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -623,13 +623,13 @@ class Go2rtcFollower:
                 GO2RTC_RETRY_SECONDS // 60,
             )
         placeholders = {
-            "name": _named(
+            "name": plain_name(
                 str(self.box.announcement.get("name") or ""),
                 self.box.name,
                 self.entry.title,
                 self.box.node_id,
             ),
-            "host": _named(host),
+            "host": plain_name(host),
             "stream": self.stream_name,
         }
         if problem == PROBLEM_REFUSED:

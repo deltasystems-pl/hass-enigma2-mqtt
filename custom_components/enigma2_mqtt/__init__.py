@@ -35,6 +35,7 @@ from .const import (
     PLUGIN_MIN_VERSION,
     TOPIC_INTEGRATION_PREFIX,
 )
+from .menu import ReceiverMenu, async_delete_clock_issue, async_retract_menu
 from .own_go2rtc import Go2rtcFollower, async_delete_go2rtc_issue
 from .picture import PiconResolver
 from .relay import async_answer_relay_request, async_get_relay
@@ -158,6 +159,15 @@ async def async_setup_entry(
     box.relay_request_handler = _relay_request
     entry.async_on_unload(lambda: async_get_relay(hass).drop_node(box.node_id))
 
+    # The receiver menu: published now and whenever a bound entity changes, and the
+    # viewer's OK on a row performed here (ADR-0012). Unloading stops following the
+    # entities and leaves the retained menu as it is - a reload republishes it at once;
+    # removing the entry retracts it.
+    menu = ReceiverMenu(hass, entry, box)
+    box.menu_action_handler = menu.async_action_received
+    entry.async_on_unload(menu.async_stop)
+    await menu.async_start()
+
     # The retained release index, repaired from the verified copy this Home Assistant holds -
     # once for every receiver, when the first is set up and whenever the broker connection
     # comes back, and never over a retained index the rule ranks at or above the held one.
@@ -210,7 +220,7 @@ async def async_unload_entry(
 async def async_remove_entry(
     hass: HomeAssistant, entry: Enigma2MqttConfigEntry
 ) -> None:
-    """Hand a removed box back to MQTT discovery - two messages, and nothing else.
+    """Hand a removed box back to MQTT discovery - three messages, and nothing else.
 
     Adding a box switches its plugin into `integration` mode, which makes the plugin
     retract the discovery payloads the core MQTT integration builds entities from.
@@ -222,12 +232,16 @@ async def async_remove_entry(
     The first message retracts `enigma2mqtt/integration/<node_id>`: the receiver is no
     longer managed by this integration, so nothing may narrow its choice of plugin
     releases in this integration's name (ADR-0008 section 10, which supersedes "one publish").
+    The last retracts `enigma2mqtt/menu/<node_id>`: a menu whose rows nothing performs
+    any more is not left on the television (ADR-0012). It is a retraction of this
+    integration's own topic, not a command.
     The retained `enigma2mqtt/release_index` stays - a signed index is harmless to
     anybody who reads it, and it is not this receiver's.
     """
     # The receiver's repair goes with it, and with it the record that it was ignored.
     async_delete_withheld_issue(hass, entry.entry_id)
     async_delete_go2rtc_issue(hass, entry.entry_id)
+    async_delete_clock_issue(hass, entry.entry_id)
     # So does the count its update card kept for the card after a reload.
     async_forget_stood_still(hass, entry.entry_id)
     try:
@@ -256,5 +270,16 @@ async def async_remove_entry(
             "Could not tell %s that it was removed, nor switch it back to discovery "
             "mode; do it on the receiver's setup screen if you want its MQTT discovery "
             "entities back",
+            entry.data.get(CONF_NODE_ID),
+        )
+    # The receiver's menu goes with it: nothing would perform what it offers. Tried on its
+    # own, so that a failure above does not leave the menu on the television.
+    try:
+        await async_retract_menu(hass, entry.data[CONF_NODE_ID])
+    except (HomeAssistantError, KeyError):
+        _LOGGER.warning(
+            "Could not retract the receiver menu of %s; it stays on the receiver until "
+            "the retained topic enigma2mqtt/menu/%s is emptied",
+            entry.data.get(CONF_NODE_ID),
             entry.data.get(CONF_NODE_ID),
         )

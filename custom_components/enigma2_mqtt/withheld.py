@@ -169,14 +169,14 @@ def _plain(text: str) -> str:
     cannot be seen goes first (`_visible`).
 
     The result can be empty - a name made of nothing but such characters - and every
-    caller has something to say then (`_named`).
+    caller has something to say then (`plain_name`).
     """
     text = _WWW.sub("www ", _SCHEME.sub(" ", _visible(text).translate(_INERT)))
     text = _LOOSE_UNDERSCORE.sub(" ", text).replace("//", "/")
     return " ".join(text.split())[:NAME_MAX].strip()
 
 
-def _named(*candidates: str | None) -> str:
+def plain_name(*candidates: str | None) -> str:
     """Return the first candidate that is still something once it is plain text.
 
     A name that reduces to nothing would leave empty quotation marks in a sentence, or a
@@ -213,11 +213,11 @@ def describe(box: Enigma2Box, topic: str, language: str) -> str:
             # The grid's slug is the channel topic's for nearly every bouquet, and the
             # index is the only place that still names a bouquet whose topic is gone.
             return phrases[key].format(
-                bouquet=_named(box.bouquet_name_for_slug(slug), slug)
+                bouquet=plain_name(box.bouquet_name_for_slug(slug), slug)
             )
     if "/" in topic and topic.endswith("/config"):
         return phrases["discovery"]
-    return phrases["other"].format(topic=_named(topic))
+    return phrases["other"].format(topic=plain_name(topic))
 
 
 def withheld_lines(box: Enigma2Box, language: str) -> str:
@@ -234,7 +234,7 @@ def withheld_lines(box: Enigma2Box, language: str) -> str:
         lines.append(describe(box, entry["topic"], language))
         if entry["topic"] == TOPIC_CHANNELS:
             lines.extend(
-                phrases["bouquet_channels"].format(bouquet=_named(name))
+                phrases["bouquet_channels"].format(bouquet=plain_name(name))
                 for name in box.bouquet_names_without_topic()
             )
     shown = lines[:WITHHELD_ISSUE_MAX]
@@ -291,7 +291,7 @@ def async_setup_withheld_issue(
             translation_placeholders={
                 # The entry's own title is asked too: the name stored with the entry
                 # follows the receiver's announcement, so it can be the same nothing.
-                "name": _named(
+                "name": plain_name(
                     str(box.announcement.get("name") or ""),
                     box.name,
                     entry.title,

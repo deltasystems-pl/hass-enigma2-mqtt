@@ -1,6 +1,10 @@
 {
   "title": "Enigma2 MQTT",
   "common": {
+    "menu_top_level": "Hauptliste",
+    "menu_empty": "Das Menü ist leer.",
+    "menu_state_unavailable": "Nicht verfügbar",
+    "menu_state_unknown": "Unbekannt",
     "force_reinstall_interface_stopped": "Die Oberfläche des Receivers bleibt gestoppt, wie ein unterbrochenes Update oder eine unterbrochene Installation des Plugins sie hinterlassen hat, und der Receiver zeigt kein Bild. Um sie zu starten, schalte den Receiver am Netzschalter oder Stecker aus und wieder ein, oder behebe die oben genannte Ursache und führe die erzwungene Plugin-Neuinstallation erneut aus, die sie startet.",
     "force_reinstall_update_running": "Die Oberfläche des Receivers ist gestoppt, weil ein Plugin-Update das vorherige Plugin noch zurückspielt; es startet die Oberfläche selbst, sobald es fertig ist. Warte, bis es fertig ist - das dauert einige Minuten - und schalte den Receiver in der Zwischenzeit nicht aus, sonst brichst du es mittendrin ab. Führe die erzwungene Plugin-Neuinstallation nur erneut aus, wenn danach immer noch kein Bild kommt.",
     "force_reinstall_unexpected": "Die erzwungene Plugin-Neuinstallation wurde durch einen unerwarteten Fehler abgebrochen ({error}); Details stehen im Home-Assistant-Protokoll.",
@@ -173,7 +177,15 @@
   },
   "options": {
     "step": {
-      "init": {"title": "Receiver-Optionen", "description": "Ändere die Optionen auf dieser Seite der Verbindung, oder ändere das Plugin auf dem Receiver per SSH. Das Entfernen des Plugins wird nur angeboten, solange der Receiver es erlaubt; diese Erlaubnis wird am Receiver selbst gesetzt.", "menu_options": {"settings": "Optionen", "uninstall": "Plugin vom Receiver entfernen", "downgrade": "Ältere Plugin-Version installieren"}},
+      "init": {"title": "Receiver-Optionen", "description": "Ändere die Optionen auf dieser Seite der Verbindung, oder ändere das Plugin auf dem Receiver per SSH. Das Entfernen des Plugins wird nur angeboten, solange der Receiver es erlaubt; diese Erlaubnis wird am Receiver selbst gesetzt. Hier wird auch das Menü gebaut, das der Receiver aus Home Assistant zeigt, sobald er eines zeigen kann.", "menu_options": {"settings": "Optionen", "receiver_menu": "Menü auf dem Receiver", "uninstall": "Plugin vom Receiver entfernen", "downgrade": "Ältere Plugin-Version installieren"}},
+      "receiver_menu": {"title": "Menü auf dem Receiver", "description": "Das Menü, das der Receiver aus Home Assistant zeigt: bis zu {groups} Gruppen und bis zu {entries} Einträge in der Hauptliste und in jeder Gruppe. Der Receiver sagt nur, welche Zeile gewählt wurde; Home Assistant führt sie aus. Jeder, der an deinen MQTT-Broker veröffentlichen kann, kann ebenfalls eine Zeile wählen - nimm hier also nur auf, was du jedem mit der Fernbedienung in der Hand überlassen würdest. Nichts ändert sich, bis du das Menü speicherst.\n\n{menu}", "menu_options": {"menu_add_group": "Gruppe hinzufügen", "menu_add_row": "Eintrag hinzufügen", "menu_edit_group": "Gruppe ändern", "menu_edit_row": "Eintrag ändern", "menu_move": "Gruppe oder Eintrag verschieben", "menu_remove": "Gruppen oder Einträge entfernen", "menu_save": "Menü speichern"}},
+      "menu_move": {"title": "Gruppe oder Eintrag verschieben", "description": "Um eine Stelle nach oben oder unten in der eigenen Liste: der Hauptliste oder der Gruppe, in der er steht.", "data": {"item": "Gruppe oder Eintrag", "direction": "Richtung"}},
+      "menu_group": {"title": "Gruppe", "description": "Ein Untermenü des Receiver-Menüs. Neue Gruppen kommen ans Ende der Hauptliste.", "data": {"label": "Name", "icon": "Symbol"}, "data_description": {"label": "Wird auf dem Receiver angezeigt, nach {label_max} Zeichen abgeschnitten.", "icon": "Wird auf dem Receiver neben dem Namen gezeichnet."}},
+      "menu_row": {"title": "Eintrag", "description": "Eine Zeile des Receiver-Menüs, verbunden mit einer Entität, einer Szene oder einem Skript. Neue Einträge kommen ans Ende der Liste, in die sie gelegt werden.", "data": {"entity_id": "Entität", "place": "Ort", "label": "Name", "icon": "Symbol"}, "data_description": {"entity_id": "Was die Zeile zeigt und steuert. Wie sie angezeigt wird, ergibt sich aus der Entität: eine Taste für eine Szene oder ein Skript, ein Schalter für ein Licht, eine Auswahlliste für eine Auswahl und so weiter; jede andere Entität wird als Anzeige mit ihrem Zustand gezeigt. Die Zeile folgt der Entität, wenn ihre ID umbenannt wird.", "place": "Die Hauptliste oder eine der Gruppen.", "label": "Leer lassen, um den Namen der Entität zu verwenden. Nach {label_max} Zeichen abgeschnitten.", "icon": "Leer lassen, um ein zur Entität passendes zu wählen."}},
+      "menu_row_control": {"title": "Darstellung", "description": "{entity} kann auf mehr als eine Art angezeigt werden.", "data": {"control": "Element"}},
+      "menu_edit_group": {"title": "Gruppe ändern", "data": {"group": "Gruppe"}},
+      "menu_edit_row": {"title": "Eintrag ändern", "data": {"row": "Eintrag"}},
+      "menu_remove": {"title": "Gruppen oder Einträge entfernen", "description": "Eine Gruppe wird mit allen ihren Einträgen entfernt.", "data": {"remove": "Entfernen"}},
       "settings": {
         "title": "Receiver-Optionen",
         "description": "Der Receiver meldet die MAC-Adresse {mac}. Magic Packets gehen dorthin, sofern unten keine andere angegeben wird.",
@@ -239,6 +251,10 @@
       "downgrade_confirm": {"title": "Plugin {version} statt {installed} installieren", "description": "Plugin {version} wird von der Release-Seite des Plugins heruntergeladen (außer es ist das mit der Integration mitgelieferte Plugin), mit der signierten Versionsliste geprüft und per SSH anstelle von {installed} installiert. Der Receiver muss eingeschaltet sein: im Standby wird die Installation abgelehnt, weil der Neustart ihn aufwecken würde. Die Oberfläche des Receivers startet neu; er behält seinen Sender, und seine eigenen Einstellungen bleiben, wie sie sind - Einstellungen, die die ältere Version nicht kennt, kehren mit ihren Werten nach dem nächsten Update zurück.\n\n**Was nicht mehr funktioniert**, bis das Plugin wieder aktualisiert wird - die Entitäten bleiben in Home Assistant, aber nichts aktualisiert sie:\n\n{lost}\n\nEine fehlgeschlagene Installation stellt {installed} wieder her.", "data": {"confirm_downgrade": "Ältere Version installieren"}}
     },
     "error": {
+      "menu_label_required": "Gib der Gruppe einen Namen.",
+      "menu_full": "Das Menü fasst keine weiteren Gruppen.",
+      "menu_entity_not_supported": "Diese Entität kann nicht in das Receiver-Menü aufgenommen werden.",
+      "menu_place_full": "Dort ist kein Platz mehr; wähle einen anderen Ort.",
       "plugin_unavailable": "Der Receiver ist nicht verbunden; seine Datenschutzeinstellungen wurden nicht geändert. Versuche es erneut, wenn er online ist.",
       "plugin_config_failed": "Der Receiver hat die neuen Datenschutzeinstellungen nicht bestätigt. Die bisherigen Receiver-Einstellungen und Home-Assistant-Optionen wurden beibehalten.",
       "go2rtc_invalid_url": "Die go2rtc-Adresse ist keine Webadresse. Schreibe sie als `{go2rtc_url_form}`, ohne etwas hinter der Adresse, oder lass das Feld leer, um das auszuschalten.",
@@ -698,6 +714,51 @@
     }
   },
   "selector": {
+    "menu_direction": {
+      "options": {
+        "up": "Nach oben",
+        "down": "Nach unten"
+      }
+    },
+    "menu_icon": {
+      "options": {
+        "neutral": "Neutral",
+        "lamp": "Lampe",
+        "ceiling-light": "Deckenleuchte",
+        "blinds": "Rollladen",
+        "scene": "Szene",
+        "script": "Skript",
+        "power": "Strom",
+        "fan": "Ventilator",
+        "lock": "Schloss",
+        "radiator": "Heizkörper",
+        "thermometer": "Thermometer",
+        "tv": "Fernseher",
+        "speaker": "Lautsprecher",
+        "door": "Tür",
+        "gate": "Tor",
+        "garage": "Garage",
+        "alarm": "Alarm",
+        "camera": "Kamera",
+        "sofa": "Sofa",
+        "bed": "Bett",
+        "kitchen": "Küche",
+        "garden": "Garten",
+        "movie": "Film",
+        "note": "Notiz",
+        "home": "Zuhause"
+      }
+    },
+    "menu_control": {
+      "options": {
+        "button": "Taste",
+        "toggle": "Schalter",
+        "indicator": "Anzeige (nur lesen)",
+        "selector": "Auswahlliste",
+        "slider": "Schieberegler",
+        "input": "Textfeld"
+      }
+    },
     "message_style": {
       "options": {
         "popup": "Fenster",
@@ -749,6 +810,10 @@
     "payloads_withheld": {
       "title": "{name}: Der Receiver veröffentlicht nicht alles",
       "description": "Das Plugin auf {name} hat Folgendes nicht veröffentlicht, weil jede dieser Nachrichten die zulässige Größe einer MQTT-Nachricht überschreiten würde und der Broker die Verbindung trennen würde:\n\n{withheld}\n\nIn Home Assistant bedeutet das: Die Sender eines Bouquets, dessen Liste fehlt, werden nicht angeboten, und ein Bouquet ohne EPG hat kein Programm.\n\nUm sie zurückzubekommen, begrenze mit der Einstellung `bouquets_for_select` am Receiver (Einstellungsbildschirm des Plugins oder seine OpenWebif-Seite) die Bouquets, die das Plugin veröffentlicht, oder teile ein sehr großes Bouquet in kleinere auf. `epg_grid_events` zu verringern bringt ein fehlendes EPG nicht zurück: Das Plugin kürzt es selbst so weit wie möglich, bevor es darauf verzichtet.\n\nDieser Hinweis verschwindet von selbst, sobald der Receiver wieder alles veröffentlicht."
+    },
+    "menu_clock_behind": {
+      "title": "{name}: Die Uhr des Receivers geht nach",
+      "description": "{name} hat aus seinem Home-Assistant-Menü eine Aktion gesendet, deren Zeitstempel mehr als zwei Minuten vor der Uhr von Home Assistant liegt. Home Assistant hat sie deshalb abgelehnt und nichts ausgeführt. Solange die Uhr des Receivers nachgeht, wird jedes OK in diesem Menü abgelehnt.\n\nStelle die Uhr des Receivers richtig: Lass ihn in seinen Zeiteinstellungen die Zeit aus dem Internet (NTP) oder vom Transponder beziehen und prüfe die Zeitzone. Prüfe auch, ob die Uhr von Home Assistant selbst stimmt.\n\nDieser Hinweis verschwindet von selbst bei der nächsten Aktion aus dem Menü, die Home Assistant annimmt."
     }
   },
   "exceptions": {

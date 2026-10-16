@@ -810,3 +810,48 @@ GO2RTC_TIMEOUT: Final = 10
 GO2RTC_RETRY_SECONDS: Final = 300
 # The media player's attribute with the name of that stream, for a dashboard card.
 ATTR_GO2RTC_STREAM: Final = "go2rtc_stream"
+
+# The receiver menu, from a plugin after 0.4.0 (contract 1, additive; `menu.py` and
+# ADR-0012). The integration publishes the whole menu, retained, on a topic outside the
+# box's base topic - like `integration/<node_id>` it is this integration's, and only this
+# integration publishes or retracts it - and the receiver answers an OK on a row with one
+# `menu_action` under its base topic. The receiver never learns what a row does: it sends a
+# row id and a value, and Home Assistant performs whatever the user bound to that row.
+TOPIC_MENU_PREFIX: Final = "enigma2mqtt/menu"
+TOPIC_MENU_ACTION: Final = "menu_action"
+CAPABILITY_MENU: Final = "menu"
+# The bus event fired after Home Assistant performed a viewer's action from the menu.
+EVENT_MENU_ACTION: Final = f"{DOMAIN}_menu_action"
+# The menu as the user built it in the options: a list of groups and rows.
+CONF_MENU: Final = "menu"
+# The names of the icons the plugin ships, which are the only names a row or a group may
+# carry. The plugin's TOPICS.md holds the same list; a name it does not know is drawn as
+# `neutral`, so this list may only ever grow on the plugin's side first.
+MENU_ICONS: Final = (
+    "neutral",
+    "lamp",
+    "ceiling-light",
+    "blinds",
+    "scene",
+    "script",
+    "power",
+    "fan",
+    "lock",
+    "radiator",
+    "thermometer",
+    "tv",
+    "speaker",
+    "door",
+    "gate",
+    "garage",
+    "alarm",
+    "camera",
+    "sofa",
+    "bed",
+    "kitchen",
+    "garden",
+    "movie",
+    "note",
+    "home",
+)
+MENU_ICON_NEUTRAL: Final = "neutral"

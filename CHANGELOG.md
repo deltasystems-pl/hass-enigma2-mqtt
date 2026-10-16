@@ -14,6 +14,34 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
 
 ### Added
 
+- **The receiver menu** (plugin 0.5.0, for a receiver that claims `menu`; DOCUMENTATION.md
+  "Receiver menu" and [ADR-0012](docs/adr/0012-receiver-menu.md)). The options gain *Receiver
+  menu* („Menu na dekoderze"): up to 8 groups and 24 entries per list of controls bound to
+  entities, scenes and scripts with the entity picker, each a button, switch, indicator, list of
+  options, slider or text field as its domain allows - any entity can be an indicator. Entries
+  can be moved up and down within their list, and a control stores the entity's registry id, so
+  it follows a renamed entity. Colours say "all good" in green - a binary sensor whose "on" needs
+  attention (a door, smoke, an update, a vibration, a sound, ...) is green while off. Home Assistant publishes the whole menu,
+  retained, on `enigma2mqtt/menu/<node_id>` - at setup, after a save, when the receiver or the
+  broker connection comes back, and debounced to at most one publish every half second when a bound entity changes -
+  with state texts in the household's language, under 64 KiB, and never the text of an entity
+  in password mode, whatever control it is shown as. A viewer's OK arrives as
+  `menu_action`; Home Assistant performs it only for a row the saved menu holds, with that row's
+  action and a value the entity accepts, and refuses anything else - also an action stamped more
+  than 120 seconds before or after Home Assistant's clock, one on a control whose last action is
+  still being carried out, and any beyond five a second from one receiver, where only actions
+  that pass every other check count - with one log line per cause. A
+  receiver whose clock is behind gets a repair, „the receiver's clock is behind", at the first
+  action refused for it; the next accepted action removes it.
+  A button - a script, a scene, an automation, a button entity - does not wait for what it
+  starts: its row takes the next press once Home Assistant accepted the call. Every other
+  control waits for its call for at most 30 seconds, then takes the next press and leaves the
+  call to finish. The event `enigma2_mqtt_menu_action` follows every performed action - for a
+  button when Home Assistant accepted the call, for the rest when the call returned without an
+  error. Removing the entry
+  retracts the menu, and so does reconfiguring to a new node ID for the old node. No entity is
+  added.
+
 - **Stream facts, a stream address and a media source** (plugin 0.5.0, for a receiver that
   claims the capability named with each; DOCUMENTATION.md §4.7 and
   [ADR-0011](docs/adr/0011-stream-facts-addresses-and-a-media-source.md)). The integration
