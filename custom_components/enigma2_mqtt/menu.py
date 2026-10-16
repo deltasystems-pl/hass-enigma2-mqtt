@@ -54,7 +54,7 @@ from homeassistant.core import (
     valid_entity_id,
 )
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import entity_registry as er, issue_registry as ir
 from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.translation import async_get_translations
@@ -73,6 +73,7 @@ from .const import (
     TOPIC_AVAILABILITY,
     TOPIC_MENU_PREFIX,
 )
+from .withheld import _named
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -108,6 +109,9 @@ ACTION_IDS_REMEMBERED = 64
 # a screen that is long gone. One stamped more than this ahead is refused as well. An action
 # without `ts` is accepted.
 MAX_ACTION_AGE = 120
+# The repair raised when an action is refused as stale: the receiver's clock is behind, and
+# every OK in its menu is refused until it is right. One per config entry.
+CLOCK_ISSUE_KEY = "menu_clock_behind"
 
 # The six controls of the contract, and the action the receiver sends for each.
 BUTTON = "button"
@@ -317,6 +321,17 @@ def menu_topic(node_id: str) -> str:
 async def async_retract_menu(hass: HomeAssistant, node_id: str) -> None:
     """Publish the empty retained payload: this receiver has no menu any more."""
     await mqtt.async_publish(hass, menu_topic(node_id), "", qos=1, retain=True)
+
+
+def clock_issue_id(entry_id: str) -> str:
+    """The id of one receiver's repair about its clock."""
+    return f"{CLOCK_ISSUE_KEY}_{entry_id}"
+
+
+@callback
+def async_delete_clock_issue(hass: HomeAssistant, entry_id: str) -> None:
+    """Delete one receiver's repair about its clock, and the record that it was ignored."""
+    ir.async_delete_issue(hass, DOMAIN, clock_issue_id(entry_id))
 
 
 # ----------------------------------------------------------------------- storage
@@ -862,6 +877,8 @@ class MenuAction:
     row: str
     action: str
     value: Any
+    # Epoch seconds by the receiver's clock; None when the action carried none.
+    ts: float | None = None
 
 
 class Refused(Exception):
@@ -901,6 +918,7 @@ def parse_action(payload: Any, now: float | None = None) -> MenuAction:
         raise Refused("malformed", "action")
     if action == ACTION_SET and "value" not in data:
         raise Refused("malformed", "value")
+    ts: float | None = None
     if "ts" in data:
         # A number, as the contract says - not a text that reads as one.
         raw_ts = data["ts"]
@@ -913,7 +931,7 @@ def parse_action(payload: Any, now: float | None = None) -> MenuAction:
             # The receiver's clock is ahead: an action stamped for later is not one the
             # age limit can judge, and it would pass it for as long as the clock is ahead.
             raise Refused("future", f"{ts - now:.0f} s ahead")
-    return MenuAction(action_id, rev, row, action, data.get("value"))
+    return MenuAction(action_id, rev, row, action, data.get("value"), ts)
 
 
 def service_call(
@@ -1035,6 +1053,8 @@ class ReceiverMenu:
         self._recent_ids: deque[str] = deque(maxlen=ACTION_IDS_REMEMBERED)
         self._logged_causes: set[str] = set()
         self._logged_notes: set[str] = set()
+        # Whether this run raised the repair about the receiver's clock.
+        self._clock_issue = False
 
     @property
     def topic(self) -> str:
@@ -1175,8 +1195,14 @@ class ReceiverMenu:
                 raise Refused("duplicate", action.action_id)
             self._recent_ids.append(action.action_id)
         except Refused as refusal:
+            if refusal.cause == "stale":
+                self._raise_clock_issue()
             self._log_refusal(refusal)
             return
+        if action.ts is not None:
+            # An action stamped inside the limit: whatever the clock was, it is right now.
+            self._clock_issue = False
+            async_delete_clock_issue(self.hass, self.entry.entry_id)
         self.entry.async_create_background_task(
             self.hass,
             self._async_perform(action),
@@ -1218,6 +1244,36 @@ class ReceiverMenu:
                 ATTR_ENTITY_ID: entity_id,
                 "action": action.action,
                 "value": applied,
+            },
+        )
+
+    @callback
+    def _raise_clock_issue(self) -> None:
+        """Say where a household looks that the receiver's clock is behind - once.
+
+        Raised at the first action refused as stale and left alone at the next ones; the
+        next action accepted deletes it, and so does removing the entry. Unloading leaves
+        it, like this integration's other repairs, so one somebody ignored stays ignored.
+        A clock ahead raises nothing: its actions are refused as from the future, and the
+        log says so.
+        """
+        if self._clock_issue:
+            return
+        self._clock_issue = True
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            clock_issue_id(self.entry.entry_id),
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=CLOCK_ISSUE_KEY,
+            translation_placeholders={
+                "name": _named(
+                    str(self.box.announcement.get("name") or ""),
+                    self.box.name,
+                    self.entry.title,
+                    self.box.node_id,
+                )
             },
         )
 

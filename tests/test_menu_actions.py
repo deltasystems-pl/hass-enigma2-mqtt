@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from unittest.mock import patch
 
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import entity_registry as er, issue_registry as ir
 from homeassistant.util import dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import (
@@ -16,7 +17,7 @@ from pytest_homeassistant_custom_component.common import (
     async_mock_service,
 )
 
-from custom_components.enigma2_mqtt.const import EVENT_MENU_ACTION
+from custom_components.enigma2_mqtt.const import DOMAIN, EVENT_MENU_ACTION
 from custom_components.enigma2_mqtt.menu import Refused, parse_action
 
 from .conftest import NODE_ID, async_setup_box
@@ -589,3 +590,111 @@ def test_a_ts_with_a_fraction_is_a_number() -> None:
     with pytest.raises(Refused) as caught:
         parse_action(payload, now=1120.5)
     assert caught.value.cause == "stale"
+
+
+def _clock_issue(hass: HomeAssistant, entry: Any) -> ir.IssueEntry | None:
+    return ir.async_get(hass).async_get_issue(DOMAIN, f"menu_clock_behind_{entry.entry_id}")
+
+
+def _stale_ts() -> int:
+    return int(dt_util.utcnow().timestamp()) - 3600
+
+
+async def test_a_stale_action_raises_a_repair_about_the_receivers_clock(
+    hass: HomeAssistant, menu_box: Any, calls: list[ServiceCall]
+) -> None:
+    """Every OK is refused while the clock is behind; the household is told where it looks."""
+    fire_action(hass, "r_switch", "toggle", action_id="000000000001", ts=_stale_ts())
+    await hass.async_block_till_done()
+
+    issue = _clock_issue(hass, menu_box)
+    assert calls == []
+    assert issue is not None
+    assert issue.translation_key == "menu_clock_behind"
+    assert issue.is_fixable is False
+    assert issue.severity == ir.IssueSeverity.WARNING
+    assert issue.translation_placeholders == {"name": menu_box.runtime_data.name}
+
+
+async def test_the_clock_repair_is_raised_once_and_kept_while_ignored(
+    hass: HomeAssistant, menu_box: Any, calls: list[ServiceCall]
+) -> None:
+    """The next stale actions neither raise it again nor undo "Ignore"."""
+    issue_id = f"menu_clock_behind_{menu_box.entry_id}"
+    fire_action(hass, "r_switch", "toggle", action_id="000000000001", ts=_stale_ts())
+    await hass.async_block_till_done()
+    ir.async_get(hass).async_ignore(DOMAIN, issue_id, True)
+    with patch(
+        "custom_components.enigma2_mqtt.menu.ir.async_create_issue"
+    ) as create:
+        for n in range(2, 5):
+            fire_action(hass, "r_switch", "toggle", action_id=f"00000000000{n}", ts=_stale_ts())
+        await hass.async_block_till_done()
+
+    assert create.call_count == 0
+    issue = _clock_issue(hass, menu_box)
+    assert issue is not None and issue.dismissed_version is not None
+
+
+async def test_the_next_accepted_action_deletes_the_clock_repair(
+    hass: HomeAssistant, menu_box: Any, calls: list[ServiceCall]
+) -> None:
+    fire_action(hass, "r_switch", "toggle", action_id="000000000001", ts=_stale_ts())
+    await hass.async_block_till_done()
+    assert _clock_issue(hass, menu_box) is not None
+
+    fire_action(hass, "r_switch", "toggle", action_id="000000000002")
+    await hass.async_block_till_done()
+
+    assert _clock_issue(hass, menu_box) is None
+    assert len(calls) == 1
+    # Raised again by the next stale one: the clock went wrong again.
+    fire_action(hass, "r_switch", "toggle", action_id="000000000003", ts=_stale_ts())
+    await hass.async_block_till_done()
+    assert _clock_issue(hass, menu_box) is not None
+
+
+async def test_an_action_without_a_time_says_nothing_about_the_clock(
+    hass: HomeAssistant, menu_box: Any, calls: list[ServiceCall]
+) -> None:
+    """Performed, and the repair stays: nothing in it shows the clock is right."""
+    fire_action(hass, "r_switch", "toggle", action_id="000000000001", ts=_stale_ts())
+    await hass.async_block_till_done()
+    async_fire_mqtt_message(
+        hass,
+        MENU_ACTION_TOPIC,
+        b'{"id":"000000000002","rev":7,"row":"r_switch","action":"toggle"}',
+    )
+    await hass.async_block_till_done()
+
+    assert len(calls) == 1
+    assert _clock_issue(hass, menu_box) is not None
+
+
+async def test_a_clock_ahead_raises_no_repair(
+    hass: HomeAssistant, menu_box: Any, calls: list[ServiceCall], caplog
+) -> None:
+    """Refused as from the future, with a log line; the repair is about a clock behind."""
+    fire_action(
+        hass, "r_switch", "toggle", ts=int(dt_util.utcnow().timestamp()) + 3600
+    )
+    await hass.async_block_till_done()
+
+    assert calls == []
+    assert "(future" in caplog.text
+    assert _clock_issue(hass, menu_box) is None
+
+
+async def test_unloading_keeps_and_removing_deletes_the_clock_repair(
+    hass: HomeAssistant, menu_box: Any, calls: list[ServiceCall]
+) -> None:
+    fire_action(hass, "r_switch", "toggle", ts=_stale_ts())
+    await hass.async_block_till_done()
+
+    assert await hass.config_entries.async_unload(menu_box.entry_id)
+    await hass.async_block_till_done()
+    assert _clock_issue(hass, menu_box) is not None
+
+    assert await hass.config_entries.async_remove(menu_box.entry_id)
+    await hass.async_block_till_done()
+    assert _clock_issue(hass, menu_box) is None

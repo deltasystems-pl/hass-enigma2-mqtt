@@ -35,7 +35,7 @@ from .const import (
     PLUGIN_MIN_VERSION,
     TOPIC_INTEGRATION_PREFIX,
 )
-from .menu import ReceiverMenu, async_retract_menu
+from .menu import ReceiverMenu, async_delete_clock_issue, async_retract_menu
 from .own_go2rtc import Go2rtcFollower, async_delete_go2rtc_issue
 from .picture import PiconResolver
 from .relay import async_answer_relay_request, async_get_relay
@@ -241,6 +241,7 @@ async def async_remove_entry(
     # The receiver's repair goes with it, and with it the record that it was ignored.
     async_delete_withheld_issue(hass, entry.entry_id)
     async_delete_go2rtc_issue(hass, entry.entry_id)
+    async_delete_clock_issue(hass, entry.entry_id)
     # So does the count its update card kept for the card after a reload.
     async_forget_stood_still(hass, entry.entry_id)
     try:

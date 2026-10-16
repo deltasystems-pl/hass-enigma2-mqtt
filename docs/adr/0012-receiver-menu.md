@@ -121,6 +121,10 @@ nothing. No entity is added for the menu.
   list, and a name the plugin does not know is drawn as the neutral icon, so the list may only
   grow on the plugin's side first.
 - A receiver whose clock is more than two minutes behind or ahead of Home Assistant's has every
-  action refused; the log says why.
+  action refused; the log says why. A clock behind also raises a repair (not fixable, one per
+  receiver) at the first action refused as stale, which the next accepted action - one stamped
+  inside the limit - deletes, as does removing the entry; unloading leaves it, like the
+  integration's other repairs. An action without `ts` says nothing about the clock and leaves it.
+  A clock ahead raises none.
 - Removing an entity from the registry greys its row; it stays in the options until it is
   removed or bound again.

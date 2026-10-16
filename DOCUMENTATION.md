@@ -458,7 +458,9 @@ nothing is called. A retained action, one whose id was just seen, and **one whos
 than 120 seconds off** - older, or ahead - by the time it carries (`ts`, the receiver's clock)
 and Home Assistant's clock are refused too; an action without a time is accepted. Keep the
 receiver's clock right - an action from a receiver whose clock is more than two minutes behind
-or ahead is always refused. A row keeps
+or ahead is always refused. A clock behind also raises a repair, „the receiver's clock is
+behind", at the first such refusal; it goes by itself at the next action Home Assistant accepts
+([§8](#8-troubleshooting)). A row keeps
 its id across restarts and while only its name or icon change; bound to another entity or shown
 as another control, it gets a new id, so a press the receiver sent for the old binding cannot
 reach the new one. A service call that fails is logged; there is no repair.
@@ -2149,6 +2151,15 @@ it runs by itself.
   with a very large channel list and plugin 0.4.0 or older.** That plugin sends the oversize
   payload and the broker closes the connection each time. Update the plugin to 0.5.0, or
   narrow `bouquets_for_select` on the receiver.
+- **A repair says „the receiver's clock is behind", and nothing in the receiver menu does
+  anything.** An action from the [receiver menu](#receiver-menu) was stamped more than two
+  minutes before Home Assistant's clock, so it was refused, and so is every other OK while the
+  clock stays behind. Let the receiver take its time from the internet (NTP) or from the
+  transponder in its time settings, check its time zone, and check Home Assistant's own clock.
+  The repair is raised at the first such refusal and goes by itself at the next action Home
+  Assistant accepts, or when the receiver is removed; unloading the receiver leaves it. A clock
+  **ahead** by more than two minutes raises no repair: those actions are refused too, and the log
+  says `future`.
 
 ### The plugin does not start, and Home Assistant cannot help
 
