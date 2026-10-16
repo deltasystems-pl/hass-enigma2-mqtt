@@ -64,7 +64,8 @@ fans, covers and locks are switches - a light also a brightness slider and a cov
 position slider; select, input select and a climate's HVAC mode are lists of options; numbers,
 input numbers and a player's volume are sliders; input texts and texts are text fields; and any
 other entity, of any domain, can be an indicator showing its state. A cover and a lock take
-the explicit pair by the state the row showed (open -> close, locked -> unlock) rather than a
+the explicit pair by the entity's state when the action arrives (open -> close, locked ->
+unlock) - not the state the row showed when OK was pressed - rather than a
 toggle, and refuse when that state is neither. Percent sliders move in tens, because they are
 moved with the arrow keys of a remote; an entity's own range keeps its step, coarsened by a whole
 multiple to at most 200 steps.
@@ -106,6 +107,11 @@ entity allows - edits a working copy that is stored only by *Save the menu*. A m
 entry one place up or down within its own list. The step is offered for a receiver that claims
 `menu` and for any entry that holds a menu, so a menu can always be emptied.
 
+**9. An event follows every performed action.** `enigma2_mqtt_menu_action` with the device, the
+node, the row, the entity, the action and the value applied, fired after the service call
+returned, so an automation can follow what the viewer did. A failing call is logged and fires
+nothing. No entity is added for the menu.
+
 **10. A row stores the entity's registry id.** So a row follows its entity through a rename of
 its entity id: the state, the label and the service calls use the entity id the registry gives
 now, and the state is followed under the new id from the moment the registry says so. An entity
@@ -113,11 +119,6 @@ without a registry entry is stored by its entity id; both forms are read, and a 
 entity id that is saved again once the entity has a registry entry keeps its row id. A registry
 id that names nothing any more, or now names an entity the row's control does not fit, shows the
 row greyed and refuses every action on it.
-
-**9. An event follows every performed action.** `enigma2_mqtt_menu_action` with the device, the
-node, the row, the entity, the action and the value applied, fired after the service call
-returned, so an automation can follow what the viewer did. A failing call is logged and fires
-nothing. No entity is added for the menu.
 
 ## Consequences
 

@@ -181,7 +181,7 @@ BUTTON_SERVICES: dict[str, str] = {
     "automation": "trigger",
 }
 # Toggle rows whose domain has a `toggle` service of its own; cover and lock take the
-# explicit pair, chosen by the state the row showed.
+# explicit pair, chosen by the entity's state when the action arrives.
 TOGGLE_SERVICE_DOMAINS = ("light", "switch", "input_boolean", "fan")
 
 # A slider in percent - a light's brightness, a cover's position, a player's volume - moves

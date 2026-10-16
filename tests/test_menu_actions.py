@@ -166,7 +166,7 @@ def _performed(calls: list[ServiceCall]) -> list[tuple[str, str, dict[str, Any]]
         ("r_switch", "toggle", None, ("switch", "toggle", {"entity_id": "switch.kettle"})),
         ("r_bool", "toggle", None,
          ("input_boolean", "toggle", {"entity_id": "input_boolean.guests"})),
-        # An open cover is closed, a locked lock unlocked: the pair, by the state shown.
+        # An open cover is closed, a locked lock unlocked: the pair, by the state now.
         ("r_blind_toggle", "toggle", None,
          ("cover", "close_cover", {"entity_id": "cover.salon"})),
         ("r_lock", "toggle", None, ("lock", "unlock", {"entity_id": "lock.front"})),
