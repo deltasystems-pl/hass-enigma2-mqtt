@@ -265,12 +265,21 @@ async def async_remove_entry(
             qos=1,
             retain=False,
         )
-        # The receiver's menu goes with it: nothing would perform what it offers.
-        await async_retract_menu(hass, entry.data[CONF_NODE_ID])
     except (HomeAssistantError, KeyError):
         _LOGGER.warning(
             "Could not tell %s that it was removed, nor switch it back to discovery "
             "mode; do it on the receiver's setup screen if you want its MQTT discovery "
             "entities back",
+            entry.data.get(CONF_NODE_ID),
+        )
+    # The receiver's menu goes with it: nothing would perform what it offers. Tried on its
+    # own, so that a failure above does not leave the menu on the television.
+    try:
+        await async_retract_menu(hass, entry.data[CONF_NODE_ID])
+    except (HomeAssistantError, KeyError):
+        _LOGGER.warning(
+            "Could not retract the receiver menu of %s; it stays on the receiver until "
+            "the retained topic enigma2mqtt/menu/%s is emptied",
+            entry.data.get(CONF_NODE_ID),
             entry.data.get(CONF_NODE_ID),
         )

@@ -934,3 +934,29 @@ async def test_the_broker_connection_coming_back_gets_the_menu_again(
     after = menu_publishes(mqtt_mock)
     assert len(after) == len(before) + 1
     assert json.loads(after[-1][0])["items"] == json.loads(before[-1][0])["items"]
+
+
+async def test_removing_retracts_the_menu_even_when_the_first_messages_fail(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The retraction does not hang on the integration topic or `ha_mode` going out."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    entry, _menu = await _published(hass, mqtt_mock, box_on_the_broker, FULL_MENU)
+
+    def _fail_but_the_menu(topic: str, *_args: Any, **_kwargs: Any) -> None:
+        if topic != MENU_TOPIC:
+            raise HomeAssistantError("broker said no")
+
+    mqtt_mock.async_publish.side_effect = _fail_but_the_menu
+    assert await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+
+    topics = [call.args[0] for call in mqtt_mock.async_publish.call_args_list]
+    assert f"enigma2mqtt/integration/{NODE_ID}" in topics
+    assert menu_publishes(mqtt_mock)[-1] == ("", 1, True)
+    assert "Could not tell" in caplog.text
+    assert "Could not retract" not in caplog.text
