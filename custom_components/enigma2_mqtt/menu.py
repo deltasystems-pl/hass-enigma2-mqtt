@@ -1107,6 +1107,9 @@ class ReceiverMenu:
         self._unsubscribes.append(
             self.box.async_add_listener(self._box_changed, topics=(TOPIC_AVAILABILITY,))
         )
+        self._unsubscribes.append(
+            mqtt.async_subscribe_connection_status(self.hass, self._connection_changed)
+        )
         await self._debouncer.async_call()
 
     @callback
@@ -1166,6 +1169,18 @@ class ReceiverMenu:
             self._force = True
             self._debouncer.async_schedule_call()
         self._was_available = available
+
+    @callback
+    def _connection_changed(self, connected: bool) -> None:
+        """Publish again when the broker connection comes back.
+
+        A broker restarted without persistence has lost every retained message, and the
+        receiver then says `online` without ever having been seen offline - so its coming
+        back is no sign to go by.
+        """
+        if connected:
+            self._force = True
+            self._debouncer.async_schedule_call()
 
     async def _async_texts(self, rows: Iterable[Mapping[str, Any]]) -> dict[str, str]:
         return await async_menu_texts(self.hass, rows)

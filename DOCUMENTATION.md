@@ -439,7 +439,8 @@ shown greyed and cannot be acted on.
 
 **When it is published.** Retained, QoS 1, on `enigma2mqtt/menu/<node_id>` - outside the
 receiver's base topic, because it is this integration's - at setup, after every save, when the
-receiver comes back online, and whenever a bound entity's state changes in a way the menu shows:
+receiver comes back online, when Home Assistant's connection to the broker comes back, and
+whenever a bound entity's state changes in a way the menu shows:
 the first change at once, a burst of changes as one publish half a second later. An attribute
 the menu does not show (a player's position) publishes nothing. The whole payload stays under
 64 KiB; whatever would not fit, or would break a bound above (more than 24 options in a list,

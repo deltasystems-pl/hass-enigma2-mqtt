@@ -81,7 +81,9 @@ integration's. An entity in password mode is published without its text - no `st
 no text `value` - whatever control the row shows it as, an indicator included.
 
 **6. Publishing follows the contract's bounds and debounce.** At setup, after the options are
-saved, when the receiver comes back online, and when a bound entity changes: the first change at
+saved, when the receiver comes back online, when the broker connection comes back (a broker
+restarted without persistence has lost the retained menu, and the receiver then says `online`
+without having been seen offline), and when a bound entity changes: the first change at
 once and a burst after it as one publish half a second later, which keeps both "at most one every
 0.5 s" and "within 1 s of a change". A change the payload does not show publishes nothing. Eight
 groups, 24 entries per list, labels at 60, state texts at 24, options at 24 of 60, units at 8; the

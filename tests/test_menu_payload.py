@@ -10,8 +10,10 @@ import logging
 from typing import Any
 from unittest.mock import patch
 
+from homeassistant.components.mqtt.const import MQTT_CONNECTION_STATE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import (
@@ -910,3 +912,25 @@ async def test_a_row_past_the_contracts_bounds_is_not_acted_on(
     fire_action(hass, "r_23", "press", action_id="000000000002")
     await hass.async_block_till_done()
     assert len(pressed) == 1
+
+
+async def test_the_broker_connection_coming_back_gets_the_menu_again(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+) -> None:
+    """A broker restarted without persistence lost the retained menu; nothing else changed."""
+    await _published(hass, mqtt_mock, box_on_the_broker, FULL_MENU)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=2))
+    await hass.async_block_till_done()
+    before = menu_publishes(mqtt_mock)
+
+    async_dispatcher_send(hass, MQTT_CONNECTION_STATE, False)
+    await hass.async_block_till_done()
+    assert menu_publishes(mqtt_mock) == before
+
+    async_dispatcher_send(hass, MQTT_CONNECTION_STATE, True)
+    await hass.async_block_till_done()
+    after = menu_publishes(mqtt_mock)
+    assert len(after) == len(before) + 1
+    assert json.loads(after[-1][0])["items"] == json.loads(before[-1][0])["items"]
