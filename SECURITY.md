@@ -36,8 +36,8 @@ publish to the broker can send one, so the integration treats it as untrusted in
 only an action on a row the user put into the menu, with that row's action and a value the bound
 entity accepts, and refuses everything else ([ADR-0012](docs/adr/0012-receiver-menu.md)). Put into
 the menu only what you would hand to anyone holding the remote. The menu - the names and states
-of the entities in it - is retained on the broker for any login to read; a text field in password
-mode is published without its text.
+of the entities in it - is retained on the broker for any login to read; a text entity in password
+mode is published without its text, whether the menu shows it as a text field or as an indicator.
 
 **SSH password.** The guided installer asks for the receiver's SSH password. It is
 **discarded after a successful install** unless you explicitly ask to keep it for later plugin

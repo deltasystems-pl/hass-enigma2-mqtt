@@ -210,6 +210,30 @@ async def test_the_menu_is_published_retained_with_every_binding(
     assert rows["r_gone"]["label"] == "light.removed"
 
 
+@pytest.mark.parametrize(
+    ("entity_id", "control"),
+    [
+        ("input_text.pin", "indicator"),
+        ("input_text.pin", "input"),
+        ("text.pin", "indicator"),
+        ("text.pin", "input"),
+    ],
+)
+async def test_a_password_field_never_has_its_text_published(
+    hass: HomeAssistant, entity_id: str, control: str
+) -> None:
+    """Shown as an indicator it is read like any other state; its text still stays home."""
+    hass.states.async_set(entity_id, "4711", {"friendly_name": "PIN", "mode": "password"})
+    menu = stored_menu({"menu": [row("r_pin", entity_id, control)]})
+
+    items, _views, _notes = build_menu(hass, menu, TEXTS)
+
+    assert items[0]["available"] is True
+    assert items[0]["state"] is None
+    assert items[0]["value"] is None
+    assert "4711" not in json.dumps(items)
+
+
 async def test_an_empty_menu_is_the_empty_payload(
     hass: HomeAssistant,
     mqtt_mock,

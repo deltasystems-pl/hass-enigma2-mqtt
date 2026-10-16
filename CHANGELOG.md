@@ -23,7 +23,8 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   it follows a renamed entity. Colours say "all good" in green. Home Assistant publishes the whole menu,
   retained, on `enigma2mqtt/menu/<node_id>` - at setup, after a save, when the receiver comes
   back, and debounced to at most one publish every half second when a bound entity changes -
-  with state texts in the household's language, under 64 KiB. A viewer's OK arrives as
+  with state texts in the household's language, under 64 KiB, and never the text of an entity
+  in password mode, whatever control it is shown as. A viewer's OK arrives as
   `menu_action`; Home Assistant performs it only for a row the saved menu holds, with that row's
   action and a value the entity accepts, and refuses anything else - also an action more than
   120 seconds old - with one log line per cause.

@@ -645,6 +645,12 @@ def render_row(
         _render_input(state if available else None, view)
         if not available:
             payload["state"] = shown
+    if state is not None and state.attributes.get("mode") == "password":
+        # A field in password mode never has its text published, whatever the row shows
+        # it as - an indicator reads its state like any other entity's.
+        payload["state"] = None
+        if isinstance(payload.get("value"), str):
+            payload["value"] = None
     payload["available"] = view.available
     return view
 
@@ -752,7 +758,7 @@ def _render_slider(state: State | None, domain: str, view: RowView) -> None:
 
 
 def _render_input(state: State | None, view: RowView) -> None:
-    """The text and how long it may be; a password field's text is never published."""
+    """The text and how long it may be; a password field's text is never read here."""
     payload = view.payload
     maximum = MAX_INPUT
     value: str | None = None

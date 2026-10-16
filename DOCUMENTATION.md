@@ -425,7 +425,7 @@ The icons are the plugin's own, by name: `neutral`, `lamp`, `ceiling-light`, `bl
 | Indicator | any entity except a script, scene, button, input button or automation, which are buttons only | nothing - it cannot be acted on | the state in your language, coloured where it is on or off; a sensor shows its reading with its unit, and a state that is neither on nor off has no colour |
 | List of options | `select`, `input_select`, `climate` (HVAC mode) | `select_option`, or `climate.set_hvac_mode` | the current option; a climate's modes in your language |
 | Slider | `light` (brightness), `cover` (position), `media_player` (volume), `number`, `input_number` | `light.turn_on` with `brightness_pct`, `cover.set_cover_position`, `media_player.volume_set`, `set_value` | the value with its unit. Brightness, position and volume run 0-100 % in steps of 10; a number runs over its own range, its step made coarser where it would have more than 200 |
-| Text field | `input_text`, `text` | `set_value` | the text, cut at 24 characters; the receiver's keyboard takes the entity's maximum length, at most 255. **A field in password mode never has its text published** |
+| Text field | `input_text`, `text` | `set_value` | the text, cut at 24 characters; the receiver's keyboard takes the entity's maximum length, at most 255. **A field in password mode never has its text published** - neither here nor as an indicator |
 
 **Green means all good, red means look at it.** A switch is green while on (a cover open, a lock
 locked) and red while off. An indicator follows the same rule, except for a binary sensor whose
@@ -2360,8 +2360,8 @@ while you set its address: it carries the stream name and the source, which cont
 same address and reference.
 
 The [receiver menu](#receiver-menu) publishes the names and states of the entities you put
-into it, retained, on the broker, for any login to read; an `input_text` in password mode is
-published without its text. Leave out of the menu what the broker's users should not see.
+into it, retained, on the broker, for any login to read; an `input_text` or `text` in password
+mode is published without its text, whether it is a text field or an indicator. Leave out of the menu what the broker's users should not see.
 
 The [options](#options) can switch key publishing off, select `off`, `on_zap` or `interval`
 screenshots, set the interval and choose how long an on-zap capture waits for the new picture.
