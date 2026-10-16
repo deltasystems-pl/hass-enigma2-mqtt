@@ -38,14 +38,23 @@ from .menu import (
     ROW_CONTROL,
     ROW_ENTITY,
     allowed_controls,
+    can_add_group,
+    can_add_row,
+    clean_label,
+    control_allowed,
     find_row,
+    group_icon,
+    has_room,
+    keeps_row_id,
+    menu_groups,
     menu_ids,
     menu_rows,
     new_item_id,
     resolve_entity,
+    row_draft,
     row_label,
-    stored_binding,
     stored_menu,
+    stored_row,
 )
 
 if TYPE_CHECKING:
@@ -106,7 +115,7 @@ class ReceiverMenuSteps:
         return self._menu_items
 
     def _groups(self) -> list[dict[str, Any]]:
-        return [item for item in self._menu() if item[KIND] == KIND_GROUP]
+        return menu_groups(self._menu())  # type: ignore[return-value]
 
     def _group(self, group_id: str | None) -> dict[str, Any] | None:
         return next((group for group in self._groups() if group[ITEM_ID] == group_id), None)
@@ -128,12 +137,10 @@ class ReceiverMenuSteps:
         return None
 
     def _can_add_group(self) -> bool:
-        return len(self._groups()) < MAX_GROUPS and len(self._menu()) < MAX_ENTRIES
+        return can_add_group(self._menu())
 
     def _can_add_row(self) -> bool:
-        return len(self._menu()) < MAX_ENTRIES or any(
-            len(group[GROUP_ROWS]) < MAX_ENTRIES for group in self._groups()
-        )
+        return can_add_row(self._menu())
 
     async def _menu_texts(self) -> dict[str, str]:
         """This integration's own words for the forms, in the user's language."""
@@ -258,9 +265,8 @@ class ReceiverMenuSteps:
         group = self._group(self._menu_editing)
         errors: dict[str, str] = {}
         if user_input is not None:
-            label = " ".join(str(user_input.get(ITEM_LABEL) or "").split())
-            icon = user_input.get(ITEM_ICON)
-            icon = icon if icon in MENU_ICONS else MENU_ICON_NEUTRAL
+            label = clean_label(user_input.get(ITEM_LABEL))
+            icon = group_icon(user_input.get(ITEM_ICON))
             if not label:
                 errors[ITEM_LABEL] = "menu_label_required"
             elif group is None and not self._can_add_group():
@@ -271,13 +277,13 @@ class ReceiverMenuSteps:
                         {
                             KIND: KIND_GROUP,
                             ITEM_ID: new_item_id(KIND_GROUP, menu_ids(self._menu())),
-                            ITEM_LABEL: label[:MAX_LABEL],
+                            ITEM_LABEL: label,
                             ITEM_ICON: icon,
                             GROUP_ROWS: [],
                         }
                     )
                 else:
-                    group[ITEM_LABEL] = label[:MAX_LABEL]
+                    group[ITEM_LABEL] = label
                     group[ITEM_ICON] = icon
                 return await self.async_step_receiver_menu()
         schema = vol.Schema(
@@ -367,21 +373,14 @@ class ReceiverMenuSteps:
             container = self._container(place)
             if entity_id is None:
                 errors[ROW_ENTITY] = "menu_entity_not_supported"
-            elif container is None or (
-                place != current_place and len(container) >= MAX_ENTRIES
+            elif container is None or not has_room(
+                container, moving_in=place != current_place
             ):
                 errors[FIELD_PLACE] = "menu_place_full"
             else:
-                draft: dict[str, Any] = {
-                    KIND: KIND_ROW,
-                    ROW_ENTITY: stored_binding(self.hass, entity_id),
-                }
-                label = " ".join(str(user_input.get(ITEM_LABEL) or "").split())
-                if label:
-                    draft[ITEM_LABEL] = label[:MAX_LABEL]
-                if user_input.get(ITEM_ICON) in MENU_ICONS:
-                    draft[ITEM_ICON] = user_input[ITEM_ICON]
-                self._menu_draft = draft
+                self._menu_draft = row_draft(
+                    self.hass, entity_id, user_input.get(ITEM_LABEL), user_input.get(ITEM_ICON)
+                )
                 self._menu_place = place
                 controls = allowed_controls(self.hass, entity_id)
                 if len(controls) > 1:
@@ -433,7 +432,9 @@ class ReceiverMenuSteps:
             return await self.async_step_receiver_menu()
         entity_id = resolve_entity(self.hass, draft[ROW_ENTITY]) or ""
         controls = allowed_controls(self.hass, entity_id)
-        if user_input is not None and user_input.get(ROW_CONTROL) in controls:
+        if user_input is not None and control_allowed(
+            self.hass, entity_id, user_input.get(ROW_CONTROL)
+        ):
             return await self._async_commit_row(user_input[ROW_CONTROL])
         existing = (
             find_row(self._menu(), self._menu_editing) if self._menu_editing else None
@@ -469,19 +470,12 @@ class ReceiverMenuSteps:
         assert draft is not None
         menu = self._menu()
         existing = find_row(menu, self._menu_editing) if self._menu_editing else None
-        row = {**draft, ROW_CONTROL: control}
-        # The same entity whichever form either is stored in: a row stored by its entity id
-        # before the entity had a registry entry is still the same binding.
-        if (
-            existing is not None
-            and resolve_entity(self.hass, existing[ROW_ENTITY])
-            == resolve_entity(self.hass, row[ROW_ENTITY])
-            and existing[ROW_CONTROL] == control
-        ):
-            row[ITEM_ID] = existing[ITEM_ID]
+        if keeps_row_id(self.hass, existing, draft[ROW_ENTITY], control):
+            assert existing is not None
+            row_id = existing[ITEM_ID]
         else:
-            row[ITEM_ID] = new_item_id(KIND_ROW, menu_ids(menu))
-        row = {KIND: KIND_ROW, ITEM_ID: row.pop(ITEM_ID), **row}
+            row_id = new_item_id(KIND_ROW, menu_ids(menu))
+        row = stored_row(row_id, draft, control)
         target = self._container(self._menu_place)
         assert target is not None
         old_place = self._place_of(existing[ITEM_ID]) if existing is not None else None
