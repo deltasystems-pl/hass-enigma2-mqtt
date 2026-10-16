@@ -92,7 +92,8 @@ counts the publishes of one Home Assistant run and survives reloads within it.
 **7. The menu goes with the entry.** Removing the entry publishes the empty retained payload,
 which the receiver reads as "no menu". Reconfiguring to a new node ID retracts the old node's
 menu. Unloading and reloading do not retract: the television would blank for the length of the
-reload.
+reload. A publish still under way when the entry stops - waiting for translations - publishes
+nothing, so it can land neither after the retraction nor after the next run's menu.
 
 **8. The options build the menu in a menu step, not in sections.** The menu is a list whose
 length the user decides; sections are a fixed set of fields, and eight groups of 24 rows would be

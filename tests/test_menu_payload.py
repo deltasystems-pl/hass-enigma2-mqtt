@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 import json
 import logging
@@ -774,3 +775,47 @@ async def test_a_rename_alone_republishes(
     shown = items_by_id(last_menu(mqtt_mock))["r_desk"]
     assert shown["label"] == "light.study"
     assert shown["available"] is False
+
+
+def _slowed(menu: Any) -> asyncio.Event:
+    """Hold the menu's next translation load until the event is set."""
+    release = asyncio.Event()
+    load = menu._async_texts
+
+    async def _slow(rows: Any) -> dict[str, str]:
+        await release.wait()
+        return await load(rows)
+
+    menu._async_texts = _slow
+    return release
+
+
+@pytest.mark.parametrize("then", ["remove", "reload"])
+async def test_a_publish_under_way_when_the_entry_stops_publishes_nothing(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    then: str,
+) -> None:
+    """Never the full menu after the retraction, nor an older run's after the next one's."""
+    entry, _menu = await _published(hass, mqtt_mock, box_on_the_broker, FULL_MENU)
+    menu = entry.runtime_data.menu_action_handler.__self__
+    release = _slowed(menu)
+    menu._force = True
+    under_way = asyncio.ensure_future(menu._async_publish())
+    await asyncio.sleep(0)
+
+    if then == "remove":
+        assert await hass.config_entries.async_remove(entry.entry_id)
+    else:
+        assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    before = menu_publishes(mqtt_mock)
+
+    release.set()
+    await under_way
+    await hass.async_block_till_done()
+
+    assert menu_publishes(mqtt_mock) == before
+    if then == "remove":
+        assert before[-1] == ("", 1, True)

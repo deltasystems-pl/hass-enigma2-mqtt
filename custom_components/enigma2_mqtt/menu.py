@@ -1073,6 +1073,8 @@ class ReceiverMenu:
         # on, for the flood limit.
         self._in_flight: set[str] = set()
         self._admitted: deque[float] = deque()
+        # Set when the entry stops: a publish still under way must not land after it.
+        self._stopped = False
 
     @property
     def topic(self) -> str:
@@ -1095,7 +1097,13 @@ class ReceiverMenu:
 
     @callback
     def async_stop(self) -> None:
-        """Stop following the entities. The retained menu stays; removal retracts it."""
+        """Stop following the entities. The retained menu stays; removal retracts it.
+
+        A publish already under way is not cancelled by the debouncer's shutdown; it asks
+        `_stopped` after every wait and publishes nothing once it is set, so that it cannot
+        land after the retraction of a removed entry, or after the next run's menu.
+        """
+        self._stopped = True
         while self._unsubscribes:
             self._unsubscribes.pop()()
         if self._untrack is not None:
@@ -1156,11 +1164,15 @@ class ReceiverMenu:
 
     async def _async_publish(self) -> None:
         """Publish the whole menu, unless it is the one already published."""
+        if self._stopped:
+            return
         force, self._force = self._force, False
         if not self.menu:
             wire = b""
         else:
             texts = await self._async_texts(menu_rows(self.menu))
+            if self._stopped:
+                return
             items, _views, notes = build_menu(self.hass, self.menu, texts)
             payload: dict[str, Any] = {
                 "v": MENU_VERSION,
