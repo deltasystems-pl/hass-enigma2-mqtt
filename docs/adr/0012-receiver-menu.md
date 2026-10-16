@@ -71,7 +71,8 @@ domain - over the translations loaded for the bound domains. A climate's modes a
 language and mapped back to the entity's own word on `set`; two options that read the same once
 translated or cut fall back to the entity's word, or are left out. **Green means all good**: on,
 open and locked are green and their opposites red, except that a binary sensor whose "on" needs
-attention - a door, a window, smoke, a leak, a problem - is green while off, as the contract's
+attention - a door, a window, smoke, a leak, a problem, an update waiting, a vibration, a
+sound - is green while off, as the contract's
 example of a closed door shows. The plugin draws the colour it is given; the rule is this
 integration's. An entity in password mode is published without its text - no `state` text and
 no text `value` - whatever control the row shows it as, an indicator included.

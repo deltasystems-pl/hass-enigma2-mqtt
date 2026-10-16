@@ -184,9 +184,10 @@ TOGGLE_SERVICE_DOMAINS = ("light", "switch", "input_boolean", "fan")
 PERCENT_BOUNDS = (0, 100, 10)
 PERCENT = "%"
 
-# Binary sensor classes whose "on" is something to look at - open, wet, burning, low. An
-# indicator shows those green while off, as the contract's example of a closed door does;
-# every other on/off state is green while on.
+# Binary sensor classes whose "on" is something to look at - open, wet, burning, low, an
+# update waiting, a sound or a shake. An indicator shows those green while off, as the
+# contract's example of a closed door does; every other on/off state is green while on - a
+# connection among them.
 ATTENTION_CLASSES = frozenset(
     {
         "battery",
@@ -202,7 +203,10 @@ ATTENTION_CLASSES = frozenset(
         "problem",
         "safety",
         "smoke",
+        "sound",
         "tamper",
+        "update",
+        "vibration",
         "window",
     }
 )

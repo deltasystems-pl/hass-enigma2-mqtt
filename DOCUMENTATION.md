@@ -430,8 +430,8 @@ The icons are the plugin's own, by name: `neutral`, `lamp`, `ceiling-light`, `bl
 **Green means all good, red means look at it.** A switch is green while on (a cover open, a lock
 locked) and red while off. An indicator follows the same rule, except for a binary sensor whose
 "on" needs attention - door, window, opening, garage door, smoke, gas, carbon monoxide, moisture,
-safety, problem, tamper, lock, battery, heat, cold - which is green while off: a closed door is
-green, an open one red.
+safety, problem, tamper, lock, battery, heat, cold, update, vibration, sound - which is green
+while off: a closed door is green, an open one red. A connection is green while connected.
 
 A light that is only on or off is not offered as a slider, nor a cover without a position or a
 player whose volume cannot be set. An entity that is unavailable, or that no longer exists, is

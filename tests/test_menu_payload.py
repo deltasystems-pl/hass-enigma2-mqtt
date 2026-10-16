@@ -648,7 +648,10 @@ ATTENTION = [
     "problem",
     "safety",
     "smoke",
+    "sound",
     "tamper",
+    "update",
+    "vibration",
     "window",
 ]
 

@@ -20,7 +20,8 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   entities, scenes and scripts with the entity picker, each a button, switch, indicator, list of
   options, slider or text field as its domain allows - any entity can be an indicator. Entries
   can be moved up and down within their list, and a control stores the entity's registry id, so
-  it follows a renamed entity. Colours say "all good" in green. Home Assistant publishes the whole menu,
+  it follows a renamed entity. Colours say "all good" in green - a binary sensor whose "on" needs
+  attention (a door, smoke, an update, a vibration, a sound, ...) is green while off. Home Assistant publishes the whole menu,
   retained, on `enigma2mqtt/menu/<node_id>` - at setup, after a save, when the receiver comes
   back, and debounced to at most one publish every half second when a bound entity changes -
   with state texts in the household's language, under 64 KiB, and never the text of an entity
