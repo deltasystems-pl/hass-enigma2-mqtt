@@ -979,3 +979,19 @@ async def test_removing_retracts_the_menu_even_when_the_first_messages_fail(
     assert "Could not tell" in caplog.text
     assert "Could not retract" not in caplog.text
 
+async def test_a_publish_queued_before_the_entry_stopped_publishes_nothing(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+) -> None:
+    """An empty menu waits for nothing; a publish that had not started yet still stays."""
+    entry, _menu = await _published(hass, mqtt_mock, box_on_the_broker, None)
+    menu = entry.runtime_data.menu_action_handler.__self__
+    menu._force = True
+    queued = asyncio.ensure_future(menu._async_publish())
+    before = menu_publishes(mqtt_mock)
+
+    menu.async_stop()
+    await queued
+
+    assert menu_publishes(mqtt_mock) == before
