@@ -217,6 +217,7 @@ async def test_the_menu_is_published_retained_with_every_binding(
     assert rows["r_gone"]["label"] == "light.removed"
 
 
+@pytest.mark.parametrize("text", ["4711", "on"])
 @pytest.mark.parametrize(
     ("entity_id", "control"),
     [
@@ -227,10 +228,13 @@ async def test_the_menu_is_published_retained_with_every_binding(
     ],
 )
 async def test_a_password_field_never_has_its_text_published(
-    hass: HomeAssistant, entity_id: str, control: str
+    hass: HomeAssistant, entity_id: str, control: str, text: str
 ) -> None:
-    """Shown as an indicator it is read like any other state; its text still stays home."""
-    hass.states.async_set(entity_id, "4711", {"friendly_name": "PIN", "mode": "password"})
+    """Shown as an indicator it is read like any other state; its text still stays home.
+
+    Not even as a value or a colour: a password that is "on" would be green.
+    """
+    hass.states.async_set(entity_id, text, {"friendly_name": "PIN", "mode": "password"})
     menu = stored_menu({"menu": [row("r_pin", entity_id, control)]})
 
     items, _views, _notes = build_menu(hass, menu, TEXTS)
@@ -238,7 +242,9 @@ async def test_a_password_field_never_has_its_text_published(
     assert items[0]["available"] is True
     assert items[0]["state"] is None
     assert items[0]["value"] is None
-    assert "4711" not in json.dumps(items)
+    assert items[0].get("color") is None
+    if text == "4711":
+        assert text not in json.dumps(items)
 
 
 async def test_an_empty_menu_is_the_empty_payload(
@@ -972,3 +978,4 @@ async def test_removing_retracts_the_menu_even_when_the_first_messages_fail(
     assert menu_publishes(mqtt_mock)[-1] == ("", 1, True)
     assert "Could not tell" in caplog.text
     assert "Could not retract" not in caplog.text
+

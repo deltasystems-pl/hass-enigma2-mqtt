@@ -78,8 +78,8 @@ translated or cut fall back to the entity's word, or are left out. **Green means
 open and locked are green and their opposites red, except that a binary sensor whose "on" needs
 attention - a door, a window, smoke, a leak, a problem, an update waiting, a vibration, a
 sound - is green while off, as the contract's example of a closed door shows. The plugin draws the colour it is given; the rule is this
-integration's. An entity in password mode is published without its text - no `state` text and
-no text `value` - whatever control the row shows it as, an indicator included.
+integration's. An entity in password mode is published without its text - no `state`, no `value`
+and no `color`, which for a text of "on" would say it - whatever control the row shows it as, an indicator included.
 
 **6. Publishing follows the contract's bounds and debounce.** At setup, after the options are
 saved, when the receiver comes back online, when the broker connection comes back (a broker

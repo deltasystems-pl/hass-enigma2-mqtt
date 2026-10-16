@@ -677,10 +677,12 @@ def render_row(
             payload["state"] = shown
     if state is not None and state.attributes.get("mode") == "password":
         # A field in password mode never has its text published, whatever the row shows
-        # it as - an indicator reads its state like any other entity's.
+        # it as - an indicator reads its state like any other entity's, and even "on" as
+        # a value or a colour would say what the text is.
         payload["state"] = None
-        if isinstance(payload.get("value"), str):
-            payload["value"] = None
+        for key in ("value", "color"):
+            if key in payload:
+                payload[key] = None
     payload["available"] = view.available
     return view
 
