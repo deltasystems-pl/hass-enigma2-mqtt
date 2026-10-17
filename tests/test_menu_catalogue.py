@@ -84,7 +84,7 @@ async def _setup(
 
 
 def test_the_revision_is_a_hash_of_the_canonical_stored_menu() -> None:
-    menu = [row("r_a", "script.movie", "button", label="Kino łódź")]
+    menu = [row("r_a", "script.movie", "button", label="Kino \u0142\u00f3d\u017a")]
     canonical = json.dumps(menu, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
     assert menu_revision(menu) == hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
