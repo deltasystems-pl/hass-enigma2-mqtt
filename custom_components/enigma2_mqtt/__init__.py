@@ -129,6 +129,13 @@ async def async_setup_entry(
     # nothing until it is started, below, and nothing at all without an address.
     box.go2rtc = Go2rtcFollower(hass, entry, box)
     box.async_register_device()
+    # The receiver menu and the menu creator exist before the box subscribes, so that a
+    # `menu_action` or a `menu_edit` the broker delivers at once finds its handler. They
+    # publish and follow nothing until they are started, below.
+    menu = ReceiverMenu(hass, entry, box)
+    box.menu_action_handler = menu.async_action_received
+    creator = MenuCreator(hass, entry, box, menu)
+    box.menu_edit_handler = creator.async_edit_received
     await box.async_start()
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -164,16 +171,12 @@ async def async_setup_entry(
     # viewer's OK on a row performed here (ADR-0012). Unloading stops following the
     # entities and leaves the retained menu as it is - a reload republishes it at once;
     # removing the entry retracts it.
-    menu = ReceiverMenu(hass, entry, box)
-    box.menu_action_handler = menu.async_action_received
     entry.async_on_unload(menu.async_stop)
     await menu.async_start()
 
     # The menu creator: the catalogue the receiver's web interface edits the menu from, while
     # the receiver claims `menu_editor`, and the edits it sends back, stored here without a
     # reload (ADR-0013). Unloading leaves the retained catalogue as it is, like the menu.
-    creator = MenuCreator(hass, entry, box, menu)
-    box.menu_edit_handler = creator.async_edit_received
     entry.async_on_unload(creator.async_stop)
     await creator.async_start()
 

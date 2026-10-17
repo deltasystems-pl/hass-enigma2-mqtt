@@ -129,7 +129,9 @@ async def test_building_a_menu_from_nothing(
     """A group, a row in it with a chosen control, a row at the top; saved and published."""
     result = await _open_menu(hass, entry)
     assert result["step_id"] == "receiver_menu"
-    assert result["menu_options"] == ["menu_add_group", "menu_add_row", "menu_save"]
+    assert result["menu_options"] == [
+        "menu_add_group", "menu_add_row", "menu_remote_edit", "menu_save"
+    ]
     assert result["description_placeholders"]["menu"] == "The menu is empty."
 
     result = await _step(hass, result, "menu_add_group")
@@ -249,7 +251,7 @@ async def test_a_full_top_list_offers_no_new_row_unless_a_group_has_room(
     result = await _open_menu(hass, config_entry)
 
     assert result["menu_options"] == [
-        "menu_edit_row", "menu_move", "menu_remove", "menu_save",
+        "menu_edit_row", "menu_move", "menu_remove", "menu_remote_edit", "menu_save",
     ]
 
 
@@ -370,7 +372,9 @@ async def test_emptying_the_menu_removes_it_from_the_options(
     result = await _open_menu(hass, config_entry)
     result = await _step(hass, result, "menu_remove")
     result = await _form(hass, result, {"remove": ["r_top"]})
-    assert result["menu_options"] == ["menu_add_group", "menu_add_row", "menu_save"]
+    assert result["menu_options"] == [
+        "menu_add_group", "menu_add_row", "menu_remote_edit", "menu_save"
+    ]
     await _save(hass, result)
 
     assert CONF_MENU not in config_entry.options

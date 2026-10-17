@@ -568,11 +568,12 @@ def keeps_row_id(
     )
 
 
-def row_draft(
-    hass: HomeAssistant, entity_id: str, label: Any, icon: Any
-) -> dict[str, Any]:
-    """A row as it is stored, without its id and control: the binding and the overrides."""
-    draft: dict[str, Any] = {KIND: KIND_ROW, ROW_ENTITY: stored_binding(hass, entity_id)}
+def row_draft(binding: str, label: Any, icon: Any) -> dict[str, Any]:
+    """A row as it is stored, without its id and control: the binding and the overrides.
+
+    `binding` is what the row stores - `stored_binding` of the entity it is bound to.
+    """
+    draft: dict[str, Any] = {KIND: KIND_ROW, ROW_ENTITY: binding}
     if cleaned := clean_label(label):
         draft[ITEM_LABEL] = cleaned
     if (chosen := row_icon(icon)) is not None:
@@ -595,7 +596,9 @@ def menu_revision(menu: Any) -> str:
     `[]`. Canonical is sorted keys, no spaces, UTF-8 without escaping.
     """
     text = json.dumps(menu, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    # `surrogatepass`: the menu creator refuses a text UTF-8 cannot hold, so nothing stored
+    # has one - and if anything ever did, a hash is still not a reason to raise.
+    return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()[:16]
 
 
 # ---------------------------------------------------------------------- rendering
@@ -1229,6 +1232,9 @@ class ReceiverMenu:
 
     async def async_start(self) -> None:
         """Publish the menu now, and again whenever what it shows changes."""
+        # Read now, not when built: the menu is built before the box subscribes, and its
+        # retained `availability` arrives in between.
+        self._was_available = self.box.available
         self._async_track()
         self._unsubscribes.append(
             self.box.async_add_listener(self._box_changed, topics=(TOPIC_AVAILABILITY,))

@@ -138,7 +138,7 @@ from .installer import (
 )
 from .menu import async_retract_menu
 from .menu_creator import async_retract_catalogue
-from .menu_flow import ReceiverMenuSteps, menu_offered
+from .menu_flow import ReceiverMenuSteps, menu_offered, with_current_menu
 from .own_go2rtc import default_stream_name, validate_options as validate_go2rtc_options
 from .plugin_versions import has_credentials
 from .release_index import release_of
@@ -1156,7 +1156,11 @@ class Enigma2MqttOptionsFlow(ReceiverMenuSteps, OptionsFlowWithReload):
                     and not user_input.get(CONF_KEEP_SSH_CREDENTIALS, True)
                 ):
                     async_set_ssh_credentials(self.hass, self.config_entry, None)
-                return self.async_create_entry(data=data)
+                # The menu as the entry holds it now: the menu creator may have stored one
+                # while the receiver was answering the command above.
+                return self.async_create_entry(
+                    data=with_current_menu(data, self.config_entry.options)
+                )
 
         box = self._box()
         # Every bouquet the box published, not the ones the current option narrowed it
@@ -1525,7 +1529,13 @@ class Enigma2MqttOptionsFlow(ReceiverMenuSteps, OptionsFlowWithReload):
                 if errors:
                     return self._show_ssh_confirm(errors)
                 async_set_ssh_credentials(self.hass, self.config_entry, credentials)
-                return self.async_create_entry(data=self._pending_options or {})
+                # Read again: the SSH steps take minutes, and a menu stored from the
+                # receiver meanwhile must survive this save.
+                return self.async_create_entry(
+                    data=with_current_menu(
+                        self._pending_options or {}, self.config_entry.options
+                    )
+                )
         return self._show_ssh_confirm(errors)
 
     def _show_ssh_confirm(self, errors: dict[str, str]) -> ConfigFlowResult:

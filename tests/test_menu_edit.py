@@ -32,11 +32,11 @@ from .menu_common import (
     MENU_CAPABILITIES,
     MISSING_ID,
     claim_editor,
+    editor_entry,
     group,
     items_by_id,
     last_catalogue,
     last_menu,
-    menu_entry,
     row,
 )
 
@@ -110,12 +110,16 @@ def as_catalogue() -> list[dict[str, Any]]:
 
 
 async def _setup(
-    hass: HomeAssistant, retained: dict[str, str | bytes], *, claim: bool = True
+    hass: HomeAssistant,
+    retained: dict[str, str | bytes],
+    *,
+    claim: bool = True,
+    remote_edit: bool = True,
 ) -> tuple[MockConfigEntry, dict[str, str]]:
     ids = _states(hass)
     if claim:
         claim_editor(retained)
-    entry = menu_entry(stored(ids))
+    entry = editor_entry(stored(ids), remote_edit=remote_edit)
     await async_setup_box(hass, entry)
     return entry, ids
 
@@ -595,7 +599,11 @@ async def test_a_detail_is_cut_at_200_characters(
     fire_edit(hass, [sent_row(None, "light." + "x" * 240, "toggle")], revision(entry))
     await hass.async_block_till_done()
 
-    assert len(results(mqtt_mock)[-1]["detail"]) == 200
+    detail = results(mqtt_mock)[-1]["detail"]
+    # What the edit sent is quoted cut at 60 characters, and the sentence stays within 200.
+    assert len(detail) <= 200
+    assert "'light." + "x" * 54 + "'" in detail
+    assert "x" * 55 not in detail
 
 
 async def test_each_cause_is_a_warning_once_then_quiet(
@@ -638,11 +646,342 @@ def test_a_nesting_too_deep_for_the_parser_is_unreadable_not_an_exception() -> N
     deep = b"[" * 60000 + b"]" * 60000
     nested_id = b'{"id": "8c1d2e3f4a5b", "base": "' + b"0" * 16 + b'", "menu": ' + b"[" * 30000
 
-    assert menu_creator.edit_id_of(deep) is None
-    assert menu_creator.edit_id_of(nested_id) is None
+    assert menu_creator.decode_edit(deep) is None
+    assert menu_creator.edit_id_of(menu_creator.decode_edit(nested_id)) is None
     with pytest.raises(menu_creator.EditRefused) as refused:
-        menu_creator.parse_edit(b"[" * 40000 + b"]" * 20000)
+        menu_creator.parse_edit(menu_creator.decode_edit(b"[" * 40000 + b"]" * 20000))
     assert refused.value.result is None
     # An older Python's parser gives up on such a nesting with RecursionError.
     with patch.object(menu_creator.json, "loads", side_effect=RecursionError):
-        assert menu_creator.edit_id_of(b'{"id": "8c1d2e3f4a5b"}') is None
+        assert menu_creator.decode_edit(b'{"id": "8c1d2e3f4a5b"}') is None
+
+
+# ----------------------------------------------------------- opt-in and check order
+
+
+async def test_with_editing_off_every_edit_is_disabled(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes], clock
+) -> None:
+    entry, ids = await _setup(hass, box_on_the_broker, remote_edit=False)
+
+    fire_edit(hass, as_catalogue(), revision(entry))
+    await hass.async_block_till_done()
+
+    assert entry.options[CONF_MENU] == stored(ids)
+    assert results(mqtt_mock) == [
+        {"id": EDIT_ID, "result": "disabled", "revision": revision(entry), "path": None,
+         "detail": None}
+    ]
+
+
+async def test_disabled_comes_after_not_claimed_and_unreadable_and_before_busy(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes], clock
+) -> None:
+    from custom_components.enigma2_mqtt.const import CONF_MENU_REMOTE_EDIT
+
+    entry, _ids = await _setup(hass, box_on_the_broker)
+    fire_edit(hass, [], revision(entry), edit_id="000000000001")
+    await hass.async_block_till_done()
+    # Turned off at once, without a reload: the next edit is inside the two seconds.
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, CONF_MENU_REMOTE_EDIT: False}
+    )
+    fire_edit(hass, [], revision(entry), edit_id="000000000002")
+    await hass.async_block_till_done()
+    fire_edit(hass, [], "bad", edit_id="000000000003")
+    await hass.async_block_till_done()
+
+    assert [(a["id"], a["result"], a["path"]) for a in results(mqtt_mock)] == [
+        ("000000000001", "saved", None),
+        ("000000000002", "disabled", None),
+        ("000000000003", "invalid", "base"),
+    ]
+
+
+async def test_not_claimed_comes_before_a_bad_base_and_before_disabled(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes], clock
+) -> None:
+    entry, _ids = await _setup(hass, box_on_the_broker, claim=False, remote_edit=False)
+
+    fire_edit(hass, [], "bad", edit_id="000000000001")
+    fire_edit(hass, [], revision(entry), edit_id="000000000002")
+    await hass.async_block_till_done()
+
+    assert [a["result"] for a in results(mqtt_mock)] == ["not_claimed", "not_claimed"]
+
+
+async def test_busy_comes_before_stale(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes], clock
+) -> None:
+    entry, _ids = await _setup(hass, box_on_the_broker)
+    fire_edit(hass, [], revision(entry), edit_id="000000000001")
+    await hass.async_block_till_done()
+
+    fire_edit(hass, [], "0123456789abcdef", edit_id="000000000002")
+    await hass.async_block_till_done()
+
+    assert [a["result"] for a in results(mqtt_mock)] == ["saved", "busy"]
+
+
+# ------------------------------------------------------------- text that cannot be held
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        # A lone surrogate, escaped: valid JSON in valid UTF-8 bytes.
+        b'{"id": "8c1d2e3f4a5b", "base": "%s", "menu": [{"type": "group", "id": null, '
+        b'"label": "x\\ud800", "icon": "sofa", "rows": []}]}',
+        b'{"id": "8c1d2e3f4a5b", "base": "%s", "menu": [], "\\udfff": 1}',
+        b'{"id": "8c1d2e3f4a5b", "base": "%s", "menu": [{"type": "row", "id": null, '
+        b'"entity": "script.movie", "control": "button", "label": "a\\udc80b", "icon": null}]}',
+        b'{"id": "8c1d2e3f4a5b", "base": "%s", "menu": [], "ts": "\\ud83d"}',
+    ],
+)
+async def test_a_text_utf8_cannot_hold_is_unreadable_and_nothing_breaks(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    clock,
+    raw: bytes,
+) -> None:
+    from homeassistant.helpers.json import json_bytes
+
+    entry, ids = await _setup(hass, box_on_the_broker)
+    payload = raw.replace(b"%s", revision(entry).encode())
+
+    async_fire_mqtt_message(hass, EDIT_TOPIC, payload)
+    await hass.async_block_till_done()
+
+    assert entry.options[CONF_MENU] == stored(ids)
+    assert results(mqtt_mock) == []
+    # Every config entry can still be written, and the next edit is answered.
+    json_bytes(entry.as_storage_fragment)
+    json_bytes(hass.config_entries._data_to_save())
+    fire_edit(hass, as_catalogue(), revision(entry))
+    await hass.async_block_till_done()
+    assert results(mqtt_mock)[-1]["result"] == "saved"
+
+
+async def test_nothing_from_an_edit_reaches_the_answer_or_the_log_as_it_came(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    clock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A line break in an id, an entity or a control cannot forge a second log line."""
+    entry, _ids = await _setup(hass, box_on_the_broker)
+    forged = "x\n2026-10-17 12:00:00 ERROR (MainThread) [homeassistant] forged\x1b[31mé"
+
+    with caplog.at_level(logging.DEBUG, logger="custom_components.enigma2_mqtt.menu_creator"):
+        for number, menu in enumerate(
+            [
+                [sent_row(forged, "script.movie", "button")],
+                [sent_row(None, forged, "button")],
+                [sent_row(None, "script.movie", forged)],
+            ]
+        ):
+            clock.now += 3
+            fire_edit(hass, menu, revision(entry), edit_id=f"00000000000{number}")
+            await hass.async_block_till_done()
+
+    answers = results(mqtt_mock)
+    assert [a["result"] for a in answers] == ["invalid"] * 3
+    for answer in answers:
+        assert answer["detail"].isascii()
+        assert "\n" not in answer["detail"] and "\x1b" not in answer["detail"]
+        assert all(ord(c) >= 32 for c in answer["detail"])
+    for record in caplog.records:
+        message = record.getMessage()
+        assert "\n" not in message and "\x1b" not in message
+
+
+@pytest.mark.parametrize("ts", ["9" * 400, "1e999", "NaN", "Infinity", '"soon"', "true"])
+async def test_a_ts_that_is_no_usable_number_is_only_dropped(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    clock,
+    ts: str,
+) -> None:
+    entry, _ids = await _setup(hass, box_on_the_broker)
+    body = json.dumps({"id": EDIT_ID, "base": revision(entry), "menu": as_catalogue()})
+    payload = body[:-1] + f', "ts": {ts}}}'
+
+    async_fire_mqtt_message(hass, EDIT_TOPIC, payload)
+    await hass.async_block_till_done()
+
+    assert results(mqtt_mock)[-1]["result"] == "saved"
+
+
+def test_a_huge_integer_is_read_as_nothing_and_cheaply() -> None:
+    data = menu_creator.decode_edit(
+        b'{"id": "8c1d2e3f4a5b", "base": "0000000000000000", "ts": ' + b"7" * 4000 + b"}"
+    )
+
+    assert data is not None and data["ts"] is None
+    assert menu_creator.parse_edit(data).ts is None
+
+
+# ------------------------------------------------------------ unchanged and changed rows
+
+
+async def test_an_unchanged_row_is_kept_although_its_entity_no_longer_offers_its_control(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes], clock
+) -> None:
+    """As the options flow keeps a row nobody changed; a changed row is checked."""
+    entry, ids = await _setup(hass, box_on_the_broker)
+    menu = [*stored(ids), row("r_dim", ids["lamp"], "slider")]
+    hass.config_entries.async_update_entry(entry, options={**entry.options, CONF_MENU: menu})
+    # The lamp loses its brightness: no slider any more.
+    hass.states.async_set(
+        "light.salon", "on", {"friendly_name": "Salon lamp", "supported_color_modes": ["onoff"]}
+    )
+    edited = [*as_catalogue(), sent_row("r_dim", "light.salon", "slider")]
+    edited[1]["label"] = "Kino"
+
+    fire_edit(hass, edited, revision(entry), edit_id="000000000001")
+    await hass.async_block_till_done()
+    assert results(mqtt_mock)[-1]["result"] == "saved"
+    assert entry.options[CONF_MENU][3] == row("r_dim", ids["lamp"], "slider")
+
+    clock.now += 3
+    edited = [*as_catalogue(), sent_row(None, "light.salon", "slider")]
+    fire_edit(hass, edited, revision(entry), edit_id="000000000002")
+    await hass.async_block_till_done()
+    answer = results(mqtt_mock)[-1]
+    assert (answer["result"], answer["path"]) == ("invalid", "menu[3].control")
+
+
+async def test_a_stored_registry_binding_is_checked_against_the_entity_it_names(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes], clock
+) -> None:
+    """Sent back as the registry id it is stored by, a changed control is checked."""
+    entry, ids = await _setup(hass, box_on_the_broker)
+    edited = as_catalogue()
+    edited[0]["rows"][0] = sent_row("r_lamp", ids["lamp"], "button")
+
+    fire_edit(hass, edited, revision(entry), edit_id="000000000001")
+    await hass.async_block_till_done()
+    answer = results(mqtt_mock)[-1]
+    assert (answer["result"], answer["path"]) == ("invalid", "menu[0].rows[0].control")
+    assert "light.salon" in answer["detail"]
+
+    clock.now += 3
+    edited[0]["rows"][0] = sent_row("r_lamp", ids["lamp"], "slider")
+    fire_edit(hass, edited, revision(entry), edit_id="000000000002")
+    await hass.async_block_till_done()
+    assert results(mqtt_mock)[-1]["result"] == "saved"
+    slider = entry.options[CONF_MENU][0]["rows"][0]
+    assert slider["entity_id"] == ids["lamp"] and slider["control"] == "slider"
+    assert slider["id"] != "r_lamp"
+
+
+# ---------------------------------------------------- other saves keep the creator's menu
+
+
+def test_another_form_carries_the_menu_over_as_the_entry_holds_it_now() -> None:
+    from custom_components.enigma2_mqtt.const import CONF_MENU_REMOTE_EDIT
+    from custom_components.enigma2_mqtt.menu_flow import with_current_menu
+
+    pending = {"dangerous_buttons": True, CONF_MENU: ["old"], CONF_MENU_REMOTE_EDIT: True}
+
+    assert with_current_menu(pending, {CONF_MENU: ["new"]}) == {
+        "dangerous_buttons": True, CONF_MENU: ["new"]
+    }
+    assert with_current_menu({"x": 1}, {CONF_MENU_REMOTE_EDIT: True}) == {
+        "x": 1, CONF_MENU_REMOTE_EDIT: True
+    }
+
+
+async def test_the_settings_form_keeps_a_menu_stored_from_the_receiver_meanwhile(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes], clock
+) -> None:
+    from homeassistant.data_entry_flow import FlowResultType
+
+    from custom_components.enigma2_mqtt.const import CONF_MENU_REMOTE_EDIT
+
+    entry, _ids = await _setup(hass, box_on_the_broker)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "settings"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    # Saved from the receiver while the form is open.
+    fire_edit(hass, [sent_row(None, "script.movie", "button", label="Kino")], revision(entry))
+    await hass.async_block_till_done()
+    assert results(mqtt_mock)[-1]["result"] == "saved"
+    kept = entry.options[CONF_MENU]
+
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_MENU] == kept
+    assert entry.options[CONF_MENU_REMOTE_EDIT] is True
+
+
+async def test_the_ssh_steps_keep_a_menu_stored_from_the_receiver_meanwhile(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes], clock
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from homeassistant.data_entry_flow import FlowResultType
+
+    from custom_components.enigma2_mqtt.const import (
+        CONF_SSH_HOST,
+        CONF_SSH_PASSWORD,
+        CONF_SSH_PORT,
+        CONF_SSH_USERNAME,
+    )
+
+    from .test_installer_flow import HOST_KEY, PREFLIGHT
+
+    entry, _ids = await _setup(hass, box_on_the_broker)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "settings"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {"dangerous_buttons": False, "wol_mac": "", "bouquets": [], "configure_ssh": True},
+    )
+    with patch(
+        "custom_components.enigma2_mqtt.config_flow.async_probe_host_key",
+        AsyncMock(return_value=HOST_KEY),
+    ):
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {CONF_SSH_HOST: "receiver.local", CONF_SSH_PORT: 22}
+        )
+    # Saved from the receiver while the SSH steps are open.
+    fire_edit(hass, [sent_row(None, "script.movie", "button", label="Kino")], revision(entry))
+    await hass.async_block_till_done()
+    assert results(mqtt_mock)[-1]["result"] == "saved"
+    kept = entry.options[CONF_MENU]
+    with patch(
+        "custom_components.enigma2_mqtt.config_flow.async_preflight",
+        AsyncMock(return_value=PREFLIGHT),
+    ):
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {CONF_SSH_USERNAME: "root", CONF_SSH_PASSWORD: "secret"}
+        )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_MENU] == kept
+
+
+def test_only_a_stated_true_allows_editing_from_the_receiver() -> None:
+    from custom_components.enigma2_mqtt.const import CONF_MENU_REMOTE_EDIT
+
+    assert menu_creator.editing_allowed({CONF_MENU_REMOTE_EDIT: True}) is True
+    for value in (False, None, 1, "true", "yes", [True]):
+        assert menu_creator.editing_allowed({CONF_MENU_REMOTE_EDIT: value}) is False
+    assert menu_creator.editing_allowed({}) is False
+
+
+def test_the_revision_of_a_text_utf8_cannot_hold_does_not_raise() -> None:
+    menu = [{"type": "group", "id": "g_a", "label": "x\ud800", "icon": "sofa", "rows": []}]
+
+    assert len(menu_revision(menu)) == 16

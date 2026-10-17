@@ -12,6 +12,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry, async_
 from custom_components.enigma2_mqtt.const import (
     CONF_BASE_TOPIC,
     CONF_MENU,
+    CONF_MENU_REMOTE_EDIT,
     CONF_NAME,
     CONF_NODE_ID,
     DOMAIN,
@@ -148,3 +149,18 @@ def last_catalogue(mqtt_mock: Any) -> dict[str, Any] | None:
     payload, qos, retain = catalogue_publishes(mqtt_mock)[-1]
     assert (qos, retain) == (1, True)
     return json.loads(payload) if payload else None
+
+
+def editor_entry(menu: list[dict[str, Any]] | None, *, remote_edit: bool = True) -> MockConfigEntry:
+    """The example receiver's entry, holding this menu, with editing from the receiver on."""
+    entry = menu_entry(menu)
+    options = dict(entry.options)
+    if remote_edit:
+        options[CONF_MENU_REMOTE_EDIT] = True
+    return MockConfigEntry(
+        domain=entry.domain,
+        title=entry.title,
+        unique_id=entry.unique_id,
+        data=dict(entry.data),
+        options=options,
+    )

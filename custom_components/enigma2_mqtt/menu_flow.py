@@ -23,7 +23,15 @@ from homeassistant.helpers import entity_registry as er, selector
 from homeassistant.helpers.translation import async_get_translations
 import voluptuous as vol
 
-from .const import CAPABILITY_MENU, CONF_MENU, DOMAIN, MENU_ICON_NEUTRAL, MENU_ICONS
+from .const import (
+    CAPABILITY_MENU,
+    CONF_MENU,
+    CONF_MENU_REMOTE_EDIT,
+    DEFAULT_MENU_REMOTE_EDIT,
+    DOMAIN,
+    MENU_ICON_NEUTRAL,
+    MENU_ICONS,
+)
 from .menu import (
     GROUP_ROWS,
     ITEM_ICON,
@@ -53,6 +61,7 @@ from .menu import (
     resolve_entity,
     row_draft,
     row_label,
+    stored_binding,
     stored_menu,
     stored_row,
 )
@@ -73,6 +82,22 @@ FIELD_DIRECTION = "direction"
 DIRECTIONS = ("up", "down")
 # The place of a row that is in no group.
 PLACE_TOP = "top"
+
+
+# The options the receiver menu's steps own. A save of another form carries them over as
+# the entry holds them at that moment - the menu creator may have stored a menu meanwhile.
+MENU_OPTIONS = (CONF_MENU, CONF_MENU_REMOTE_EDIT)
+
+
+def with_current_menu(data: dict[str, Any], options: Any) -> dict[str, Any]:
+    """`data` with the menu's options as the entry holds them now."""
+    data = dict(data)
+    for key in MENU_OPTIONS:
+        if key in options:
+            data[key] = options[key]
+        else:
+            data.pop(key, None)
+    return data
 
 
 def menu_offered(box: Enigma2Box | None, options: Any) -> bool:
@@ -105,6 +130,9 @@ class ReceiverMenuSteps:
     # A row between its form and the choice of its control.
     _menu_draft: dict[str, Any] | None = None
     _menu_place: str = PLACE_TOP
+    # Whether the menu creator may replace the menu, as chosen in this dialog; None until
+    # it is chosen, and then saved with the menu.
+    _menu_remote_edit: bool | None = None
 
     # ----------------------------------------------------------------- helpers
 
@@ -113,6 +141,15 @@ class ReceiverMenuSteps:
         if self._menu_items is None:
             self._menu_items = stored_menu(self.config_entry.options)
         return self._menu_items
+
+    def _remote_edit(self) -> bool:
+        """Editing from the receiver: as chosen in this dialog, else as stored."""
+        if self._menu_remote_edit is not None:
+            return self._menu_remote_edit
+        return (
+            self.config_entry.options.get(CONF_MENU_REMOTE_EDIT, DEFAULT_MENU_REMOTE_EDIT)
+            is True
+        )
 
     def _groups(self) -> list[dict[str, Any]]:
         return menu_groups(self._menu())  # type: ignore[return-value]
@@ -211,6 +248,7 @@ class ReceiverMenuSteps:
             options.append("menu_move")
         if self._menu():
             options.append("menu_remove")
+        options.append("menu_remote_edit")
         options.append("menu_save")
         return self.async_show_menu(
             step_id="receiver_menu",
@@ -379,7 +417,9 @@ class ReceiverMenuSteps:
                 errors[FIELD_PLACE] = "menu_place_full"
             else:
                 self._menu_draft = row_draft(
-                    self.hass, entity_id, user_input.get(ITEM_LABEL), user_input.get(ITEM_ICON)
+                    stored_binding(self.hass, entity_id),
+                    user_input.get(ITEM_LABEL),
+                    user_input.get(ITEM_ICON),
                 )
                 self._menu_place = place
                 controls = allowed_controls(self.hass, entity_id)
@@ -569,13 +609,39 @@ class ReceiverMenuSteps:
             ),
         )
 
+    async def async_step_menu_remote_edit(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Whether the menu creator in the receiver's web interface may replace the menu.
+
+        Off unless turned on (ADR-0013). Kept in the working copy and stored by "Save the
+        menu", like every other change here.
+        """
+        if user_input is not None:
+            self._menu_remote_edit = user_input.get(CONF_MENU_REMOTE_EDIT) is True
+            return await self.async_step_receiver_menu()
+        return self.async_show_form(
+            step_id="menu_remote_edit",
+            data_schema=vol.Schema(
+                {vol.Required(CONF_MENU_REMOTE_EDIT, default=self._remote_edit()): bool}
+            ),
+        )
+
     async def async_step_menu_save(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Store the menu with the other options; the reload that follows publishes it."""
+        """Store the menu with the other options; the reload that follows publishes it.
+
+        The reload also publishes the menu creator's catalogue again, which is how a change
+        of "Allow editing from the receiver" reaches the receiver at once.
+        """
         options = dict(self.config_entry.options)
         if menu := self._menu():
             options[CONF_MENU] = menu
         else:
             options.pop(CONF_MENU, None)
+        if self._remote_edit():
+            options[CONF_MENU_REMOTE_EDIT] = True
+        else:
+            options.pop(CONF_MENU_REMOTE_EDIT, None)
         return self.async_create_entry(data=options)

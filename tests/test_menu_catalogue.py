@@ -42,6 +42,7 @@ from .menu_common import (
     MISSING_ID,
     catalogue_publishes,
     claim_editor,
+    editor_entry,
     group,
     last_catalogue,
     menu_entry,
@@ -71,11 +72,12 @@ async def _setup(
     menu: list[dict[str, Any]] | None = None,
     *,
     claim: bool = True,
+    remote_edit: bool = True,
 ) -> MockConfigEntry:
     _states(hass)
     if claim:
         claim_editor(retained)
-    entry = menu_entry(menu)
+    entry = editor_entry(menu, remote_edit=remote_edit)
     await async_setup_box(hass, entry)
     return entry
 
@@ -164,6 +166,7 @@ async def test_the_catalogue_lists_every_usable_entity_and_the_stored_menu(
     catalogue = last_catalogue(mqtt_mock)
     assert catalogue is not None
     assert catalogue["v"] == 1
+    assert catalogue["editing"] is True
     assert catalogue["left_out"] == 0
     assert catalogue["revision"] == menu_revision(stored_menu(entry.options))
     assert catalogue["areas"] == ["Kitchen", ("Living room " + "x" * 80)[:60]]
@@ -293,14 +296,23 @@ async def test_a_catalogue_that_leaves_entities_out_says_so_in_the_log(
     for index in range(12000):
         hass.states.async_set(f"sensor.s{index:05d}", "1", {"friendly_name": "n" * 60})
 
-    with caplog.at_level(logging.WARNING):
-        await _setup(hass, box_on_the_broker)
+    with caplog.at_level(logging.DEBUG, logger="custom_components.enigma2_mqtt.menu_creator"):
+        entry = await _setup(hass, box_on_the_broker)
+        catalogue = last_catalogue(mqtt_mock)
+        assert catalogue is not None
+        assert catalogue["left_out"] > 0
+        hass.states.async_set("sensor.s99999", "1", {"friendly_name": "n" * 60})
+        er.async_get(hass).async_get_or_create("sensor", "demo", "x", suggested_object_id="x")
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=6))
+        await hass.async_block_till_done()
+        # A reload is the same run: still no second warning.
+        await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
 
-    catalogue = last_catalogue(mqtt_mock)
-    assert catalogue is not None
-    assert catalogue["left_out"] > 0
     lines = [r for r in caplog.records if "leaves out" in r.getMessage()]
-    assert len(lines) == 1
+    assert len(lines) >= 2
+    assert [r.levelno for r in lines][0] == logging.WARNING
+    assert all(r.levelno == logging.DEBUG for r in lines[1:])
     assert str(catalogue["left_out"]) in lines[0].getMessage()
 
 
@@ -558,3 +570,246 @@ async def test_reconfiguring_to_a_new_node_id_retracts_the_old_nodes_catalogue(
     ]
     assert new and json.loads(new[-1])["v"] == 1
     assert CONF_MENU not in entry.options
+
+
+# ------------------------------------------------------------- opt-in, fit, start order
+
+
+async def test_with_editing_off_the_catalogue_says_only_that(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes]
+) -> None:
+    """Nothing about the household's entities while editing from the receiver is off."""
+    await _setup(hass, box_on_the_broker, [row("r_movie", "script.movie", "button")],
+                 remote_edit=False)
+
+    assert catalogue_publishes(mqtt_mock) == [('{"v":1,"editing":false}', 1, True)]
+    er.async_get(hass).async_get_or_create("light", "demo", "o1", suggested_object_id="o1")
+    hass.states.async_set("light.o1", "on")
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=6))
+    await hass.async_block_till_done()
+    assert len(catalogue_publishes(mqtt_mock)) == 1
+
+
+async def test_turning_editing_on_or_off_in_the_options_republishes_at_once(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes]
+) -> None:
+    from homeassistant.data_entry_flow import FlowResultType
+
+    from custom_components.enigma2_mqtt.const import CONF_MENU_REMOTE_EDIT
+
+    entry = await _setup(hass, box_on_the_broker, [row("r_movie", "script.movie", "button")],
+                         remote_edit=False)
+
+    async def _toggle(value: bool) -> None:
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {"next_step_id": "receiver_menu"}
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {"next_step_id": "menu_remote_edit"}
+        )
+        assert result["type"] is FlowResultType.FORM
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {CONF_MENU_REMOTE_EDIT: value}
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {"next_step_id": "menu_save"}
+        )
+        assert result["type"] is FlowResultType.CREATE_ENTRY
+        await hass.async_block_till_done()
+
+    await _toggle(True)
+    assert entry.options[CONF_MENU_REMOTE_EDIT] is True
+    catalogue = last_catalogue(mqtt_mock)
+    assert catalogue is not None and catalogue["editing"] is True
+    assert catalogue["menu"][0]["id"] == "r_movie"
+
+    await _toggle(False)
+    assert CONF_MENU_REMOTE_EDIT not in entry.options
+    assert catalogue_publishes(mqtt_mock)[-1] == ('{"v":1,"editing":false}', 1, True)
+
+
+def _named_payload(entities: list[dict[str, Any]], named: str) -> dict[str, Any]:
+    return {"v": 1, "editing": True, "revision": "0" * 16, "areas": [], "left_out": 0,
+            "menu": [{"type": "group", "id": "g_a", "label": "A", "icon": "sofa", "rows": [
+                {"type": "row", "id": "r_a", "entity": named, "control": "indicator",
+                 "label": None, "icon": None}]},
+                {"type": "row", "id": "r_b", "entity": MISSING_ID, "control": "toggle",
+                 "label": None, "icon": None, "missing": True}],
+            "entities": entities}
+
+
+def test_an_entity_the_menu_uses_is_never_left_out() -> None:
+    hidden = [_entity(i, h=True) for i in range(0, 4000)]
+    plain = [_entity(i) for i in range(4000, 14000)]
+    entities = [*hidden, *plain]
+    named = {hidden[5]["e"], plain[-1]["e"]}
+    payload = _named_payload(entities, hidden[5]["e"])
+    payload["menu"].append({"type": "row", "id": "r_c", "entity": plain[-1]["e"],
+                            "control": "indicator", "label": None, "icon": None})
+
+    encoded, left_out = fit_catalogue(payload)
+
+    kept = {entity["e"] for entity in json.loads(encoded)["entities"]}
+    assert left_out > len(hidden)
+    assert named <= kept
+    # Every other hidden one went first.
+    assert not (kept & {entity["e"] for entity in hidden}) - named
+
+
+def test_a_catalogue_just_over_the_bound_loses_just_enough() -> None:
+    entities = [_entity(i) for i in range(9000)]
+    payload = {"v": 1, "editing": True, "revision": "0" * 16, "areas": [""], "left_out": 0,
+               "menu": [], "entities": entities}
+    base = len(encode_menu(payload))
+    for over in (1, 2000, 5 * 1024):
+        attempt = dict(payload, entities=list(entities),
+                       areas=["x" * (MAX_CATALOGUE_BYTES - base + over)])
+        assert MAX_CATALOGUE_BYTES <= len(encode_menu(attempt)) <= MAX_CATALOGUE_BYTES + 5 * 1024
+
+        encoded, left_out = fit_catalogue(attempt)
+
+        size = len(encode_menu(_entity(0))) + 1
+        assert len(encoded) < MAX_CATALOGUE_BYTES
+        assert left_out == -(-(over + 1) // size) or left_out == -(-(over + 1) // size) + 1
+        assert json.loads(encoded)["left_out"] == left_out
+
+
+def test_the_fit_measures_again_when_left_out_gains_a_digit() -> None:
+    """Ten entities exactly cover the estimate; `left_out` going to 10 costs a byte more."""
+    entities = [_entity(i) for i in range(100)]
+    size = len(encode_menu(_entity(0))) + 1
+    payload = {"v": 1, "editing": True, "revision": "0" * 16, "areas": [""], "left_out": 0,
+               "menu": [], "entities": entities}
+    base = len(encode_menu(payload))
+    # Excess = length - bound + 1 = 10 entities exactly.
+    target = MAX_CATALOGUE_BYTES - 1 + 10 * size
+    payload["areas"] = ["x" * (target - base)]
+    assert len(encode_menu(payload)) == target
+
+    encoded, left_out = fit_catalogue(payload)
+
+    assert len(encoded) < MAX_CATALOGUE_BYTES
+    assert left_out == 11
+
+
+async def test_the_real_start_order_publishes_the_catalogue_once(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes]
+) -> None:
+    """Set up first, then the receiver's retained burst: one publish, not one per message."""
+    from .conftest import async_setup_box_then_retained
+
+    _states(hass)
+    claim_editor(box_on_the_broker)
+    await async_setup_box_then_retained(hass, editor_entry(None), box_on_the_broker)
+
+    assert len(catalogue_publishes(mqtt_mock)) == 1
+    assert last_catalogue(mqtt_mock)["editing"] is True
+
+
+async def test_a_running_home_assistant_builds_the_catalogue_once_at_setup(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes]
+) -> None:
+    from unittest.mock import patch
+
+    from custom_components.enigma2_mqtt import menu_creator
+
+    real = menu_creator.build_catalogue
+    calls: list[int] = []
+
+    def _counted(*args: Any) -> Any:
+        calls.append(1)
+        return real(*args)
+
+    with patch.object(menu_creator, "build_catalogue", _counted):
+        await _setup(hass, box_on_the_broker)
+
+    assert len(calls) == 1
+    assert len(catalogue_publishes(mqtt_mock)) == 1
+
+
+async def test_a_claim_that_goes_is_retracted_within_five_seconds(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes]
+) -> None:
+    """Start claimed, let everything from the start settle, then drop the claim."""
+    await _setup(hass, box_on_the_broker)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=6))
+    await hass.async_block_till_done()
+    count = len(catalogue_publishes(mqtt_mock))
+
+    async_fire_mqtt_message(
+        hass, INFO_TOPIC, json.dumps({**INFO, "capabilities": MENU_CAPABILITIES})
+    )
+    await hass.async_block_till_done()
+    assert len(catalogue_publishes(mqtt_mock)) == count
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=12))
+    await hass.async_block_till_done()
+
+    assert catalogue_publishes(mqtt_mock)[count:] == [("", 1, True)]
+
+
+async def test_the_edit_handler_is_in_place_before_the_box_subscribes(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes]
+) -> None:
+    from unittest.mock import patch
+
+    from custom_components.enigma2_mqtt.box import Enigma2Box
+
+    real = Enigma2Box.async_start
+    seen: list[bool] = []
+
+    async def _start(self: Enigma2Box) -> None:
+        seen.append(
+            self.menu_edit_handler is not None and self.menu_action_handler is not None
+        )
+        await real(self)
+
+    with patch.object(Enigma2Box, "async_start", _start):
+        await _setup(hass, box_on_the_broker)
+
+    assert seen == [True]
+
+
+async def test_calls_before_a_pending_publish_runs_are_one_build_forced_if_any_was(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes]
+) -> None:
+    from unittest.mock import patch
+
+    from custom_components.enigma2_mqtt import menu_creator
+
+    entry = await _setup(hass, box_on_the_broker)
+    creator = entry.runtime_data.menu_edit_handler.__self__
+    count = len(catalogue_publishes(mqtt_mock))
+    real = menu_creator.build_catalogue
+    calls: list[int] = []
+
+    def _counted(*args: Any) -> Any:
+        calls.append(1)
+        return real(*args)
+
+    with patch.object(menu_creator, "build_catalogue", _counted):
+        creator._schedule(force=True)
+        creator._schedule(force=False)
+        creator._schedule(force=False)
+        await hass.async_block_till_done()
+
+    assert len(calls) == 1
+    # Unchanged, and still published: one of the calls forced it.
+    assert len(catalogue_publishes(mqtt_mock)) == count + 1
+
+
+async def test_the_registries_are_followed_only_while_editing_is_on(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes]
+) -> None:
+    from custom_components.enigma2_mqtt.const import CONF_MENU_REMOTE_EDIT
+
+    entry = await _setup(hass, box_on_the_broker, remote_edit=False)
+    off = hass.bus.async_listeners().get(ar.EVENT_AREA_REGISTRY_UPDATED, 0)
+
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, CONF_MENU_REMOTE_EDIT: True}
+    )
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.bus.async_listeners().get(ar.EVENT_AREA_REGISTRY_UPDATED, 0) == off + 1

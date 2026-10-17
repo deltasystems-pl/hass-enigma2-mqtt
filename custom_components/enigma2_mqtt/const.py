@@ -866,6 +866,10 @@ TOPIC_MENU_CATALOGUE_PREFIX: Final = "enigma2mqtt/menu_catalogue"
 TOPIC_MENU_EDIT_RESULT_PREFIX: Final = "enigma2mqtt/menu_edit_result"
 TOPIC_MENU_EDIT: Final = "menu_edit"
 CAPABILITY_MENU_EDITOR: Final = "menu_editor"
+# Whether the menu creator may replace the menu: an option of the receiver menu, off unless
+# the user turns it on. Off, the catalogue says only that, and every edit is refused.
+CONF_MENU_REMOTE_EDIT: Final = "menu_remote_edit"
+DEFAULT_MENU_REMOTE_EDIT: Final = False
 
 # Two receiver settings of the menu that Home Assistant shows and writes, each one key of a
 # partial `cmd/config` (plugin TOPICS.md, `cmd/config`). A plugin that reports
