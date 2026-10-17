@@ -529,7 +529,8 @@ receiver holds no Home Assistant token ([ADR-0013](docs/adr/0013-menu-creator.md
 🔴 **It is off until you turn it on**: *Receiver menu -> Editing from the receiver* („Edycja na
 dekoderze") -> **Allow editing from the receiver**, then *Save the menu*. Read the warning at the
 end of this section first. While it is off, the catalogue says only that editing is off -
-`{"v": 1, "editing": false}`, nothing about any entity - the creator page says so and shows no
+`{"v": 1, "editing": false}`, nothing about any entity, published even for a receiver that has
+gone silent so that no full catalogue stays on the broker - the creator page says so and shows no
 editor, and every edit from the receiver is answered `disabled`. Saving the setting publishes the
 catalogue again at once.
 
@@ -558,7 +559,8 @@ catalogue again at once.
   published again within a second.
 - **Every edit is answered** on `enigma2mqtt/menu_edit_result/<node_id>`: `saved`, `invalid`
   (with where and why, in English, which the page shows as it comes; anything quoted from the edit
-  is cut and written as an ASCII literal), `disabled` (editing from the receiver is off),
+  is cut and written as an ASCII literal), `disabled` (editing from the receiver is off; like
+  `not_claimed`, it carries no revision, so a refusal does not tell when the menu changed),
   `busy` (one save at a time, and at most one every two seconds), `not_claimed`, or **`stale`**: the menu changed since the
   page loaded it - in the options, or from another browser - and the page asks you to reload,
   keeping your unsaved edits on screen until you choose.

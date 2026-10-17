@@ -366,6 +366,14 @@ def fit_catalogue(payload: dict[str, Any]) -> tuple[bytes, int]:
         ]
         payload["left_out"] = len(left_out)
         encoded = encode_menu(payload)
+    if len(encoded) >= MAX_CATALOGUE_BYTES:
+        # Only the menu and the entities it uses are left, and they alone are too large -
+        # which the menu's own bounds keep from happening. Published as it is, and said.
+        _LOGGER.warning(
+            "The menu catalogue is %s bytes with every entity the menu does not use left "
+            "out; the menu and its own entities alone are over 1 MiB",
+            len(encoded),
+        )
     return encoded, len(left_out)
 
 
@@ -755,7 +763,7 @@ class MenuCreator:
         self._unsubscribes.append(
             mqtt.async_subscribe_connection_status(self.hass, self._connection_changed)
         )
-        if self.claimed:
+        if self.claimed or not self.editing:
             await self._async_reconcile(force=True)
         elif self.box.capabilities_declared:
             # Nothing to hurry for: the retraction below waits like a registry change.
@@ -808,7 +816,7 @@ class MenuCreator:
 
     @callback
     def _started(self, _hass: HomeAssistant) -> None:
-        if self.claimed:
+        if self.claimed and self.editing:
             self._schedule(force=False)
 
     @callback
@@ -829,7 +837,7 @@ class MenuCreator:
     @callback
     def _connection_changed(self, connected: bool) -> None:
         """Publish again when the broker connection comes back - it may have lost it."""
-        if connected and self.claimed:
+        if connected and (self.claimed or not self.editing):
             self._schedule(force=True)
 
     @callback
@@ -866,8 +874,19 @@ class MenuCreator:
         the permission was turned off on the receiver, say - does not stay on the broker.
         A receiver that has not said anything yet is left alone. The registries are followed
         only while there is a full catalogue to keep up to date.
+
+        While editing from the receiver is off, the catalogue is the payload that says so,
+        whatever the receiver claims and whether it has said anything at all: it discloses
+        nothing, and it replaces a full catalogue an earlier run left behind - also for a
+        receiver that has gone silent.
         """
         if self._stopped:
+            return
+        if not self.editing:
+            self._claimed = self.claimed
+            self._retracted = False
+            self._stop_listening()
+            await self._async_publish(force=force)
             return
         if self.claimed:
             self._claimed = True
@@ -1007,11 +1026,17 @@ class MenuCreator:
     async def _async_publish_answer(
         self, edit_id: str, result: str, path: str | None, detail: str | None
     ) -> None:
-        """Answer one edit, with the revision the stored menu has now."""
+        """Answer one edit, with the revision the stored menu has now.
+
+        Not for `disabled` and `not_claimed`: their revision is null, so that a refused edit
+        does not tell anyone on the broker when the household changed its menu.
+        """
         payload = {
             "id": edit_id,
             "result": result,
-            "revision": self.revision,
+            "revision": (
+                None if result in (RESULT_DISABLED, RESULT_NOT_CLAIMED) else self.revision
+            ),
             "path": path,
             "detail": detail,
         }

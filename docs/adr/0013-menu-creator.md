@@ -58,8 +58,9 @@ Assistant run as a warning, then at debug level. An entity the stored menu uses 
 the page could not show what a row is bound to. The menu is never cut; its own bounds keep it far
 below the limit.
 
-**4. When the catalogue is published.** Only while the receiver claims `menu_editor` - which a
-plugin does while its menu permission is on and its web interface page is registered. At setup;
+**4. When the catalogue is published.** The full catalogue only while the receiver claims
+`menu_editor` - which a plugin does while its menu permission is on and its web interface page is
+registered - and editing is allowed; while editing is off, see section 10. At setup;
 within a second of a stored menu change; when the receiver comes back online and when the broker
 connection comes back (both published even when nothing changed, since a broker restarted without
 persistence lost it); once Home Assistant has started, since entities get their states while it
@@ -130,16 +131,19 @@ save, so a save from the receiver meanwhile survives them.
 
 **9. Every edit with a usable id is answered.** `enigma2mqtt/menu_edit_result/<node_id>`, not
 retained, QoS 1: the edit's `id`, the `result` (`saved`, `stale`, `invalid`, `disabled`, `busy`,
-`not_claimed`), the revision after handling, and for `invalid` the `path` and the `detail` - both
+`not_claimed`), the revision after handling - `null` for `disabled` and `not_claimed`, so that a
+refused edit does not tell anyone on the broker when the menu changed - and for `invalid` the `path` and the `detail` - both
 `null` otherwise.
 
 **10. Editing from the receiver is opt-in, off by default.** The receiver menu's options carry
 "Allow editing from the receiver" (`menu_remote_edit`, stored with the menu by *Save the menu*;
-absent means off). The maintainer first chose always-on editing, and changed it once a review showed
-what it gives away: whoever can publish to the broker, or open the receiver's web interface, could
-put a lock, a garage door or a gate cover, a script or an automation into the menu and then operate
-it from there. Off, the catalogue says nothing about any entity and every edit is `disabled`. On,
-the power is exactly that, and the documentation and SECURITY.md say so plainly.
+absent means off). Turned on, it lets whoever can publish to the broker, or open the receiver's web
+interface, put any entity - a lock, a garage door or a gate cover, a script or an automation - into
+the menu and then operate it from there; that is too much to give by default. Off, the catalogue is
+`{"v": 1, "editing": false}` - published while the entry is loaded whatever the receiver claims and
+whether it has said anything at all, since it discloses nothing and replaces a full catalogue an
+earlier run left behind - and every edit is `disabled`. The documentation and SECURITY.md say what
+turning it on gives away.
 
 **11. The menu's two receiver settings are entities too.** "Menu transparency" (a number, 0-80 %
 in steps of 10) and "Menu hotkey" (a select of `help_long`, `red_long`, `f3`, `f4`, `off`), both

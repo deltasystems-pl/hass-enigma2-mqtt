@@ -45,7 +45,6 @@ from .menu_common import (
     editor_entry,
     group,
     last_catalogue,
-    menu_entry,
     row,
 )
 
@@ -356,7 +355,7 @@ async def test_a_receiver_that_said_nothing_yet_is_left_alone(
 ) -> None:
     retained[AVAILABILITY_TOPIC] = "online"
     _states(hass)
-    await async_setup_box(hass, menu_entry(None))
+    await async_setup_box(hass, editor_entry(None))
 
     assert catalogue_publishes(mqtt_mock) == []
 
@@ -813,3 +812,100 @@ async def test_the_registries_are_followed_only_while_editing_is_on(
     await hass.async_block_till_done()
 
     assert hass.bus.async_listeners().get(ar.EVENT_AREA_REGISTRY_UPDATED, 0) == off + 1
+
+
+async def test_editing_off_replaces_a_full_catalogue_even_for_a_receiver_gone_silent(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes]
+) -> None:
+    """The plugin was removed and the box is gone: the full catalogue must still go."""
+    from custom_components.enigma2_mqtt.const import CONF_MENU_REMOTE_EDIT
+
+    from .conftest import ANNOUNCEMENT_TOPIC
+
+    entry = await _setup(hass, box_on_the_broker, [row("r_movie", "script.movie", "button")])
+    full = last_catalogue(mqtt_mock)
+    assert full is not None and full["editing"] is True and full["entities"]
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    del box_on_the_broker[INFO_TOPIC]
+    del box_on_the_broker[ANNOUNCEMENT_TOPIC]
+    box_on_the_broker[AVAILABILITY_TOPIC] = "offline"
+    hass.config_entries.async_update_entry(
+        entry, options={key: value for key, value in entry.options.items()
+                        if key != CONF_MENU_REMOTE_EDIT}
+    )
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert not entry.runtime_data.capabilities_declared
+    assert catalogue_publishes(mqtt_mock)[-1] == ('{"v":1,"editing":false}', 1, True)
+
+
+async def test_with_editing_off_a_dropped_claim_keeps_the_small_payload(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes]
+) -> None:
+    """Only removal and a moved node empty the topic; off, nothing else does."""
+    await _setup(hass, box_on_the_broker, remote_edit=False)
+    async_fire_mqtt_message(
+        hass, INFO_TOPIC, json.dumps({**INFO, "capabilities": MENU_CAPABILITIES})
+    )
+    await hass.async_block_till_done()
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=6))
+    await hass.async_block_till_done()
+
+    assert catalogue_publishes(mqtt_mock) == [('{"v":1,"editing":false}', 1, True)]
+
+
+async def test_with_editing_off_the_broker_coming_back_gets_the_small_payload_again(
+    hass: HomeAssistant, mqtt_mock, retained: dict[str, str | bytes]
+) -> None:
+    """A broker restarted without persistence lost it; the receiver need not have spoken."""
+    retained[AVAILABILITY_TOPIC] = "online"
+    await async_setup_box(hass, editor_entry(None, remote_edit=False))
+    assert catalogue_publishes(mqtt_mock) == [('{"v":1,"editing":false}', 1, True)]
+
+    async_dispatcher_send(hass, MQTT_CONNECTION_STATE, False)
+    async_dispatcher_send(hass, MQTT_CONNECTION_STATE, True)
+    await hass.async_block_till_done()
+
+    assert catalogue_publishes(mqtt_mock) == [('{"v":1,"editing":false}', 1, True)] * 2
+
+
+def test_a_menu_whose_own_entities_are_over_the_bound_is_said_in_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Unreachable within the menu's bounds; if it ever happens, it is not silent."""
+    entities = [_entity(i) for i in range(12000)]
+    payload = {"v": 1, "editing": True, "revision": "0" * 16, "areas": [], "left_out": 0,
+               "menu": [{"type": "row", "id": f"r_{i:08x}", "entity": entity["e"],
+                         "control": "indicator", "label": None, "icon": None}
+                        for i, entity in enumerate(entities)],
+               "entities": entities}
+
+    with caplog.at_level(logging.WARNING):
+        encoded, left_out = fit_catalogue(payload)
+
+    assert left_out == 0
+    assert len(encoded) >= MAX_CATALOGUE_BYTES
+    assert any("alone are over 1 MiB" in record.getMessage() for record in caplog.records)
+
+
+async def test_editing_turned_off_stops_following_the_registries(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes]
+) -> None:
+    """Off without a reload (the option stored directly): the next publish lets them go."""
+    from custom_components.enigma2_mqtt.const import CONF_MENU_REMOTE_EDIT
+
+    before = hass.bus.async_listeners().get(ar.EVENT_AREA_REGISTRY_UPDATED, 0)
+    entry = await _setup(hass, box_on_the_broker)
+    assert hass.bus.async_listeners().get(ar.EVENT_AREA_REGISTRY_UPDATED, 0) == before + 1
+
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, CONF_MENU_REMOTE_EDIT: False}
+    )
+    async_dispatcher_send(hass, MQTT_CONNECTION_STATE, True)
+    await hass.async_block_till_done()
+
+    assert catalogue_publishes(mqtt_mock)[-1] == ('{"v":1,"editing":false}', 1, True)
+    assert hass.bus.async_listeners().get(ar.EVENT_AREA_REGISTRY_UPDATED, 0) == before

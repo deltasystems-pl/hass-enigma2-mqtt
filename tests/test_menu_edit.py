@@ -373,7 +373,7 @@ async def test_a_receiver_that_does_not_claim_the_editor_is_answered_not_claimed
 
     assert entry.options[CONF_MENU] == stored(ids)
     assert results(mqtt_mock) == [
-        {"id": EDIT_ID, "result": "not_claimed", "revision": revision(entry), "path": None,
+        {"id": EDIT_ID, "result": "not_claimed", "revision": None, "path": None,
          "detail": None}
     ]
 
@@ -669,9 +669,16 @@ async def test_with_editing_off_every_edit_is_disabled(
 
     assert entry.options[CONF_MENU] == stored(ids)
     assert results(mqtt_mock) == [
-        {"id": EDIT_ID, "result": "disabled", "revision": revision(entry), "path": None,
+        {"id": EDIT_ID, "result": "disabled", "revision": None, "path": None,
          "detail": None}
     ]
+    # A menu changed in the options meanwhile: the refusal still says nothing about it.
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, CONF_MENU: [row("r_new", "script.movie", "button")]}
+    )
+    fire_edit(hass, as_catalogue(), revision(entry), edit_id="000000000009")
+    await hass.async_block_till_done()
+    assert results(mqtt_mock)[-1]["revision"] is None
 
 
 async def test_disabled_comes_after_not_claimed_and_unreadable_and_before_busy(
@@ -985,3 +992,25 @@ def test_the_revision_of_a_text_utf8_cannot_hold_does_not_raise() -> None:
     menu = [{"type": "group", "id": "g_a", "label": "x\ud800", "icon": "sofa", "rows": []}]
 
     assert len(menu_revision(menu)) == 16
+
+
+async def test_only_disabled_and_not_claimed_leave_the_revision_out(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes], clock
+) -> None:
+    entry, _ids = await _setup(hass, box_on_the_broker)
+    fire_edit(hass, [], "0123456789abcdef", edit_id="000000000001")
+    await hass.async_block_till_done()
+    fire_edit(hass, "x", revision(entry), edit_id="000000000002")
+    await hass.async_block_till_done()
+    fire_edit(hass, [], revision(entry), edit_id="000000000003")
+    await hass.async_block_till_done()
+    clock.now += 1
+    fire_edit(hass, [], revision(entry), edit_id="000000000004")
+    await hass.async_block_till_done()
+
+    answers = {a["id"]: (a["result"], a["revision"]) for a in results(mqtt_mock)}
+    emptied = menu_revision([])
+    assert answers["000000000001"][0] == "stale" and answers["000000000001"][1]
+    assert answers["000000000002"][0] == "invalid" and answers["000000000002"][1]
+    assert answers["000000000003"] == ("saved", emptied)
+    assert answers["000000000004"] == ("busy", emptied)
