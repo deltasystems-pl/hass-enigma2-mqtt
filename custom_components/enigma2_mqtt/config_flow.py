@@ -137,6 +137,7 @@ from .installer import (
     async_probe_host_key,
 )
 from .menu import async_retract_menu
+from .menu_creator import async_retract_catalogue
 from .menu_flow import ReceiverMenuSteps, menu_offered
 from .own_go2rtc import default_stream_name, validate_options as validate_go2rtc_options
 from .plugin_versions import has_credentials
@@ -637,10 +638,12 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 if node_id != entry.data[CONF_NODE_ID]:
                     self._async_forget_device(entry.data[CONF_NODE_ID], entry.entry_id)
-                    # The old node's menu would stay on the broker for a receiver that
-                    # no longer reads it; the reload publishes it under the new id.
+                    # The old node's menu and catalogue would stay on the broker for a
+                    # receiver that no longer reads them; the reload publishes them under
+                    # the new id.
                     try:
                         await async_retract_menu(self.hass, entry.data[CONF_NODE_ID])
+                        await async_retract_catalogue(self.hass, entry.data[CONF_NODE_ID])
                     except HomeAssistantError as error:
                         _LOGGER.debug("Could not retract the old node's menu: %s", error)
                 return self.async_update_reload_and_abort(

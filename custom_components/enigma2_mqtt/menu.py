@@ -29,6 +29,7 @@ import asyncio
 from collections import deque
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+import hashlib
 import json
 import logging
 import math
@@ -584,6 +585,17 @@ def stored_row(
 ) -> dict[str, Any]:
     """A row with its id and control, in the order the options keep its fields."""
     return {KIND: KIND_ROW, ITEM_ID: row_id, **draft, ROW_CONTROL: control}
+
+
+def menu_revision(menu: Any) -> str:
+    """The revision of a stored menu: 16 hex digits of the SHA-256 of its canonical JSON.
+
+    A content hash, not a counter (ADR-0013): nothing to keep or migrate, it changes exactly
+    when the stored menu changes - whoever changed it - and the empty menu is the hash of
+    `[]`. Canonical is sorted keys, no spaces, UTF-8 without escaping.
+    """
+    text = json.dumps(menu, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
 # ---------------------------------------------------------------------- rendering
@@ -1178,6 +1190,8 @@ class ReceiverMenu:
         # Following the bound entities' states, and which entity ids that is for.
         self._untrack: CALLBACK_TYPE | None = None
         self._tracked: list[str] = []
+        # Following the entity registry, while there are rows whose binding it can move.
+        self._unlisten_registry: CALLBACK_TYPE | None = None
         self._debouncer: Debouncer[Any] = Debouncer(
             hass,
             _LOGGER,
@@ -1216,12 +1230,6 @@ class ReceiverMenu:
     async def async_start(self) -> None:
         """Publish the menu now, and again whenever what it shows changes."""
         self._async_track()
-        if self.menu:
-            self._unsubscribes.append(
-                self.hass.bus.async_listen(
-                    er.EVENT_ENTITY_REGISTRY_UPDATED, self._registry_changed
-                )
-            )
         self._unsubscribes.append(
             self.box.async_add_listener(self._box_changed, topics=(TOPIC_AVAILABILITY,))
         )
@@ -1244,7 +1252,25 @@ class ReceiverMenu:
         if self._untrack is not None:
             self._untrack()
             self._untrack = None
+        if self._unlisten_registry is not None:
+            self._unlisten_registry()
+            self._unlisten_registry = None
         self._debouncer.async_shutdown()
+
+    @callback
+    def async_menu_changed(self) -> None:
+        """Read the menu from the options again and publish it, without a reload.
+
+        The menu creator stores an accepted edit in the options and calls this (ADR-0013):
+        no entity goes unavailable for a menu change. The publish goes through the same
+        debouncer as a state change, so it leaves at once, or half a second after the
+        last one.
+        """
+        if self._stopped:
+            return
+        self.menu = stored_menu(self.entry.options)
+        self._async_track()
+        self._debouncer.async_schedule_call()
 
     def _bound_entities(self) -> list[str]:
         """The entity ids the rows name now."""
@@ -1258,7 +1284,7 @@ class ReceiverMenu:
 
     @callback
     def _async_track(self) -> None:
-        """Follow the state of every entity the rows name now."""
+        """Follow the state of every entity the rows name now, and the registry for them."""
         if self._untrack is not None:
             self._untrack()
             self._untrack = None
@@ -1267,6 +1293,13 @@ class ReceiverMenu:
             self._untrack = async_track_state_change_event(
                 self.hass, self._tracked, self._state_changed
             )
+        if self.menu and self._unlisten_registry is None:
+            self._unlisten_registry = self.hass.bus.async_listen(
+                er.EVENT_ENTITY_REGISTRY_UPDATED, self._registry_changed
+            )
+        elif not self.menu and self._unlisten_registry is not None:
+            self._unlisten_registry()
+            self._unlisten_registry = None
 
     @callback
     def _registry_changed(self, _event: Event[er.EventEntityRegistryUpdatedData]) -> None:
