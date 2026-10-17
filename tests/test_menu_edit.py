@@ -772,7 +772,7 @@ async def test_nothing_from_an_edit_reaches_the_answer_or_the_log_as_it_came(
 ) -> None:
     """A line break in an id, an entity or a control cannot forge a second log line."""
     entry, _ids = await _setup(hass, box_on_the_broker)
-    forged = "x\n2026-10-17 12:00:00 ERROR (MainThread) [homeassistant] forged\x1b[31mé"
+    forged = "x\n2026-10-17 12:00:00 ERROR (MainThread) [homeassistant] forged\x1b[31m\u00e9"
 
     with caplog.at_level(logging.DEBUG, logger="custom_components.enigma2_mqtt.menu_creator"):
         for number, menu in enumerate(
