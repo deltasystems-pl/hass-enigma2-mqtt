@@ -122,6 +122,7 @@ from .const import (
     TOPIC_LAST_ERROR,
     TOPIC_LOCAL_ERROR,
     TOPIC_MENU_ACTION,
+    TOPIC_MENU_EDIT,
     TOPIC_OSCAM,
     TOPIC_POWER,
     TOPIC_PROCESS,
@@ -1105,6 +1106,9 @@ class Enigma2Box:
         # Who checks and performs a viewer's `menu_action`: the receiver menu, set when the
         # entry is set up.
         self.menu_action_handler: Callable[[ReceiveMessage], None] | None = None
+        # Who checks and stores an edited menu from the receiver's web interface: the menu
+        # creator, set when the entry is set up.
+        self.menu_edit_handler: Callable[[ReceiveMessage], None] | None = None
         # Finds and fetches channel picons through the receiver's web interface: set
         # when the entry is set up, stopped with the box.
         self.picons: PiconResolver | None = None
@@ -1984,6 +1988,9 @@ class Enigma2Box:
         elif suffix == TOPIC_MENU_ACTION:
             if self.menu_action_handler is not None:
                 self.menu_action_handler(msg)
+        elif suffix == TOPIC_MENU_EDIT:
+            if self.menu_edit_handler is not None:
+                self.menu_edit_handler(msg)
         elif suffix == TOPIC_UPDATE:
             self._update_received(msg)
         else:

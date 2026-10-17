@@ -42,6 +42,22 @@ mode is published without its text, whether the menu shows it as a text field or
 Anyone who can publish to the broker can also raise and clear the repair about the receiver's
 clock - a nuisance only, since it changes nothing but what that repair says.
 
+**Editing the receiver menu from the receiver is off by default** ([ADR-0013](docs/adr/0013-menu-creator.md)).
+It is turned on per receiver in the integration's options (*Receiver menu -> Editing from the
+receiver*). Off, the catalogue on the broker says only `{"v": 1, "editing": false}` - nothing
+about any entity - and every edit is refused with `disabled`. **Turning it on gives anyone who can
+publish to the broker, or open the receiver's web interface, the power to choose any entity Home
+Assistant has and then operate it** from the menu: name a lock and unlock it, a garage door or a
+gate cover and open it, a script, an automation or a button and run it - not only press what the
+user put into the menu. While it is on, the catalogue is retained on the broker for any login to
+read: the entity ID, name, area and possible controls of every entity Home Assistant has a state
+for, hidden ones included. The edit is untrusted input either way: Home Assistant reads it with the
+options flow's own rules (bounds, an entity that exists, a control that entity may be shown as),
+refuses an edit carrying a text UTF-8 cannot hold, refuses one that started from an older menu,
+stores at most one every two seconds, stores nothing from a retained message, and quotes what it
+sent in its answer and its log only as cut ASCII literals. Turn it on only while the broker and the
+receiver's web interface are reachable by the household's own devices alone.
+
 **SSH password.** The guided installer asks for the receiver's SSH password. It is
 **discarded after a successful install** unless you explicitly ask to keep it for later plugin
 updates. If you do keep it, it is stored in the config entry - and Home Assistant's `.storage`

@@ -42,6 +42,36 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   retracts the menu, and so does reconfiguring to a new node ID for the old node. No entity is
   added.
 
+- **The menu creator** (plugin 0.5.0, for a receiver that claims `menu_editor`; DOCUMENTATION.md
+  "Editing the menu on the receiver" and [ADR-0013](docs/adr/0013-menu-creator.md)). The receiver
+  menu can also be built on a page in the receiver's web interface. Home Assistant publishes a
+  catalogue on `enigma2mqtt/menu_catalogue/<node_id>`, retained - every entity with a state, hidden,
+  configuration and diagnostic ones marked, with its name, area and possible controls, and the
+  stored menu with its revision (a hash of its content) - under 1 MiB, leaving out hidden, then
+  diagnostic, then configuration entities, then the rest by name, and saying how many. It goes out
+  at setup, after a menu change, when the receiver or the broker connection comes back, once Home
+  Assistant has started, and at most every five seconds after a change to the entity, area or
+  device registry; it is retracted when the claim goes, the entry is removed or its node ID changes.
+  The receiver sends the edited menu back on `menu_edit`; Home Assistant checks it with the options
+  flow's own rules - their checks are now functions both call - refuses one that started from
+  another revision as `stale`, takes one save at a time and at most one every two seconds, stores
+  the menu in the options **without reloading the entry**, republishes the menu and the catalogue
+  within a second, and answers every readable edit on `enigma2mqtt/menu_edit_result/<node_id>`
+  (`saved`, `stale`, `invalid` with a path and a reason, `disabled`, `busy`, `not_claimed`).
+  **Editing from the receiver is off by default**: the receiver menu's options gain *Editing from
+  the receiver* („Edycja na dekoderze"), and while it is off the catalogue says only
+  `{"v": 1, "editing": false}` and every edit is answered `disabled`. Turned on, anyone who can
+  publish to the broker can put any entity into the menu and operate it (SECURITY.md). The
+  catalogue never leaves out an entity the menu uses; a control sent back unchanged is kept even
+  when its entity no longer offers that control; an edit with a text UTF-8 cannot hold is
+  unreadable; what an edit sent is quoted in answers and the log only as cut ASCII literals. The
+  settings form and the SSH steps carry the menu over as it is stored when they save.
+- **„Przezroczystość menu" and „Klawisz menu"** (*Menu transparency*, *Menu hotkey*; plugin 0.5.0,
+  for a receiver that reports `menu_transparency`; DOCUMENTATION.md §4.4): a number (0-80 % in
+  steps of 10) and a select (long HELP, long RED, F3, F4, off) for two settings of the receiver
+  menu, each written with a `cmd/config` that carries only its own key and confirmed by
+  `info.settings`.
+
 - **Stream facts, a stream address and a media source** (plugin 0.5.0, for a receiver that
   claims the capability named with each; DOCUMENTATION.md §4.7 and
   [ADR-0011](docs/adr/0011-stream-facts-addresses-and-a-media-source.md)). The integration

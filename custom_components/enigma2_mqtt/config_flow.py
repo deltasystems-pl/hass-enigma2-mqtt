@@ -137,7 +137,8 @@ from .installer import (
     async_probe_host_key,
 )
 from .menu import async_retract_menu
-from .menu_flow import ReceiverMenuSteps, menu_offered
+from .menu_creator import async_retract_catalogue
+from .menu_flow import ReceiverMenuSteps, menu_offered, with_current_menu
 from .own_go2rtc import default_stream_name, validate_options as validate_go2rtc_options
 from .plugin_versions import has_credentials
 from .release_index import release_of
@@ -637,10 +638,12 @@ class Enigma2MqttConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 if node_id != entry.data[CONF_NODE_ID]:
                     self._async_forget_device(entry.data[CONF_NODE_ID], entry.entry_id)
-                    # The old node's menu would stay on the broker for a receiver that
-                    # no longer reads it; the reload publishes it under the new id.
+                    # The old node's menu and catalogue would stay on the broker for a
+                    # receiver that no longer reads them; the reload publishes them under
+                    # the new id.
                     try:
                         await async_retract_menu(self.hass, entry.data[CONF_NODE_ID])
+                        await async_retract_catalogue(self.hass, entry.data[CONF_NODE_ID])
                     except HomeAssistantError as error:
                         _LOGGER.debug("Could not retract the old node's menu: %s", error)
                 return self.async_update_reload_and_abort(
@@ -1153,7 +1156,11 @@ class Enigma2MqttOptionsFlow(ReceiverMenuSteps, OptionsFlowWithReload):
                     and not user_input.get(CONF_KEEP_SSH_CREDENTIALS, True)
                 ):
                     async_set_ssh_credentials(self.hass, self.config_entry, None)
-                return self.async_create_entry(data=data)
+                # The menu as the entry holds it now: the menu creator may have stored one
+                # while the receiver was answering the command above.
+                return self.async_create_entry(
+                    data=with_current_menu(data, self.config_entry.options)
+                )
 
         box = self._box()
         # Every bouquet the box published, not the ones the current option narrowed it
@@ -1522,7 +1529,13 @@ class Enigma2MqttOptionsFlow(ReceiverMenuSteps, OptionsFlowWithReload):
                 if errors:
                     return self._show_ssh_confirm(errors)
                 async_set_ssh_credentials(self.hass, self.config_entry, credentials)
-                return self.async_create_entry(data=self._pending_options or {})
+                # Read again: the SSH steps take minutes, and a menu stored from the
+                # receiver meanwhile must survive this save.
+                return self.async_create_entry(
+                    data=with_current_menu(
+                        self._pending_options or {}, self.config_entry.options
+                    )
+                )
         return self._show_ssh_confirm(errors)
 
     def _show_ssh_confirm(self, errors: dict[str, str]) -> ConfigFlowResult:

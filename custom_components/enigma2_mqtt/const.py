@@ -855,3 +855,30 @@ MENU_ICONS: Final = (
     "home",
 )
 MENU_ICON_NEUTRAL: Final = "neutral"
+
+# The menu creator, from a plugin after 0.4.0 (contract 1, additive; `menu_creator.py` and
+# ADR-0013): a page in the receiver's web interface edits the menu. Home Assistant publishes
+# a catalogue of its entities and the stored menu, retained, while the receiver claims
+# `menu_editor`; the receiver sends the edited menu back on `menu_edit` under its base topic,
+# and Home Assistant answers every edit it can read on the result topic. The catalogue and
+# the result are this integration's, outside the base topic like the menu.
+TOPIC_MENU_CATALOGUE_PREFIX: Final = "enigma2mqtt/menu_catalogue"
+TOPIC_MENU_EDIT_RESULT_PREFIX: Final = "enigma2mqtt/menu_edit_result"
+TOPIC_MENU_EDIT: Final = "menu_edit"
+CAPABILITY_MENU_EDITOR: Final = "menu_editor"
+# Whether the menu creator may replace the menu: an option of the receiver menu, off unless
+# the user turns it on. Off, the catalogue says only that, and every edit is refused.
+CONF_MENU_REMOTE_EDIT: Final = "menu_remote_edit"
+DEFAULT_MENU_REMOTE_EDIT: Final = False
+
+# Two receiver settings of the menu that Home Assistant shows and writes, each one key of a
+# partial `cmd/config` (plugin TOPICS.md, `cmd/config`). A plugin that reports
+# `menu_transparency` in `info.settings` takes a partial payload; one that does not is
+# never sent either key on its own. Their defaults are the plugin's and are read from
+# `info.settings`, so nothing here needs them.
+SETTING_MENU_TRANSPARENCY: Final = "menu_transparency"
+SETTING_MENU_HOTKEY: Final = "menu_hotkey"
+MENU_TRANSPARENCY_MIN: Final = 0
+MENU_TRANSPARENCY_MAX: Final = 80
+MENU_TRANSPARENCY_STEP: Final = 10
+MENU_HOTKEYS: Final = ("help_long", "red_long", "f3", "f4", "off")

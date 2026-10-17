@@ -12,6 +12,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry, async_
 from custom_components.enigma2_mqtt.const import (
     CONF_BASE_TOPIC,
     CONF_MENU,
+    CONF_MENU_REMOTE_EDIT,
     CONF_NAME,
     CONF_NODE_ID,
     DOMAIN,
@@ -116,3 +117,50 @@ def fire_action(
         payload["value"] = value
     payload.update(overrides)
     async_fire_mqtt_message(hass, MENU_ACTION_TOPIC, json.dumps(payload), retain=retain)
+
+
+# The menu creator (ADR-0013).
+CATALOGUE_TOPIC = f"enigma2mqtt/menu_catalogue/{NODE_ID}"
+EDITOR_CAPABILITIES = [*MENU_CAPABILITIES, "menu_editor"]
+EDITOR_INFO = {**INFO, "capabilities": EDITOR_CAPABILITIES}
+MISSING_ID = "0123456789abcdef0123456789abcdef"
+
+
+def claim_editor(retained: dict[str, str | bytes], info: dict[str, Any] | None = None) -> None:
+    """Make the example receiver one that claims `menu` and `menu_editor`."""
+    payload = info if info is not None else EDITOR_INFO
+    retained[INFO_TOPIC] = json.dumps(payload)
+    retained[ANNOUNCEMENT_TOPIC] = json.dumps(
+        {**ANNOUNCEMENT, "capabilities": payload["capabilities"]}
+    )
+
+
+def catalogue_publishes(mqtt_mock: Any) -> list[tuple[str, int, bool]]:
+    """Every publish to the catalogue topic: payload, QoS and retain."""
+    return [
+        (call.args[1], call.args[2], call.args[3])
+        for call in mqtt_mock.async_publish.call_args_list
+        if call.args[0] == CATALOGUE_TOPIC
+    ]
+
+
+def last_catalogue(mqtt_mock: Any) -> dict[str, Any] | None:
+    """The last catalogue published, decoded; None for the empty payload."""
+    payload, qos, retain = catalogue_publishes(mqtt_mock)[-1]
+    assert (qos, retain) == (1, True)
+    return json.loads(payload) if payload else None
+
+
+def editor_entry(menu: list[dict[str, Any]] | None, *, remote_edit: bool = True) -> MockConfigEntry:
+    """The example receiver's entry, holding this menu, with editing from the receiver on."""
+    entry = menu_entry(menu)
+    options = dict(entry.options)
+    if remote_edit:
+        options[CONF_MENU_REMOTE_EDIT] = True
+    return MockConfigEntry(
+        domain=entry.domain,
+        title=entry.title,
+        unique_id=entry.unique_id,
+        data=dict(entry.data),
+        options=options,
+    )

@@ -29,6 +29,7 @@ import asyncio
 from collections import deque
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+import hashlib
 import json
 import logging
 import math
@@ -490,6 +491,114 @@ def allowed_controls(hass: HomeAssistant, entity_id: str) -> list[str]:
         if isinstance(features, int) and not features & 4:
             controls.remove(SLIDER)
     return controls
+
+
+# ------------------------------------------------------------------- the menu's rules
+#
+# What a menu may hold and how an edit is read into it, apart from any form: the options
+# flow and the menu creator's edit (ADR-0013) both call these, so the two cannot drift.
+
+
+def clean_label(raw: Any) -> str:
+    """A name as the menu stores it: on one line, cut at 60 characters; "" for none."""
+    return " ".join(str(raw or "").split())[:MAX_LABEL]
+
+
+def group_icon(raw: Any) -> str:
+    """A group's icon: one of the plugin's, else the neutral one."""
+    return raw if isinstance(raw, str) and raw in MENU_ICONS else MENU_ICON_NEUTRAL
+
+
+def row_icon(raw: Any) -> str | None:
+    """A row's icon override: one of the plugin's, else none (the row picks one)."""
+    return raw if isinstance(raw, str) and raw in MENU_ICONS else None
+
+
+def menu_groups(menu: Iterable[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """The groups of a stored menu, in order."""
+    return [item for item in menu if item.get(KIND) == KIND_GROUP]
+
+
+def can_add_group(menu: list[Mapping[str, Any]]) -> bool:
+    """Whether one more group fits: eight groups, and room in the top list."""
+    return len(menu_groups(menu)) < MAX_GROUPS and len(menu) < MAX_ENTRIES
+
+
+def can_add_row(menu: list[Mapping[str, Any]]) -> bool:
+    """Whether one more row fits anywhere: the top list or any group."""
+    return len(menu) < MAX_ENTRIES or any(
+        len(group[GROUP_ROWS]) < MAX_ENTRIES for group in menu_groups(menu)
+    )
+
+
+def has_room(entries: list[Any], *, moving_in: bool) -> bool:
+    """Whether a list takes a row: one already in it always fits, a new one if under 24."""
+    return not moving_in or len(entries) < MAX_ENTRIES
+
+
+def control_allowed(hass: HomeAssistant, entity_id: str, control: Any) -> bool:
+    """Whether a row bound to this entity may be this control now."""
+    return control in allowed_controls(hass, entity_id)
+
+
+def same_binding(hass: HomeAssistant, stored: Any, other: Any) -> bool:
+    """Whether two bindings name the same entity, whichever form either is stored in.
+
+    A row stored by its entity id before the entity had a registry entry is still the same
+    binding as the registry id it has now.
+    """
+    return resolve_entity(hass, stored) == resolve_entity(hass, other)
+
+
+def keeps_row_id(
+    hass: HomeAssistant, existing: Mapping[str, Any] | None, binding: Any, control: str
+) -> bool:
+    """Whether a row keeps the id of the stored row it replaces (ADR-0012 section 3).
+
+    It does while it stays bound to the same entity as the same control; a new binding is a
+    new row as far as the receiver can tell, and gets a new id.
+    """
+    return (
+        existing is not None
+        and existing[ROW_CONTROL] == control
+        and (
+            existing[ROW_ENTITY] == binding
+            or same_binding(hass, existing[ROW_ENTITY], binding)
+        )
+    )
+
+
+def row_draft(binding: str, label: Any, icon: Any) -> dict[str, Any]:
+    """A row as it is stored, without its id and control: the binding and the overrides.
+
+    `binding` is what the row stores - `stored_binding` of the entity it is bound to.
+    """
+    draft: dict[str, Any] = {KIND: KIND_ROW, ROW_ENTITY: binding}
+    if cleaned := clean_label(label):
+        draft[ITEM_LABEL] = cleaned
+    if (chosen := row_icon(icon)) is not None:
+        draft[ITEM_ICON] = chosen
+    return draft
+
+
+def stored_row(
+    row_id: str, draft: Mapping[str, Any], control: str
+) -> dict[str, Any]:
+    """A row with its id and control, in the order the options keep its fields."""
+    return {KIND: KIND_ROW, ITEM_ID: row_id, **draft, ROW_CONTROL: control}
+
+
+def menu_revision(menu: Any) -> str:
+    """The revision of a stored menu: 16 hex digits of the SHA-256 of its canonical JSON.
+
+    A content hash, not a counter (ADR-0013): nothing to keep or migrate, it changes exactly
+    when the stored menu changes - whoever changed it - and the empty menu is the hash of
+    `[]`. Canonical is sorted keys, no spaces, UTF-8 without escaping.
+    """
+    text = json.dumps(menu, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    # `surrogatepass`: the menu creator refuses a text UTF-8 cannot hold, so nothing stored
+    # has one - and if anything ever did, a hash is still not a reason to raise.
+    return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()[:16]
 
 
 # ---------------------------------------------------------------------- rendering
@@ -1084,6 +1193,8 @@ class ReceiverMenu:
         # Following the bound entities' states, and which entity ids that is for.
         self._untrack: CALLBACK_TYPE | None = None
         self._tracked: list[str] = []
+        # Following the entity registry, while there are rows whose binding it can move.
+        self._unlisten_registry: CALLBACK_TYPE | None = None
         self._debouncer: Debouncer[Any] = Debouncer(
             hass,
             _LOGGER,
@@ -1121,13 +1232,10 @@ class ReceiverMenu:
 
     async def async_start(self) -> None:
         """Publish the menu now, and again whenever what it shows changes."""
+        # Read now, not when built: the menu is built before the box subscribes, and its
+        # retained `availability` arrives in between.
+        self._was_available = self.box.available
         self._async_track()
-        if self.menu:
-            self._unsubscribes.append(
-                self.hass.bus.async_listen(
-                    er.EVENT_ENTITY_REGISTRY_UPDATED, self._registry_changed
-                )
-            )
         self._unsubscribes.append(
             self.box.async_add_listener(self._box_changed, topics=(TOPIC_AVAILABILITY,))
         )
@@ -1150,7 +1258,25 @@ class ReceiverMenu:
         if self._untrack is not None:
             self._untrack()
             self._untrack = None
+        if self._unlisten_registry is not None:
+            self._unlisten_registry()
+            self._unlisten_registry = None
         self._debouncer.async_shutdown()
+
+    @callback
+    def async_menu_changed(self) -> None:
+        """Read the menu from the options again and publish it, without a reload.
+
+        The menu creator stores an accepted edit in the options and calls this (ADR-0013):
+        no entity goes unavailable for a menu change. The publish goes through the same
+        debouncer as a state change, so it leaves at once, or half a second after the
+        last one.
+        """
+        if self._stopped:
+            return
+        self.menu = stored_menu(self.entry.options)
+        self._async_track()
+        self._debouncer.async_schedule_call()
 
     def _bound_entities(self) -> list[str]:
         """The entity ids the rows name now."""
@@ -1164,7 +1290,7 @@ class ReceiverMenu:
 
     @callback
     def _async_track(self) -> None:
-        """Follow the state of every entity the rows name now."""
+        """Follow the state of every entity the rows name now, and the registry for them."""
         if self._untrack is not None:
             self._untrack()
             self._untrack = None
@@ -1173,6 +1299,13 @@ class ReceiverMenu:
             self._untrack = async_track_state_change_event(
                 self.hass, self._tracked, self._state_changed
             )
+        if self.menu and self._unlisten_registry is None:
+            self._unlisten_registry = self.hass.bus.async_listen(
+                er.EVENT_ENTITY_REGISTRY_UPDATED, self._registry_changed
+            )
+        elif not self.menu and self._unlisten_registry is not None:
+            self._unlisten_registry()
+            self._unlisten_registry = None
 
     @callback
     def _registry_changed(self, _event: Event[er.EventEntityRegistryUpdatedData]) -> None:

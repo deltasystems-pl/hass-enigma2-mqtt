@@ -178,7 +178,7 @@
   "options": {
     "step": {
       "init": {"title": "Receiver-Optionen", "description": "Ändere die Optionen auf dieser Seite der Verbindung, oder ändere das Plugin auf dem Receiver per SSH. Das Entfernen des Plugins wird nur angeboten, solange der Receiver es erlaubt; diese Erlaubnis wird am Receiver selbst gesetzt. Hier wird auch das Menü gebaut, das der Receiver aus Home Assistant zeigt, sobald er eines zeigen kann.", "menu_options": {"settings": "Optionen", "receiver_menu": "Menü auf dem Receiver", "uninstall": "Plugin vom Receiver entfernen", "downgrade": "Ältere Plugin-Version installieren"}},
-      "receiver_menu": {"title": "Menü auf dem Receiver", "description": "Das Menü, das der Receiver aus Home Assistant zeigt: bis zu {groups} Gruppen und bis zu {entries} Einträge in der Hauptliste und in jeder Gruppe. Der Receiver sagt nur, welche Zeile gewählt wurde; Home Assistant führt sie aus. Jeder, der an deinen MQTT-Broker veröffentlichen kann, kann ebenfalls eine Zeile wählen - nimm hier also nur auf, was du jedem mit der Fernbedienung in der Hand überlassen würdest. Nichts ändert sich, bis du das Menü speicherst.\n\n{menu}", "menu_options": {"menu_add_group": "Gruppe hinzufügen", "menu_add_row": "Eintrag hinzufügen", "menu_edit_group": "Gruppe ändern", "menu_edit_row": "Eintrag ändern", "menu_move": "Gruppe oder Eintrag verschieben", "menu_remove": "Gruppen oder Einträge entfernen", "menu_save": "Menü speichern"}},
+      "receiver_menu": {"title": "Menü auf dem Receiver", "description": "Das Menü, das der Receiver aus Home Assistant zeigt: bis zu {groups} Gruppen und bis zu {entries} Einträge in der Hauptliste und in jeder Gruppe. Der Receiver sagt nur, welche Zeile gewählt wurde; Home Assistant führt sie aus. Jeder, der an deinen MQTT-Broker veröffentlichen kann, kann ebenfalls eine Zeile wählen - nimm hier also nur auf, was du jedem mit der Fernbedienung in der Hand überlassen würdest. Nichts ändert sich, bis du das Menü speicherst.\n\n{menu}", "menu_options": {"menu_add_group": "Gruppe hinzufügen", "menu_add_row": "Eintrag hinzufügen", "menu_edit_group": "Gruppe ändern", "menu_edit_row": "Eintrag ändern", "menu_move": "Gruppe oder Eintrag verschieben", "menu_remove": "Gruppen oder Einträge entfernen", "menu_remote_edit": "Bearbeiten am Receiver", "menu_save": "Menü speichern"}},
       "menu_move": {"title": "Gruppe oder Eintrag verschieben", "description": "Um eine Stelle nach oben oder unten in der eigenen Liste: der Hauptliste oder der Gruppe, in der er steht.", "data": {"item": "Gruppe oder Eintrag", "direction": "Richtung"}},
       "menu_group": {"title": "Gruppe", "description": "Ein Untermenü des Receiver-Menüs. Neue Gruppen kommen ans Ende der Hauptliste.", "data": {"label": "Name", "icon": "Symbol"}, "data_description": {"label": "Wird auf dem Receiver angezeigt, nach {label_max} Zeichen abgeschnitten.", "icon": "Wird auf dem Receiver neben dem Namen gezeichnet."}},
       "menu_row": {"title": "Eintrag", "description": "Eine Zeile des Receiver-Menüs, verbunden mit einer Entität, einer Szene oder einem Skript. Neue Einträge kommen ans Ende der Liste, in die sie gelegt werden.", "data": {"entity_id": "Entität", "place": "Ort", "label": "Name", "icon": "Symbol"}, "data_description": {"entity_id": "Was die Zeile zeigt und steuert. Wie sie angezeigt wird, ergibt sich aus der Entität: eine Taste für eine Szene oder ein Skript, ein Schalter für ein Licht, eine Auswahlliste für eine Auswahl und so weiter; jede andere Entität wird als Anzeige mit ihrem Zustand gezeigt. Die Zeile folgt der Entität, wenn ihre ID umbenannt wird.", "place": "Die Hauptliste oder eine der Gruppen.", "label": "Leer lassen, um den Namen der Entität zu verwenden. Nach {label_max} Zeichen abgeschnitten.", "icon": "Leer lassen, um ein zur Entität passendes zu wählen."}},
@@ -186,6 +186,7 @@
       "menu_edit_group": {"title": "Gruppe ändern", "data": {"group": "Gruppe"}},
       "menu_edit_row": {"title": "Eintrag ändern", "data": {"row": "Eintrag"}},
       "menu_remove": {"title": "Gruppen oder Einträge entfernen", "description": "Eine Gruppe wird mit allen ihren Einträgen entfernt.", "data": {"remove": "Entfernen"}},
+      "menu_remote_edit": {"title": "Bearbeiten am Receiver", "description": "Erlaubt dem Menü-Editor in der Weboberfläche des Receivers, dieses Menü zu ersetzen. Standardmäßig aus. Solange es an ist, kann jeder, der auf deinem MQTT-Broker veröffentlichen kann, jede Entität dieses Home Assistant ins Menü setzen und sie dann von dort bedienen - Schlösser, Garagentore, Skripte -, und jeder, der den Broker lesen kann, sieht die Namen und Bereiche deiner Entitäten. Wird mit dem Menü gespeichert.", "data": {"menu_remote_edit": "Bearbeiten am Receiver erlauben"}},
       "settings": {
         "title": "Receiver-Optionen",
         "description": "Der Receiver meldet die MAC-Adresse {mac}. Magic Packets gehen dorthin, sofern unten keine andere angegeben wird.",
@@ -422,6 +423,9 @@
     "number": {
       "volume": {
         "name": "Lautstärke"
+      },
+      "menu_transparency": {
+        "name": "Menütransparenz"
       }
     },
     "remote": {
@@ -550,6 +554,16 @@
       },
       "zap_history_all": {
         "name": "Zuletzt gesehen (alle)"
+      },
+      "menu_hotkey": {
+        "name": "Menütaste",
+        "state": {
+          "help_long": "Langes HELP",
+          "red_long": "Langes Rot",
+          "f3": "F3",
+          "f4": "F4",
+          "off": "Aus"
+        }
       }
     }
   },
@@ -817,6 +831,7 @@
     }
   },
   "exceptions": {
+    "menu_transparency_step": {"message": "Eine Menütransparenz von {value} % nimmt der Receiver nicht an: Er nimmt 0 bis 80 % in Zehnerschritten."},
     "stream_source_unknown": {"message": "Dieser Receiver, dieses Bouquet oder dieser Sender wird hier nicht zum Streamen angeboten. Öffne den Medienbrowser erneut und wähle aus dem, was jetzt dort steht."},
     "stream_player_browser": {"message": "Der Browser kann den Transportstrom eines Receivers nicht abspielen. Wähle einen Media Player, der ihn selbst dekodiert, etwa Kodi, VLC oder einen Player auf Android TV."},
     "stream_player_cast": {"message": "Chromecast kann den Transportstrom eines Receivers nicht abspielen. Wähle einen Media Player, der ihn selbst dekodiert, etwa Kodi, VLC oder einen Player auf Android TV."},

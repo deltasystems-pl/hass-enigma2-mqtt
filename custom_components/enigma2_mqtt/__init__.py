@@ -36,6 +36,7 @@ from .const import (
     TOPIC_INTEGRATION_PREFIX,
 )
 from .menu import ReceiverMenu, async_delete_clock_issue, async_retract_menu
+from .menu_creator import MenuCreator, async_retract_catalogue
 from .own_go2rtc import Go2rtcFollower, async_delete_go2rtc_issue
 from .picture import PiconResolver
 from .relay import async_answer_relay_request, async_get_relay
@@ -128,6 +129,13 @@ async def async_setup_entry(
     # nothing until it is started, below, and nothing at all without an address.
     box.go2rtc = Go2rtcFollower(hass, entry, box)
     box.async_register_device()
+    # The receiver menu and the menu creator exist before the box subscribes, so that a
+    # `menu_action` or a `menu_edit` the broker delivers at once finds its handler. They
+    # publish and follow nothing until they are started, below.
+    menu = ReceiverMenu(hass, entry, box)
+    box.menu_action_handler = menu.async_action_received
+    creator = MenuCreator(hass, entry, box, menu)
+    box.menu_edit_handler = creator.async_edit_received
     await box.async_start()
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -163,10 +171,14 @@ async def async_setup_entry(
     # viewer's OK on a row performed here (ADR-0012). Unloading stops following the
     # entities and leaves the retained menu as it is - a reload republishes it at once;
     # removing the entry retracts it.
-    menu = ReceiverMenu(hass, entry, box)
-    box.menu_action_handler = menu.async_action_received
     entry.async_on_unload(menu.async_stop)
     await menu.async_start()
+
+    # The menu creator: the catalogue the receiver's web interface edits the menu from, while
+    # the receiver claims `menu_editor`, and the edits it sends back, stored here without a
+    # reload (ADR-0013). Unloading leaves the retained catalogue as it is, like the menu.
+    entry.async_on_unload(creator.async_stop)
+    await creator.async_start()
 
     # The retained release index, repaired from the verified copy this Home Assistant holds -
     # once for every receiver, when the first is set up and whenever the broker connection
@@ -232,9 +244,11 @@ async def async_remove_entry(
     The first message retracts `enigma2mqtt/integration/<node_id>`: the receiver is no
     longer managed by this integration, so nothing may narrow its choice of plugin
     releases in this integration's name (ADR-0008 section 10, which supersedes "one publish").
-    The last retracts `enigma2mqtt/menu/<node_id>`: a menu whose rows nothing performs
-    any more is not left on the television (ADR-0012). It is a retraction of this
-    integration's own topic, not a command.
+    The last retract `enigma2mqtt/menu/<node_id>` and `enigma2mqtt/menu_catalogue/<node_id>`:
+    a menu whose rows nothing performs any more is not left on the television (ADR-0012),
+    and a list of this Home Assistant's entities is not left on the broker for a receiver
+    nothing manages (ADR-0013). They are retractions of this integration's own topics, not
+    commands.
     The retained `enigma2mqtt/release_index` stays - a signed index is harmless to
     anybody who reads it, and it is not this receiver's.
     """
@@ -280,6 +294,15 @@ async def async_remove_entry(
         _LOGGER.warning(
             "Could not retract the receiver menu of %s; it stays on the receiver until "
             "the retained topic enigma2mqtt/menu/%s is emptied",
+            entry.data.get(CONF_NODE_ID),
+            entry.data.get(CONF_NODE_ID),
+        )
+    try:
+        await async_retract_catalogue(hass, entry.data[CONF_NODE_ID])
+    except (HomeAssistantError, KeyError):
+        _LOGGER.warning(
+            "Could not retract the menu catalogue of %s; it stays on the broker until "
+            "the retained topic enigma2mqtt/menu_catalogue/%s is emptied",
             entry.data.get(CONF_NODE_ID),
             entry.data.get(CONF_NODE_ID),
         )
