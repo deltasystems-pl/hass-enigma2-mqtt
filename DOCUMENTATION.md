@@ -145,10 +145,13 @@ topic read enigma2mqtt/menu/<node_id>
 topic read enigma2mqtt/menu_catalogue/<node_id>
 topic read enigma2mqtt/menu_edit_result/<node_id>
 topic read homeassistant/status
+topic read enigma2mqtt/integration/<node_id>
+topic read enigma2mqtt/release_index
 ```
 
-The last four are what the receiver menu reads: the menu and the creator's catalogue and answers
-this integration publishes, and Home Assistant's own online status.
+The four reads after the writes are what the receiver menu reads: the menu and the creator's
+catalogue and answers this integration publishes, and Home Assistant's own online status. The
+last two are what the plugin reads about this integration and the signed release index.
 
 The **Home Assistant Mosquitto add-on does not enforce an `acl_file`**: it accepts the file and
 never asks it, because its authentication plugin answers "superuser" for every login and the
@@ -402,7 +405,7 @@ The menu is **one level of groups**, each a list of controls, plus controls at t
 **8 groups**, at most **24 entries** in the top list (groups and controls together) and at most 24
 controls in each group. The step shows the menu as it stands and offers *Add a group*, *Add a
 control*, *Change a group*, *Change a control*, *Move a group or a control*, *Remove groups or
-controls* and *Save the menu*.
+controls*, *Editing from the receiver* (below) and *Save the menu*.
 **Nothing changes until you save**; closing the dialog discards the edits. Saving stores the
 menu in the entry's options and reloads the entry, and the reload publishes it.
 
@@ -521,16 +524,24 @@ permission is on and its OpenWebif page is there - also offers a **menu creator*
 receiver's web interface (*MQTT Bridge -> Menu*). It edits the same menu as the steps above, all
 at once: groups and controls added, renamed, given an icon, moved and removed, each control bound
 to an entity found by name, entity ID or area. Home Assistant stays the owner of the menu, and the
-receiver holds no Home Assistant token ([ADR-0013](docs/adr/0013-menu-creator.md)):
+receiver holds no Home Assistant token ([ADR-0013](docs/adr/0013-menu-creator.md)).
+
+🔴 **It is off until you turn it on**: *Receiver menu -> Editing from the receiver* („Edycja na
+dekoderze") -> **Allow editing from the receiver**, then *Save the menu*. Read the warning at the
+end of this section first. While it is off, the catalogue says only that editing is off -
+`{"v": 1, "editing": false}`, nothing about any entity - the creator page says so and shows no
+editor, and every edit from the receiver is answered `disabled`. Saving the setting publishes the
+catalogue again at once.
 
 - **Home Assistant publishes a catalogue** on `enigma2mqtt/menu_catalogue/<node_id>`, retained,
-  while the receiver claims the capability: every entity that has a state - hidden ones and
+  while the receiver claims the capability and editing is allowed: every entity that has a state - hidden ones and
   configuration and diagnostic ones too, marked as such; disabled ones have no state and are not
   in it - with its name, its area (its own, else its device's) and the controls it can be shown as,
   and the menu as it is stored, with its **revision**. A control whose entity is gone is listed as
   missing, and can stay in the menu unchanged. The catalogue stays under **1 MiB**: past that,
   entities are left out - hidden ones first, then diagnostic, then configuration, then the rest by
-  name - and the creator page says how many; one warning goes to the log. It is published at setup,
+  name, but never one the menu uses - and the creator page says how many; the log says so once per
+  Home Assistant run. It is published at setup,
   after every change to the menu, when the receiver or the broker connection comes back, once Home
   Assistant has started, and at most every five seconds when entities, areas or devices are
   added, renamed or moved - not when a state changes. When the receiver stops claiming the
@@ -538,25 +549,34 @@ receiver holds no Home Assistant token ([ADR-0013](docs/adr/0013-menu-creator.md
 - **The receiver sends the edited menu back** on `<base_topic>/<node_id>/menu_edit`, and Home
   Assistant checks it with **the same rules as the steps above** - the same code: 8 groups, 24
   entries per list, one level, names cut at 60, an icon from the plugin's list, an entity Home
-  Assistant has now and a control it can be shown as. A control keeps its id while its entity and
-  its control stay the same, as in the options. An accepted menu is stored in the entry's options
+  Assistant has now and a control it can be shown as. A control sent back exactly as it is stored
+  is kept as it is, even when its entity no longer offers that control - as the options keep a
+  control nobody changed; a new or changed one is checked. A text that cannot be written as UTF-8
+  (an escaped lone surrogate) makes the whole edit unreadable. A control keeps its id while its
+  entity and its control stay the same, as in the options. An accepted menu is stored in the entry's options
   **without reloading the entry** - nothing goes unavailable - and the menu and the catalogue are
   published again within a second.
 - **Every edit is answered** on `enigma2mqtt/menu_edit_result/<node_id>`: `saved`, `invalid`
-  (with where and why, in English, which the page shows as it comes), `busy` (one save at a time,
-  and at most one every two seconds), `not_claimed`, or **`stale`**: the menu changed since the
+  (with where and why, in English, which the page shows as it comes; anything quoted from the edit
+  is cut and written as an ASCII literal), `disabled` (editing from the receiver is off),
+  `busy` (one save at a time, and at most one every two seconds), `not_claimed`, or **`stale`**: the menu changed since the
   page loaded it - in the options, or from another browser - and the page asks you to reload,
   keeping your unsaved edits on screen until you choose.
 
 **A save in the options after a save on the receiver overwrites it.** A dialog opened before the
 receiver's save works on the older menu, and *Save the menu* stores that one. Close and open the
-options again after editing on the receiver.
+options again after editing on the receiver. The other forms of the options - the settings, and
+the SSH steps that can follow them - carry the menu over as it is stored at the moment they save,
+so a save on the receiver meanwhile survives them.
 
-🔴 **Editing from the receiver is always on**, by design, and it widens what the broker can do.
-Whoever can publish to your broker can replace the menu with **any entity Home Assistant has** -
-not only press what you put into it - and whoever can read the broker can read the catalogue:
-the name and area of every entity. The menu's rules still apply to every row, but the choice of
-what is in it is no longer only yours. Keep the broker to the household's own devices.
+🔴 **What turning editing on gives away.** While it is on, whoever can publish to your broker - or
+open the receiver's web interface - can replace the menu with **any entity Home Assistant has**,
+and then operate it from the menu like any other row: name a lock and unlock it, a garage door or
+a gate cover and open it, a script, an automation or a button and run it. Whoever can read the
+broker can read the catalogue: the name and area of every entity. The menu's rules still apply to
+every row, but the choice of what is in it is no longer only yours. Turn it on only while the
+broker and the receiver's web interface are reachable by the household's own devices alone, and
+off again when you are done.
 
 ### Reconfigure
 
@@ -2457,10 +2477,11 @@ same address and reference.
 The [receiver menu](#receiver-menu) publishes the names and states of the entities you put
 into it, retained, on the broker, for any login to read; an `input_text` or `text` in password
 mode is published without its text, whether it is a text field or an indicator. Leave out of the menu what the broker's users should not see.
-While a receiver claims the [menu creator](#editing-the-menu-on-the-receiver), its catalogue is
-retained on the broker as well: the entity ID, name, area and possible controls of every entity
-Home Assistant has a state for, hidden ones included. Anyone who can publish there can also
-replace the menu.
+While a receiver claims the [menu creator](#editing-the-menu-on-the-receiver) **and editing from
+the receiver is turned on**, its catalogue is retained on the broker as well: the entity ID, name,
+area and possible controls of every entity Home Assistant has a state for, hidden ones included,
+and anyone who can publish there can also replace the menu. Off - the default - the catalogue
+says only that editing is off.
 
 The [options](#options) can switch key publishing off, select `off`, `on_zap` or `interval`
 screenshots, set the interval and choose how long an on-zap capture waits for the new picture.

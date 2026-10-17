@@ -57,9 +57,15 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   another revision as `stale`, takes one save at a time and at most one every two seconds, stores
   the menu in the options **without reloading the entry**, republishes the menu and the catalogue
   within a second, and answers every readable edit on `enigma2mqtt/menu_edit_result/<node_id>`
-  (`saved`, `stale`, `invalid` with a path and a reason, `busy`, `not_claimed`). **Editing from the
-  receiver is always on**: anyone who can publish to the broker can replace the menu
-  (SECURITY.md).
+  (`saved`, `stale`, `invalid` with a path and a reason, `disabled`, `busy`, `not_claimed`).
+  **Editing from the receiver is off by default**: the receiver menu's options gain *Editing from
+  the receiver* („Edycja na dekoderze"), and while it is off the catalogue says only
+  `{"v": 1, "editing": false}` and every edit is answered `disabled`. Turned on, anyone who can
+  publish to the broker can put any entity into the menu and operate it (SECURITY.md). The
+  catalogue never leaves out an entity the menu uses; a control sent back unchanged is kept even
+  when its entity no longer offers that control; an edit with a text UTF-8 cannot hold is
+  unreadable; what an edit sent is quoted in answers and the log only as cut ASCII literals. The
+  settings form and the SSH steps carry the menu over as it is stored when they save.
 - **„Przezroczystość menu" and „Klawisz menu"** (*Menu transparency*, *Menu hotkey*; plugin 0.5.0,
   for a receiver that reports `menu_transparency`; DOCUMENTATION.md §4.4): a number (0-80 % in
   steps of 10) and a select (long HELP, long RED, F3, F4, off) for two settings of the receiver
