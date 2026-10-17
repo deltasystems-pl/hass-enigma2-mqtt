@@ -53,6 +53,8 @@ from .const import (
     CAPABILITY_ZAP_HISTORY,
     CONF_PLUGIN_TARGET_VERSION,
     DOMAIN,
+    MENU_HOTKEYS,
+    SETTING_MENU_HOTKEY,
     SIGNAL_RELEASE_INDEX,
     SIGNAL_TARGET_VERSION,
     TARGET_LATEST,
@@ -63,7 +65,12 @@ from .const import (
     TOPIC_ZAP_HISTORY,
     ZAP_HISTORY_REASONS,
 )
-from .entity import Enigma2Entity, OptionalEntities
+from .entity import (
+    Enigma2Entity,
+    OptionalEntities,
+    PluginSettingEntity,
+    menu_settings_reported,
+)
 from .plugin_versions import (
     KEY_PLUGIN_INSTALL_VERSION,
     PluginVersions,
@@ -196,6 +203,20 @@ async def async_setup_entry(
             hass,
             box,
             Platform.SELECT,
+            (SETTING_MENU_HOTKEY,),
+            lambda _key: Enigma2MenuHotkeySelect(box),
+            lambda: menu_settings_reported(box, SETTING_MENU_HOTKEY),
+            # Never removed, like the transparency: unavailable while not reported.
+            lambda: False,
+            async_add_entities,
+        ).start()
+    )
+
+    entry.async_on_unload(
+        OptionalEntities(
+            hass,
+            box,
+            Platform.SELECT,
             (KEY_ZAP_HISTORY, KEY_ZAP_HISTORY_ALL),
             _create,
             lambda: CAPABILITY_ZAP_HISTORY in box.capabilities,
@@ -270,6 +291,30 @@ class Enigma2PluginVersionSelect(Enigma2Entity, SelectEntity):
         async_dispatcher_send(self.hass, f"{SIGNAL_TARGET_VERSION}_{self._entry.entry_id}")
         self._async_read_state()
         self.async_write_ha_state()
+
+
+class Enigma2MenuHotkeySelect(PluginSettingEntity, SelectEntity):
+    """The key on the remote that opens the receiver menu, as the receiver reports it.
+
+    The receiver's own setting, written with a partial `cmd/config` (ADR-0013); `off`
+    leaves the menu to the receiver's Extensions menu. A key the receiver could not bind
+    on its image is still the setting - `info.menu` says whether it is bound.
+    """
+
+    _attr_options = list(MENU_HOTKEYS)
+
+    def __init__(self, box: Enigma2Box) -> None:
+        """Follow `info.settings.menu_hotkey`."""
+        super().__init__(box, SETTING_MENU_HOTKEY, SETTING_MENU_HOTKEY)
+
+    @callback
+    def _async_read_state(self) -> None:
+        reported = self.reported()
+        self._attr_current_option = reported if reported in MENU_HOTKEYS else None
+
+    async def async_select_option(self, option: str) -> None:
+        """Write the key and wait until the receiver reports it."""
+        await self.async_write_setting(option)
 
 
 class Enigma2Select(Enigma2Entity, SelectEntity):

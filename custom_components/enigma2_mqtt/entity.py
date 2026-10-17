@@ -22,8 +22,11 @@ moment the topic appears.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
+import json
 import logging
+from typing import Any
 
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -31,7 +34,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import Entity
 
 from .box import Enigma2Box
-from .const import DOMAIN, TOPIC_INFO
+from .const import DOMAIN, SETTING_MENU_TRANSPARENCY, TOPIC_INFO
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -97,6 +100,64 @@ class Enigma2Entity(Entity):
         derived values - a parsed timestamp, a media image hash - do the work here, once
         per message, rather than on every read of every property.
         """
+
+
+def menu_settings_reported(box: Enigma2Box, *settings: str) -> bool:
+    """Whether `info.settings` carries these settings and `menu_transparency`.
+
+    `menu_transparency` is what says the plugin takes a partial `cmd/config`: a plugin that
+    reports it accepts a payload with one key, and one that does not is never sent one.
+    """
+    reported = box.info.get("settings")
+    return isinstance(reported, dict) and all(
+        setting in reported for setting in (SETTING_MENU_TRANSPARENCY, *settings)
+    )
+
+
+class PluginSettingEntity(Enigma2Entity):
+    """One remotely writable plugin setting, read from `info.settings` and written by
+    a partial `cmd/config` that carries only its own key.
+
+    Only for a setting of a plugin that takes a partial `cmd/config` - every plugin that
+    reports `menu_transparency` does - so the entity is created only for such a receiver.
+    The value shown is always the receiver's: there is no default on this side, and the
+    entity is unavailable while the receiver does not report the setting.
+    """
+
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, box: Enigma2Box, key: str, setting: str) -> None:
+        """Follow `info`, which carries the setting."""
+        super().__init__(box, key, topics=(TOPIC_INFO,))
+        self._setting = setting
+
+    def _settings(self) -> dict[str, Any] | None:
+        settings = self.box.info.get("settings")
+        return settings if isinstance(settings, dict) else None
+
+    @property
+    def available(self) -> bool:
+        """Return whether the receiver is there and reports the setting."""
+        settings = self._settings()
+        return super().available and settings is not None and self._setting in settings
+
+    def reported(self) -> Any:
+        """The setting's value as the receiver reports it; None when it does not."""
+        settings = self._settings()
+        return settings.get(self._setting) if settings is not None else None
+
+    async def async_write_setting(self, value: Any) -> None:
+        """Send the one key, and wait until `info.settings` carries the new value.
+
+        A refusal - `last_error` naming the command, or its id - is raised as the
+        receiver's own sentence, and so is a receiver that never confirms it.
+        """
+        setting = self._setting
+        await self.box.async_command(
+            "config",
+            json.dumps({setting: value}, separators=(",", ":")),
+            effect=lambda: self.reported() == value,
+        )
 
 
 class OptionalEntities:

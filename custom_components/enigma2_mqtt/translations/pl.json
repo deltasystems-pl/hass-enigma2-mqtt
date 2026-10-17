@@ -422,6 +422,9 @@
     "number": {
       "volume": {
         "name": "Głośność"
+      },
+      "menu_transparency": {
+        "name": "Przezroczystość menu"
       }
     },
     "remote": {
@@ -550,6 +553,16 @@
       },
       "zap_history_all": {
         "name": "Ostatnio oglądane (wszystkie)"
+      },
+      "menu_hotkey": {
+        "name": "Klawisz menu",
+        "state": {
+          "help_long": "Długi HELP",
+          "red_long": "Długi czerwony",
+          "f3": "F3",
+          "f4": "F4",
+          "off": "Wyłączony"
+        }
       }
     }
   },
@@ -817,6 +830,7 @@
     }
   },
   "exceptions": {
+    "menu_transparency_step": {"message": "Dekoder nie przyjmie przezroczystości menu {value} %: przyjmuje od 0 do 80 % co 10."},
     "stream_source_unknown": {"message": "Tego dekodera, bukietu albo kanału nie ma wśród oferowanych tu do strumieniowania. Otwórz przeglądarkę mediów ponownie i wskaż coś, co jest na niej teraz."},
     "stream_player_browser": {"message": "Przeglądarka nie odtworzy strumienia transportowego dekodera. Wybierz odtwarzacz, który sam go dekoduje, na przykład Kodi, VLC albo odtwarzacz na Android TV."},
     "stream_player_cast": {"message": "Chromecast nie odtworzy strumienia transportowego dekodera. Wybierz odtwarzacz, który sam go dekoduje, na przykład Kodi, VLC albo odtwarzacz na Android TV."},

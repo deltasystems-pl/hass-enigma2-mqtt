@@ -121,6 +121,9 @@
     "number": {
       "volume": {
         "default": "mdi:volume-high"
+      },
+      "menu_transparency": {
+        "default": "mdi:circle-opacity"
       }
     },
     "remote": {
@@ -276,6 +279,9 @@
       },
       "zap_history_all": {
         "default": "mdi:history"
+      },
+      "menu_hotkey": {
+        "default": "mdi:remote"
       }
     }
   },

@@ -449,6 +449,9 @@
     "number": {
       "volume": {
         "name": "Volume"
+      },
+      "menu_transparency": {
+        "name": "Menu transparency"
       }
     },
     "remote": {
@@ -577,6 +580,16 @@
       },
       "zap_history_all": {
         "name": "Recently watched (all)"
+      },
+      "menu_hotkey": {
+        "name": "Menu hotkey",
+        "state": {
+          "help_long": "Long HELP",
+          "red_long": "Long RED",
+          "f3": "F3",
+          "f4": "F4",
+          "off": "Off"
+        }
       }
     }
   },
@@ -844,6 +857,7 @@
     }
   },
   "exceptions": {
+    "menu_transparency_step": {"message": "{value} % is not a menu transparency the receiver takes: it takes 0 to 80 % in steps of 10."},
     "stream_source_unknown": {"message": "That receiver, bouquet or channel is not offered for streaming here. Open the media browser again and pick from what is there now."},
     "stream_player_browser": {"message": "The browser cannot play a receiver's transport stream. Choose a media player that decodes it itself, such as Kodi, VLC or an Android TV player."},
     "stream_player_cast": {"message": "Chromecast cannot play a receiver's transport stream. Choose a media player that decodes it itself, such as Kodi, VLC or an Android TV player."},
