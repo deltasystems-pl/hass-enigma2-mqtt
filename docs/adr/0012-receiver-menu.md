@@ -7,6 +7,9 @@ states of the entities the user puts into the menu, and performs services on a m
 broker. No telemetry, no cloud service and nothing outside the household's network are
 unchanged. The receiver's half is the plugin's menu ADR and the `menu` and `menu_action` sections
 of its `docs/TOPICS.md`.
+**Extended by:** [ADR-0013](0013-menu-creator.md) - the menu can also be edited from the receiver's
+web interface. Section 8's options flow stays; its rules are now functions the creator's edit calls
+as well, and an edit stored from the receiver does not reload the entry.
 
 ## Context
 
