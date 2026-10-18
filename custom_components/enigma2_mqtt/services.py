@@ -63,8 +63,9 @@ from .const import (
     MESSAGE_STYLES,
     MESSAGE_TYPES,
     PLAY_RECORDING_REASONS,
+    PLAY_RECORDING_TIMESHIFT_TIMEOUT,
     RECORD_ACTIONS,
-    RECORDINGS_READ_TIMEOUT,
+    RECORDING_DELETE_TIMEOUT,
     STREAM_STOP_FAILURES,
     STREAM_STOP_REASONS,
     TOPIC_BOUQUET,
@@ -263,21 +264,27 @@ async def async_play_recording(box: Enigma2Box, value: Any) -> None:
 
     The image's own movie player plays it, and the receiver's own rule decides whether it
     resumes where it was left, asks, or starts over. From standby the receiver wakes first,
-    as for a zap. The proof is `service` naming the recording's file - as for a zap, a
-    recording that is already playing is proved at once, and the command still goes out. A
-    refusal is the receiver's, and the two codes this integration knows are said in the
-    household's language.
+    as for a zap; with a timeshift buffer running it first asks the viewer whether to leave
+    timeshift, and one who keeps it ends the command with a refusal. The proof is `service`
+    naming the recording's file - as for a zap, a recording that is already playing is
+    proved at once, and the command still goes out. A refusal is the receiver's, and the
+    codes this integration knows are said in the household's language.
     """
     if CAPABILITY_RECORDING_PLAY not in box.capabilities:
         raise _invalid("recording_play_unsupported")
     rec_id, (location, _folder, recording) = _listed_recording(box, value)
     if not box.available:
         raise _invalid("recording_receiver_offline")
+    # With a timeshift buffer running the receiver asks the viewer first, as its movie list
+    # does, and the answer - the recording playing, or `timeshift_kept` - comes when somebody
+    # has pressed a key.
+    timeshift = (box.state.timeshift or {}).get("active") is True
     await box.async_command(
         "play_recording",
         json.dumps({"id": rec_id}),
         effect=lambda: plays(box.state.service, location, recording),
         reasons=PLAY_RECORDING_REASONS,
+        **({"timeout": PLAY_RECORDING_TIMESHIFT_TIMEOUT} if timeshift else {}),
     )
 
 
@@ -290,7 +297,8 @@ async def async_delete_recording(box: Enigma2Box, value: Any) -> None:
     and its companion files, into the image's trash. A recording that is being recorded is
     refused here too, as the receiver would refuse it; one that is being played is refused
     by the receiver. The proof is the library, read again by the receiver, no longer
-    listing the id.
+    listing the id, within 90 seconds - longer than the receiver's own bound on the move, so
+    that its refusal arrives before this gives up.
     """
     if (refusal := box.recording_delete_refusal()) is not None:
         raise _invalid(refusal)
@@ -303,7 +311,7 @@ async def async_delete_recording(box: Enigma2Box, value: Any) -> None:
         "delete_recording",
         json.dumps({"id": rec_id}),
         effect=lambda: box.find_recording(rec_id) is None,
-        timeout=RECORDINGS_READ_TIMEOUT,
+        timeout=RECORDING_DELETE_TIMEOUT,
         reasons=DELETE_RECORDING_REASONS,
     )
 

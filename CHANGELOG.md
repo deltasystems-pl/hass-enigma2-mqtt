@@ -34,6 +34,8 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   lists every recording; the hidden-bouquets option keeps a hidden bouquet's recordings out of
   the browser, the action and the count, refuses to play or delete them, and shows a running
   one without its title; a folder or a location left with nothing to show is not listed.
+  The receiver's refusals of these commands are said in the household's language, also a play
+  the viewer declined by keeping timeshift and a delete asked for while another is being moved.
 - **The receiver menu** (plugin 0.5.0, for a receiver that claims `menu`; DOCUMENTATION.md
   "Receiver menu" and [ADR-0012](docs/adr/0012-receiver-menu.md)). The options gain *Receiver
   menu* („Menu na dekoderze"): up to 8 groups and 24 entries per list of controls bound to

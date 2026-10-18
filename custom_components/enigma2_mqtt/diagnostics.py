@@ -36,11 +36,12 @@ what from which address describes a household, not a fault.
 `player_picture` is the chosen picture of the media player and the state of the picon
 lookup as counts and a cause - never the address asked, a channel or a picture.
 
-The recording library is summarised as its shape: when and why it was read, and per movie
-location whether it is mounted, its free space and its folders as counts, each by its slug -
-the address of its topic - and never a path or a recording's title, which describe what a
-household watches. `timeshift`
-is kept as normalised: three values.
+The recording library is summarised as its shape, as Home Assistant shows it: when and why
+it was read, and per movie location with something to show whether it is mounted, its free
+space and its folders with something to show as counts, each by its slug - the address of
+its topic. Never a path or a recording's title, which describe what a household watches; a
+folder or a location holding only a hidden bouquet's recordings is left out, as everywhere.
+`timeshift` is kept as normalised: four values.
 """
 
 from __future__ import annotations
@@ -201,10 +202,11 @@ async def async_get_config_entry_diagnostics(
             "stream": state.stream,
             "stream_clients": _summarise_stream_clients(state.stream_clients),
             "timeshift": state.timeshift,
-            "recordings": _summarise_recordings(state.recordings_index),
+            "recordings": _summarise_recordings(box),
             "recording_folders": {
-                slug: len(recordings)
-                for slug, recordings in sorted(state.recording_folders.items())
+                folder["slug"]: len(recordings)
+                for _location, folders in box.visible_library()
+                for folder, recordings in folders
             },
             "last_error": state.last_error,
             "screen": {
@@ -313,8 +315,9 @@ def _summarise_stream_clients(clients: dict[str, Any] | None) -> dict[str, Any] 
     }
 
 
-def _summarise_recordings(index: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Return the library index as its shape: no path, no folder name, no title."""
+def _summarise_recordings(box: Enigma2Box) -> dict[str, Any] | None:
+    """Return the library as its shape: no path, no folder name, no title, nothing hidden."""
+    index = box.state.recordings_index
     if index is None:
         return None
     return {
@@ -331,10 +334,10 @@ def _summarise_recordings(index: dict[str, Any] | None) -> dict[str, Any] | None
                         "size_mb": folder["size_mb"],
                         "cut": folder["cut"],
                     }
-                    for folder in location["folders"]
+                    for folder, _recordings in folders
                 ],
             }
-            for location in index["locations"]
+            for location, folders in box.visible_library()
         ],
     }
 

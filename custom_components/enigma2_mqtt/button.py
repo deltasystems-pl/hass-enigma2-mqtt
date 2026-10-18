@@ -291,21 +291,30 @@ async def _async_clear_error(box: Enigma2Box) -> None:
 async def _async_recordings_refresh(box: Enigma2Box) -> None:
     """Ask the receiver to read its recording library now, and wait for the new index.
 
-    The proof is an index that arrived **after** the press and is not the broker's replay:
-    a read always says when it ran, so even a library that did not change comes back as a
-    new payload. A refresh asked for while a read is already running is answered by that
-    read. The wait is longer than a command's: this is the one press that may spin a
+    The proof is an index that arrived **after** the press, is not the broker's replay, and
+    says a read later than the one held before the press. The receiver also publishes the
+    index again when free space moves, with `read` as it was, and that is no answer: a read
+    is told by its `read`. A refresh asked for while a read is already running is answered
+    by that read. The wait is longer than a command's: this is the one press that may spin a
     sleeping disk up before the directories can be read.
     """
     before = box.updates.get(TOPIC_RECORDINGS, 0)
+    read_before = (box.state.recordings_index or {}).get("read")
+
+    def read_again() -> bool:
+        index = box.state.recordings_index
+        return (
+            box.updates.get(TOPIC_RECORDINGS, 0) > before
+            and not box.state.recordings_index_retained
+            and index is not None
+            and index["read"] is not None
+            and index["read"] != read_before
+        )
+
     await box.async_command(
         "recordings_refresh",
         PRESS,
-        effect=lambda: (
-            box.updates.get(TOPIC_RECORDINGS, 0) > before
-            and not box.state.recordings_index_retained
-            and box.state.recordings_index is not None
-        ),
+        effect=read_again,
         timeout=RECORDINGS_READ_TIMEOUT,
         reasons=RECORDINGS_REFRESH_REASONS,
     )

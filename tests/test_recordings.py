@@ -34,6 +34,7 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from custom_components.enigma2_mqtt import (
+    box as box_module,
     button as button_module,
     recordings,
     services as services_module,
@@ -45,6 +46,8 @@ from custom_components.enigma2_mqtt.diagnostics import async_get_config_entry_di
 from .conftest import (
     AVAILABILITY_TOPIC,
     BASE_TOPIC,
+    CHANNELS,
+    CHANNELS_TOPIC,
     INFO,
     INFO_TOPIC,
     LAST_ERROR_TOPIC,
@@ -372,6 +375,26 @@ def test_a_recording_path_is_its_file_under_its_location() -> None:
     assert recordings.plays(None, location, {"file": "a.ts"}) is False
 
 
+def test_every_list_has_its_bound() -> None:
+    folders = [{"slug": f"s{n}", "path": ""} for n in range(recordings.FOLDERS_MAX + 5)]
+    index = recordings.normalise_index(
+        {
+            "locations": [
+                {"path": f"/media/l{n}", "folders": folders if n == 0 else []}
+                for n in range(recordings.LOCATIONS_MAX + 3)
+            ]
+        }
+    )
+    assert len(index["locations"]) == recordings.LOCATIONS_MAX
+    assert sum(len(location["folders"]) for location in index["locations"]) == (
+        recordings.FOLDERS_MAX
+    )
+    many = [
+        {"id": f"{n:016x}", "file": f"{n}.ts"} for n in range(recordings.RECORDINGS_MAX + 2)
+    ]
+    assert len(recordings.normalise_folder({"recordings": many})) == recordings.RECORDINGS_MAX
+
+
 async def test_a_recording_is_titled_with_its_channel_date_and_length(
     hass: HomeAssistant,
 ) -> None:
@@ -441,7 +464,7 @@ async def test_timeshift_is_on_with_a_buffer_and_says_how(
     assert hass.states.get(TIMESHIFT).state == "unknown"
 
 
-async def test_the_free_space_is_the_first_location_and_every_location_is_listed(
+async def test_the_free_space_is_the_default_location_s_and_the_shown_ones_are_listed(
     hass: HomeAssistant,
     mqtt_mock,
     box_on_the_broker: dict[str, str | bytes],
@@ -454,13 +477,42 @@ async def test_the_free_space_is_the_first_location_and_every_location_is_listed
     state = hass.states.get(FREE_SPACE)
     # Shown in GiB, kept in MiB.
     assert float(state.state) == pytest.approx(412330 / 1024, abs=0.01)
+    # The USB location has nothing to show: its folder topic has not arrived.
     assert state.attributes["locations"] == [
         {"path": LOCATION, "mounted": True, "free_mb": 412330},
-        # Listed although none of its recordings has arrived: free space is about the
-        # disk, and says nothing about what is on it.
-        {"path": USB, "mounted": True, "free_mb": 1000},
     ]
     assert b"locations" not in _stored_attributes(state)
+
+    async_fire_mqtt_message(hass, folder_topic("usb_movie"), json.dumps({"recordings": [USB_FILM]}))
+    await hass.async_block_till_done()
+    assert hass.states.get(FREE_SPACE).attributes["locations"] == [
+        {"path": LOCATION, "mounted": True, "free_mb": 412330},
+        {"path": USB, "mounted": True, "free_mb": 1000},
+    ]
+
+
+async def test_a_location_with_only_hidden_recordings_is_not_named_but_the_default_is(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    sport_only = {
+        "path": "/media/hdd/movie/Sport only", "mounted": True, "free_mb": 5,
+        "folders": [{"slug": "sport", "path": "", "count": 1, "size_mb": 1, "cut": 0}],
+    }
+    library(box_on_the_broker, index={**INDEX, "locations": [*INDEX["locations"], sport_only]})
+    box_on_the_broker[folder_topic("sport")] = json.dumps({"recordings": [MATCH]})
+    # Everything in the default location is hidden too: it is still listed, as the state.
+    entry = hiding(config_entry, "Sport", "Ulubione TV")
+    await _setup(hass, entry, box_on_the_broker)
+
+    state = hass.states.get(FREE_SPACE)
+    assert state.state != "unknown"
+    assert [location["path"] for location in state.attributes["locations"]] == [LOCATION]
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    assert '"sport"' not in json.dumps(diagnostics["topics"]["recordings"])
+    assert "sport" not in diagnostics["topics"]["recording_folders"]
 
 
 async def test_the_library_counts_what_it_shows(
@@ -529,6 +581,33 @@ async def test_a_channel_of_a_hidden_bouquet_stays_hidden_under_another_bouquet(
     assert [child.identifier for child in folder.children] == [f"{NODE_ID}/p/{NEWS['id']}"]
 
 
+async def test_what_is_hidden_follows_the_channel_list(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The library is judged again when the channel list moves, not only when it does."""
+    library(box_on_the_broker)
+    box_on_the_broker[folder_topic("movie")] = json.dumps(
+        {"recordings": [{**MATCH, "bouquet": "Ulubione TV"}, NEWS]}
+    )
+    entry = hiding(config_entry, "Sport")
+    await _setup(hass, entry, box_on_the_broker)
+    # Eurosport 1 is a channel of the hidden "Sport", so its recording is hidden wherever
+    # it is listed.
+    assert hass.states.get(LIBRARY).state == "2"
+
+    channels = json.loads(json.dumps(CHANNELS))
+    channels["bouquets"][1]["channels"] = [
+        channel for channel in channels["bouquets"][1]["channels"] if channel["sref"] != EUROSPORT
+    ]
+    async_fire_mqtt_message(hass, CHANNELS_TOPIC, json.dumps(channels))
+    await hass.async_block_till_done()
+    assert hass.states.get(LIBRARY).state == "3"
+    assert entry.runtime_data.find_recording(MATCH["id"]) is not None
+
+
 async def test_without_the_option_a_recording_with_no_bouquet_is_shown(
     hass: HomeAssistant,
     mqtt_mock,
@@ -592,6 +671,20 @@ async def test_without_details_the_running_recordings_keep_their_shape(
     ]
 
 
+async def test_an_older_plugins_running_recording_keeps_its_attributes(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Without `bouquet` there is nothing to judge: the option changes nothing here."""
+    entry = {"name": "News", "sref": EUROSPORT, "begin": 1, "end": 2}
+    box_on_the_broker[RECORDING_TOPIC] = json.dumps({"active": [entry], "next": None})
+    await _setup(hass, hiding(config_entry, "Sport"), box_on_the_broker)
+
+    assert hass.states.get(ACTIVE).attributes["recordings"] == [{**entry, "hidden": False}]
+
+
 async def test_a_hidden_running_recording_is_counted_and_not_named(
     hass: HomeAssistant,
     mqtt_mock,
@@ -617,6 +710,69 @@ async def test_a_hidden_running_recording_is_counted_and_not_named(
         }
     ]
     assert hass.states.get("binary_sensor.dekoder_salon_recording").state == "on"
+
+
+async def test_a_retracted_index_empties_the_library(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    library(box_on_the_broker)
+    await _setup(hass, config_entry, box_on_the_broker)
+
+    async_fire_mqtt_message(hass, INDEX_TOPIC, "")
+    await hass.async_block_till_done()
+    assert hass.states.get(LIBRARY).state == "unknown"
+    assert hass.states.get(FREE_SPACE).state == "unknown"
+    assert await _get_recordings(hass) == {"read": None, "reason": None, "locations": []}
+    with pytest.raises(ServiceValidationError) as raised:
+        await _play(hass, "recording", NEWS["id"])
+    assert raised.value.translation_key == "recording_unknown"
+
+
+async def test_the_brokers_replay_of_the_same_index_wakes_nobody(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    library(box_on_the_broker)
+    await _setup(hass, config_entry, box_on_the_broker)
+    box = config_entry.runtime_data
+    before = box.updates.get("recordings", 0)
+
+    box._message_received(
+        ReceiveMessage(
+            INDEX_TOPIC, json.dumps(INDEX).encode(), 0, True, f"{BASE_TOPIC}/{NODE_ID}/#", 0.0
+        )
+    )
+    assert box.updates.get("recordings", 0) == before
+
+
+async def test_folder_topics_no_index_names_are_held_up_to_a_bound(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    library(box_on_the_broker)
+    await _setup(hass, config_entry, box_on_the_broker)
+    box = config_entry.runtime_data
+    monkeypatch.setattr(box_module, "FOLDERS_MAX", len(box.state.recording_folders) + 1)
+
+    for slug in ("stale1", "stale2"):
+        async_fire_mqtt_message(hass, folder_topic(slug), json.dumps(FOLDER_SERIES))
+    await hass.async_block_till_done()
+    assert "stale1" in box.state.recording_folders
+    assert "stale2" not in box.state.recording_folders
+    # A folder already held is still updated, and a retraction is still taken.
+    async_fire_mqtt_message(hass, folder_topic("movie"), json.dumps({"recordings": [NEWS]}))
+    async_fire_mqtt_message(hass, folder_topic("stale1"), "")
+    await hass.async_block_till_done()
+    assert box.state.recording_folders["movie"][0]["id"] == NEWS["id"]
+    assert "stale1" not in box.state.recording_folders
 
 
 # ------------------------------------------------------------------- refresh
@@ -654,7 +810,7 @@ async def test_a_refresh_that_finds_the_same_library_still_answers(
     config_entry: MockConfigEntry,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A receiver that publishes the index it already had is still answering the press."""
+    """The same library, read again: only `read` differs, and that is the answer."""
     monkeypatch.setattr(button_module, "RECORDINGS_READ_TIMEOUT", 1)
     library(box_on_the_broker)
     await _setup(hass, config_entry, box_on_the_broker)
@@ -662,11 +818,52 @@ async def test_a_refresh_that_finds_the_same_library_still_answers(
     await _arm(
         hass,
         "recordings_refresh",
-        lambda _id, _payload: async_fire_mqtt_message(hass, INDEX_TOPIC, json.dumps(INDEX)),
+        lambda _id, _payload: async_fire_mqtt_message(
+            hass, INDEX_TOPIC, json.dumps({**INDEX, "read": INDEX["read"] + 1})
+        ),
     )
     await hass.services.async_call(
         "button", "press", {ATTR_ENTITY_ID: REFRESH}, blocking=True
     )
+
+
+@pytest.mark.parametrize(
+    "moved",
+    [
+        pytest.param({"free_mb": 412000}, id="free space"),
+        pytest.param({"mounted": False}, id="unmounted"),
+    ],
+)
+async def test_an_index_republished_without_a_new_read_is_no_answer(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+    moved: dict[str, Any],
+) -> None:
+    """The minute mount check republishes the index with `read` and `reason` as they were."""
+    monkeypatch.setattr(button_module, "RECORDINGS_READ_TIMEOUT", 0.2)
+    library(box_on_the_broker)
+    await _setup(hass, config_entry, box_on_the_broker)
+    republished = json.loads(json.dumps(INDEX))
+    republished["locations"][0].update(moved)
+
+    await _arm(
+        hass,
+        "recordings_refresh",
+        lambda _id, _payload: async_fire_mqtt_message(hass, INDEX_TOPIC, json.dumps(republished)),
+    )
+    with pytest.raises(HomeAssistantError) as raised:
+        await hass.services.async_call(
+            "button", "press", {ATTR_ENTITY_ID: REFRESH}, blocking=True
+        )
+    assert raised.value.translation_key == "command_timeout"
+    # It was read all the same: the free space moved.
+    assert hass.states.get(FREE_SPACE).attributes["locations"][0] == {
+        "path": LOCATION, **{key: INDEX["locations"][0][key] for key in ("mounted", "free_mb")},
+        **moved,
+    }
 
 
 async def test_a_replayed_index_is_not_the_answer_to_a_refresh(
@@ -939,6 +1136,43 @@ async def test_play_from_the_browser_sends_the_id_and_waits_for_the_service(
     assert [json.loads(payload) for _id, payload in sent] == [{"id": EPISODE["id"]}]
 
 
+@pytest.mark.parametrize(
+    ("file", "written"),
+    [
+        pytest.param("100% Wolf.ts", "100%25 Wolf.ts", id="percent"),
+        pytest.param("a:b.ts", "a%3ab.ts", id="colon"),
+        pytest.param("Series/A b.ts", "Series/A b.ts", id="space"),
+        pytest.param("Series/A b.ts", "Series/A%20b.ts", id="space encoded"),
+        pytest.param("tab\tname.ts", "tab%09name.ts", id="control"),
+    ],
+)
+async def test_play_reads_the_path_the_way_the_image_writes_it(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    file: str,
+    written: str,
+) -> None:
+    """The image percent-encodes `:`, `%` and control characters in a reference's path."""
+    film = {**NEWS, "id": "9999888877776666", "file": file, "name": "Wolf"}
+    library(box_on_the_broker)
+    box_on_the_broker[folder_topic("movie")] = json.dumps({"recordings": [film]})
+    await _setup(hass, config_entry, box_on_the_broker)
+
+    # A name the image writes after the path is a field of its own.
+    await _arm(hass, "play_recording", _plays(hass, f"{LOCATION}/{written}:Wolf"))
+    await _play(hass, "recording", film["id"])
+
+
+def test_a_path_that_only_ends_the_same_is_not_the_recording() -> None:
+    location = {"path": "/media/hdd/movie"}
+    other = {"sref": "1:0:0:0:0:0:0:0:0:0:/media/usb/media/hdd/movie/a.ts"}
+    assert recordings.plays(other, location, {"file": "a.ts"}) is False
+    short = {"sref": "1:0:0:0:0"}
+    assert recordings.plays(short, location, {"file": "a.ts"}) is False
+
+
 async def test_play_by_the_bare_id_from_an_automation(
     hass: HomeAssistant,
     mqtt_mock,
@@ -972,6 +1206,28 @@ async def test_a_recording_already_playing_is_played_again_and_proved_at_once(
     ] == [{"id": NEWS["id"]}]
 
 
+async def test_with_timeshift_running_play_waits_for_the_viewer(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The receiver asks first, so the wait is the timeshift one, not a zap's."""
+    monkeypatch.setattr(services_module, "PLAY_RECORDING_TIMESHIFT_TIMEOUT", 0.1)
+    library(box_on_the_broker)
+    box_on_the_broker[TIMESHIFT_TOPIC] = json.dumps({"active": True, "paused": True})
+    await _setup(hass, config_entry, box_on_the_broker)
+
+    await _arm(hass, "play_recording", lambda _id, _payload: None)
+    started = dt_util.utcnow()
+    with pytest.raises(Enigma2CommandError) as raised:
+        await _play(hass, "recording", NEWS["id"])
+    assert raised.value.translation_key == "command_timeout"
+    # Not the ten seconds of a play without a buffer.
+    assert (dt_util.utcnow() - started).total_seconds() < 5
+
+
 async def test_play_that_never_shows_on_the_service_times_out(
     hass: HomeAssistant,
     mqtt_mock,
@@ -998,6 +1254,7 @@ async def test_play_that_never_shows_on_the_service_times_out(
     ("reason", "key"),
     [
         ("busy", "play_recording_busy"),
+        ("timeshift_kept", "play_recording_timeshift_kept"),
         ("file_gone", "play_recording_file_gone"),
         ("not_in_library", "play_recording_not_in_library"),
         (None, "command_refused"),
@@ -1080,6 +1337,10 @@ async def test_nothing_is_sent_to_a_receiver_that_is_offline(
             {"settings": {"recording_delete_allowed": True}, "recording_trash": None},
             "recording_delete_unsupported",
         ),
+        (
+            {"settings": {"recording_delete_allowed": True}, "recording_trash": True},
+            "recording_delete_not_ready",
+        ),
     ],
 )
 async def test_delete_is_refused_unless_the_receiver_claims_it(
@@ -1145,7 +1406,7 @@ async def test_a_delete_the_library_never_shows_times_out(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Silence is not a delete: the library has to be read again without the recording."""
-    monkeypatch.setattr(services_module, "RECORDINGS_READ_TIMEOUT", 0.1)
+    monkeypatch.setattr(services_module, "RECORDING_DELETE_TIMEOUT", 0.1)
     deletable(box_on_the_broker)
     await _setup(hass, config_entry, box_on_the_broker)
 
@@ -1182,6 +1443,7 @@ async def test_a_recording_being_recorded_is_not_deleted(
         ("trash_off", ServiceValidationError),
         ("not_permitted", ServiceValidationError),
         ("file_gone", ServiceValidationError),
+        ("in_progress", ServiceValidationError),
         ("busy", ServiceValidationError),
     ],
 )

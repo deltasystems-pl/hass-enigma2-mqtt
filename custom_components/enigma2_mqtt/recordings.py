@@ -31,6 +31,7 @@ from collections.abc import Callable
 from datetime import datetime
 import re
 from typing import Any, Final
+from urllib.parse import unquote
 
 import homeassistant.util.dt as dt_util
 
@@ -42,8 +43,8 @@ RECORDING_ID: Final = re.compile(r"[0-9a-f]{16}")
 # one the options hide (`Enigma2Box.service_hidden`).
 type HiddenRule = Callable[[Any, Any], bool]
 
-# The longest service reference kept, the plugin's own bound for one; a longer one is no
-# reference, and is hidden whenever anything is.
+# The longest service reference kept, the bound the stream clients' rows use too; a longer one
+# is no reference, and is then hidden whenever anything is.
 SREF_MAX: Final = 512
 # A short description is cut here on the receiver; a longer one is cut here too.
 DESCRIPTION_MAX: Final = 200
@@ -141,6 +142,10 @@ def active_recordings(
     file - the rule the stream clients' rows follow. It is not left out: how many
     recordings run is what the count, the "Recording" sensor and every guard on the
     receiver are about, and a recording that holds a tuner is not hidden by a dashboard.
+
+    Hiding is judged only for an entry that carries `bouquet`, which a plugin sends with
+    the details. An older plugin's entry has none, and keeps exactly the attributes it
+    always had: the rule could only ever say "hidden" about it, for every recording.
     """
     active = recording.get("active") if isinstance(recording, dict) else None
     rows: list[dict[str, Any]] = []
@@ -165,7 +170,7 @@ def active_recordings(
                     "instant": _flag(entry.get("instant")),
                 }
             )
-        concealed = hidden(entry.get("sref"), entry.get("bouquet"))
+        concealed = "bouquet" in entry and hidden(entry.get("sref"), entry.get("bouquet"))
         if concealed:
             for key in _ACTIVE_REVEALING:
                 if key in row:
@@ -336,17 +341,26 @@ def recording_path(location: dict[str, Any], recording: dict[str, Any]) -> str:
     return f"{location['path'].rstrip('/')}/{recording['file'].lstrip('/')}"
 
 
+# How many colon-separated fields come before the path in a service reference.
+_SREF_PATH_FIELD: Final = 10
+
+
 def plays(service: Any, location: dict[str, Any], recording: dict[str, Any]) -> bool:
     """Return whether a `service` payload says this recording is what the decoder plays.
 
-    A recording played from the movie list is a service whose reference ends with the
-    file's path. Compared at the end only, because what comes in front of the path is
-    the image's business.
+    A recording played from the movie list is a service whose reference carries the file's
+    path in its eleventh field. The image writes that field percent-encoded - `:` as `%3a`,
+    `%` as `%25`, a control character as its code - so a colon in a name can never end the
+    field, and the field is decoded before it is compared with the location and the file. A
+    name the image writes after the path, in a twelfth field, is not part of it.
     """
     sref = service.get("sref") if isinstance(service, dict) else None
     if not isinstance(sref, str) or not sref:
         return False
-    return sref.endswith(recording_path(location, recording))
+    fields = sref.split(":")
+    if len(fields) <= _SREF_PATH_FIELD:
+        return False
+    return unquote(fields[_SREF_PATH_FIELD]) == recording_path(location, recording)
 
 
 def library_response(
@@ -358,7 +372,8 @@ def library_response(
     `shown` is `Enigma2Box.visible_library()`: every location and folder with at least one
     recording the options do not hide, and only those recordings. Times are the epoch
     seconds the topics use, as `get_epg_grid` returns them. A recording's service reference
-    and bouquet are not in it: they are what the hiding is judged by.
+    and bouquet are not in it: they are what the hiding is judged by. A folder's `cut` is
+    the receiver's own number, and counts the recordings of hidden bouquets it left out too.
     """
     return {
         "read": (index or {}).get("read"),

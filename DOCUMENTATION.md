@@ -1106,7 +1106,7 @@ does not. A receiver that stops reporting them keeps the entities, unavailable.
 | `softcam_restart` | *Restart softcam* | `<node_id>_softcam_restart` | `cmd/softcam_restart` · **both gates below** | silence |
 | `epg_import` | *Pobierz EPG* | `<node_id>_epg_import` | `cmd/epg_import` · **both gates below** | a new `epg_import` payload in `running` |
 | `history_clear` | *Wyczyść ostatnio oglądane* | `<node_id>_history_clear` | `cmd/history_clear` · only while the receiver names the `history_clear` capability; unavailable while `zap_history` says `panic_button: false` | a **new** `zap_history` payload with at most one entry |
-| `recordings_refresh` | *Odśwież nagrania* · configuration | `<node_id>_recordings_refresh` | `cmd/recordings_refresh` · only while the receiver names the `recordings` capability ([§4.8](#48-recordings)) | a **new** `recordings` index, within sixty seconds |
+| `recordings_refresh` | *Odśwież nagrania* · configuration | `<node_id>_recordings_refresh` | `cmd/recordings_refresh` · only while the receiver names the `recordings` capability ([§4.8](#48-recordings)) | a `recordings` index with a **new `read`**, within sixty seconds - the index the receiver republishes when free space changes keeps its `read`, and is no answer |
 | `clear_error` | *Wyczyść ostatni błąd* · diagnostic | `<node_id>_clear_error` | `cmd/clear_error` · only for a receiver whose `info.plugin` is 0.5.0 or later (below) | a **new**, empty `last_error` payload |
 | `check_plugin_update` | *Sprawdź aktualizacje wtyczki* · diagnostic | `<node_id>_check_plugin_update` | no MQTT: fetches the plugin's signed release index, at most once in ten minutes, and available while the box is not | the update card's `index_serial`, `last_check` and `check_error` |
 | `force_reinstall` | *Wymuś reinstalację wtyczki (SSH)* · diagnostic, disabled by default, only while SSH credentials are stored | `<node_id>_force_reinstall` | no MQTT: the SSH installer's forced mode, after two presses by an administrator (below) | a new interface process holding the plugin's log open, and the announcement when the plugin is switched on |
@@ -2046,16 +2046,17 @@ its web interface, shows after the next such event, or after a press of „Odśw
   the buffer started (ISO 8601). With no buffer all three are `null`.
 - **„Wolne miejsce na nagrania"** is the free space of the receiver's default movie location
   (the one the receiver lists first), in MiB and shown in GiB; the attribute `locations` has
-  every location's `path`, `mounted` and `free_mb` - every one, also a location with nothing to
-  show, because free space is about the disk and not about what is on it. It moves when the
-  library is read again, or when the receiver's minute-by-minute mount check sees a location
-  come or go - not continuously. The free space of the recording disk on a timer is still
+  the `path`, `mounted` and `free_mb` of the default location, always, and of every other
+  location the library shows something in - one holding only hidden recordings is not named.
+  It moves when the library is read again, and at the receiver's minute-by-minute mount check
+  when the free space has changed or a location came or went - which reads no directory and
+  wakes no disk - and not in between. The free space of the recording disk on a timer is still
   „Dysk nagrań"'s `free_mb`.
 - **„Nagrania w bibliotece"** (diagnostic) counts the recordings the library shows - hidden
   ones left out. `folder_count` and `location_count` count the folders and locations shown;
   `left_out` is how many the receiver itself left out of those folders, too large for one MQTT
-  packet (the oldest of each such folder, and of every bouquet: nothing here can judge a
-  recording it was not sent); `read` and `reason` say when and why the library was last read
+  packet (the oldest of each such folder, of every bouquet, the hidden ones included: nothing
+  here can judge a recording it was not sent); `read` and `reason` say when and why the library was last read
   (`start`, `recording`, `delete`, `mount` or `refresh`).
 
 #### The media browser
@@ -2088,13 +2089,17 @@ data:
 The id is the first sixteen hexadecimal digits of the sha256 of the recording's path on the
 receiver - a recording keeps it for as long as it is not moved or renamed. **Nothing Home
 Assistant sends names a file**: the receiver is sent the id, and acts only on a recording its
-own library lists. The play is proved by `service` naming the recording, within ten seconds.
+own library lists. The play is proved by `service` naming the recording - the image writes the
+path in the reference percent-encoded (`%3a` for a colon, `%25` for a per cent sign), and it is
+decoded before it is compared - within ten seconds. **With a timeshift buffer running the
+receiver first asks on the television whether to leave timeshift**, as its own movie list does,
+and the wait is a minute; a viewer who keeps timeshift ends the play with a refusal.
 Refused with a sentence before anything is sent: an id that is not sixteen hexadecimal digits,
 one the library does not show (deleted, hidden, or among the oldest of a folder that was cut),
 a receiver that does not name `recording_play`, and a receiver that is offline. The receiver
-refuses a recording whose file has gone and one its library no longer lists, and every command
-while its plugin is being updated - each said in your language - and anything else in its own
-sentence.
+refuses a recording whose file has gone, one its library no longer lists, a play the viewer
+declined by keeping timeshift, and every command while its plugin is being updated - each said
+in your language - and anything else in its own sentence.
 
 #### The library for an automation (`get_recordings`)
 
@@ -2121,7 +2126,8 @@ response_variable: library
 
 Times are the epoch seconds the topics use, as `get_epg_grid` returns them; `file` is relative
 to its movie location, also in a subfolder (`Series/...`); `cut` is how many of the folder's
-oldest recordings the receiver left out. The hidden bouquets' recordings are left out, and so
+oldest recordings the receiver left out - its own number, which counts the hidden bouquets'
+recordings too, since nothing here was sent them to judge. The hidden bouquets' recordings are left out, and so
 is a folder or a location with nothing left to show. Before the library has arrived, `read` is
 `null` and `locations` is empty. Like `get_epg_grid`, it is an answer and never a state
 attribute: a library is far too large for the recorder.
@@ -2146,12 +2152,14 @@ data:
 setup screen or its web interface; it cannot be written over MQTT. The receiver names the
 `recording_delete` capability only while it is on **and** the image's trash is switched on
 (`info.recording_trash`). Without the capability the action is refused before anything is
-sent, and says why: the permission is off, the trash is off, or the plugin or the image cannot
-do it. Also refused here: an id the library does not show (hidden ones included) and one that
-is being recorded right now. The receiver refuses one that is being played, one whose move
-into the trash failed, and every delete while its plugin is being updated. The delete is
-proved by the library, read again by the receiver, no longer listing the id, within sixty
-seconds.
+sent, and says why: the permission is off, the trash is off, both are on and the receiver has
+not read its library since its plugin started, or the plugin or the image cannot do it. Also
+refused here: an id the library does not show (hidden ones included) and one that is being
+recorded right now. The receiver refuses one that is being played, one asked for while it is
+still moving another into the trash, one whose move failed, and every delete while its plugin
+is being updated. The delete is proved by the library, read again by the receiver, no longer
+listing the id, within ninety seconds - longer than the receiver's own minute for the move,
+so that its sentence is what you read when the move does not finish.
 
 The trash is the image's: it empties it by its own rules, and a recording can be taken back
 out of it there, in the receiver's movie list.

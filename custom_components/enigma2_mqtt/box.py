@@ -148,6 +148,7 @@ from .const import (
     TOPIC_ZAP_HISTORY,
 )
 from .recordings import (
+    FOLDERS_MAX,
     normalise_folder,
     normalise_index,
     normalise_timeshift,
@@ -1176,6 +1177,11 @@ class Enigma2Box:
         # When the broker's answer to that request arrived, to know the same delivery
         # again should the wildcard subscription be handed it too.
         self._refetch_answered: float | None = None
+        # The library as Home Assistant shows it, the key it was built for, and its
+        # recordings by id (`visible_library`). Rebuilt only when what it is judged by moved.
+        self._library_key: tuple[Any, ...] | None = None
+        self._library: list[Any] = []
+        self._library_ids: dict[str, tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = {}
 
     # ------------------------------------------------------------------ properties
 
@@ -3239,11 +3245,15 @@ class Enigma2Box:
         """Track one folder's `recordings/<slug>`, or forget it when it is retracted.
 
         Kept whatever the index says so far, because the index can arrive after it.
-        A folder published again as it was wakes nobody.
+        A folder published again as it was wakes nobody. At most `FOLDERS_MAX` folder topics
+        are held - as many as an index may name - so retained topics that no index will ever
+        name cannot grow the store without bound.
         """
         if not slug or "/" in slug:
             return
         folders = self.state.recording_folders
+        if slug not in folders and len(folders) >= FOLDERS_MAX and not _retracted(msg.payload):
+            return
         if _retracted(msg.payload):
             if folders.pop(slug, None) is None:
                 return
@@ -3272,7 +3282,22 @@ class Enigma2Box:
         only with at least one such folder: the name of a folder that holds nothing but a
         hidden bouquet's recordings says what is in it.
         """
+        # Built once for every state of what it is judged by - the index, the folder topics,
+        # the channel list and the option - because a delete's proof asks for it on every
+        # message of every topic, and a large library takes a tenth of a second to filter.
+        # Reading `channel_list` first brings its generation up to date.
+        _ = self.channel_list
+        key = (
+            self.updates.get(TOPIC_RECORDINGS, 0),
+            self.updates.get(TOPIC_RECORDING_FOLDERS, 0),
+            id(self.state.recordings_index),
+            self._channel_generation,
+            frozenset(self.hidden_bouquet_names),
+        )
+        if key == self._library_key:
+            return self._library
         shown = []
+        ids: dict[str, tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = {}
         for location in self.recording_locations:
             folders = [
                 (folder, recordings)
@@ -3287,6 +3312,10 @@ class Enigma2Box:
             ]
             if folders:
                 shown.append((location, folders))
+                for folder, recordings in folders:
+                    for recording in recordings:
+                        ids.setdefault(recording["id"], (location, folder, recording))
+        self._library_key, self._library, self._library_ids = key, shown, ids
         return shown
 
     def visible_recording_count(self) -> int | None:
@@ -3307,12 +3336,8 @@ class Enigma2Box:
         A hidden one is not found: it is played or deleted from here exactly as often as
         it is shown here, which is never.
         """
-        for location, folders in self.visible_library():
-            for folder, recordings in folders:
-                for recording in recordings:
-                    if recording["id"] == rec_id:
-                        return location, folder, recording
-        return None
+        self.visible_library()
+        return self._library_ids.get(rec_id)
 
     @property
     def recording_delete_permission(self) -> bool | None:
@@ -3349,6 +3374,14 @@ class Enigma2Box:
             return "recording_delete_not_permitted"
         if self.recording_trash is False:
             return "recording_delete_trash_off"
+        if (
+            not self.info_retracted
+            and self.recording_delete_permission is True
+            and self.recording_trash is True
+        ):
+            # Both are on and the receiver does not claim the delete yet: its plugin has
+            # not read the library since it started.
+            return "recording_delete_not_ready"
         return "recording_delete_unsupported"
 
     # ------------------------------------------------------------ channel list

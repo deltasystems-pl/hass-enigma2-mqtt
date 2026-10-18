@@ -60,8 +60,10 @@ and its id, and marked `hidden` - but it is counted, as a hidden stream client i
 tuner, the "Recording" sensor and every guard on the receiver count it, and a dashboard does not
 make it stop. **A folder left with no recording to show is not listed, nor a location left
 with no such folder** - in the media browser, `get_recordings` or any count - because a
-folder's name can say what it holds. The free-space sensor's list of locations is the one list
-that keeps every location: it is about the disk, not about what is on it.
+folder's name can say what it holds. The free-space sensor's list of locations follows the same
+rule, with one exception: the default location is always in it, because its free space is the
+sensor's state. A running recording is judged only when the receiver sends its bouquet, with
+the details; an older plugin's entries carry none and keep the attributes they always had.
 
 **4. Delete moves a recording into the receiver's trash, and only there, behind the receiver's
 permission.** `enigma2_mqtt.delete_recording` is refused before anything is sent unless the
@@ -75,8 +77,12 @@ good.
 it at its start and when something changes it, never on a timer, so a disk is never woken for a
 list. "Refresh recordings" asks for a read now - the one press that may wake a disk - and is a
 configuration entity, not something a dashboard needs. Its proof is an index that is not the
-broker's replay, within sixty seconds; a delete is proved the same way, by the library no
-longer listing the id, within the same sixty seconds.
+broker's replay and says a new `read`, within sixty seconds: the receiver republishes the index
+when free space changes, with `read` as it was, and that is not a read. A delete is proved by
+the library no longer listing the id, within ninety seconds - longer than the receiver's own
+minute for the move, so that its refusal reaches the household before Home Assistant gives up.
+A play is proved by `service`: the image writes the path in a reference percent-encoded, and
+Home Assistant decodes it before comparing it with the location's resolved path and the file.
 
 **6. The entities stay modest.** One free-space sensor - the default movie location's, with every
 location in an attribute - rather than one per location; one diagnostic count; one binary
@@ -116,7 +122,10 @@ file, title, description, channel, start, length and size - from the topics alre
   zap history: anybody who can read the broker sees every title of every bouquet.
 - A recording copied onto the disk some other way, or deleted on the receiver itself, shows after
   the next event or a press of "Refresh recordings".
-- The free space shown moves when the library is read, not continuously.
+- The free space shown moves when the library is read, and at the receiver's minute mount check
+  when it has changed - never in between, and never by reading a directory.
+- A folder's `cut` is the receiver's count, hidden bouquets' recordings included: nothing here
+  is sent them to judge.
 - An automation finds a recording's id with `get_recordings`, or on the running recordings'
   attribute.
 - `file` is relative to its movie location everywhere, and `locations[0]` is the image's default

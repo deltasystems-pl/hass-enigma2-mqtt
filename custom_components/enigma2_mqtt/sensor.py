@@ -652,19 +652,27 @@ def _free_space(state: Enigma2State) -> int | None:
     return locations[0]["free_mb"] if locations else None
 
 
-def _locations(state: Enigma2State) -> dict[str, Any]:
-    """Return every movie location's path, whether it is mounted, and its free space."""
-    locations = (state.recordings_index or {}).get("locations")
+def _locations(box: Enigma2Box) -> dict[str, Any]:
+    """Return each movie location's path, whether it is mounted, and its free space.
+
+    The default location, listed first, always - its free space is the state. Every other
+    only while the library shows something in it (`Enigma2Box.visible_library`), as every
+    list of the library here: a location holding only a hidden bouquet's recordings is not
+    named.
+    """
+    locations = (box.state.recordings_index or {}).get("locations")
+    if locations is None:
+        return {"locations": None}
+    shown = {id(location) for location, _folders in box.visible_library()}
     return {
-        "locations": None
-        if locations is None
-        else [
+        "locations": [
             {
                 "path": location["path"],
                 "mounted": location["mounted"],
                 "free_mb": location["free_mb"],
             }
-            for location in locations
+            for number, location in enumerate(locations)
+            if number == 0 or id(location) in shown
         ]
     }
 
@@ -690,21 +698,25 @@ def _library_attributes(box: Enigma2Box) -> dict[str, Any]:
 
 
 # The recording library, from its index (`recordings`): how much room the movie locations
-# have left, and how many recordings there are. Both move only when the receiver reads its
-# library again - a recording starts or ends, one is deleted, a location is mounted, or
+# have left, and how many recordings there are. The count moves only when the receiver reads
+# its library again - a recording starts or ends, one is deleted, a location is mounted, or
 # somebody presses "Refresh recordings" - because nothing reads the disk on a timer. The free
-# space of the default location, listed first, is the state; every location is in an attribute.
+# space moves then too, and at the receiver's minute mount check when it has changed, which
+# reads no directory. The default location's free space, listed first, is the state; the
+# locations with something to show are in an attribute.
 RECORDINGS_SENSORS: tuple[Enigma2SensorDescription, ...] = (
     Enigma2SensorDescription(
         key="recording_free_space",
-        topics=(TOPIC_RECORDINGS,),
+        # The folder topics and the channel list as well: which locations the attribute
+        # names follows what is hidden.
+        topics=(TOPIC_RECORDINGS, TOPIC_RECORDING_FOLDERS, TOPIC_CHANNELS),
         device_class=SensorDeviceClass.DATA_SIZE,
         native_unit_of_measurement=UnitOfInformation.MEBIBYTES,
         suggested_unit_of_measurement=UnitOfInformation.GIBIBYTES,
         suggested_display_precision=1,
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=_free_space,
-        attributes_fn=_locations,
+        box_attributes_fn=_locations,
     ),
     # How many recordings the library shows: those of every folder's topic that the
     # options do not hide. The folder topics and the channel list move it, as well as the

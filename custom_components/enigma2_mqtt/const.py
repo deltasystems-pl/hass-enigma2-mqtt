@@ -583,21 +583,33 @@ CONF_RECORDING_DELETE_ALLOWED: Final = "recording_delete_allowed"
 INFO_RECORDING_TRASH: Final = "recording_trash"
 # The refusal codes of the two commands that this integration has a sentence for, each
 # translated as `<command>_<reason>`. Any other refusal is the receiver's own sentence.
-# `busy` is the receiver's refusal of every command while its plugin is being updated.
-PLAY_RECORDING_REASONS: Final = ("not_in_library", "file_gone", "busy")
+# `busy` is the receiver's refusal of every command while its plugin is being updated - the
+# update's doors, and nothing else. `in_progress` is a delete asked for while the receiver is
+# still moving another recording into its trash.
+# `timeshift_kept`: a timeshift buffer ran, the receiver asked as its movie list does, and the
+# viewer chose to keep it.
+PLAY_RECORDING_REASONS: Final = ("not_in_library", "file_gone", "timeshift_kept", "busy")
 DELETE_RECORDING_REASONS: Final = (
     "not_permitted",
     "trash_off",
     "not_in_library",
     "in_use",
     "file_gone",
+    "in_progress",
     "busy",
 )
 RECORDINGS_REFRESH_REASONS: Final = ("busy",)
-# Seconds a refresh, or a delete, waits for the library to be read again. The read is the
-# one thing that reads directories and metadata files, and a refresh may first have to spin
-# a sleeping disk up; ten seconds is a zap, not that.
+# Seconds a refresh waits for the library to be read again. The read is the one thing that
+# reads directories and metadata files, and a refresh may first have to spin a sleeping disk
+# up; ten seconds is a zap, not that.
 RECORDINGS_READ_TIMEOUT: Final = 60
+# Seconds a delete waits for the library without the recording. Longer than the receiver's
+# own sixty-second bound on moving one into the trash, so that its refusal - not a timeout of
+# ours - is what the household reads when the move does not finish.
+RECORDING_DELETE_TIMEOUT: Final = 90
+# Seconds a play waits while a timeshift buffer runs: the receiver first asks the viewer, on
+# the television, whether to leave timeshift, and answers only when somebody has.
+PLAY_RECORDING_TIMESHIFT_TIMEOUT: Final = 60
 # The media player's `play_media` type for one recording; its id is the recording's id.
 MEDIA_TYPE_RECORDING: Final = "recording"
 
