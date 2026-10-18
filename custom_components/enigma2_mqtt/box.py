@@ -3221,10 +3221,10 @@ class Enigma2Box:
         """Track the library index.
 
         The answers every retained topic here gets: an empty payload is a retraction and
-        clears it, a payload that is not a JSON object leaves the last good one alone. The
-        broker's replay of the index already held changes nothing and wakes nobody. A
-        fresh one is always news, also when it lists the same library: it is the answer to
-        a refresh, and says when the library was read.
+        clears it, a payload that is not a JSON object leaves the last good one alone. An
+        index equal to the one held - the broker's replay at a reconnect, or the same index
+        published again - changes nothing and wakes nobody: a new read of the library always
+        says a new `read`, and that is what a refresh waits for.
         """
         if _retracted(msg.payload):
             if self.state.recordings_index is None:
@@ -3234,7 +3234,7 @@ class Enigma2Box:
             return
         else:
             index = normalise_index(payload)
-            if index == self.state.recordings_index and msg.retain:
+            if index == self.state.recordings_index:
                 return
             self.state.recordings_index = index
         self.state.recordings_index_retained = msg.retain

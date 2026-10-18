@@ -731,11 +731,13 @@ async def test_a_retracted_index_empties_the_library(
     assert raised.value.translation_key == "recording_unknown"
 
 
-async def test_the_brokers_replay_of_the_same_index_wakes_nobody(
+@pytest.mark.parametrize("retain", [True, False], ids=["replayed", "published again"])
+async def test_the_same_index_again_wakes_nobody(
     hass: HomeAssistant,
     mqtt_mock,
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
+    retain: bool,
 ) -> None:
     library(box_on_the_broker)
     await _setup(hass, config_entry, box_on_the_broker)
@@ -744,7 +746,7 @@ async def test_the_brokers_replay_of_the_same_index_wakes_nobody(
 
     box._message_received(
         ReceiveMessage(
-            INDEX_TOPIC, json.dumps(INDEX).encode(), 0, True, f"{BASE_TOPIC}/{NODE_ID}/#", 0.0
+            INDEX_TOPIC, json.dumps(INDEX).encode(), 0, retain, f"{BASE_TOPIC}/{NODE_ID}/#", 0.0
         )
     )
     assert box.updates.get("recordings", 0) == before
@@ -825,6 +827,31 @@ async def test_a_refresh_that_finds_the_same_library_still_answers(
     await hass.services.async_call(
         "button", "press", {ATTR_ENTITY_ID: REFRESH}, blocking=True
     )
+
+
+async def test_an_index_that_says_no_read_is_no_answer(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(button_module, "RECORDINGS_READ_TIMEOUT", 0.2)
+    library(box_on_the_broker)
+    await _setup(hass, config_entry, box_on_the_broker)
+
+    await _arm(
+        hass,
+        "recordings_refresh",
+        lambda _id, _payload: async_fire_mqtt_message(
+            hass, INDEX_TOPIC, json.dumps({**INDEX, "read": None})
+        ),
+    )
+    with pytest.raises(HomeAssistantError) as raised:
+        await hass.services.async_call(
+            "button", "press", {ATTR_ENTITY_ID: REFRESH}, blocking=True
+        )
+    assert raised.value.translation_key == "command_timeout"
 
 
 @pytest.mark.parametrize(
