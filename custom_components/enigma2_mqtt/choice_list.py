@@ -42,13 +42,16 @@ from datetime import datetime
 from functools import partial
 import json
 import logging
+import math
 import re
 from typing import TYPE_CHECKING, Any
+import unicodedata
 
 from homeassistant.components.mqtt import ReceiveMessage
 from homeassistant.const import ATTR_DEVICE_ID
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import translation
 from homeassistant.helpers.event import async_call_later
 
 from .box import (
@@ -75,6 +78,7 @@ from .const import (
     LIST_NO_ANSWER,
     LIST_PICKED,
     LIST_REFUSAL_REASONS,
+    LIST_REFUSED,
     LIST_ROW_ID_CHARACTERS,
     LIST_ROW_ID_MAX,
     LIST_ROWS_MAX,
@@ -115,6 +119,7 @@ ATTR_LIST_ID = "list_id"
 ATTR_ENDING = "ending"
 ATTR_ROW = "row"
 ATTR_LABEL = "label"
+ATTR_ERROR = "error"
 
 
 def _invalid(translation_key: str, /, **placeholders: Any) -> ServiceValidationError:
@@ -138,13 +143,55 @@ def _failed(translation_key: str, /, **placeholders: Any) -> HomeAssistantError:
 
 
 def strip_backslashes(text: str) -> str:
-    """`text` without a backslash: the plugin's rule for every text it puts on the screen.
+    """`text` without a backslash, the first step of the plugin's rule for screen text.
 
-    Every escape enigma2's renderer knows begins with one, so the plugin removes them all
-    before a title, a text or a label is cut or judged blank. Done here first, so that the
-    label this side reports back is the one the viewer saw.
+    Every escape enigma2's renderer knows begins with one, so the plugin removes them all.
     """
     return text.replace("\\", "")
+
+
+def _screen_characters(text: str, *, keep_line_breaks: bool) -> str:
+    """Drop every format character and lone surrogate; make every control a space.
+
+    Cf is the bidirectional overrides and isolates, the zero-width space and joiners, the
+    soft hyphen and the byte order mark: they draw nothing and can make a row read as
+    something it is not. Cs is half a surrogate pair, which no UTF-8 holds and which the
+    image's renderer does not survive. Cc, Zl and Zp become a space - a line break too,
+    except in the text under the title, which may have two lines.
+    """
+    pieces: list[str] = []
+    for character in text:
+        category = unicodedata.category(character)
+        if category in ("Cf", "Cs"):
+            continue
+        if keep_line_breaks and character == "\n":
+            pieces.append(character)
+        elif category in ("Cc", "Zl", "Zp"):
+            pieces.append(" ")
+        else:
+            pieces.append(character)
+    return "".join(pieces)
+
+
+def clean_line(text: str, limit: int) -> str:
+    """A title or a label exactly as the receiver shows it - the plugin's `clean_line`.
+
+    In this order: every backslash removed; every Cf and Cs character dropped; every Cc, Zl and Zp
+    character a space; cut at `limit`; the ends stripped. Empty after that is blank. Done
+    here before anything else is judged, so that a list this side accepts is never refused
+    by the receiver as blank, and the label reported back is the one on the screen.
+    """
+    return _screen_characters(strip_backslashes(text), keep_line_breaks=False)[:limit].strip()
+
+
+def clean_lines(text: str, limit: int) -> str:
+    """The text under the title as the receiver shows it - the plugin's `clean_lines`.
+
+    As `clean_line`, except that `\\r\\n` and `\\r` become `\\n` after the backslashes
+    go, and a `\\n` stays a line break.
+    """
+    text = strip_backslashes(text).replace("\r\n", "\n").replace("\r", "\n")
+    return _screen_characters(text, keep_line_breaks=True)[:limit].strip()
 
 
 # --------------------------------------------------------------------- the request --
@@ -203,22 +250,30 @@ def _as_text(value: Any) -> str | None:
 
     A number counts: a template renders `{{ 1 }}` as an integer, and YAML reads `key: 1`
     as one, and both mean the text `1`. A boolean does not - `yes` in YAML is `True`, which
-    is not what anybody meant as a label.
+    is not what anybody meant as a label - and neither does a number that is not finite:
+    `nan`, `inf`, or an integer too large to be one, which is a template's mistake rather
+    than a text anybody wrote.
     """
     if isinstance(value, str):
         return value
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return str(value)
+        try:
+            finite = math.isfinite(value)
+        except OverflowError:
+            finite = False
+        return str(value) if finite else None
     return None
 
 
-def _screen_text(value: Any, limit: int, member: str, row: int | None = None) -> str:
-    """A title, text or label as the receiver will show it: no backslash, at most `limit`."""
+def _screen_text(
+    value: Any, limit: int, member: str, row: int | None = None, *, lines: bool = False
+) -> str:
+    """A title, text or label as the receiver will show it (`clean_line`, `clean_lines`)."""
     if (text := _as_text(value)) is None:
         if row is None:
             raise _invalid("list_member_not_text", member=member)
         raise _invalid("list_row_member_not_text", row=row, member=member)
-    return strip_backslashes(text)[:limit]
+    return clean_lines(text, limit) if lines else clean_line(text, limit)
 
 
 def _timeout(value: Any) -> int:
@@ -248,7 +303,7 @@ def _row(raw: Any, number: int) -> ListRow:
     if raw.get("label") is None:
         raise _invalid("list_row_label_blank", row=number)
     label = _screen_text(raw["label"], LIST_LABEL_MAX, "label", number)
-    if not label.strip():
+    if not label:
         raise _invalid("list_row_label_blank", row=number)
     key: str | None = None
     if raw.get("key") is not None:
@@ -274,14 +329,12 @@ def build_list(data: Mapping[str, Any]) -> ListRequest:
     if data.get(ATTR_TITLE) is None:
         raise _invalid("list_title_blank")
     title = _screen_text(data[ATTR_TITLE], LIST_TITLE_MAX, ATTR_TITLE)
-    if not title.strip():
+    if not title:
         raise _invalid("list_title_blank")
 
     text: str | None = None
     if data.get(ATTR_TEXT) is not None:
-        text = _screen_text(data[ATTR_TEXT], LIST_TEXT_MAX, ATTR_TEXT)
-        if not text.strip():
-            text = None
+        text = _screen_text(data[ATTR_TEXT], LIST_TEXT_MAX, ATTR_TEXT, lines=True) or None
 
     raw_rows = data.get(ATTR_ROWS)
     if not isinstance(raw_rows, (list, tuple)):
@@ -313,9 +366,20 @@ def build_list(data: Mapping[str, Any]) -> ListRequest:
         if default is None or default not in ids:
             raise _invalid("list_default_unknown")
 
-    return ListRequest(
+    request = ListRequest(
         title=title, rows=tuple(rows), timeout=timeout, text=text, default=default
     )
+    # The size in the envelope, which is the same for every id: all are 16 digits. Checked
+    # with the fields, because it is the list that is too long, not the receiver. Counted in
+    # UTF-8, as the broker carries it: the envelope escapes no character outside ASCII.
+    try:
+        size = len(command_envelope(new_command_id(), request.payload()).encode("utf-8"))
+    except UnicodeEncodeError:
+        # Half a surrogate pair where the text rule does not reach - an icon's name.
+        raise _invalid("list_not_utf8") from None
+    if size > COMMAND_MAX_BYTES:
+        raise _invalid("list_too_long", size=size, limit=COMMAND_MAX_BYTES)
+    return request
 
 
 def check_can_show(box: Enigma2Box) -> None:
@@ -335,6 +399,38 @@ def check_can_show(box: Enigma2Box) -> None:
 def answer_response(ending: str, row: str | None, label: str | None) -> dict[str, Any]:
     """What the action returns to a caller that asked for the answer."""
     return {ATTR_ENDING: ending, ATTR_ROW: row, ATTR_LABEL: label}
+
+
+async def async_refused_response(hass: HomeAssistant, error: HomeAssistantError) -> dict[str, Any]:
+    """One receiver's failure as its own entry in a response for several receivers.
+
+    Home Assistant gathers an entity action's calls and raises the first exception, which
+    would throw away the answers of every receiver that did answer. So with several targets
+    a receiver that refuses the list, or cannot be reached, says so in its own entry -
+    `ending: refused`, which only this side says, and the sentence it would have raised, in
+    the installation's language.
+    """
+    return {
+        ATTR_ENDING: LIST_REFUSED,
+        ATTR_ERROR: await async_error_sentence(hass, error),
+        ATTR_ROW: None,
+        ATTR_LABEL: None,
+    }
+
+
+async def async_error_sentence(hass: HomeAssistant, error: HomeAssistantError) -> str:
+    """The sentence an error stands for, in the installation's language where it has one."""
+    domain, key = error.translation_domain, error.translation_key
+    if domain and key:
+        texts = await translation.async_get_translations(
+            hass, hass.config.language, "exceptions", [domain]
+        )
+        if message := texts.get(f"component.{domain}.exceptions.{key}.message"):
+            try:
+                return message.format(**(error.translation_placeholders or {}))
+            except (KeyError, IndexError, ValueError):
+                return message
+    return str(error)
 
 
 NO_ANSWER: dict[str, Any] = answer_response(LIST_NO_ANSWER, None, None)
@@ -465,14 +561,8 @@ class ChoiceLists:
         box = self.box
         check_can_show(box)
         list_id = new_command_id()
+        # `build_list` has checked the size and the encoding of this very envelope.
         wire = command_envelope(list_id, request.payload())
-        try:
-            size = len(wire.encode("utf-8"))
-        except UnicodeEncodeError:
-            # Half a surrogate pair, which a template can produce and no UTF-8 holds.
-            raise _invalid("list_not_utf8") from None
-        if size > COMMAND_MAX_BYTES:
-            raise _invalid("list_too_long", size=size, limit=COMMAND_MAX_BYTES)
 
         await box.async_wait_subscribed()
         if not box.subscribed:

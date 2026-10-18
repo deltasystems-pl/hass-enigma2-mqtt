@@ -63,6 +63,9 @@ from custom_components.enigma2_mqtt.const import (
     CAPABILITY_COMMAND_ID,
     CAPABILITY_LIST,
     COMMAND_MAX_BYTES,
+    CONF_BASE_TOPIC,
+    CONF_NAME,
+    CONF_NODE_ID,
     DOMAIN,
     EVENT_LIST_ANSWER,
     LIST_ANSWER_GRACE,
@@ -1412,3 +1415,380 @@ async def test_a_trigger_on_a_list_from_here_carries_the_label(
 
     assert len(receiver.heard) == 1
     assert [dict(call.data) for call in calls] == [{"row": "open", "label": "Open the gate"}]
+
+
+# --------------------------------------------------------------- the text rule --
+
+# What the receiver shows for each input: its own `clean_line` (a title or a label, 60) and
+# `clean_lines` (the text, 200), run on these strings and written down here - not computed
+# from the plugin's code, which this repository does not carry. Both repositories test the
+# same vectors.
+SCREEN_TEXT: list[tuple[str, str, str]] = [
+    ("\u200b", "", ""),
+    ("\u202e\u2066", "", ""),
+    ("\x01\x02", "", ""),
+    ("\u00ad", "", ""),
+    ("\ufeff", "", ""),
+    ("  Open  ", "Open", "Open"),
+    ("a\x00b", "a b", "a b"),
+    ("\u200b" * 10 + "x" * 60, "x" * 60, "x" * 60),
+    ("Line1\nLine2", "Line1 Line2", "Line1\nLine2"),
+    ("a\r\nb\rc", "a  b c", "a\nb\nc"),
+    ("a\\nb", "anb", "anb"),
+    ("x\u2028y\u2029z", "x y z", "x y z"),
+    ("\t tab \t", "tab", "tab"),
+    ("\u200d" * 70 + "end", "end", "end"),
+    ("e\u0301", "e\u0301", "e\u0301"),
+    ("\u00a0nbsp\u00a0", "nbsp", "nbsp"),
+    ("a\x7fb", "a b", "a b"),
+    (" " * 60 + "w", "", "w"),
+    ("\n\nLine\n\n", "Line", "Line"),
+    # Half a surrogate pair is dropped like a format character.
+    ("x\ud800y", "xy", "xy"),
+    ("\udfff", "", ""),
+]
+
+
+@pytest.mark.parametrize(("raw", "line", "lines"), SCREEN_TEXT)
+def test_the_text_rule_is_the_receiver_s(raw: str, line: str, lines: str) -> None:
+    assert choice_list.clean_line(raw, 60) == line
+    assert choice_list.clean_lines(raw, 200) == lines
+
+
+@pytest.mark.parametrize(("raw", "line", "lines"), SCREEN_TEXT)
+def test_a_title_and_a_label_are_what_the_receiver_shows_or_are_refused(
+    raw: str, line: str, lines: str
+) -> None:
+    """Blank is judged on the cleaned text, so this side refuses what the receiver would."""
+    as_title = {"title": raw, "rows": [{"id": "a", "label": "A"}]}
+    as_label = {"title": "T", "rows": [{"id": "a", "label": raw}]}
+
+    if line:
+        assert build_list(as_title).title == line
+        assert build_list(as_label).rows[0].label == line
+    else:
+        assert _refused(as_title).translation_key == "list_title_blank"
+        assert _refused(as_label).translation_key == "list_row_label_blank"
+
+
+@pytest.mark.parametrize(("raw", "line", "lines"), SCREEN_TEXT)
+def test_the_text_is_what_the_receiver_shows_or_no_text(raw: str, line: str, lines: str) -> None:
+    request = build_list({"title": "T", "text": raw, "rows": _rows(1)})
+
+    assert request.text == (lines or None)
+    assert ("text" in json.loads(request.payload())) is bool(lines)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf"), 10**400])
+def test_a_number_that_is_not_finite_is_not_a_text(value: Any) -> None:
+    """`nan` and `inf` are a template's mistake, not a title anybody wrote."""
+    assert _refused({"title": value, "rows": _rows(1)}).translation_key == "list_member_not_text"
+    assert _refused({"title": "T", "rows": [{"id": "a", "label": value}]}).translation_key == (
+        "list_row_member_not_text"
+    )
+    assert _refused({"title": "T", "rows": [{"id": value, "label": "A"}]}).translation_key == (
+        "list_row_id_invalid"
+    )
+    assert _refused({**DOORBELL, "default": value}).translation_key == "list_default_unknown"
+
+
+def test_a_large_finite_number_is_still_a_text() -> None:
+    assert build_list({"title": 1e300, "rows": _rows(1)}).title == "1e+300"
+
+
+async def test_the_label_reported_back_is_the_one_on_the_screen(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    await _box(hass, config_entry, box_on_the_broker)
+    receiver = await Receiver(
+        hass,
+        lambda list_id, _payload: _answer(hass, {"id": list_id, "ending": "picked", "row": "open"}),
+    ).arm()
+
+    response = await _show(
+        hass,
+        {
+            "title": "\u202eDoorbell\u200b ",
+            "text": "Someone\r\nat the gate\ufeff",
+            "rows": [{"id": "open", "label": "  Open\u200b the\ngate  "}],
+        },
+    )
+
+    assert response == {PLAYER: {"ending": "picked", "row": "open", "label": "Open the gate"}}
+    (_, _, payload) = receiver.heard[0]
+    assert payload["title"] == "Doorbell"
+    assert payload["text"] == "Someone\nat the gate"
+    assert payload["rows"] == [{"id": "open", "label": "Open the gate"}]
+
+
+# ------------------------------------------------------- the waits that never start --
+
+
+async def test_a_list_waiting_for_the_subscription_is_not_sent_after_an_unload(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Unloaded while it waited for the broker: nothing reads its answer, so it is not sent."""
+    box = await _box(hass, config_entry, box_on_the_broker)
+    receiver = await Receiver(hass).arm()
+    confirmed = asyncio.Event()
+
+    with patch.object(box, "async_wait_subscribed", confirmed.wait):
+        task = _show(hass)
+        await _settle()
+        assert await hass.config_entries.async_unload(config_entry.entry_id)
+        confirmed.set()
+
+        with pytest.raises(HomeAssistantError) as raised:
+            await asyncio.wait_for(task, 5)
+
+    assert raised.value.translation_key == "list_unloaded"
+    assert receiver.heard == []
+    assert box.lists is not None and box.lists.waiting == 0
+
+
+async def test_a_list_that_could_not_be_published_is_not_remembered(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    box = await _box(hass, config_entry, box_on_the_broker)
+
+    with (
+        patch.object(
+            box, "async_publish_enveloped", side_effect=HomeAssistantError("broker gone")
+        ),
+        pytest.raises(HomeAssistantError),
+    ):
+        await _show(hass, response=False)
+
+    assert box.lists is not None and box.lists.waiting == 0
+
+
+# ------------------------------------------------------------ several receivers --
+
+NODE_TWO = "vuuno4kse_005302"
+PLAYER_TWO = "media_player.dekoder_kuchnia"
+LIST_TOPIC_TWO = f"{BASE_TOPIC}/{NODE_TWO}/cmd/list"
+
+
+async def _second_box(
+    hass: HomeAssistant, retained: dict[str, str | bytes], info: dict[str, Any]
+) -> Enigma2Box:
+    """A second receiver on the same broker, set up after the first."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Dekoder kuchnia",
+        unique_id=NODE_TWO,
+        data={CONF_NODE_ID: NODE_TWO, CONF_BASE_TOPIC: BASE_TOPIC, CONF_NAME: "Dekoder kuchnia"},
+    )
+    retained.clear()
+    retained.update(
+        {
+            f"{BASE_TOPIC}/{NODE_TWO}/info": json.dumps(info),
+            f"{BASE_TOPIC}/{NODE_TWO}/availability": "online",
+            f"{BASE_TOPIC}/{NODE_TWO}/power": "on",
+        }
+    )
+    await async_setup_box_then_retained(hass, entry, retained)
+    box: Enigma2Box = entry.runtime_data
+    await box.async_wait_subscribed()
+    assert hass.states.get(PLAYER_TWO) is not None
+    return box
+
+
+async def _answer_on(hass: HomeAssistant, topic: str, answer: Callable[[str], None]) -> None:
+    @callback
+    def _received(msg: ReceiveMessage) -> None:
+        list_id, _inner = opened_command(msg.payload)
+        assert list_id is not None
+        answer(list_id)
+
+    await mqtt.async_subscribe(hass, topic, _received)
+
+
+def _show_both(hass: HomeAssistant, *, response: bool = True) -> asyncio.Task[Any]:
+    return asyncio.get_running_loop().create_task(
+        hass.services.async_call(
+            DOMAIN,
+            "show_list",
+            {"entity_id": [PLAYER, PLAYER_TWO], **DOORBELL},
+            blocking=True,
+            return_response=response,
+        )
+    )
+
+
+async def test_two_receivers_answer_one_each(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    await _box(hass, config_entry, box_on_the_broker)
+    await _second_box(hass, box_on_the_broker, CLAIMS)
+    fired = _events(hass)
+    await _answer_on(
+        hass, LIST_TOPIC, lambda list_id: _answer(hass, {"id": list_id, "ending": "dismissed"})
+    )
+    await _answer_on(
+        hass,
+        LIST_TOPIC_TWO,
+        lambda list_id: async_fire_mqtt_message(
+            hass,
+            f"{BASE_TOPIC}/{NODE_TWO}/list_answer",
+            json.dumps({"id": list_id, "ending": "picked", "row": "open"}),
+        ),
+    )
+
+    response = await _show_both(hass)
+
+    assert response == {
+        PLAYER: {"ending": "dismissed", "row": None, "label": None},
+        PLAYER_TWO: {"ending": "picked", "row": "open", "label": "Open the gate"},
+    }
+    assert sorted((event["node_id"], event["ending"]) for event in fired) == [
+        (NODE_ID, "dismissed"),
+        (NODE_TWO, "picked"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("second_info", "refuse", "error"),
+    [
+        (
+            INFO,
+            False,
+            "This receiver cannot show a list of choices. It needs a plugin release that "
+            "offers one.",
+        ),
+        (CLAIMS, True, "The receiver did not show the list: the receiver is in standby"),
+    ],
+    ids=["cannot show one", "refuses it"],
+)
+async def test_with_two_receivers_a_refusal_is_its_own_entry(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    second_info: dict[str, Any],
+    refuse: bool,
+    error: str,
+) -> None:
+    """Home Assistant raises the first exception of an entity action and drops the other
+    answers with it, so with several targets a refusal is an entry, not an exception."""
+    await _box(hass, config_entry, box_on_the_broker)
+    await _second_box(hass, box_on_the_broker, second_info)
+    await _answer_on(
+        hass,
+        LIST_TOPIC,
+        lambda list_id: _answer(hass, {"id": list_id, "ending": "picked", "row": "ignore"}),
+    )
+    if refuse:
+        await _answer_on(
+            hass,
+            LIST_TOPIC_TWO,
+            lambda list_id: async_fire_mqtt_message(
+                hass,
+                f"{BASE_TOPIC}/{NODE_TWO}/last_error",
+                json.dumps(
+                    {
+                        "id": list_id,
+                        "cmd": "list",
+                        "error": "the receiver is in standby",
+                        "reason": "standby",
+                    }
+                ),
+            ),
+        )
+
+    response = await _show_both(hass)
+
+    assert response == {
+        PLAYER: {"ending": "picked", "row": "ignore", "label": "Ignore"},
+        PLAYER_TWO: {"ending": "refused", "error": error, "row": None, "label": None},
+    }
+
+
+async def test_with_two_receivers_a_mistake_in_the_fields_is_still_raised(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The same mistake for every receiver: an error, not two entries saying it twice."""
+    await _box(hass, config_entry, box_on_the_broker)
+    await _second_box(hass, box_on_the_broker, CLAIMS)
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await hass.services.async_call(
+            DOMAIN,
+            "show_list",
+            {"entity_id": [PLAYER, PLAYER_TWO], **DOORBELL, "timeout": 4},
+            blocking=True,
+            return_response=True,
+        )
+
+    assert raised.value.translation_key == "list_timeout_invalid"
+
+
+async def test_with_two_receivers_and_no_response_a_refusal_is_raised_after_both_were_sent(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Without a response there is no entry to put it in; the receiver that can show the
+    list has been sent it all the same."""
+    await _box(hass, config_entry, box_on_the_broker)
+    await _second_box(hass, box_on_the_broker, INFO)
+    receiver = await Receiver(hass).arm()
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await _show_both(hass, response=False)
+
+    assert raised.value.translation_key == "list_unsupported"
+    assert len(receiver.heard) == 1
+
+
+def test_an_icon_no_utf8_holds_is_refused() -> None:
+    """The text rule drops half a surrogate pair from texts; an icon's name it does not touch."""
+    refused = _refused({"title": "T", "rows": [{"id": "a", "label": "A", "icon": "x\ud800"}]})
+
+    assert refused.translation_key == "list_not_utf8"
+
+
+async def test_twenty_four_polish_rows_fit_because_the_envelope_is_utf8(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The limit counts what the broker carries: a Polish letter is two bytes in UTF-8, six
+    as an escape - and 24 rows of 60 such characters fit only the first way."""
+    await _box(hass, config_entry, box_on_the_broker)
+    receiver = await Receiver(hass).arm()
+    polish = ("za\u017c\u00f3\u0142\u0107 g\u0119\u015bl\u0105 ja\u017a\u0144 " * 4)[:60]
+    assert len(polish) == 60
+    rows = [{"id": f"row{n:02}", "label": polish} for n in range(24)]
+
+    request = build_list({"title": polish, "rows": rows})
+    await _show(hass, {"title": polish, "rows": rows}, response=False)
+
+    (wire, list_id, payload) = receiver.heard[0]
+    text = wire.decode() if isinstance(wire, (bytes, bytearray)) else wire
+    assert "\\u" not in text
+    assert polish in text
+    size = len(text.encode("utf-8"))
+    assert size == len(choice_list.command_envelope(list_id, request.payload()).encode("utf-8"))
+    assert size <= COMMAND_MAX_BYTES
+    # Escaped, the same list would not have fitted.
+    escaped = json.dumps({"id": list_id, "payload": request.payload()}, separators=(",", ":"))
+    assert len(escaped) > COMMAND_MAX_BYTES
+    assert [row["label"] for row in payload["rows"]] == [polish] * 24

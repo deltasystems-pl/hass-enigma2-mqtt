@@ -924,6 +924,9 @@ LIST_REPLACED: Final = "replaced"
 LIST_CLOSED: Final = "closed"
 LIST_ENDINGS: Final = (LIST_PICKED, LIST_TIMEOUT, LIST_DISMISSED, LIST_REPLACED, LIST_CLOSED)
 LIST_NO_ANSWER: Final = "no_answer"
+# What one receiver's entry says when an action aimed at several receivers could not show
+# it the list: refused, unreachable, or unloaded. Never sent by a receiver.
+LIST_REFUSED: Final = "refused"
 # The refusal codes of `cmd/list` that say the moment or the request was wrong - standby,
 # an update holding the receiver, a payload the receiver would not show - and not the box.
 LIST_REFUSAL_REASONS: Final = ("standby", "busy", "invalid")

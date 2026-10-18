@@ -31,9 +31,14 @@ from datetime import datetime
 import json
 from typing import Any
 
+from homeassistant.const import ATTR_ENTITY_ID, ENTITY_MATCH_ALL
 from homeassistant.core import ServiceCall, ServiceResponse, SupportsResponse
-from homeassistant.exceptions import ServiceValidationError
-from homeassistant.helpers import config_validation as cv, entity_platform
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import (
+    config_validation as cv,
+    entity_platform,
+    target as target_helpers,
+)
 import homeassistant.util.dt as dt_util
 import voluptuous as vol
 
@@ -42,6 +47,7 @@ from .choice_list import (
     ATTR_DEFAULT,
     ATTR_ROWS,
     ATTR_TITLE,
+    async_refused_response,
     build_list,
     check_can_show,
 )
@@ -136,7 +142,8 @@ STOP_STREAM_SCHEMA = {
 }
 # Every field is taken as it comes and checked by `choice_list.build_list`, which says what
 # is wrong in the household's language and names the row; a schema error would say it in
-# English, without the row.
+# English, without the row. Only a field the action does not have - a misspelt `titel` -
+# is refused by the schema, with voluptuous' English message.
 SHOW_LIST_SCHEMA = {
     vol.Optional(ATTR_TITLE): object,
     vol.Optional(ATTR_TEXT): object,
@@ -423,6 +430,27 @@ class Enigma2Actions:
         return {"bouquets": grids}
 
 
+def _target_count(entity: Enigma2Actions, call: ServiceCall) -> int:
+    """How many receivers one call of the action reaches, as Home Assistant resolves it.
+
+    The receivers' media players, among those the call names - by entity, device, area,
+    floor or label - or all of them for `all`, as `entity_service_call` picks them.
+    """
+    platform = getattr(entity, "platform", None)
+    entities = platform.domain_platform_entities if platform is not None else {}
+    if call.data.get(ATTR_ENTITY_ID) == ENTITY_MATCH_ALL:
+        return sum(1 for candidate in entities.values() if candidate.available)
+    selected = target_helpers.async_extract_referenced_entity_ids(
+        call.hass, target_helpers.TargetSelection(call.data), True
+    )
+    named = selected.referenced | selected.indirectly_referenced
+    return sum(
+        1
+        for entity_id, candidate in entities.items()
+        if entity_id in named and candidate.available
+    )
+
+
 async def async_show_list(entity: Enigma2Actions, call: ServiceCall) -> ServiceResponse:
     """Put a list of choices on the television; with a response, wait for how it ended.
 
@@ -430,13 +458,30 @@ async def async_show_list(entity: Enigma2Actions, call: ServiceCall) -> ServiceR
     for a response decides what this does: with one it returns `ending`, `row` and `label`
     once the list is answered - or `no_answer` fifteen seconds after its timeout - and
     without one it returns as soon as the list is published.
+
+    Aimed at several receivers with a response, a receiver that refuses the list or cannot
+    be reached answers in its own entry (`async_refused_response`) instead of raising:
+    Home Assistant raises the first exception of an entity action's calls and drops every
+    other receiver's answer with it. A mistake in the fields is the same for every receiver
+    and is raised either way; so is everything aimed at one receiver.
     """
     box = entity.box
-    check_can_show(box)
+    several = call.return_response and _target_count(entity, call) > 1
+    try:
+        check_can_show(box)
+    except HomeAssistantError as error:
+        if not several:
+            raise
+        return await async_refused_response(call.hass, error)
     request = build_list(call.data)
     if box.lists is None:  # pragma: no cover - set before the platforms are
         raise _invalid("list_unsupported")
-    return await box.lists.async_show(request, wait=call.return_response)
+    try:
+        return await box.lists.async_show(request, wait=call.return_response)
+    except HomeAssistantError as error:
+        if not several:
+            raise
+        return await async_refused_response(call.hass, error)
 
 
 def async_setup_services() -> None:
