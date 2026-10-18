@@ -71,7 +71,24 @@ older run sent: the receiver answered, whoever asked. The receiver offers *a row
 picked* (any row, or the row whose id the trigger names), *a list timed out* and *a list was
 dismissed*. `replaced` and `closed` are no one's choice and have no trigger; they are on the event.
 
-**7. No permission and no option.** A list changes nothing on the receiver and calls nothing in
+**7. The text on the screen is cleaned the same way on both sides.** A title, the text and every
+label are cleaned by the plugin's rule, in its order: every backslash removed; in the text,
+`\r\n` and `\r` made a line break; every Unicode Cf and Cs character dropped; every Cc, Zl and Zp
+character made a space, except a line break in the text; cut at the limit (60, or 200 for the
+text); the ends stripped. Blank is judged on the result. Home Assistant applies it before its own
+checks, so it refuses in the caller's language exactly what the receiver would refuse as blank, and
+the label it reports back is the one on the screen. Both repositories test the same vectors.
+
+**8. Several receivers answer one each.** A target of more than one receiver shows the list on
+each, and the response has one entry per media player, each answer its own event and trigger.
+Home Assistant gathers an entity action's calls and raises the first exception, which would throw
+away every answer that did arrive; so with several targets and a response, a receiver that refuses
+or cannot be reached returns `{"ending": "refused", "error": <the translated sentence>, "row":
+null, "label": null}` in its own entry. `refused` is Home Assistant's, never a receiver's. One
+target raises as before, a mistake in the fields is raised for any number of targets, and without
+a response there is no entry, so a failure is raised once every receiver's call has run.
+
+**9. No permission and no option.** A list changes nothing on the receiver and calls nothing in
 Home Assistant by itself, like a message. What it can cost is a question on the screen nobody
 asked for, and an answer nobody gave - which is why SECURITY.md says that an automation must not
 treat an answer as proof of who pressed what.
@@ -86,7 +103,7 @@ treat an answer as proof of who pressed what.
 - Unloading or reloading the entry ends every wait with an error, `list_unloaded`: nothing reads
   the receiver's answers between the unload and the next setup.
 - The response is keyed by the media player it came from, like every entity action's; a target of
-  several receivers shows the list on each and returns one answer per receiver.
+  several receivers shows the list on each and returns one answer per receiver (section 8).
 - A field of the action is checked here, in the household's language and with the row's number,
   before anything is published - a payload the receiver would refuse on `last_error` is refused
   in the dialog instead. An unknown member of a row is refused here, though the receiver ignores

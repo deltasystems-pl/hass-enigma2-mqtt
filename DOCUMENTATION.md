@@ -2153,16 +2153,34 @@ from Home Assistant.
 
 | Field | Rule |
 |---|---|
-| `title` | Required. Every backslash is removed, then it is cut at 60 characters; blank is refused |
-| `text` | Optional, one or two lines under the title; the same backslash rule, cut at 200 |
-| `rows` | 1 to 24 rows, shown in this order. Each has `id` (1-32 letters, digits or `.` `_` `:` `-`, unique, case matters) and `label` (required, backslashes removed, cut at 60), and optionally `key` - `red`, `green`, `yellow`, `blue` or `"1"` to `"9"`, unique - and `icon`, one of the receiver menu's icon names (an unknown name is drawn as the neutral icon) |
+| `title` | Required; cleaned as below and cut at 60 characters; blank is refused |
+| `text` | Optional, one or two lines under the title; cleaned as below, cut at 200; blank is no text |
+| `rows` | 1 to 24 rows, shown in this order. Each has `id` (1-32 letters, digits or `.` `_` `:` `-`, unique, case matters) and `label` (required; cleaned as below and cut at 60; blank is refused), and optionally `key` - `red`, `green`, `yellow`, `blue` or `"1"` to `"9"`, unique - and `icon`, one of the receiver menu's icon names (an unknown name is drawn as the neutral icon) |
 | `timeout` | Whole seconds from 5 to 600, default 60. There is no list without one |
 | `default` | Optional: the id of the row the selection starts on, and the row a timeout names |
+
+A title, the text and every label are cleaned exactly as the receiver cleans them, in this order,
+and only then judged blank - so a list Home Assistant accepts is never refused by the receiver as
+blank, and the `label` it reports back is the one on the screen:
+
+1. every backslash is removed;
+2. in the text only, `\r\n` and `\r` become a line break;
+3. every invisible format character (Unicode category Cf - bidirectional overrides and isolates,
+   the zero-width space and joiners, the soft hyphen, the byte order mark) and every half of a
+   surrogate pair (Cs) is dropped;
+4. every control character and line or paragraph separator (Cc, Zl, Zp) becomes a space - except a
+   line break in the text, which stays one;
+5. the result is cut at the limit;
+6. the spaces at either end are stripped; nothing left is blank.
+
+A number is taken as its text (a template's `{{ 2026 }}`), but not `true` or `false`, and not a
+number that is not finite (`nan`, `inf`).
 
 Everything is checked before anything is published, and a mistake is refused with the field and
 the row's number, counted from 1. A row member other than these four is refused too - a misspelt
 `key` would otherwise vanish without a word. The list, in its envelope, has to fit the receiver's
-4096 bytes; 24 rows of 60 plain characters do. A receiver that is not on the broker is refused, too.
+4096 bytes, counted in UTF-8 as the broker carries it; 24 rows of 60 characters do, Polish ones
+included. A receiver that is not on the broker is refused, too.
 
 **Called with a response**, the action waits until the list ends and returns, keyed by the media
 player as every entity action's response is, `{"ending": ..., "row": ..., "label": ...}`:
@@ -2184,6 +2202,16 @@ made once the receiver is back is still answered. Treat `no_answer` as "nobody c
 
 **Called without a response**, the action returns as soon as the list is published; the answer
 still fires the event and the device triggers below, with the label.
+
+**Several receivers at once.** A target that names more than one receiver - two media players, an
+area, a label - shows the list on each, and each answers for itself: the response has one entry per
+media player, and each answer is its own event and trigger. With a response, a receiver that
+refuses the list or cannot be reached does not take the others' answers down with it: its entry is
+`{"ending": "refused", "error": "<the sentence it would have raised>", "row": null, "label": null}`,
+in the installation's language. `refused` is never a receiver's ending, only Home Assistant's. A
+mistake in the fields is the same for every receiver and is raised, and so is any failure when the
+target is one receiver, or when no response was asked for - there is no entry to put it in then; the
+receivers that could show the list have been sent it.
 
 A list the receiver refuses - in standby, while an update holds it, or one it reads as invalid -
 raises an error with the receiver's sentence; so does unloading or reloading the entry while a list
@@ -2306,7 +2334,9 @@ Assistant sent the list, `null` otherwise. It is fired also for a list another a
 earlier run or another client sent: the trigger is about the receiver, not about who asked. A list
 that ended `replaced` or `closed` has no trigger - nobody chose anything - and is on the event. An
 answer that does not fit the contract, a retained one and a second answer with the same id fire
-nothing and are logged once per cause.
+nothing and are logged once per cause - and so does an answer to a list this Home Assistant sent
+that names a row the list did not have, or a timeout that names another row than the default it
+was sent with.
 
 ```yaml
 # A list sent without waiting - from a dashboard button, say - answered here.
