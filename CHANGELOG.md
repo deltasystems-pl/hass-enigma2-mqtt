@@ -30,7 +30,12 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   action and a value the entity accepts, and refuses anything else - also an action stamped more
   than 120 seconds before or after Home Assistant's clock, one on a control whose last action is
   still being carried out, and any beyond five a second from one receiver, where only actions
-  that pass every other check count - with one log line per cause. A
+  that pass every other check count - with one log line per cause. A switch's OK carries the
+  state its row showed (`seen`), and Home Assistant calls the service for the other state -
+  `turn_on` or `turn_off`, `open_cover` or `close_cover`, `lock` or `unlock` - or nothing when
+  the entity is already there, publishing the menu again so the row is redrawn: an OK that
+  arrives late or twice repeats what the viewer meant and never inverts it. An action without
+  `seen`, or with `null` (a row showing no state), toggles as before. A
   receiver whose clock is behind gets a repair, „the receiver's clock is behind", at the first
   action refused for it; the next accepted action removes it.
   A button - a script, a scene, an automation, a button entity - does not wait for what it

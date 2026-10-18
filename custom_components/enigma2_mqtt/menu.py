@@ -187,8 +187,21 @@ BUTTON_SERVICES: dict[str, str] = {
     "automation": "trigger",
 }
 # Toggle rows whose domain has a `toggle` service of its own; cover and lock take the
-# explicit pair, chosen by the entity's state when the action arrives.
+# explicit pair, chosen by the entity's state when the action arrives. Both only for a
+# toggle that does not say what its row showed.
 TOGGLE_SERVICE_DOMAINS = ("light", "switch", "input_boolean", "fan")
+# The explicit service that puts a toggle row's entity where its row shows `true` (on, open,
+# locked) or `false` (off, closed, unlocked). A toggle that says what the row showed (`seen`)
+# is turned into one of these: the viewer meant the other value, so a late or repeated OK
+# repeats that intent and never inverts it (ADR-0012 section 11).
+TOGGLE_TARGET_SERVICES: dict[str, dict[bool, str]] = {
+    "light": {True: "turn_on", False: "turn_off"},
+    "switch": {True: "turn_on", False: "turn_off"},
+    "input_boolean": {True: "turn_on", False: "turn_off"},
+    "fan": {True: "turn_on", False: "turn_off"},
+    "cover": {True: "open_cover", False: "close_cover"},
+    "lock": {True: "lock", False: "unlock"},
+}
 
 # A slider in percent - a light's brightness, a cover's position, a player's volume - moves
 # in tens: it is moved with the arrow keys of a remote.
@@ -1020,6 +1033,9 @@ class MenuAction:
     value: Any
     # Epoch seconds by the receiver's clock; None when the action carried none.
     ts: float | None = None
+    # For a toggle, the `value` its row showed when OK was pressed; None when the row showed
+    # no state or the action did not say (a plugin that does not send `seen`).
+    seen: bool | None = None
 
 
 class Refused(Exception):
@@ -1059,6 +1075,13 @@ def parse_action(payload: Any, now: float | None = None) -> MenuAction:
         raise Refused("malformed", "action")
     if action == ACTION_SET and "value" not in data:
         raise Refused("malformed", "value")
+    seen = data.get("seen")
+    # Optional, and only a toggle's: the row's own `value` - `true`, `false` or `null`. A
+    # number is not a value a row shows, and another action has no row value to repeat.
+    if "seen" in data and (
+        action != ACTION_TOGGLE or not (seen is None or isinstance(seen, bool))
+    ):
+        raise Refused("malformed", "seen")
     ts: float | None = None
     if "ts" in data:
         # A number, as the contract says - not a text that reads as one.
@@ -1072,13 +1095,16 @@ def parse_action(payload: Any, now: float | None = None) -> MenuAction:
             # The receiver's clock is ahead: an action stamped for later is not one the
             # age limit can judge, and it would pass it for as long as the clock is ahead.
             raise Refused("future", f"{ts - now:.0f} s ahead")
-    return MenuAction(action_id, rev, row, action, data.get("value"), ts)
+    return MenuAction(action_id, rev, row, action, data.get("value"), ts, seen)
 
 
 def service_call(
     row: Mapping[str, Any], view: RowView, action: MenuAction
-) -> tuple[str, str, dict[str, Any], Any]:
+) -> tuple[str, str | None, dict[str, Any], Any]:
     """The service one action on one row calls: domain, service, data and the value applied.
+
+    The service is None for a toggle that says what its row showed when the entity is
+    already where the press would put it: the intent is met and nothing is called.
 
     Raises `Refused` for an action the row does not take, a row that cannot be acted on now,
     and a value outside what the entity accepts.
@@ -1097,6 +1123,14 @@ def service_call(
     if control == BUTTON:
         return domain, BUTTON_SERVICES[domain], {}, None
     if control == TOGGLE:
+        if action.seen is not None:
+            # The viewer saw `seen` and meant the other value. "Already" is read from
+            # `view.value`, the same reading that builds the row's `value`; a state that is
+            # neither (unknown, jammed) is not already there, so the service is called.
+            wanted = not action.seen
+            if view.value is wanted:
+                return domain, None, {}, None
+            return domain, TOGGLE_TARGET_SERVICES[domain][wanted], {}, None
         if domain in TOGGLE_SERVICE_DOMAINS:
             return domain, "toggle", {}, None
         if view.value is None:
@@ -1141,7 +1175,8 @@ class PlannedCall:
     control: str
     entity_id: str
     domain: str
-    service: str
+    # None when nothing needs calling: a toggle whose entity already is where it would go.
+    service: str | None
     data: dict[str, Any]
     # The value the event reports: the entity's own option, the number on its step, the text.
     applied: Any
@@ -1424,7 +1459,8 @@ class ReceiverMenu:
                 raise Refused("duplicate", action.action_id)
             self._recent_ids.append(action.action_id)
             call = self._planned_call(action)
-            self._admit(action)
+            if call.service is not None:
+                self._admit(action)
         except Refused as refusal:
             if refusal.cause == "stale":
                 self._raise_clock_issue()
@@ -1434,6 +1470,9 @@ class ReceiverMenu:
             # An action stamped inside the limit: whatever the clock was, it is right now.
             self._clock_issue = False
             async_delete_clock_issue(self.hass, self.entry.entry_id)
+        if call.service is None:
+            self._async_intent_met(call)
+            return
         self.entry.async_create_background_task(
             self.hass,
             self._async_perform(action, call),
@@ -1464,6 +1503,27 @@ class ReceiverMenu:
             data=data,
             applied=applied,
         )
+
+    @callback
+    def _async_intent_met(self, call: PlannedCall) -> None:
+        """A toggle whose entity already is where the viewer meant it to go.
+
+        Nothing is called and no event is fired - nothing was performed - and the action is
+        not counted towards the flood limit or held as the row's action in progress, since
+        it costs no service call. The receiver's row showed the other value, so the menu is
+        published again, forced: the state did not change, and an unchanged menu would
+        otherwise not go out. The publish goes through the debouncer, so a burst of these is
+        still at most one publish every half second.
+        """
+        _LOGGER.debug(
+            "The menu of %s called nothing for row %s: %s already is where the press would "
+            "put it; the menu is published again",
+            self.box.node_id,
+            call.row_id,
+            call.entity_id,
+        )
+        self._force = True
+        self._debouncer.async_schedule_call()
 
     @callback
     def _admit(self, action: MenuAction) -> None:

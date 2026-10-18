@@ -2,6 +2,8 @@
 
 **Status:** proposed 2026-10-15
 **Date:** 2026-10-15
+**Amended:** 2026-10-18 - a toggle says what its row showed, and Home Assistant performs that
+intent rather than a flip (section 11)
 **Extends:** [ADR-0000](0000-prd.md) §7 - Home Assistant now publishes, retained, the names and
 states of the entities the user puts into the menu, and performs services on a message from the
 broker. No telemetry, no cloud service and nothing outside the household's network are
@@ -50,7 +52,8 @@ passed every check that needs no service call - the row, whether the last menu c
 action its control takes, its entity's availability and the value, all checked before the
 action is counted - so an action refused for any cause costs nothing, and junk on the broker
 cannot use up the second a real press needs; a key held down, or anyone on the broker, cannot
-turn the menu into a stream of service calls. A selector's value is checked against the options
+turn the menu into a stream of service calls. A toggle whose target is already met calls no
+service and is neither counted nor held (section 11). A selector's value is checked against the options
 in the words of the last menu published, which are the words the receiver shows. "Still being
 performed" depends on the control. A button - a script, a scene, an automation, a button
 entity - is fire-and-forget: its call is made without waiting for what it starts, so a script
@@ -82,7 +85,8 @@ input numbers and a player's volume are sliders; input texts and texts are text 
 other entity, of any domain, can be an indicator showing its state. A cover and a lock take
 the explicit pair by the entity's state when the action arrives (open -> close, locked ->
 unlock) - not the state the row showed when OK was pressed - rather than a
-toggle, and refuse when that state is neither. Percent sliders move in tens, because they are
+toggle, and refuse when that state is neither. A toggle that says what its row showed is
+taken by section 11 instead. Percent sliders move in tens, because they are
 moved with the arrow keys of a remote; an entity's own range keeps its step, coarsened by a whole
 multiple to at most 200 steps.
 
@@ -102,7 +106,8 @@ saved, when the receiver comes back online, when the broker connection comes bac
 restarted without persistence has lost the retained menu, and the receiver then says `online`
 without having been seen offline), and when a bound entity changes: the first change at
 once and a burst after it as one publish half a second later, which keeps both "at most one every
-0.5 s" and "within 1 s of a change". A change the payload does not show publishes nothing. Eight
+0.5 s" and "within 1 s of a change". A change the payload does not show publishes nothing - except after a toggle whose target was
+already met, which publishes the unchanged menu again (section 11). Eight
 groups, 24 entries per list, labels at 60, state texts at 24, options at 24 of 60, units at 8; the
 whole payload under 64 KiB - measured with the `rev` it goes out with - dropping from the end
 with one warning per thing left out. A row left out is not on the receiver, and an action naming
@@ -138,6 +143,29 @@ without a registry entry is stored by its entity id; both forms are read, and a 
 entity id that is saved again once the entity has a registry entry keeps its row id. A registry
 id that names nothing any more, or now names an entity the row's control does not fit, shows the
 row greyed and refuses every action on it.
+
+**11. A toggle says what its row showed, and Home Assistant performs the intent, not the
+flip.** An OK can reach Home Assistant late - a network stall shorter
+than the MQTT keepalive keeps the session, and the press waits in a socket buffer - and by then
+an earlier OK may have changed the entity. A plain `toggle` then does the opposite of what the
+viewer meant: the row showed "off", the lamp went on meanwhile, and the late OK switched it off.
+Refusing an older `rev` is no answer (section 3 accepts one on purpose), so the action carries
+the intent instead. A `toggle` may carry `seen`: the `value` the row showed when OK was pressed -
+`true`, `false`, or `null` for a row that showed no state. With `true` or `false` the viewer
+meant the other value, and Home Assistant calls the explicit service for it - `turn_on` or
+`turn_off`, `open_cover` or `close_cover`, `lock` or `unlock` - so a late or repeated OK repeats
+the intent and never inverts it. When the entity already is there, judged by the same reading
+of its state that builds the row's `value` (a cover is open exactly when its row would show
+`true`, opening included), nothing is called, one debug line is logged, no event is fired since
+nothing was performed, and the menu is published again - forced, since nothing in it changed -
+so the receiver redraws the row from the current state. Such an action calls no service, so it
+is not counted towards the five a second and does not hold its row; its publish goes through
+the menu's debouncer like any other. A state that is neither on nor off (unknown, jammed) is not
+"already there", so the explicit service is called rather than refused. `seen` absent or `null`
+is the toggle of section 4 unchanged - a plugin that does not send it gets exactly the earlier
+behaviour. `seen` of any other type, or on `press` or `set`, is refused as malformed. Every other
+check - the row, its control, its availability, the age of `ts`, the duplicate id - is the same
+as for any action, and `rev` is still not consulted.
 
 ## Consequences
 
