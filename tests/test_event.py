@@ -178,7 +178,8 @@ async def test_the_device_offers_eight_colour_key_triggers(
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """Four colours, short and long, in the automation editor."""
+    """Four colours, short and long, in the automation editor - beside the three answers to
+    a list of choices (`test_choice_list.py`)."""
     await async_setup_box(hass, config_entry)
     device_id = _device_id(hass, config_entry)
 
@@ -186,7 +187,9 @@ async def test_the_device_offers_eight_colour_key_triggers(
         hass, DeviceAutomationType.TRIGGER, device_id
     )
     ours = sorted(
-        trigger["type"] for trigger in triggers if trigger["domain"] == DOMAIN
+        trigger["type"]
+        for trigger in triggers
+        if trigger["domain"] == DOMAIN and not trigger["type"].startswith("list_")
     )
 
     assert ours == sorted(TRIGGER_TYPES)

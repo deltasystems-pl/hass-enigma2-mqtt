@@ -882,3 +882,51 @@ MENU_TRANSPARENCY_MIN: Final = 0
 MENU_TRANSPARENCY_MAX: Final = 80
 MENU_TRANSPARENCY_STEP: Final = 10
 MENU_HOTKEYS: Final = ("help_long", "red_long", "f3", "f4", "off")
+
+# A list of choices on the television, from a plugin after 0.4.0 (contract 1, additive;
+# `choice_list.py` and ADR-0014). Home Assistant publishes `cmd/list` - a title, an optional
+# text and labelled rows, each with an id - and the receiver answers once on `list_answer`
+# with the row id that was picked, or with how the list ended otherwise. The receiver never
+# learns what a row does. The list's id is the command's id, so the capability implies
+# `command_id` and a list always goes out in an envelope.
+CAPABILITY_LIST: Final = "list"
+COMMAND_LIST: Final = "list"
+TOPIC_LIST_ANSWER: Final = "list_answer"
+# The bus event fired for every answer that can be read, whoever sent the list.
+EVENT_LIST_ANSWER: Final = f"{DOMAIN}_list_answer"
+# The contract's bounds. Texts lose every backslash first (the toast's rule), then are cut.
+LIST_TITLE_MAX: Final = 60
+LIST_TEXT_MAX: Final = 200
+LIST_LABEL_MAX: Final = 60
+LIST_ROWS_MIN: Final = 1
+LIST_ROWS_MAX: Final = 24
+# A row id: 1 to 32 characters out of letters, digits and `.`, `_`, `:`, `-`.
+LIST_ROW_ID_CHARACTERS: Final = r"A-Za-z0-9._:-"
+LIST_ROW_ID_MAX: Final = 32
+# What a row's shortcut may be: a colour key or a digit. Unique within a list.
+LIST_KEYS: Final = (
+    "red", "green", "yellow", "blue", "1", "2", "3", "4", "5", "6", "7", "8", "9"
+)
+# Seconds a list stays on screen: there is no list without a timeout.
+LIST_TIMEOUT_MIN: Final = 5
+LIST_TIMEOUT_MAX: Final = 600
+LIST_DEFAULT_TIMEOUT: Final = 60
+# Seconds after a list's own timeout that a caller still waits for its answer before the
+# wait ends as `no_answer`: the receiver's clock, the broker and a busy image in between.
+LIST_ANSWER_GRACE: Final = 15
+# How a list ended, as the receiver says it, and the one ending only Home Assistant says:
+# no answer arrived in time - the receiver was unreachable, or the answer was lost, which
+# it is on purpose while the broker is away (it is never queued).
+LIST_PICKED: Final = "picked"
+LIST_TIMEOUT: Final = "timeout"
+LIST_DISMISSED: Final = "dismissed"
+LIST_REPLACED: Final = "replaced"
+LIST_CLOSED: Final = "closed"
+LIST_ENDINGS: Final = (LIST_PICKED, LIST_TIMEOUT, LIST_DISMISSED, LIST_REPLACED, LIST_CLOSED)
+LIST_NO_ANSWER: Final = "no_answer"
+# What one receiver's entry says when an action aimed at several receivers could not show
+# it the list: refused, unreachable, or unloaded. Never sent by a receiver.
+LIST_REFUSED: Final = "refused"
+# The refusal codes of `cmd/list` that say the moment or the request was wrong - standby,
+# an update holding the receiver, a payload the receiver would not show - and not the box.
+LIST_REFUSAL_REASONS: Final = ("standby", "busy", "invalid")

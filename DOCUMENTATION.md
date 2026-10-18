@@ -2016,6 +2016,7 @@ the platform an action was registered on, and one box has exactly one media play
 | `enigma2_mqtt.set_ha_mode` | `mode`: `discovery`, `integration` or `off` |
 | `enigma2_mqtt.get_epg_grid` | `bouquet` (optional) · **returns a response** |
 | `enigma2_mqtt.stop_stream` | `host`, `sref` (optional) · on every receiver; refused before anything is sent unless it names the `stream_stop` capability ([§4.7](#47-streams)) |
+| `enigma2_mqtt.show_list` | `title`, `text`, `rows`, `timeout` (5-600, default 60), `default`; **can return a response**: how the list ended ([below](#show_list)); refused before anything is sent unless the receiver names the `list` capability |
 
 `begin` and `end` take a date and time or the epoch seconds the topics use; both end up as
 epoch seconds on the wire.
@@ -2140,6 +2141,171 @@ response_variable: grid
 It is deliberately not a state attribute anywhere: a grid runs to tens of kilobytes per
 bouquet, and an attribute of that size is written to the recorder database on every refresh.
 
+### `show_list`
+
+Puts a question on the television as a **list of choices** - on top of whatever is on screen: live
+TV, a recording, the receiver menu - and the viewer answers with the remote: up and down and OK, a
+row's colour or number key, or EXIT. The receiver never learns what a row does; it says which row
+id was picked, once, and the automation that asked does the rest
+([ADR-0014](docs/adr/0014-a-list-of-choices.md)). A yes/no question is a list of two rows. Needs a
+receiver that names the `list` capability (plugin 0.5.0); the screen says that the question comes
+from Home Assistant.
+
+| Field | Rule |
+|---|---|
+| `title` | Required; cleaned as below and cut at 60 characters; blank is refused |
+| `text` | Optional, one or two lines under the title; cleaned as below, cut at 200; blank is no text |
+| `rows` | 1 to 24 rows, shown in this order. Each has `id` (1-32 letters, digits or `.` `_` `:` `-`, unique, case matters) and `label` (required; cleaned as below and cut at 60; blank is refused), and optionally `key` - `red`, `green`, `yellow`, `blue` or `"1"` to `"9"`, unique - and `icon`, one of the receiver menu's icon names (an unknown name is drawn as the neutral icon) |
+| `timeout` | Whole seconds from 5 to 600, default 60. There is no list without one |
+| `default` | Optional: the id of the row the selection starts on, and the row a timeout names |
+
+A title, the text and every label are cleaned exactly as the receiver cleans them, in this order,
+and only then judged blank - so a list Home Assistant accepts is never refused by the receiver as
+blank, and the `label` it reports back is the one on the screen:
+
+1. every backslash is removed;
+2. in the text only, `\r\n` and `\r` become a line break;
+3. every invisible format character (Unicode category Cf - bidirectional overrides and isolates,
+   the zero-width space and joiners, the soft hyphen, the byte order mark) and every half of a
+   surrogate pair (Cs) is dropped;
+4. every control character and line or paragraph separator (Cc, Zl, Zp) becomes a space - except a
+   line break in the text, which stays one;
+5. the result is cut at the limit;
+6. the spaces at either end are stripped; nothing left is blank.
+
+A number is taken as its text (a template's `{{ 2026 }}`), but not `true` or `false`, and not a
+number that is not finite (`nan`, `inf`).
+
+Everything is checked before anything is published, and a mistake is refused with the field and
+the row's number, counted from 1. A row member other than these four is refused too - a misspelt
+`key` would otherwise vanish without a word. The list, in its envelope, has to fit the receiver's
+4096 bytes, counted in UTF-8 as the broker carries it; 24 rows of 60 characters do, Polish ones
+included. A receiver that is not on the broker is refused, too.
+
+**Called with a response**, the action waits until the list ends and returns, keyed by the media
+player as every entity action's response is, `{"ending": ..., "row": ..., "label": ...}`:
+
+| `ending` | When | `row` | `label` |
+|---|---|---|---|
+| `picked` | the viewer chose a row - OK, or the row's key | that row's id | its label |
+| `timeout` | nobody chose within `timeout` seconds | the `default` row's id, or `null` without one | that row's label, or `null` |
+| `dismissed` | the viewer pressed EXIT | `null` | `null` |
+| `replaced` | a newer list was shown on that receiver - by this automation, another one, or another client | `null` | `null` |
+| `closed` | the receiver went to standby, or the plugin stopped (GUI restart, shutdown, update) | `null` | `null` |
+| `no_answer` | no answer came within `timeout` + 15 seconds | `null` | `null` |
+| `refused` | only with several receivers and a response: this receiver refused the list or could not be reached; the entry also has `error`, the sentence ([below](#show_list)) | `null` | `null` |
+
+**`no_answer` is Home Assistant's own.** The receiver never queues an answer while the broker is
+away - a late "open the gate" is worse than none - so a choice made then is lost, and so is a list
+the receiver never heard. The wait ends 15 seconds after the list's own timeout either way, and
+not earlier when the receiver drops off the broker: the list stays on the television, and a choice
+made once the receiver is back is still answered. Treat `no_answer` as "nobody can say".
+
+**Called without a response**, the action returns as soon as the list is published; the answer
+still fires the event and the device triggers below, with the label.
+
+**Several receivers at once.** A target that names more than one receiver - two media players, an
+area, a label - shows the list on each, and each answers for itself: the response has one entry per
+media player, and each answer is its own event and trigger. With a response, a receiver that
+refuses the list or cannot be reached does not take the others' answers down with it: its entry is
+`{"ending": "refused", "error": "<the sentence it would have raised>", "row": null, "label": null}`,
+in the installation's language. `refused` is never a receiver's ending, only Home Assistant's. A
+mistake in the fields is the same for every receiver and is raised, and so is any failure when the
+target is one receiver, or when no response was asked for - there is no entry to put it in then; the
+receivers that could show the list have been sent it.
+
+A list the receiver refuses - in standby, while an update holds it, or one it reads as invalid -
+raises an error with the receiver's sentence; so does unloading or reloading the entry while a list
+is waited for. A refusal is the list's only when `last_error` says the list's id, so another
+client's refusals never end the wait.
+
+```yaml
+# The doorbell asks on the television, and the answer opens the gate.
+alias: Doorbell - ask on the TV
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.doorbell
+    to: "on"
+actions:
+  - action: enigma2_mqtt.show_list
+    target:
+      entity_id: media_player.dekoder_salon
+    data:
+      title: Doorbell
+      text: Someone is at the gate.
+      timeout: 60
+      default: ignore
+      rows:
+        - id: open
+          label: Open the gate
+          key: green
+          icon: gate
+        - id: ignore
+          label: Ignore
+          key: red
+    response_variable: answer
+  - if:
+      - condition: template
+        value_template: >-
+          {{ answer['media_player.dekoder_salon'].ending == 'picked'
+             and answer['media_player.dekoder_salon'].row == 'open' }}
+    then:
+      - action: cover.open_cover
+        target:
+          entity_id: cover.gate
+```
+
+```yaml
+# At bedtime: switch the receiver off unless somebody asks for fifteen more minutes.
+alias: Bedtime - fifteen more minutes?
+triggers:
+  - trigger: time
+    at: "23:30:00"
+conditions:
+  - condition: not
+    conditions:
+      - condition: state
+        entity_id: media_player.dekoder_salon
+        state: "off"
+actions:
+  - action: enigma2_mqtt.show_list
+    target:
+      entity_id: media_player.dekoder_salon
+    data:
+      title: The TV goes off in 1 minute
+      timeout: 60
+      rows:
+        - id: later
+          label: +15 minutes
+          key: green
+        - id: cancel
+          label: Cancel
+          key: red
+    response_variable: answer
+  - variables:
+      ending: "{{ answer['media_player.dekoder_salon'].ending }}"
+      row: "{{ answer['media_player.dekoder_salon'].row }}"
+  - choose:
+      - conditions: "{{ ending == 'picked' and row == 'later' }}"
+        sequence:
+          - delay: "00:15:00"
+          - action: media_player.turn_off
+            target:
+              entity_id: media_player.dekoder_salon
+      # Nobody there to answer: switch off. EXIT, "Cancel", a newer list and standby leave it.
+      - conditions: "{{ ending in ['timeout', 'no_answer'] }}"
+        sequence:
+          - action: media_player.turn_off
+            target:
+              entity_id: media_player.dekoder_salon
+```
+
+**An answer is not proof of who pressed what.** Anybody who can publish on the broker can show a
+list and can publish an answer to any list, also one this Home Assistant sent - the list's id is
+on the broker for everybody subscribed to read. Home Assistant reads an answer strictly and drops
+anything that does not fit the list it sent, but a well-formed forgery is indistinguishable from a
+press on the remote. Do not let an answer alone unlock a door or disarm an alarm (SECURITY.md).
+
 ## 6. Device triggers
 
 The colour keys - red, green, yellow, blue - each as a short and a long press: eight triggers
@@ -2149,6 +2315,9 @@ on the receiver in the automation editor.
 |---|---|
 | `red_short` ... `blue_short` | a tap of that colour key |
 | `red_long` ... `blue_long` | that colour key held |
+| `list_picked` | a row of a list of choices was picked; with the optional **row id** field, only that row |
+| `list_timeout` | a list of choices timed out |
+| `list_dismissed` | a list of choices was dismissed with EXIT |
 
 They listen to the `enigma2_mqtt_key` bus event, which carries `device_id`, `node_id`, `key`
 and `press` and is fired for **every** key the box reports. The event is fired by the
@@ -2158,6 +2327,31 @@ editor should not have to keep an entity it never looks at.
 
 Any other key is still reachable: either through the event entity, or through a plain event
 trigger on `enigma2_mqtt_key` with the key name in its event data.
+
+The three list triggers listen to **`enigma2_mqtt_list_answer`**, which is fired for every answer
+that can be read ([`show_list`](#show_list)): `device_id`, `node_id`, `list_id` (the list's id, or
+`null` for a list sent without one), `ending`, `row` and `label` - the row's label when this Home
+Assistant sent the list, `null` otherwise. It is fired also for a list another automation, an
+earlier run or another client sent: the trigger is about the receiver, not about who asked. A list
+that ended `replaced` or `closed` has no trigger - nobody chose anything - and is on the event. An
+answer that does not fit the contract, a retained one and a second answer with the same id fire
+nothing and are logged once per cause - and so does an answer to a list this Home Assistant sent
+that names a row the list did not have, or a timeout that names another row than the default it
+was sent with.
+
+```yaml
+# A list sent without waiting - from a dashboard button, say - answered here.
+triggers:
+  - trigger: device
+    domain: enigma2_mqtt
+    device_id: 0123456789abcdef0123456789abcdef
+    type: list_picked
+    row: open
+actions:
+  - action: cover.open_cover
+    target:
+      entity_id: cover.gate
+```
 
 ## 7. Diagnostics
 
