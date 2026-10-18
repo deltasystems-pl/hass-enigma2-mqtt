@@ -182,6 +182,18 @@ get_epg_grid:
       selector:
         text:
 
+delete_recording:
+  target:
+    entity:
+      - integration: enigma2_mqtt
+        domain: media_player
+  fields:
+    id:
+      required: true
+      example: "3f9c2e4a1b7d5c60"
+      selector:
+        text:
+
 stop_stream:
   target:
     entity:

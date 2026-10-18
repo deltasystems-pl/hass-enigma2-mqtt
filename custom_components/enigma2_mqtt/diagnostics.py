@@ -35,6 +35,12 @@ what from which address describes a household, not a fault.
 
 `player_picture` is the chosen picture of the media player and the state of the picon
 lookup as counts and a cause - never the address asked, a channel or a picture.
+
+The recording library is summarised as its shape: when and why it was read, and per movie
+location whether it is mounted, its free space and its folders as counts, each by its slug -
+the address of its topic - and never a path or a recording's title, which describe what a
+household watches. `timeshift`
+is kept as normalised: three values.
 """
 
 from __future__ import annotations
@@ -194,6 +200,12 @@ async def async_get_config_entry_diagnostics(
             # normalised. No host is in it.
             "stream": state.stream,
             "stream_clients": _summarise_stream_clients(state.stream_clients),
+            "timeshift": state.timeshift,
+            "recordings": _summarise_recordings(state.recordings_index),
+            "recording_folders": {
+                slug: len(recordings)
+                for slug, recordings in sorted(state.recording_folders.items())
+            },
             "last_error": state.last_error,
             "screen": {
                 "bytes": len(state.screen) if state.screen else 0,
@@ -298,6 +310,32 @@ def _summarise_stream_clients(clients: dict[str, Any] | None) -> dict[str, Any] 
         "count": clients.get("count"),
         "rows": len(rows),
         "transcoded": sum(1 for row in rows if row.get("transcoded") is True),
+    }
+
+
+def _summarise_recordings(index: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Return the library index as its shape: no path, no folder name, no title."""
+    if index is None:
+        return None
+    return {
+        "read": index["read"],
+        "reason": index["reason"],
+        "locations": [
+            {
+                "mounted": location["mounted"],
+                "free_mb": location["free_mb"],
+                "folders": [
+                    {
+                        "slug": folder["slug"],
+                        "count": folder["count"],
+                        "size_mb": folder["size_mb"],
+                        "cut": folder["cut"],
+                    }
+                    for folder in location["folders"]
+                ],
+            }
+            for location in index["locations"]
+        ],
     }
 
 

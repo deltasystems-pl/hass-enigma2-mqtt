@@ -1,6 +1,7 @@
 {
   "title": "Enigma2 MQTT",
   "common": {
+    "media_recordings": "Nagrania",
     "menu_top_level": "Lista główna",
     "menu_empty": "Menu jest puste.",
     "menu_state_unavailable": "Niedostępne",
@@ -240,7 +241,7 @@
           "check_github_releases": "Włączone: podpisana lista wersji wtyczki jest pobierana także samoczynnie, najwyżej raz na 24 godziny, jedna dla wszystkich dekoderów; sprawdzenie pobiera tę listę i nic więcej. Wyłączone: lista jest pobierana tylko po naciśnięciu „Sprawdź aktualizacje wtyczki”.",
           "source_list_scope": "„Wszystkie oferowane bukiety” to kanały ze wszystkich bukietów na jednej liście, która może być bardzo długa. „Aktywny bukiet” pokazuje tylko listę, na której stoi sam dekoder, tak jak wybór „Kanał”; dekoder, który nie publikuje aktywnego bukietu, zostaje przy długiej liście.",
           "player_picture": "Zrzut ekranu pokazuje zrzut ekranu, a picon nowego kanału tylko od zmiany kanału do następnego zrzutu. Picon kanału pokazuje zawsze picon, a zrzut tylko dla kanału, który go nie ma. Picony pobiera Home Assistant z interfejsu WWW dekodera (OpenWebif).",
-          "history_hidden_bouquets": "Kanały tych bukietów nie pojawiają się w „Ostatnio oglądane”, a gdy cokolwiek jest tu wybrane, pomijany jest też kanał, którego bukietu nie da się sprawdzić. Ukrywa je tylko w tej jednej encji: pozostałe encje, ekran historii na samym dekoderze i broker nadal je pokazują, a „Ostatnio oglądane (wszystkie)”, gdy ta encja jest włączona, zapisuje odtwarzany kanał w historii Home Assistanta. Z wtyczką 0.5.0 te same bukiety są też pomijane w tym, co Home Assistant pokazuje o strumieniach: klient strumienia na takim kanale jest pokazywany bez kanału, a taki kanał nie dostaje adresu strumienia i nie jest oferowany jako źródło multimediów.",
+          "history_hidden_bouquets": "Kanały tych bukietów nie pojawiają się w „Ostatnio oglądane”, a gdy cokolwiek jest tu wybrane, pomijany jest też kanał, którego bukietu nie da się sprawdzić. Ukrywa je tylko w tej jednej encji: pozostałe encje, ekran historii na samym dekoderze i broker nadal je pokazują, a „Ostatnio oglądane (wszystkie)”, gdy ta encja jest włączona, zapisuje odtwarzany kanał w historii Home Assistanta. Z wtyczką 0.5.0 te same bukiety są też pomijane w tym, co Home Assistant pokazuje o strumieniach: klient strumienia na takim kanale jest pokazywany bez kanału, a taki kanał nie dostaje adresu strumienia i nie jest oferowany jako źródło multimediów. Ich nagrania są pomijane w nagraniach dekodera w przeglądarce multimediów i nie można ich stąd odtworzyć ani usunąć, a trwające nagranie jest pokazywane bez tytułu.",
           "configure_ssh": "Przycisk „Wymuś reinstalację wtyczki (SSH)” pojawia się, gdy zapiszesz dane SSH. Przycisk jest domyślnie wyłączony; włącz go na stronie urządzenia.",
           "keep_ssh_credentials": "Odznacz, aby zapomnieć zapisane dane SSH. Karta aktualizacji straci wtedy możliwość instalacji, a przycisk „Wymuś reinstalację wtyczki (SSH)” zostanie usunięty."
         }
@@ -333,6 +334,7 @@
       },
       "interlaced": {"name": "Obraz z przeplotem"},
       "volume_passthrough": {"name": "Passthrough dźwięku"},
+      "timeshift": {"name": "Timeshift"},
       "recording_disk": {
         "name": "Dysk nagrań"
       },
@@ -398,6 +400,7 @@
       "force_reinstall": {
         "name": "Wymuś reinstalację wtyczki (SSH)"
       },
+      "recordings_refresh": {"name": "Odśwież nagrania"},
       "clear_error": {
         "name": "Wyczyść ostatni błąd"
       }
@@ -446,6 +449,8 @@
       "active_recordings": {
         "name": "Aktywne nagrania"
       },
+      "recording_free_space": {"name": "Wolne miejsce na nagrania"},
+      "recording_library": {"name": "Nagrania w bibliotece"},
       "next_timer": {
         "name": "Następny timer"
       },
@@ -609,6 +614,16 @@
         "default": {
           "name": "Wiersz domyślny",
           "description": "Identyfikator wiersza, na którym zaczyna się zaznaczenie. Gdy czas minie, odpowiedź podaje ten wiersz."
+        }
+      }
+    },
+    "delete_recording": {
+      "name": "Usuń nagranie",
+      "description": "Przenosi jedno nagranie do kosza dekodera. Tylko na dekoderze, którego własne ustawienie na to pozwala: nic nie jest usuwane na zawsze, a przy wyłączonym koszu dekodera nic nie jest usuwane w ogóle.",
+      "fields": {
+        "id": {
+          "name": "ID nagrania",
+          "description": "ID nagrania: 16 cyfr szesnastkowych, tak jak podaje je biblioteka dekodera i trwające nagrania w „Aktywne nagrania”."
         }
       }
     },
@@ -909,6 +924,22 @@
     "list_default_unknown": {"message": "Wiersz domyślny musi być identyfikatorem jednego z wierszy listy."},
     "list_too_long": {"message": "Lista zajmuje {size} bajtów, a dekoder czyta najwyżej {limit}. Skróć etykiety lub tekst albo użyj mniej wierszy."},
     "list_not_utf8": {"message": "Lista zawiera znak, którego nie da się wysłać."},
+    "recording_id_invalid": {"message": "ID nagrania to 16 cyfr szesnastkowych."},
+    "recording_unknown": {"message": "Biblioteka dekodera nie zawiera nagrania o ID {id}. Mogło zostać usunięte albo jest jednym z najstarszych nagrań folderu zbyt dużego, by pokazać go w całości."},
+    "recording_play_unsupported": {"message": "Ten dekoder nie może odtworzyć nagrania z Home Assistanta: jego wtyczka jest starsza niż 0.5.0 albo jego obraz tego nie oferuje."},
+    "recording_receiver_offline": {"message": "Dekoder nie jest połączony z brokerem, więc nic nie zostało wysłane."},
+    "recording_other_receiver": {"message": "To nagranie należy do innego dekodera. Odtwórz je w odtwarzaczu tamtego dekodera."},
+    "recording_plays_on_receiver": {"message": "Nagranie odtwarza sam dekoder, na swoim telewizorze. Wybierz do tego odtwarzacz tego dekodera."},
+    "recording_delete_not_permitted": {"message": "Usuwanie nagrań z Home Assistanta jest wyłączone na dekoderze. Można je włączyć tylko w ustawieniach wtyczki na samym dekoderze."},
+    "recording_delete_trash_off": {"message": "Kosz dekodera jest wyłączony, więc nic nie zostaje usunięte: nagranie usunięte z Home Assistanta trafia zawsze tylko do kosza dekodera. Włącz kosz w ustawieniach dekodera."},
+    "recording_delete_unsupported": {"message": "Ten dekoder nie może usunąć nagrania z Home Assistanta: jego wtyczka jest starsza niż 0.5.0 albo jego obraz nie ma kosza."},
+    "delete_recording_in_use": {"message": "To nagranie jest właśnie nagrywane albo odtwarzane i nie można go teraz usunąć."},
+    "delete_recording_not_permitted": {"message": "Usuwanie nagrań z Home Assistanta jest wyłączone na dekoderze. Można je włączyć tylko w ustawieniach wtyczki na samym dekoderze."},
+    "delete_recording_trash_off": {"message": "Kosz dekodera jest wyłączony, więc nic nie zostaje usunięte: nagranie usunięte z Home Assistanta trafia zawsze tylko do kosza dekodera. Włącz kosz w ustawieniach dekodera."},
+    "delete_recording_not_in_library": {"message": "Biblioteka dekodera nie zawiera już tego nagrania."},
+    "delete_recording_file_gone": {"message": "Pliku tego nagrania nie ma już na dekoderze."},
+    "play_recording_not_in_library": {"message": "Biblioteka dekodera nie zawiera już tego nagrania."},
+    "play_recording_file_gone": {"message": "Pliku tego nagrania nie ma już na dekoderze."},
     "menu_transparency_step": {"message": "Dekoder nie przyjmie przezroczystości menu {value} %: przyjmuje od 0 do 80 % co 10."},
     "stream_source_unknown": {"message": "Tego dekodera, bukietu albo kanału nie ma wśród oferowanych tu do strumieniowania. Otwórz przeglądarkę mediów ponownie i wskaż coś, co jest na niej teraz."},
     "stream_player_browser": {"message": "Przeglądarka nie odtworzy strumienia transportowego dekodera. Wybierz odtwarzacz, który sam go dekoduje, na przykład Kodi, VLC albo odtwarzacz na Android TV."},

@@ -560,6 +560,44 @@ TOAST_MAX_TIMEOUT: Final = 30
 # What `cmd/record` accepts.
 RECORD_ACTIONS: Final = ("start", "stop")
 
+# The receiver's recordings, from a plugin after 0.4.0 (contract 1, additive; `recordings.py`
+# reads every payload of them, and ADR-0015 says why the library is shaped as it is). Each
+# capability is claimed by itself: the running recordings in detail on `recording`, the
+# timeshift state, the library index and one topic per folder, playing a recording on the
+# receiver, and moving one into the receiver's trash.
+TOPIC_TIMESHIFT: Final = "timeshift"
+TOPIC_RECORDINGS: Final = "recordings"
+# The key every folder's `recordings/<slug>` is counted under in `seen` and `updates`, one
+# for all of them, as `channels/+` is for the per-bouquet channel lists.
+TOPIC_RECORDING_FOLDERS: Final = "recordings/+"
+CAPABILITY_RECORDING_DETAILS: Final = "recording_details"
+CAPABILITY_TIMESHIFT: Final = "timeshift"
+CAPABILITY_RECORDINGS: Final = "recordings"
+CAPABILITY_RECORDING_PLAY: Final = "recording_play"
+CAPABILITY_RECORDING_DELETE: Final = "recording_delete"
+# The box-only permission behind `cmd/delete_recording`: set on the receiver, read-only in
+# `info.settings`, off unless somebody turned it on there.
+CONF_RECORDING_DELETE_ALLOWED: Final = "recording_delete_allowed"
+# Whether the receiver's own trash is switched on, as `info` reports it: a delete only ever
+# moves a recording into that trash, so with it off the receiver deletes nothing.
+INFO_RECORDING_TRASH: Final = "recording_trash"
+# The refusal codes of the two commands that this integration has a sentence for, each
+# translated as `<command>_<reason>`. Any other refusal is the receiver's own sentence.
+PLAY_RECORDING_REASONS: Final = ("not_in_library", "file_gone")
+DELETE_RECORDING_REASONS: Final = (
+    "not_permitted",
+    "trash_off",
+    "not_in_library",
+    "in_use",
+    "file_gone",
+)
+# Seconds a refresh, or a delete, waits for the library to be read again. The read is the
+# one thing that reads directories and metadata files, and a refresh may first have to spin
+# a sleeping disk up; ten seconds is a zap, not that.
+RECORDINGS_READ_TIMEOUT: Final = 60
+# The media player's `play_media` type for one recording; its id is the recording's id.
+MEDIA_TYPE_RECORDING: Final = "recording"
+
 # The plugin release this version of the integration is written against: the version
 # the update entity shows as the one to install when no bundle loads. With a bundle, the
 # bundle's own version decides.

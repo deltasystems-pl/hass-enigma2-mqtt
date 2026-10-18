@@ -57,6 +57,12 @@
         "state": {
           "off": "mdi:volume-high"
         }
+      },
+      "timeshift": {
+        "default": "mdi:timer-play-outline",
+        "state": {
+          "off": "mdi:timer-off-outline"
+        }
       }
     },
     "button": {
@@ -98,6 +104,9 @@
       },
       "clear_error": {
         "default": "mdi:notification-clear-all"
+      },
+      "recordings_refresh": {
+        "default": "mdi:folder-refresh-outline"
       }
     },
     "event": {
@@ -246,6 +255,12 @@
       },
       "stream_clients": {
         "default": "mdi:cast-connected"
+      },
+      "recording_free_space": {
+        "default": "mdi:harddisk"
+      },
+      "recording_library": {
+        "default": "mdi:filmstrip-box-multiple"
       }
     },
     "switch": {
@@ -318,6 +333,9 @@
     },
     "stop_stream": {
       "service": "mdi:stop-circle-outline"
+    },
+    "delete_recording": {
+      "service": "mdi:delete-outline"
     }
   }
 }

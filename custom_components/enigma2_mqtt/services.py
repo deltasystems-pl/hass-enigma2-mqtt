@@ -52,22 +52,28 @@ from .choice_list import (
     check_can_show,
 )
 from .const import (
+    CAPABILITY_RECORDING_PLAY,
     CAPABILITY_STREAM_STOP,
+    DELETE_RECORDING_REASONS,
     DOMAIN,
     HA_MODES,
     MESSAGE_STYLE_POPUP,
     MESSAGE_STYLE_TOAST,
     MESSAGE_STYLES,
     MESSAGE_TYPES,
+    PLAY_RECORDING_REASONS,
     RECORD_ACTIONS,
+    RECORDINGS_READ_TIMEOUT,
     STREAM_STOP_FAILURES,
     STREAM_STOP_REASONS,
     TOPIC_BOUQUET,
     TOPIC_EPG_GRID,
     TOPIC_SCREEN,
+    TOPIC_SERVICE,
     TOPIC_TIMERS,
 )
 from .notify import check_toast, message_payload
+from .recordings import active_recording_ids, parse_recording_id, plays
 
 SERVICE_ZAP = "zap"
 SERVICE_SELECT_BOUQUET = "select_bouquet"
@@ -80,6 +86,7 @@ SERVICE_SCREENSHOT = "screenshot"
 SERVICE_SET_HA_MODE = "set_ha_mode"
 SERVICE_GET_EPG_GRID = "get_epg_grid"
 SERVICE_STOP_STREAM = "stop_stream"
+SERVICE_DELETE_RECORDING = "delete_recording"
 SERVICE_SHOW_LIST = "show_list"
 
 ATTR_SREF = "sref"
@@ -97,6 +104,7 @@ ATTR_ACTION = "action"
 ATTR_MODE = "mode"
 ATTR_BOUQUET = "bouquet"
 ATTR_HOST = "host"
+ATTR_ID = "id"
 
 # Epoch seconds, or anything Home Assistant can read as a moment in time. An automation
 # built in the UI hands over a `datetime`; one written by hand is as likely to have the
@@ -140,6 +148,7 @@ STOP_STREAM_SCHEMA = {
     vol.Required(ATTR_HOST): cv.string,
     vol.Optional(ATTR_SREF): cv.string,
 }
+DELETE_RECORDING_SCHEMA = {vol.Required(ATTR_ID): cv.string}
 # Every field is taken as it comes and checked by `choice_list.build_list`, which says what
 # is wrong in the household's language and names the row; a schema error would say it in
 # English, without the row. Only a field the action does not have - a misspelt `titel` -
@@ -229,6 +238,75 @@ async def async_stop_stream(box: Enigma2Box, host: str, sref: str | None = None)
         json.dumps({"host": host, "sref": sref}),
         reasons=STREAM_STOP_REASONS,
         failures=STREAM_STOP_FAILURES,
+    )
+
+
+def _listed_recording(box: Enigma2Box, value: Any) -> tuple[str, Any]:
+    """Return a recording id the receiver's library lists now, and where it is listed.
+
+    Refused with a sentence for an id that cannot be one, and for one the library Home
+    Assistant holds does not list - a recording deleted since, one of a folder the
+    receiver cut to fit one packet, or one of another receiver. Nothing from here ever
+    names a file: the receiver is sent the id and finds the file in its own library.
+    """
+    rec_id = parse_recording_id(value)
+    if rec_id is None:
+        raise _invalid("recording_id_invalid")
+    if (found := box.find_recording(rec_id)) is None:
+        raise _invalid("recording_unknown", id=rec_id)
+    return rec_id, found
+
+
+async def async_play_recording(box: Enigma2Box, value: Any) -> None:
+    """Play one recording of the library on the receiver, as its movie list would.
+
+    The image's own movie player plays it, and the receiver's own rule decides whether it
+    resumes where it was left, asks, or starts over. From standby the receiver wakes first,
+    as for a zap. The proof is `service` naming the recording's file; a refusal is the
+    receiver's, and the two codes this integration knows are said in the household's
+    language.
+    """
+    if CAPABILITY_RECORDING_PLAY not in box.capabilities:
+        raise _invalid("recording_play_unsupported")
+    rec_id, (location, folder, recording) = _listed_recording(box, value)
+    if not box.available:
+        raise _invalid("recording_receiver_offline")
+    before = box.updates.get(TOPIC_SERVICE, 0)
+    await box.async_command(
+        "play_recording",
+        json.dumps({"id": rec_id}),
+        effect=lambda: (
+            box.updates.get(TOPIC_SERVICE, 0) > before
+            and plays(box.state.service, location, folder, recording)
+        ),
+        reasons=PLAY_RECORDING_REASONS,
+    )
+
+
+async def async_delete_recording(box: Enigma2Box, value: Any) -> None:
+    """Move one recording of the library into the receiver's trash, and see it gone.
+
+    Asked only of a receiver that claims `recording_delete`, which it does only while its
+    own permission is on and its trash is there; otherwise refused here, with the reason
+    its `info` gives. Nothing is ever deleted for good: the receiver moves the recording,
+    and its companion files, into the image's trash. A recording that is being recorded is
+    refused here too, as the receiver would refuse it; one that is being played is refused
+    by the receiver. The proof is the library, read again by the receiver, no longer
+    listing the id.
+    """
+    if (refusal := box.recording_delete_refusal()) is not None:
+        raise _invalid(refusal)
+    rec_id, _found = _listed_recording(box, value)
+    if not box.available:
+        raise _invalid("recording_receiver_offline")
+    if rec_id in active_recording_ids(box.state.recording):
+        raise _invalid("delete_recording_in_use")
+    await box.async_command(
+        "delete_recording",
+        json.dumps({"id": rec_id}),
+        effect=lambda: box.find_recording(rec_id) is None,
+        timeout=RECORDINGS_READ_TIMEOUT,
+        reasons=DELETE_RECORDING_REASONS,
     )
 
 
@@ -398,6 +476,10 @@ class Enigma2Actions:
         """End one stream the receiver is serving to another device."""
         await async_stop_stream(self.box, host, sref)
 
+    async def async_delete_recording(self, id: str) -> None:  # noqa: A002
+        """Move one recording into the receiver's trash, by its id."""
+        await async_delete_recording(self.box, id)
+
     async def async_get_epg_grid(self, bouquet: str | None = None) -> ServiceResponse:
         """Return what is on, per bouquet, from the retained grid topics.
 
@@ -526,6 +608,9 @@ def async_setup_services() -> None:
     )
     platform.async_register_entity_service(
         SERVICE_STOP_STREAM, STOP_STREAM_SCHEMA, "async_stop_stream"
+    )
+    platform.async_register_entity_service(
+        SERVICE_DELETE_RECORDING, DELETE_RECORDING_SCHEMA, "async_delete_recording"
     )
     platform.async_register_entity_service(
         SERVICE_GET_EPG_GRID,
