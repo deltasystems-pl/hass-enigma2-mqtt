@@ -33,7 +33,11 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_mqtt_message,
 )
 
-from custom_components.enigma2_mqtt import button as button_module, recordings
+from custom_components.enigma2_mqtt import (
+    button as button_module,
+    recordings,
+    services as services_module,
+)
 from custom_components.enigma2_mqtt.box import Enigma2CommandError
 from custom_components.enigma2_mqtt.const import DOMAIN
 from custom_components.enigma2_mqtt.diagnostics import async_get_config_entry_diagnostics
@@ -274,6 +278,8 @@ def test_the_index_keeps_what_the_contract_names() -> None:
             "locations": [
                 "not a location",
                 {"mounted": True},
+                {"path": "", "mounted": True},
+                {"path": 5, "mounted": True},
                 {
                     "path": LOCATION,
                     "mounted": "yes",
@@ -642,6 +648,28 @@ async def test_refresh_asks_and_waits_for_a_new_read(
     assert hass.states.get(LIBRARY).attributes["reason"] == "refresh"
 
 
+async def test_a_refresh_that_finds_the_same_library_still_answers(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A receiver that publishes the index it already had is still answering the press."""
+    monkeypatch.setattr(button_module, "RECORDINGS_READ_TIMEOUT", 1)
+    library(box_on_the_broker)
+    await _setup(hass, config_entry, box_on_the_broker)
+
+    await _arm(
+        hass,
+        "recordings_refresh",
+        lambda _id, _payload: async_fire_mqtt_message(hass, INDEX_TOPIC, json.dumps(INDEX)),
+    )
+    await hass.services.async_call(
+        "button", "press", {ATTR_ENTITY_ID: REFRESH}, blocking=True
+    )
+
+
 async def test_a_replayed_index_is_not_the_answer_to_a_refresh(
     hass: HomeAssistant,
     mqtt_mock,
@@ -761,6 +789,10 @@ async def test_a_folder_the_index_does_not_name_is_not_browsed(
 
     with pytest.raises(BrowseError):
         await media_source.async_browse_media(hass, f"{RECEIVER}/f/stale")
+    # Its topic is kept - the index may name it next - and read for nothing until then.
+    box = config_entry.runtime_data
+    assert box.state.recording_folders["stale"]
+    assert box.recordings_in("stale") == []
 
     # A folder whose topic was retracted lists nothing until it is published again.
     async_fire_mqtt_message(hass, folder_topic("movie"), "")
@@ -784,6 +816,21 @@ async def test_without_play_the_recordings_are_shown_and_not_playable(
     with pytest.raises(ServiceValidationError) as raised:
         await _play(hass, "recording", NEWS["id"])
     assert raised.value.translation_key == "recording_play_unsupported"
+
+
+async def test_a_receiver_without_the_library_is_not_browsed_by_its_id(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    box_on_the_broker[INDEX_TOPIC] = json.dumps(INDEX)
+    await _setup(hass, config_entry, box_on_the_broker)
+
+    root = await _player(hass).async_browse_media()
+    assert [child.title for child in root.children] == ["Ulubione TV", "Sport"]
+    with pytest.raises(BrowseError):
+        await _player(hass).async_browse_media(media_content_id=f"{RECEIVER}/r")
 
 
 async def test_another_receivers_browse_ids_are_not_this_players(
@@ -844,6 +891,25 @@ async def test_play_by_the_bare_id_from_an_automation(
     sent = await _arm(hass, "play_recording", _plays(hass, f"{LOCATION}/{NEWS['file']}"))
     await _play(hass, "recording", NEWS["id"].upper())
     assert [json.loads(payload) for _id, payload in sent] == [{"id": NEWS["id"]}]
+
+
+async def test_a_recording_already_playing_is_played_again_and_proved_at_once(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    library(box_on_the_broker)
+    box_on_the_broker[SERVICE_TOPIC] = json.dumps(
+        {**SERVICE, "sref": f"1:0:0:0:0:0:0:0:0:0:{LOCATION}/{NEWS['file']}"}
+    )
+    await _setup(hass, config_entry, box_on_the_broker)
+
+    await _play(hass, "recording", NEWS["id"])
+    assert [
+        json.loads(opened_command(payload)[1])
+        for payload in published_payloads(mqtt_mock, command_topic("play_recording"))
+    ] == [{"id": NEWS["id"]}]
 
 
 async def test_play_that_never_shows_on_the_service_times_out(
@@ -1008,6 +1074,26 @@ async def test_delete_sends_the_id_and_waits_for_the_library_without_it(
     await _delete(hass, NEWS["id"])
     assert [json.loads(payload) for _id, payload in sent] == [{"id": NEWS["id"]}]
     assert hass.states.get(LIBRARY).state == "3"
+
+
+async def test_a_delete_the_library_never_shows_times_out(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Silence is not a delete: the library has to be read again without the recording."""
+    monkeypatch.setattr(services_module, "RECORDINGS_READ_TIMEOUT", 0.1)
+    deletable(box_on_the_broker)
+    await _setup(hass, config_entry, box_on_the_broker)
+
+    sent = await _arm(hass, "delete_recording", lambda _id, _payload: None)
+    with pytest.raises(Enigma2CommandError) as raised:
+        await _delete(hass, NEWS["id"].upper())
+    assert raised.value.translation_key == "command_timeout"
+    # Sent as the receiver writes it, whatever was typed.
+    assert [json.loads(payload) for _id, payload in sent] == [{"id": NEWS["id"]}]
 
 
 async def test_a_recording_being_recorded_is_not_deleted(

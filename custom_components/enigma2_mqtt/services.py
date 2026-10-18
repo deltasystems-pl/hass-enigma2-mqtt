@@ -69,7 +69,6 @@ from .const import (
     TOPIC_BOUQUET,
     TOPIC_EPG_GRID,
     TOPIC_SCREEN,
-    TOPIC_SERVICE,
     TOPIC_TIMERS,
 )
 from .notify import check_toast, message_payload
@@ -262,23 +261,20 @@ async def async_play_recording(box: Enigma2Box, value: Any) -> None:
 
     The image's own movie player plays it, and the receiver's own rule decides whether it
     resumes where it was left, asks, or starts over. From standby the receiver wakes first,
-    as for a zap. The proof is `service` naming the recording's file; a refusal is the
-    receiver's, and the two codes this integration knows are said in the household's
-    language.
+    as for a zap. The proof is `service` naming the recording's file - as for a zap, a
+    recording that is already playing is proved at once, and the command still goes out. A
+    refusal is the receiver's, and the two codes this integration knows are said in the
+    household's language.
     """
     if CAPABILITY_RECORDING_PLAY not in box.capabilities:
         raise _invalid("recording_play_unsupported")
     rec_id, (location, folder, recording) = _listed_recording(box, value)
     if not box.available:
         raise _invalid("recording_receiver_offline")
-    before = box.updates.get(TOPIC_SERVICE, 0)
     await box.async_command(
         "play_recording",
         json.dumps({"id": rec_id}),
-        effect=lambda: (
-            box.updates.get(TOPIC_SERVICE, 0) > before
-            and plays(box.state.service, location, folder, recording)
-        ),
+        effect=lambda: plays(box.state.service, location, folder, recording),
         reasons=PLAY_RECORDING_REASONS,
     )
 
