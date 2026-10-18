@@ -1792,3 +1792,41 @@ async def test_twenty_four_polish_rows_fit_because_the_envelope_is_utf8(
     escaped = json.dumps({"id": list_id, "payload": request.payload()}, separators=(",", ":"))
     assert len(escaped) > COMMAND_MAX_BYTES
     assert [row["label"] for row in payload["rows"]] == [polish] * 24
+
+
+async def test_a_live_refusal_during_a_silent_self_update_ends_the_wait(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """During a silent self-update the plugin refuses a list with `busy`, non-retained, on
+    `last_error` - after the list has gone out, not inside its publish. That is the list's
+    answer: a refusal the caller can wait out."""
+    box = await _box(hass, config_entry, box_on_the_broker)
+    receiver = await Receiver(hass).arm()
+    task = _show(hass)
+    list_id = await _heard(receiver)
+    await _settle()
+    assert not task.done()
+
+    async_fire_mqtt_message(
+        hass,
+        LAST_ERROR_TOPIC,
+        json.dumps(
+            {
+                "id": list_id,
+                "cmd": "list",
+                "error": "an update holds the receiver",
+                "reason": "busy",
+                "ts": 1792050000,
+            }
+        ),
+        retain=False,
+    )
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await task
+    assert raised.value.translation_key == "list_refused"
+    assert raised.value.translation_placeholders == {"reason": "an update holds the receiver"}
+    assert box.lists is not None and box.lists.waiting == 0
