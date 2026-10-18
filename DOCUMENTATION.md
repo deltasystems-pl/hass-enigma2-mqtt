@@ -346,7 +346,7 @@ appears.
 | **Bouquets to offer** | every bouquet the box publishes | Which bouquets feed the media player's channel list and the media browser. The choices are the bouquets on the `channels` topic, and a name can be typed for one the box has not published yet. This narrows the plugin's own `bouquets_for_select`; it cannot widen it. |
 | **Channels in the media player's source list** | every bouquet on offer | What `media_player.source_list` holds, and nothing else. **Every bouquet on offer** is what this integration has always done and stays the default, so an existing installation does not change under an automation that names a channel; on a receiver with about a thousand channels it is a dropdown of about a thousand rows. **The active bouquet** is the short list the receiver's own channel ± is walking, which is also what the „Kanał" select shows. `select_source` follows this setting; the `zap` action takes a service reference and does not. Three cases keep the long list whatever is chosen, because there is nothing to shorten it to and an empty source list would leave no way to change channel: a receiver that publishes no channel-list context (an older plugin without `bouquet_context`), a context naming a bouquet the **Bouquets to offer** option excludes, and a context naming a bouquet with no playable channel in it. The last two are logged as a warning, once per bouquet. 🔴 This setting is **not** about the recorder: Home Assistant declares `source_list` an unrecorded attribute and the recorder removes it before it measures a state against its size limit, so the long list never reached the database in the first place. |
 | **Picture on the media player card** | screenshot | Which picture the media player shows. **Screenshot** shows the screenshot of the television the plugin publishes, as before, and the picon of the new channel only between a channel change and the next screenshot: the last screenshot still shows the previous channel then. With screenshots off on the receiver no next one arrives, and the picon stays. **Channel picon** always shows the picon of the current channel, and the screenshot only for a channel that has none. Home Assistant fetches picons from the receiver's web interface (OpenWebif, plain HTTP on port 80) and serves them itself; [§4.1](#41-media-player) says which address it asks, how, and what happens when that fails. The „Ekran" image entity is the screenshot in both settings. |
-| **Bouquets hidden from "Recently watched"** („Bukiety ukryte w „Ostatnio oglądane"") | none | Which bouquets' channels [„Ostatnio oglądane"](#46-selects) leaves out - and that one entity only: „Ostatnio oglądane (wszystkie)", „Kanał", „Bukiet" and the media player are untouched. The choices are the bouquets on the `channels` topic, and a name can be typed. With it empty every entry shows. With a bouquet chosen, an entry shows only when its bouquet is a published bouquet that is not hidden **and** its channel is not a member of any hidden bouquet, so a channel of a hidden bouquet reached through another one stays hidden. While anything is chosen, an entry that cannot be checked - no bouquet path, a radio bouquet, a bouquet the plugin does not publish - is hidden too. And while a hidden bouquet is listed without its channels - plugin 0.5.0 could not publish that bouquet's own topic, or it has not arrived - every entry is hidden, because which channels to hide is what is missing. A hidden name that is no longer on the `channels` topic is logged once. 🔴 **This is a filter in Home Assistant, not privacy on the network**: the receiver publishes every entry of its history on `zap_history` and every channel of every bouquet on `channels`, retained, to any broker login; its own History Zap screen, the plugin's OpenWebif page and „Ostatnio oglądane (wszystkie)" show everything. See [§4.6](#46-selects) for what the recorder keeps. **With plugin 0.5.0 the same bouquets are also kept out of what Home Assistant shows about streams** ([§4.7](#47-streams)): a stream client on such a channel is listed without the channel, such a channel gets no stream address and no stream name, it is not offered as a media source, and your go2rtc is not pointed at it. The option's name still says only "Recently watched". |
+| **Bouquets hidden from "Recently watched"** („Bukiety ukryte w „Ostatnio oglądane"") | none | Which bouquets' channels [„Ostatnio oglądane"](#46-selects) leaves out - and that one entity only: „Ostatnio oglądane (wszystkie)", „Kanał", „Bukiet" and the media player are untouched. The choices are the bouquets on the `channels` topic, and a name can be typed. With it empty every entry shows. With a bouquet chosen, an entry shows only when its bouquet is a published bouquet that is not hidden **and** its channel is not a member of any hidden bouquet, so a channel of a hidden bouquet reached through another one stays hidden. While anything is chosen, an entry that cannot be checked - no bouquet path, a radio bouquet, a bouquet the plugin does not publish - is hidden too. And while a hidden bouquet is listed without its channels - plugin 0.5.0 could not publish that bouquet's own topic, or it has not arrived - every entry is hidden, because which channels to hide is what is missing. A hidden name that is no longer on the `channels` topic is logged once. 🔴 **This is a filter in Home Assistant, not privacy on the network**: the receiver publishes every entry of its history on `zap_history` and every channel of every bouquet on `channels`, retained, to any broker login; its own History Zap screen, the plugin's OpenWebif page and „Ostatnio oglądane (wszystkie)" show everything. See [§4.6](#46-selects) for what the recorder keeps. **With plugin 0.5.0 the same bouquets are also kept out of what Home Assistant shows about streams** ([§4.7](#47-streams)): a stream client on such a channel is listed without the channel, such a channel gets no stream address and no stream name, it is not offered as a media source, and your go2rtc is not pointed at it. And a recording of such a channel is not in the media browser or the library's count and cannot be played or deleted from here, while a running one is shown without its title ([§4.8](#48-recordings)). The option's name still says only "Recently watched". |
 | **Check daily for available plugin versions** | off | Off means this integration asks nothing on its own. The plugin's **signed release index** - `releases.json` and its signature from the plugin's fixed HTTPS origin, `https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/` - is fetched only when somebody presses **Check for plugin updates** (*Sprawdź aktualizacje wtyczki*), or uses Home Assistant's own "Check for updates" while this option is on. On, it is also fetched **at most once every 24 hours**, one index for every receiver. It is fetched with a verified TLS context and no redirects, at most 64 KiB, and it is accepted only when its Ed25519 signature verifies with a key built into this integration and its serial rises by the rule in [ADR-0008](docs/adr/0008-signed-plugin-index.md) - the same rule the receiver applies. Manual checks share a ten-minute limit. The index, its signature, the stamps and the record of accepted serials are kept in `.storage/enigma2_mqtt.release_index`, so a reload or a restart asks nothing again; the old `.storage/enigma2_mqtt.release_check` is removed. **Every newly accepted index is announced**: a warning in the log and a persistent notification with its serial, its key, the versions it adds and withdraws, and its floor - the index is signed in the plugin repository's CI, so an index nobody expected must be visible. It is then published, retained, on `enigma2mqtt/release_index`, where every receiver on plugin 0.4.0 or later verifies it again - the way a receiver with no internet of its own learns of releases - and put back, verified first, when the first receiver is set up and at every reconnect to the broker, if the broker lost it. What the broker retains there is read first: an index of a higher-ranked key, or a newer one of the same key - such as an index signed with the plugin's spare key in an emergency - is never overwritten, and when the rule accepts it, Home Assistant takes it and announces it like any new index. An index and a signature that do not match are read once more before they are judged, because a publication can land between the two requests; a pair that still does not verify is reported as "could not be verified", and the log keeps a warning. Nothing else is downloaded on a check; a release package is downloaded only when somebody installs it (see [Buttons and update](#45-buttons-and-update)). |
 
 When a recent plugin advertises its configurable publishers, the same form also controls key
@@ -848,7 +848,9 @@ while the box is unreachable, because that is precisely when somebody wants to w
 | `channel` | *Kanał* | `<node_id>_channel` | `service` | attributes `sref`, `bouquet`, `provider`, `width`, `height` |
 | `program` | *Program* | `<node_id>_program` | `epg` | `epg.now.title`; attributes `begin`, `end` (ISO 8601), `event_id`, `short`, `long` |
 | `next_program` | *Następny program* | `<node_id>_next_program` | `epg` | the same, for `epg.next` |
-| `active_recordings` | *Aktywne nagrania* | `<node_id>_active_recordings` | `recording` | the count; attribute `recordings` is the list |
+| `active_recordings` | *Aktywne nagrania* | `<node_id>_active_recordings` | `recording` | the count; attribute `recordings` is the list (**not recorded**), each entry with `hidden`, and its details from plugin 0.5.0 on ([§4.8](#48-recordings)) |
+| `recording_free_space` | *Wolne miejsce na nagrania* | `<node_id>_recording_free_space` | `recordings` | the free space of the first movie location the receiver lists · MiB, shown in GiB · attribute `locations` (**not recorded**) · only while the receiver names the `recordings` capability |
+| `recording_library` | *Nagrania w bibliotece* | `<node_id>_recording_library` | `recordings`, `recordings/<folder_slug>` | how many recordings the library shows · diagnostic · attributes `left_out`, `folder_count`, `location_count`, `read`, `reason` · `recordings` |
 | `next_timer` | *Następny timer* | `<node_id>_next_timer` | `recording` | a timestamp, `unknown` when nothing is due |
 | `snr` | *SNR* | `<node_id>_snr` | `tuner` | % · diagnostic · **disabled by default** |
 | `agc` | *AGC* | `<node_id>_agc` | `tuner` | % · diagnostic · **disabled by default** |
@@ -1042,6 +1044,7 @@ quarter of an hour, and a database is not where a plot summary belongs.
 |---|---|---|---|---|
 | `recording` | *Nagrywanie* | `<node_id>_recording` | `recording` | device class `running` - what to check before rebooting anything |
 | `recording_disk` | *Dysk nagrań* | `<node_id>_recording_disk` | `hdd` | device class `connectivity`; attributes `path`, `free_mb` |
+| `timeshift` | *Timeshift* | `<node_id>_timeshift` | `timeshift` | on while a timeshift buffer runs · attributes `paused`, `behind`, `since` · only while the receiver names the `timeshift` capability |
 | `power` | *Zasilanie* | `<node_id>_power` | `power` | <-> `cmd/power on\|standby` |
 | `mute` | *Wyciszenie* | `<node_id>_mute` | `volume` | <-> `cmd/mute ON\|OFF` |
 | `volume` | *Głośność* | `<node_id>_volume` | `volume` | 0-100, the box's own scale <-> `cmd/volume` · attribute `volume_passthrough` while the receiver names the `volume_passthrough` capability |
@@ -1103,6 +1106,7 @@ does not. A receiver that stops reporting them keeps the entities, unavailable.
 | `softcam_restart` | *Restart softcam* | `<node_id>_softcam_restart` | `cmd/softcam_restart` · **both gates below** | silence |
 | `epg_import` | *Pobierz EPG* | `<node_id>_epg_import` | `cmd/epg_import` · **both gates below** | a new `epg_import` payload in `running` |
 | `history_clear` | *Wyczyść ostatnio oglądane* | `<node_id>_history_clear` | `cmd/history_clear` · only while the receiver names the `history_clear` capability; unavailable while `zap_history` says `panic_button: false` | a **new** `zap_history` payload with at most one entry |
+| `recordings_refresh` | *Odśwież nagrania* · configuration | `<node_id>_recordings_refresh` | `cmd/recordings_refresh` · only while the receiver names the `recordings` capability ([§4.8](#48-recordings)) | a **new** `recordings` index, within sixty seconds |
 | `clear_error` | *Wyczyść ostatni błąd* · diagnostic | `<node_id>_clear_error` | `cmd/clear_error` · only for a receiver whose `info.plugin` is 0.5.0 or later (below) | a **new**, empty `last_error` payload |
 | `check_plugin_update` | *Sprawdź aktualizacje wtyczki* · diagnostic | `<node_id>_check_plugin_update` | no MQTT: fetches the plugin's signed release index, at most once in ten minutes, and available while the box is not | the update card's `index_serial`, `last_check` and `check_error` |
 | `force_reinstall` | *Wymuś reinstalację wtyczki (SSH)* · diagnostic, disabled by default, only while SSH credentials are stored | `<node_id>_force_reinstall` | no MQTT: the SSH installer's forced mode, after two presses by an administrator (below) | a new interface process holding the plugin's log open, and the announcement when the plugin is switched on |
@@ -1998,6 +2002,122 @@ channel it was sent: this integration does not delete it. Delete it there if you
 want it - in go2rtc's web interface, or with
 `DELETE <go2rtc address>/api/streams?src=<stream name>` on its API.
 
+### 4.8 Recordings
+
+Plugin 0.5.0 publishes the receiver's recordings: each running recording in detail, the
+timeshift state, and the **whole recording library** - every configured movie location with
+its subfolders, the image's trash left out. A recording can be **played on the receiver**
+from Home Assistant's media browser and **moved into the receiver's trash** with an action,
+behind a permission that only the receiver can give. The reasons for the shape are in
+[ADR-0015](docs/adr/0015-recordings-are-browsed-here-played-there-and-hidden-here.md).
+Everything here exists only for a receiver whose `info` names the capability beside it.
+
+**The receiver publishes the whole library to the broker**, as it publishes every channel and
+the zap history: every title, channel and file name, of every bouquet. **Hiding is done here**,
+by the option *Bouquets hidden from "Recently watched"* - the rule the zap history, the stream
+clients and the media source follow ([§4.7](#47-streams)). A recording of a channel of a hidden
+bouquet is not in the media browser, not in a count this integration makes, and cannot be
+played or deleted from here; a running one is shown without its title, channel and file. With
+the option set, **a recording the receiver could not place in any published bouquet is hidden
+too**, because whether it belongs to a hidden one cannot be told. Anybody who can read the
+broker sees all of it.
+
+**The library is read at the plugin's start and then only when something changes it** - a
+recording starts or ends, a recording is deleted, a movie location is mounted or unmounted -
+**and never on a timer**: a timer that lists directories keeps a disk from ever going to sleep.
+A recording copied onto the disk some other way, or deleted in the receiver's own movie list or
+its web interface, shows after the next such event, or after a press of „Odśwież nagrania"
+(*Refresh recordings*) - the one thing that may spin a sleeping disk up.
+
+#### What the entities say
+
+- **„Aktywne nagrania"** keeps its count and its attribute `recordings`. From plugin 0.5.0 on,
+  with the `recording_details` capability, each entry also has `bouquet`, `service_name`,
+  `description` (cut at 200 characters), `location` (the movie location it records into),
+  `file` (relative to that location), `id` (the id the recording will have in the library)
+  and `instant` (`true` for one started with `record` or the remote's record key, `false` for
+  a timer). Every entry has `hidden`: `true` for a recording of a channel the option hides,
+  which keeps only its times and `instant`. **The count includes it**: a recording that holds a
+  tuner is still running, and „Nagrywanie" and every guard on the receiver count it too.
+- **„Timeshift"** is on while the receiver keeps a timeshift buffer. `paused` says whether it is
+  paused, `behind` whether the picture comes from the buffer rather than live, and `since` when
+  the buffer started (ISO 8601). With no buffer all three are `null`.
+- **„Wolne miejsce na nagrania"** is the free space of the first movie location the receiver
+  lists, in MiB and shown in GiB; the attribute `locations` has every location's `path`,
+  `mounted` and `free_mb`. It moves when the library is read, not continuously - the free space
+  of the recording disk on a timer is still „Dysk nagrań"'s `free_mb`.
+- **„Nagrania w bibliotece"** (diagnostic) counts the recordings the library shows - hidden
+  ones left out. `left_out` is how many the receiver itself left out of folders too large for
+  one MQTT packet (the oldest of each such folder, and of every bouquet: nothing here can judge
+  a recording it was not sent); `read` and `reason` say when and why the library was last read
+  (`start`, `recording`, `delete`, `mount` or `refresh`).
+
+#### The media browser
+
+The receiver's own media player shows **„Nagrania"** (*Recordings*) beside its bouquets: the
+movie locations, each location's folders, and a folder's recordings, newest first, each as
+`Title - Channel - 2026-10-17 20:15 (60 min)` in Home Assistant's time zone. With one movie
+location its folders are listed straight away. A folder the receiver had to cut says how many
+of its oldest recordings are not shown.
+
+**Playing a recording plays it on the receiver**, on its television, in the image's own movie
+player and by its own rule about where to start - it resumes, asks or starts over as the
+receiver is set to. From standby the receiver wakes first, as for a channel. Nothing is
+streamed to Home Assistant or to another player, and **the recordings are offered by the
+receiver's media player only**: the media source does not list them for any other player, and
+asked to resolve one for another player it refuses with a sentence.
+
+From an automation, `media_player.play_media` on the receiver takes the type `recording` and the
+recording's id:
+
+```yaml
+action: media_player.play_media
+target:
+  entity_id: media_player.dekoder_salon
+data:
+  media_content_type: recording
+  media_content_id: 3f9c2e4a1b7d5c60
+```
+
+The id is the first sixteen hexadecimal digits of the sha256 of the recording's path on the
+receiver - a recording keeps it for as long as it is not moved or renamed. **Nothing Home
+Assistant sends names a file**: the receiver is sent the id, and acts only on a recording its
+own library lists. The play is proved by `service` naming the recording, within ten seconds.
+Refused with a sentence before anything is sent: an id that is not sixteen hexadecimal digits,
+one the library does not show (deleted, hidden, or among the oldest of a folder that was cut),
+a receiver that does not name `recording_play`, and a receiver that is offline. The receiver
+refuses a recording whose file has gone and one its library no longer lists, during an update
+of the plugin, and in any other case it has a sentence for.
+
+#### Deleting a recording
+
+`enigma2_mqtt.delete_recording` with the recording's `id` **moves it, and its companion
+files, into the receiver's trash** - as the receiver's own movie list does - and nothing else:
+**nothing is ever deleted for good from Home Assistant**, and with the receiver's trash
+switched off nothing is deleted at all.
+
+```yaml
+action: enigma2_mqtt.delete_recording
+target:
+  entity_id: media_player.dekoder_salon
+data:
+  id: 3f9c2e4a1b7d5c60
+```
+
+**The permission is the receiver's alone.** *Allow deleting recordings*
+(`recording_delete_allowed`) is off unless somebody turns it on on the receiver - on its
+setup screen or its web interface; it cannot be written over MQTT. The receiver names the
+`recording_delete` capability only while it is on **and** the image's trash is switched on
+(`info.recording_trash`). Without the capability the action is refused before anything is
+sent, and says why: the permission is off, the trash is off, or the plugin or the image cannot
+do it. Also refused here: an id the library does not show (hidden ones included) and one that
+is being recorded right now. The receiver refuses one that is being played. The delete is
+proved by the library, read again by the receiver, no longer listing the id, within sixty
+seconds.
+
+The trash is the image's: it empties it by its own rules, and a recording can be taken back
+out of it there, in the receiver's movie list.
+
 ## 5. Actions
 
 Every action targets the receiver's **media player**, which is how a device, an area or an
@@ -2017,6 +2137,7 @@ the platform an action was registered on, and one box has exactly one media play
 | `enigma2_mqtt.get_epg_grid` | `bouquet` (optional) · **returns a response** |
 | `enigma2_mqtt.stop_stream` | `host`, `sref` (optional) · on every receiver; refused before anything is sent unless it names the `stream_stop` capability ([§4.7](#47-streams)) |
 | `enigma2_mqtt.show_list` | `title`, `text`, `rows`, `timeout` (5-600, default 60), `default`; **can return a response**: how the list ended ([below](#show_list)); refused before anything is sent unless the receiver names the `list` capability |
+| `enigma2_mqtt.delete_recording` | `id` · on every receiver; refused before anything is sent unless it names the `recording_delete` capability ([§4.8](#48-recordings)) |
 
 `begin` and `end` take a date and time or the epoch seconds the topics use; both end up as
 epoch seconds on the wire.
@@ -2678,6 +2799,13 @@ reference of the channel that is on - as `media_content_id` already does. The on
 this section that leaves Home Assistant is the request to **your own go2rtc**, and only
 while you set its address: it carries the stream name and the source, which contains that
 same address and reference.
+
+The recording library is the same kind of record once more: every title, channel and file
+name the receiver has recorded, of every bouquet. The receiver publishes it whole, retained,
+on the broker; the option that hides bouquets takes those recordings out of what Home
+Assistant shows, counts and plays, and hides nothing on the network ([§4.8](#48-recordings)).
+The list of running recordings on „Aktywne nagrania" and the movie locations on „Wolne
+miejsce na nagrania" are not recorded.
 
 The [receiver menu](#receiver-menu) publishes the names and states of the entities you put
 into it, retained, on the broker, for any login to read; an `input_text` or `text` in password

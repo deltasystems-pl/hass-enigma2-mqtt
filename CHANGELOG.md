@@ -14,6 +14,24 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
 
 ### Added
 
+- **Recordings** (plugin 0.5.0; DOCUMENTATION.md §4.8 and
+  [ADR-0015](docs/adr/0015-recordings-are-browsed-here-played-there-and-hidden-here.md)).
+  „Aktywne nagrania" carries each running recording's channel, bouquet, short description,
+  movie location, file, library id and whether it was started by hand (`recording_details`),
+  in its unrecorded `recordings` attribute, with `hidden` on every entry. New, each only for a
+  receiver that claims the capability: „Timeshift" (`timeshift`; attributes `paused`, `behind`,
+  `since`), „Wolne miejsce na nagrania" (the first movie location's free space, every location
+  in an unrecorded attribute) and the diagnostic „Nagrania w bibliotece" (`recordings`), and
+  the configuration button „Odśwież nagrania", which asks the receiver to read its library now -
+  it reads it at its start and on events, never on a timer. The receiver's media player shows
+  „Nagrania" beside its bouquets: movie locations, folders and recordings, played **on the
+  receiver** with `cmd/play_recording` by the recording's id (`recording_play`), also as
+  `media_player.play_media` with the type `recording`; no other player is offered them. The
+  action `enigma2_mqtt.delete_recording` moves one recording into the receiver's trash, only
+  while the receiver claims `recording_delete` - its own permission on and its trash on - and
+  says which is missing otherwise. The receiver lists every recording; the hidden-bouquets
+  option keeps a hidden bouquet's recordings out of the browser and the count, refuses to play
+  or delete them, and shows a running one without its title.
 - **The receiver menu** (plugin 0.5.0, for a receiver that claims `menu`; DOCUMENTATION.md
   "Receiver menu" and [ADR-0012](docs/adr/0012-receiver-menu.md)). The options gain *Receiver
   menu* („Menu na dekoderze"): up to 8 groups and 24 entries per list of controls bound to
