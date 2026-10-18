@@ -336,6 +336,9 @@
     },
     "delete_recording": {
       "service": "mdi:delete-outline"
+    },
+    "get_recordings": {
+      "service": "mdi:filmstrip-box-multiple"
     }
   }
 }

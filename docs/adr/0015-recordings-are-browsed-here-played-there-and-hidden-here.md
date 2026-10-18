@@ -58,7 +58,10 @@ option set, a recording the receiver placed in no published bouquet is hidden to
 recording that the option hides is shown without its title, its channel, its bouquet, its file
 and its id, and marked `hidden` - but it is counted, as a hidden stream client is: it holds a
 tuner, the "Recording" sensor and every guard on the receiver count it, and a dashboard does not
-make it stop.
+make it stop. **A folder left with no recording to show is not listed, nor a location left
+with no such folder** - in the media browser, `get_recordings` or any count - because a
+folder's name can say what it holds. The free-space sensor's list of locations is the one list
+that keeps every location: it is about the disk, not about what is on it.
 
 **4. Delete moves a recording into the receiver's trash, and only there, behind the receiver's
 permission.** `enigma2_mqtt.delete_recording` is refused before anything is sent unless the
@@ -75,7 +78,7 @@ configuration entity, not something a dashboard needs. Its proof is an index tha
 broker's replay, within sixty seconds; a delete is proved the same way, by the library no
 longer listing the id, within the same sixty seconds.
 
-**6. The entities stay modest.** One free-space sensor - the first movie location's, with every
+**6. The entities stay modest.** One free-space sensor - the default movie location's, with every
 location in an attribute - rather than one per location; one diagnostic count; one binary
 sensor for timeshift; one button. Every list attribute is unrecorded. Entities that follow a
 capability are never removed for it going quiet ([ADR-0011](0011-stream-facts-addresses-and-a-media-source.md)
@@ -84,6 +87,11 @@ decision 9).
 **7. Every reader of the new payloads is in one module**, `recordings.py`, which normalises them:
 a value that cannot be believed is `None`, a member the contract does not name is dropped, and
 every list is bounded. A shape that changes before the plugin's release changes that module.
+
+**8. The library is an answer, never an attribute.** `enigma2_mqtt.get_recordings` returns the
+library as decision 3 shows it - locations, folders by slug and path, and each recording's id,
+file, title, description, channel, start, length and size - from the topics already held, as
+`get_epg_grid` returns the grids. It names no service reference and no bouquet.
 
 ## Alternatives that were not taken
 
@@ -99,6 +107,8 @@ every list is bounded. A shape that changes before the plugin's release changes 
   and entities that come and go with a USB stick are worse than an attribute.
 - **Hiding the count of running recordings too.** It would make "is anything recording" disagree
   with the receiver about a recording that is running.
+- **Listing a folder that has nothing to show.** A folder that holds only a hidden bouquet's
+  recordings is usually named after what is in it.
 
 ## Consequences
 
@@ -107,5 +117,7 @@ every list is bounded. A shape that changes before the plugin's release changes 
 - A recording copied onto the disk some other way, or deleted on the receiver itself, shows after
   the next event or a press of "Refresh recordings".
 - The free space shown moves when the library is read, not continuously.
-- An automation can play or delete a recording only by an id it already has: from the running
-  recordings' attribute, or from the media browser.
+- An automation finds a recording's id with `get_recordings`, or on the running recordings'
+  attribute.
+- `file` is relative to its movie location everywhere, and `locations[0]` is the image's default
+  movie location: both are the contract's, and the free-space sensor reads the second.

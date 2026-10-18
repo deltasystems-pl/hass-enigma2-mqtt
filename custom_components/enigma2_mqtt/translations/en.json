@@ -644,6 +644,10 @@
         }
       }
     },
+    "get_recordings": {
+      "name": "Get recordings",
+      "description": "Returns the receiver's recording library as Home Assistant shows it: its movie locations, their folders and each folder's recordings with their ID, file, title, description, channel, start, length and size. Recordings of the bouquets hidden from “Recently watched” are left out, and so is a folder or a location with nothing left to show. Read from what the receiver has already published; nothing wakes its disk."
+    },
     "delete_recording": {
       "name": "Delete recording",
       "description": "Moves one recording into the receiver's trash. Only for a receiver whose own setting allows it: nothing is ever deleted for good, and with the receiver's trash switched off nothing is deleted at all.",
@@ -951,6 +955,10 @@
     "list_default_unknown": {"message": "The default row must be the id of one of the list's rows."},
     "list_too_long": {"message": "The list takes {size} bytes and the receiver reads at most {limit}. Shorten the labels or the text, or use fewer rows."},
     "list_not_utf8": {"message": "The list holds a character that cannot be sent."},
+    "recordings_unsupported": {"message": "This receiver does not publish its recording library: its plugin is older than 0.5.0, or its image does not offer it."},
+    "play_recording_busy": {"message": "The plugin is being updated on the receiver. Try again when the update has finished."},
+    "delete_recording_busy": {"message": "The plugin is being updated on the receiver. Try again when the update has finished."},
+    "recordings_refresh_busy": {"message": "The plugin is being updated on the receiver. Try again when the update has finished."},
     "recording_id_invalid": {"message": "A recording's ID is 16 hexadecimal digits."},
     "recording_unknown": {"message": "The receiver's library does not list a recording with the ID {id}. It may have been deleted, or be one of the oldest recordings of a folder too large to list whole."},
     "recording_play_unsupported": {"message": "This receiver cannot play a recording from Home Assistant: its plugin is older than 0.5.0, or its image does not offer it."},

@@ -92,7 +92,7 @@ from .const import (
     WITHHELD_ATTRIBUTE_MAX,
 )
 from .entity import Enigma2Entity, OptionalEntities
-from .recordings import active_recordings, index_folders, iso
+from .recordings import active_recordings, iso
 from .stream_facts import audio_attributes, audio_codec, audio_language, frame_rate, video_codec
 
 PARALLEL_UPDATES = 0
@@ -647,7 +647,7 @@ SERVICE_CODEC_SENSORS: tuple[Enigma2SensorDescription, ...] = (
 )
 
 def _free_space(state: Enigma2State) -> int | None:
-    """Return the free space of the first movie location the receiver lists, in MiB."""
+    """Return the free space of the default movie location - the one listed first - in MiB."""
     locations = (state.recordings_index or {}).get("locations") or []
     return locations[0]["free_mb"] if locations else None
 
@@ -672,18 +672,18 @@ def _locations(state: Enigma2State) -> dict[str, Any]:
 def _library_attributes(box: Enigma2Box) -> dict[str, Any]:
     """Return when and why the library was read, and what the count leaves out.
 
-    `left_out` is the receiver's own number of recordings it left out of folders too
-    large for one packet - the oldest ones, of every bouquet, since nothing here can judge
-    a recording it was not sent.
+    Of the folders and locations the library shows (`Enigma2Box.visible_library`).
+    `left_out` is the receiver's own number of recordings it left out of those folders,
+    too large for one packet - the oldest ones, of every bouquet, since nothing here can
+    judge a recording it was not sent.
     """
     index = box.state.recordings_index
-    folders = index_folders(index)
+    shown = box.visible_library()
+    folders = [folder for _location, location_folders in shown for folder, _ in location_folders]
     return {
-        "left_out": None
-        if index is None
-        else sum(folder["cut"] or 0 for _location, folder in folders),
+        "left_out": None if index is None else sum(folder["cut"] or 0 for folder in folders),
         "folder_count": None if index is None else len(folders),
-        "location_count": None if index is None else len(index["locations"]),
+        "location_count": None if index is None else len(shown),
         "read": iso((index or {}).get("read")),
         "reason": (index or {}).get("reason"),
     }
@@ -693,7 +693,7 @@ def _library_attributes(box: Enigma2Box) -> dict[str, Any]:
 # have left, and how many recordings there are. Both move only when the receiver reads its
 # library again - a recording starts or ends, one is deleted, a location is mounted, or
 # somebody presses "Refresh recordings" - because nothing reads the disk on a timer. The free
-# space of the first location is the state; every location is in an attribute.
+# space of the default location, listed first, is the state; every location is in an attribute.
 RECORDINGS_SENSORS: tuple[Enigma2SensorDescription, ...] = (
     Enigma2SensorDescription(
         key="recording_free_space",

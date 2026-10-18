@@ -148,7 +148,6 @@ from .const import (
     TOPIC_ZAP_HISTORY,
 )
 from .recordings import (
-    index_folders,
     normalise_folder,
     normalise_index,
     normalise_timeshift,
@@ -3262,33 +3261,42 @@ class Enigma2Box:
         """Return the movie locations of the library index, or none while there is none."""
         return list((self.state.recordings_index or {}).get("locations") or [])
 
-    def recording_folder(self, slug: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
-        """Return one folder of the index with its location, by its slug."""
-        for location, folder in index_folders(self.state.recordings_index):
-            if folder["slug"] == slug:
-                return location, folder
-        return None
+    def visible_library(
+        self,
+    ) -> list[tuple[dict[str, Any], list[tuple[dict[str, Any], list[dict[str, Any]]]]]]:
+        """Return the library as Home Assistant shows it: locations, folders, recordings.
 
-    def recordings_in(self, slug: str) -> list[dict[str, Any]]:
-        """Return the recordings a folder of the index lists that may be shown, newest first.
-
-        Only for a folder the index names: the topic set follows the index, so a topic
-        whose folder the index no longer has is a folder that is gone. A folder whose
-        topic has not arrived, or was retracted, lists nothing. A recording of a service
-        the options hide is left out (`service_hidden`, with the bouquet the receiver
-        names for it), failing toward hiding as that rule does.
+        Every list Home Assistant builds of the library is this one - the media browser,
+        `get_recordings`, the library's counts, what may be played or deleted. A folder is
+        in it only with at least one recording the options do not hide, and a location
+        only with at least one such folder: the name of a folder that holds nothing but a
+        hidden bouquet's recordings says what is in it.
         """
-        if self.recording_folder(slug) is None:
-            return []
-        return visible(self.state.recording_folders.get(slug) or [], self.service_hidden)
+        shown = []
+        for location in self.recording_locations:
+            folders = [
+                (folder, recordings)
+                for folder in location["folders"]
+                # The folder is the index's own, so its topic is read without looking it up.
+                if (
+                    recordings := visible(
+                        self.state.recording_folders.get(folder["slug"]) or [],
+                        self.service_hidden,
+                    )
+                )
+            ]
+            if folders:
+                shown.append((location, folders))
+        return shown
 
     def visible_recording_count(self) -> int | None:
         """Return how many recordings the library shows, or None while there is no index."""
         if self.state.recordings_index is None:
             return None
         return sum(
-            len(self.recordings_in(folder["slug"]))
-            for _location, folder in index_folders(self.state.recordings_index)
+            len(recordings)
+            for _location, folders in self.visible_library()
+            for _folder, recordings in folders
         )
 
     def find_recording(
@@ -3299,10 +3307,11 @@ class Enigma2Box:
         A hidden one is not found: it is played or deleted from here exactly as often as
         it is shown here, which is never.
         """
-        for location, folder in index_folders(self.state.recordings_index):
-            for recording in self.recordings_in(folder["slug"]):
-                if recording["id"] == rec_id:
-                    return location, folder, recording
+        for location, folders in self.visible_library():
+            for folder, recordings in folders:
+                for recording in recordings:
+                    if recording["id"] == rec_id:
+                        return location, folder, recording
         return None
 
     @property

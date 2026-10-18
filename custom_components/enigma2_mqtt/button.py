@@ -95,6 +95,7 @@ from .const import (
     HISTORY_CLEAR_FAILURES,
     HISTORY_CLEAR_REASONS,
     RECORDINGS_READ_TIMEOUT,
+    RECORDINGS_REFRESH_REASONS,
     SIGNAL_FORCE_REINSTALL,
     TOPIC_EPG_IMPORT,
     TOPIC_LAST_ERROR,
@@ -306,6 +307,7 @@ async def _async_recordings_refresh(box: Enigma2Box) -> None:
             and box.state.recordings_index is not None
         ),
         timeout=RECORDINGS_READ_TIMEOUT,
+        reasons=RECORDINGS_REFRESH_REASONS,
     )
 
 

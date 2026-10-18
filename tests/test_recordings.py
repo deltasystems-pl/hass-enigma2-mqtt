@@ -112,7 +112,8 @@ NO_BOUQUET: dict[str, Any] = {
 }
 EPISODE: dict[str, Any] = {
     "id": "fedcba9876543210",
-    "file": "20261014 2100 - TVN HD - Serial.ts",
+    # Relative to the movie location, in a subfolder as well.
+    "file": "Series/20261014 2100 - TVN HD - Serial.ts",
     "name": "Serial",
     "description": None,
     "service_name": "TVN HD",
@@ -140,10 +141,11 @@ INDEX: dict[str, Any] = {
 }
 USB_LOCATION: dict[str, Any] = {
     "path": USB,
-    "mounted": False,
-    "free_mb": None,
-    "folders": [{"slug": "usb_movie", "path": "", "count": 0, "size_mb": 0, "cut": 0}],
+    "mounted": True,
+    "free_mb": 1000,
+    "folders": [{"slug": "usb_movie", "path": "", "count": 1, "size_mb": 900, "cut": 0}],
 }
+USB_FILM: dict[str, Any] = {**NEWS, "id": "1111222233334444", "file": "usb.ts", "name": "Usb"}
 FOLDER_MOVIE = {"recordings": [NEWS, MATCH, NO_BOUQUET]}
 FOLDER_SERIES = {"recordings": [EPISODE]}
 
@@ -356,23 +358,18 @@ def test_timeshift_without_a_buffer_says_nothing_else() -> None:
     }
 
 
-def test_a_recording_path_reads_a_bare_name_against_its_folder() -> None:
+def test_a_recording_path_is_its_file_under_its_location() -> None:
     location = {"path": "/media/hdd/movie/"}
-    top = {"path": "", "slug": "movie"}
-    series = {"path": "Series", "slug": "movie_series"}
-    assert recordings.recording_path(location, top, {"file": "a.ts"}) == "/media/hdd/movie/a.ts"
+    assert recordings.recording_path(location, {"file": "a.ts"}) == "/media/hdd/movie/a.ts"
     assert (
-        recordings.recording_path(location, series, {"file": "a.ts"})
-        == "/media/hdd/movie/Series/a.ts"
-    )
-    assert (
-        recordings.recording_path(location, series, {"file": "Series/a.ts"})
+        recordings.recording_path(location, {"file": "Series/a.ts"})
         == "/media/hdd/movie/Series/a.ts"
     )
     playing = {"sref": "1:0:0:0:0:0:0:0:0:0:/media/hdd/movie/Series/a.ts"}
-    assert recordings.plays(playing, location, series, {"file": "a.ts"}) is True
-    assert recordings.plays(playing, location, top, {"file": "a.ts"}) is False
-    assert recordings.plays(None, location, top, {"file": "a.ts"}) is False
+    assert recordings.plays(playing, location, {"file": "Series/a.ts"}) is True
+    # A bare name is at the location's top, not in whatever folder lists it.
+    assert recordings.plays(playing, location, {"file": "a.ts"}) is False
+    assert recordings.plays(None, location, {"file": "a.ts"}) is False
 
 
 async def test_a_recording_is_titled_with_its_channel_date_and_length(
@@ -459,7 +456,9 @@ async def test_the_free_space_is_the_first_location_and_every_location_is_listed
     assert float(state.state) == pytest.approx(412330 / 1024, abs=0.01)
     assert state.attributes["locations"] == [
         {"path": LOCATION, "mounted": True, "free_mb": 412330},
-        {"path": USB, "mounted": False, "free_mb": None},
+        # Listed although none of its recordings has arrived: free space is about the
+        # disk, and says nothing about what is on it.
+        {"path": USB, "mounted": True, "free_mb": 1000},
     ]
     assert b"locations" not in _stored_attributes(state)
 
@@ -708,7 +707,64 @@ async def test_a_replayed_index_is_not_the_answer_to_a_refresh(
     assert box.state.recordings_index["read"] == 1792060000
 
 
+async def test_a_refresh_during_an_update_is_refused_in_the_households_language(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    library(box_on_the_broker)
+    await _setup(hass, config_entry, box_on_the_broker)
+
+    await _arm(hass, "recordings_refresh", _refuse(hass, "recordings_refresh", "busy"))
+    with pytest.raises(ServiceValidationError) as raised:
+        await hass.services.async_call(
+            "button", "press", {ATTR_ENTITY_ID: REFRESH}, blocking=True
+        )
+    assert raised.value.translation_key == "recordings_refresh_busy"
+
+
 # ---------------------------------------------------------------- the browser
+
+
+async def test_a_folder_and_a_location_with_nothing_to_show_are_left_out(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A folder holding only a hidden bouquet's recordings is not named anywhere."""
+    library(box_on_the_broker, index={**INDEX, "locations": [*INDEX["locations"], USB_LOCATION]})
+    box_on_the_broker[folder_topic("usb_movie")] = json.dumps(
+        {"recordings": [{**USB_FILM, "bouquet": "Ulubione TV"}]}
+    )
+    await _setup(hass, hiding(config_entry, "Ulubione TV"), box_on_the_broker)
+
+    # Shown: MATCH alone. NEWS, EPISODE and the USB film are in the hidden bouquet, and
+    # NO_BOUQUET cannot be checked against the option - so "Series" and the USB location
+    # have nothing to show, and the one location left is opened straight away.
+    top = await media_source.async_browse_media(hass, f"{RECEIVER}/r")
+    assert [child.title for child in top.children] == ["movie"]
+    for gone in (
+        f"{RECEIVER}/f/movie_series",
+        f"{RECEIVER}/f/usb_movie",
+        f"{RECEIVER}/l/%2Fmedia%2Fusb%2Fmovie",
+    ):
+        with pytest.raises(BrowseError):
+            await media_source.async_browse_media(hass, gone)
+
+    state = hass.states.get(LIBRARY)
+    assert state.state == "1"
+    assert state.attributes["folder_count"] == 1
+    assert state.attributes["location_count"] == 1
+    # The four the receiver cut from "Series" are not counted: that folder is not shown.
+    assert state.attributes["left_out"] == 0
+
+    response = await _get_recordings(hass)
+    assert [location["path"] for location in response["locations"]] == [LOCATION]
+    assert [folder["slug"] for folder in response["locations"][0]["folders"]] == ["movie"]
+
+
 
 
 async def test_the_player_offers_the_library_beside_its_bouquets(
@@ -766,6 +822,7 @@ async def test_several_locations_are_a_level_of_their_own(
     config_entry: MockConfigEntry,
 ) -> None:
     library(box_on_the_broker, index={**INDEX, "locations": [*INDEX["locations"], USB_LOCATION]})
+    box_on_the_broker[folder_topic("usb_movie")] = json.dumps({"recordings": [USB_FILM]})
     await _setup(hass, config_entry, box_on_the_broker)
 
     top = await media_source.async_browse_media(hass, f"{RECEIVER}/r")
@@ -784,7 +841,7 @@ async def test_a_folder_the_index_does_not_name_is_not_browsed(
     config_entry: MockConfigEntry,
 ) -> None:
     library(box_on_the_broker)
-    box_on_the_broker[folder_topic("stale")] = json.dumps(FOLDER_SERIES)
+    box_on_the_broker[folder_topic("stale")] = json.dumps({"recordings": [USB_FILM]})
     await _setup(hass, config_entry, box_on_the_broker)
 
     with pytest.raises(BrowseError):
@@ -792,13 +849,16 @@ async def test_a_folder_the_index_does_not_name_is_not_browsed(
     # Its topic is kept - the index may name it next - and read for nothing until then.
     box = config_entry.runtime_data
     assert box.state.recording_folders["stale"]
-    assert box.recordings_in("stale") == []
+    assert box.find_recording(USB_FILM["id"]) is None
 
-    # A folder whose topic was retracted lists nothing until it is published again.
+    # A folder whose topic was retracted has nothing to show, and is not listed until it
+    # is published again.
     async_fire_mqtt_message(hass, folder_topic("movie"), "")
     await hass.async_block_till_done()
-    folder = await media_source.async_browse_media(hass, f"{RECEIVER}/f/movie")
-    assert folder.children == []
+    with pytest.raises(BrowseError):
+        await media_source.async_browse_media(hass, f"{RECEIVER}/f/movie")
+    top = await media_source.async_browse_media(hass, f"{RECEIVER}/r")
+    assert [child.title for child in top.children] == ["Series"]
 
 
 async def test_without_play_the_recordings_are_shown_and_not_playable(
@@ -874,7 +934,7 @@ async def test_play_from_the_browser_sends_the_id_and_waits_for_the_service(
     library(box_on_the_broker)
     await _setup(hass, config_entry, box_on_the_broker)
 
-    sent = await _arm(hass, "play_recording", _plays(hass, f"{LOCATION}/Series/{EPISODE['file']}"))
+    sent = await _arm(hass, "play_recording", _plays(hass, f"{LOCATION}/{EPISODE['file']}"))
     await _play(hass, "recording", f"{RECEIVER}/p/{EPISODE['id']}")
     assert [json.loads(payload) for _id, payload in sent] == [{"id": EPISODE["id"]}]
 
@@ -937,6 +997,7 @@ async def test_play_that_never_shows_on_the_service_times_out(
 @pytest.mark.parametrize(
     ("reason", "key"),
     [
+        ("busy", "play_recording_busy"),
         ("file_gone", "play_recording_file_gone"),
         ("not_in_library", "play_recording_not_in_library"),
         (None, "command_refused"),
@@ -1121,6 +1182,7 @@ async def test_a_recording_being_recorded_is_not_deleted(
         ("trash_off", ServiceValidationError),
         ("not_permitted", ServiceValidationError),
         ("file_gone", ServiceValidationError),
+        ("busy", ServiceValidationError),
     ],
 )
 async def test_a_refused_delete_is_said_in_the_households_language(
@@ -1138,6 +1200,85 @@ async def test_a_refused_delete_is_said_in_the_households_language(
     with pytest.raises(kind) as raised:
         await _delete(hass, NEWS["id"])
     assert raised.value.translation_key == f"delete_recording_{reason}"
+
+
+# ------------------------------------------------------------- get_recordings
+
+
+async def _get_recordings(hass: HomeAssistant) -> dict[str, Any]:
+    response = await hass.services.async_call(
+        DOMAIN,
+        "get_recordings",
+        {ATTR_ENTITY_ID: PLAYER},
+        blocking=True,
+        return_response=True,
+    )
+    return response[PLAYER]
+
+
+async def test_get_recordings_returns_what_the_library_shows(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    library(box_on_the_broker)
+    await _setup(hass, hiding(config_entry, "Sport"), box_on_the_broker)
+
+    fields = ("id", "file", "name", "description", "service_name", "begin", "duration", "size_mb")
+    assert await _get_recordings(hass) == {
+        "read": 1792050000,
+        "reason": "start",
+        "locations": [
+            {
+                "path": LOCATION,
+                "mounted": True,
+                "free_mb": 412330,
+                "folders": [
+                    {
+                        "slug": "movie",
+                        "path": "",
+                        "cut": 0,
+                        "recordings": [{key: NEWS[key] for key in fields}],
+                    },
+                    {
+                        "slug": "movie_series",
+                        "path": "Series",
+                        "cut": 4,
+                        "recordings": [{key: EPISODE[key] for key in fields}],
+                    },
+                ],
+            }
+        ],
+    }
+    # Nothing was asked of the receiver.
+    assert published_payloads(mqtt_mock, command_topic("recordings_refresh")) == []
+
+
+async def test_get_recordings_before_the_library_has_arrived(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    box_on_the_broker[INFO_TOPIC] = info_with(*LIBRARY_CAPABILITIES)
+    await _setup(hass, config_entry, box_on_the_broker)
+
+    assert await _get_recordings(hass) == {"read": None, "reason": None, "locations": []}
+
+
+async def test_get_recordings_without_the_library_is_refused(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    box_on_the_broker[INDEX_TOPIC] = json.dumps(INDEX)
+    await _setup(hass, config_entry, box_on_the_broker)
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await _get_recordings(hass)
+    assert raised.value.translation_key == "recordings_unsupported"
 
 
 # ---------------------------------------------------------------- diagnostics

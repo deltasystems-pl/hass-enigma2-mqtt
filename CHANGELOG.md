@@ -29,9 +29,11 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   `media_player.play_media` with the type `recording`; no other player is offered them. The
   action `enigma2_mqtt.delete_recording` moves one recording into the receiver's trash, only
   while the receiver claims `recording_delete` - its own permission on and its trash on - and
-  says which is missing otherwise. The receiver lists every recording; the hidden-bouquets
-  option keeps a hidden bouquet's recordings out of the browser and the count, refuses to play
-  or delete them, and shows a running one without its title.
+  says which is missing otherwise. The response-only action `enigma2_mqtt.get_recordings`
+  returns the library as Home Assistant shows it, from the topics already held. The receiver
+  lists every recording; the hidden-bouquets option keeps a hidden bouquet's recordings out of
+  the browser, the action and the count, refuses to play or delete them, and shows a running
+  one without its title; a folder or a location left with nothing to show is not listed.
 - **The receiver menu** (plugin 0.5.0, for a receiver that claims `menu`; DOCUMENTATION.md
   "Receiver menu" and [ADR-0012](docs/adr/0012-receiver-menu.md)). The options gain *Receiver
   menu* („Menu na dekoderze"): up to 8 groups and 24 entries per list of controls bound to

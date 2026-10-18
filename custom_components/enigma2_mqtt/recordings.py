@@ -276,15 +276,6 @@ def normalise_index(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def index_folders(index: dict[str, Any] | None) -> list[tuple[dict[str, Any], dict[str, Any]]]:
-    """Return every folder of an index with its location, in the receiver's order."""
-    return [
-        (location, folder)
-        for location in (index or {}).get("locations") or []
-        for folder in location["folders"]
-    ]
-
-
 def visible(recordings: list[dict[str, Any]], hidden: HiddenRule) -> list[dict[str, Any]]:
     """Return the recordings of a list whose service the options do not hide."""
     return [
@@ -335,31 +326,17 @@ def normalise_folder(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return recordings
 
 
-def recording_path(
-    location: dict[str, Any], folder: dict[str, Any], recording: dict[str, Any]
-) -> str:
+def recording_path(location: dict[str, Any], recording: dict[str, Any]) -> str:
     """Return where a recording is on the receiver, as far as the payloads say.
 
-    Used to recognise the recording on `service` once it plays, and nothing else: no
-    command carries a path. A `file` with a slash in it is read as relative to the
-    location, a bare name as relative to its folder.
+    `file` is relative to its movie location, in a subfolder as well: `Series/x.ts`. Used to
+    recognise the recording on `service` once it plays, and nothing else: no command
+    carries a path.
     """
-    file = recording["file"]
-    if "/" in file:
-        return f"{location['path'].rstrip('/')}/{file}"
-    parts = [location["path"].rstrip("/")]
-    if folder["path"]:
-        parts.append(folder["path"].strip("/"))
-    parts.append(file)
-    return "/".join(parts)
+    return f"{location['path'].rstrip('/')}/{recording['file'].lstrip('/')}"
 
 
-def plays(
-    service: Any,
-    location: dict[str, Any],
-    folder: dict[str, Any],
-    recording: dict[str, Any],
-) -> bool:
+def plays(service: Any, location: dict[str, Any], recording: dict[str, Any]) -> bool:
     """Return whether a `service` payload says this recording is what the decoder plays.
 
     A recording played from the movie list is a service whose reference ends with the
@@ -369,7 +346,56 @@ def plays(
     sref = service.get("sref") if isinstance(service, dict) else None
     if not isinstance(sref, str) or not sref:
         return False
-    return sref.endswith(recording_path(location, folder, recording))
+    return sref.endswith(recording_path(location, recording))
+
+
+def library_response(
+    index: dict[str, Any] | None,
+    shown: list[tuple[dict[str, Any], list[tuple[dict[str, Any], list[dict[str, Any]]]]]],
+) -> dict[str, Any]:
+    """Return the library as `get_recordings` answers: what Home Assistant shows of it.
+
+    `shown` is `Enigma2Box.visible_library()`: every location and folder with at least one
+    recording the options do not hide, and only those recordings. Times are the epoch
+    seconds the topics use, as `get_epg_grid` returns them. A recording's service reference
+    and bouquet are not in it: they are what the hiding is judged by.
+    """
+    return {
+        "read": (index or {}).get("read"),
+        "reason": (index or {}).get("reason"),
+        "locations": [
+            {
+                "path": location["path"],
+                "mounted": location["mounted"],
+                "free_mb": location["free_mb"],
+                "folders": [
+                    {
+                        "slug": folder["slug"],
+                        "path": folder["path"],
+                        "cut": folder["cut"],
+                        "recordings": [
+                            {
+                                key: recording[key]
+                                for key in (
+                                    "id",
+                                    "file",
+                                    "name",
+                                    "description",
+                                    "service_name",
+                                    "begin",
+                                    "duration",
+                                    "size_mb",
+                                )
+                            }
+                            for recording in recordings
+                        ],
+                    }
+                    for folder, recordings in folders
+                ],
+            }
+            for location, folders in shown
+        ],
+    }
 
 
 # --------------------------------------------------------------------- the browser

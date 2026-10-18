@@ -617,6 +617,10 @@
         }
       }
     },
+    "get_recordings": {
+      "name": "Aufnahmen abrufen",
+      "description": "Gibt die Aufnahmebibliothek des Receivers so zurück, wie Home Assistant sie zeigt: seine Aufnahmeorte, deren Ordner und die Aufnahmen jedes Ordners mit ID, Datei, Titel, Beschreibung, Sender, Beginn, Länge und Größe. Aufnahmen der in „Zuletzt gesehen“ ausgeblendeten Bouquets fehlen, ebenso ein Ordner oder ein Aufnahmeort, in dem nichts zu zeigen bleibt. Gelesen aus dem, was der Receiver schon veröffentlicht hat; nichts weckt seine Festplatte."
+    },
     "delete_recording": {
       "name": "Aufnahme löschen",
       "description": "Verschiebt eine Aufnahme in den Papierkorb des Receivers. Nur bei einem Receiver, dessen eigene Einstellung es erlaubt: Nichts wird endgültig gelöscht, und bei ausgeschaltetem Papierkorb des Receivers wird gar nichts gelöscht.",
@@ -924,6 +928,10 @@
     "list_default_unknown": {"message": "Die Standardzeile muss die ID einer der Zeilen der Liste sein."},
     "list_too_long": {"message": "Die Liste belegt {size} Bytes, und der Receiver liest höchstens {limit}. Kürze die Beschriftungen oder den Text oder nimm weniger Zeilen."},
     "list_not_utf8": {"message": "Die Liste enthält ein Zeichen, das sich nicht senden lässt."},
+    "recordings_unsupported": {"message": "Dieser Receiver veröffentlicht seine Aufnahmebibliothek nicht: Sein Plugin ist älter als 0.5.0, oder sein Image bietet es nicht an."},
+    "play_recording_busy": {"message": "Das Plugin wird gerade auf dem Receiver aktualisiert. Versuche es erneut, wenn das Update fertig ist."},
+    "delete_recording_busy": {"message": "Das Plugin wird gerade auf dem Receiver aktualisiert. Versuche es erneut, wenn das Update fertig ist."},
+    "recordings_refresh_busy": {"message": "Das Plugin wird gerade auf dem Receiver aktualisiert. Versuche es erneut, wenn das Update fertig ist."},
     "recording_id_invalid": {"message": "Die ID einer Aufnahme besteht aus 16 Hexadezimalziffern."},
     "recording_unknown": {"message": "Die Bibliothek des Receivers führt keine Aufnahme mit der ID {id}. Sie wurde vielleicht gelöscht oder gehört zu den ältesten Aufnahmen eines Ordners, der zu groß ist, um ganz aufgeführt zu werden."},
     "recording_play_unsupported": {"message": "Dieser Receiver kann keine Aufnahme aus Home Assistant abspielen: Sein Plugin ist älter als 0.5.0, oder sein Image bietet es nicht an."},

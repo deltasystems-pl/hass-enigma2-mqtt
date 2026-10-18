@@ -849,7 +849,7 @@ while the box is unreachable, because that is precisely when somebody wants to w
 | `program` | *Program* | `<node_id>_program` | `epg` | `epg.now.title`; attributes `begin`, `end` (ISO 8601), `event_id`, `short`, `long` |
 | `next_program` | *Następny program* | `<node_id>_next_program` | `epg` | the same, for `epg.next` |
 | `active_recordings` | *Aktywne nagrania* | `<node_id>_active_recordings` | `recording` | the count; attribute `recordings` is the list (**not recorded**), each entry with `hidden`, and its details from plugin 0.5.0 on ([§4.8](#48-recordings)) |
-| `recording_free_space` | *Wolne miejsce na nagrania* | `<node_id>_recording_free_space` | `recordings` | the free space of the first movie location the receiver lists · MiB, shown in GiB · attribute `locations` (**not recorded**) · only while the receiver names the `recordings` capability |
+| `recording_free_space` | *Wolne miejsce na nagrania* | `<node_id>_recording_free_space` | `recordings` | the free space of the receiver's default movie location · MiB, shown in GiB · attribute `locations` (**not recorded**) · only while the receiver names the `recordings` capability |
 | `recording_library` | *Nagrania w bibliotece* | `<node_id>_recording_library` | `recordings`, `recordings/<folder_slug>` | how many recordings the library shows · diagnostic · attributes `left_out`, `folder_count`, `location_count`, `read`, `reason` · `recordings` |
 | `next_timer` | *Następny timer* | `<node_id>_next_timer` | `recording` | a timestamp, `unknown` when nothing is due |
 | `snr` | *SNR* | `<node_id>_snr` | `tuner` | % · diagnostic · **disabled by default** |
@@ -2016,8 +2016,10 @@ Everything here exists only for a receiver whose `info` names the capability bes
 the zap history: every title, channel and file name, of every bouquet. **Hiding is done here**,
 by the option *Bouquets hidden from "Recently watched"* - the rule the zap history, the stream
 clients and the media source follow ([§4.7](#47-streams)). A recording of a channel of a hidden
-bouquet is not in the media browser, not in a count this integration makes, and cannot be
-played or deleted from here; a running one is shown without its title, channel and file. With
+bouquet is not in the media browser, not in `get_recordings`, not in a count this integration
+makes, and cannot be played or deleted from here; a running one is shown without its title,
+channel and file. **A folder left with no recording to show is not listed either, nor is a
+movie location left with no such folder**, because a folder's name can say what is in it. With
 the option set, **a recording the receiver could not place in any published bouquet is hidden
 too**, because whether it belongs to a hidden one cannot be told. Anybody who can read the
 broker sees all of it.
@@ -2042,14 +2044,18 @@ its web interface, shows after the next such event, or after a press of „Odśw
 - **„Timeshift"** is on while the receiver keeps a timeshift buffer. `paused` says whether it is
   paused, `behind` whether the picture comes from the buffer rather than live, and `since` when
   the buffer started (ISO 8601). With no buffer all three are `null`.
-- **„Wolne miejsce na nagrania"** is the free space of the first movie location the receiver
-  lists, in MiB and shown in GiB; the attribute `locations` has every location's `path`,
-  `mounted` and `free_mb`. It moves when the library is read, not continuously - the free space
-  of the recording disk on a timer is still „Dysk nagrań"'s `free_mb`.
+- **„Wolne miejsce na nagrania"** is the free space of the receiver's default movie location
+  (the one the receiver lists first), in MiB and shown in GiB; the attribute `locations` has
+  every location's `path`, `mounted` and `free_mb` - every one, also a location with nothing to
+  show, because free space is about the disk and not about what is on it. It moves when the
+  library is read again, or when the receiver's minute-by-minute mount check sees a location
+  come or go - not continuously. The free space of the recording disk on a timer is still
+  „Dysk nagrań"'s `free_mb`.
 - **„Nagrania w bibliotece"** (diagnostic) counts the recordings the library shows - hidden
-  ones left out. `left_out` is how many the receiver itself left out of folders too large for
-  one MQTT packet (the oldest of each such folder, and of every bouquet: nothing here can judge
-  a recording it was not sent); `read` and `reason` say when and why the library was last read
+  ones left out. `folder_count` and `location_count` count the folders and locations shown;
+  `left_out` is how many the receiver itself left out of those folders, too large for one MQTT
+  packet (the oldest of each such folder, and of every bouquet: nothing here can judge a
+  recording it was not sent); `read` and `reason` say when and why the library was last read
   (`start`, `recording`, `delete`, `mount` or `refresh`).
 
 #### The media browser
@@ -2057,8 +2063,8 @@ its web interface, shows after the next such event, or after a press of „Odśw
 The receiver's own media player shows **„Nagrania"** (*Recordings*) beside its bouquets: the
 movie locations, each location's folders, and a folder's recordings, newest first, each as
 `Title - Channel - 2026-10-17 20:15 (60 min)` in Home Assistant's time zone. With one movie
-location its folders are listed straight away. A folder the receiver had to cut says how many
-of its oldest recordings are not shown.
+location to show, its folders are listed straight away. A folder the receiver had to cut says
+how many of its oldest recordings are not shown.
 
 **Playing a recording plays it on the receiver**, on its television, in the image's own movie
 player and by its own rule about where to start - it resumes, asks or starts over as the
@@ -2086,8 +2092,39 @@ own library lists. The play is proved by `service` naming the recording, within 
 Refused with a sentence before anything is sent: an id that is not sixteen hexadecimal digits,
 one the library does not show (deleted, hidden, or among the oldest of a folder that was cut),
 a receiver that does not name `recording_play`, and a receiver that is offline. The receiver
-refuses a recording whose file has gone and one its library no longer lists, during an update
-of the plugin, and in any other case it has a sentence for.
+refuses a recording whose file has gone and one its library no longer lists, and every command
+while its plugin is being updated - each said in your language - and anything else in its own
+sentence.
+
+#### The library for an automation (`get_recordings`)
+
+`enigma2_mqtt.get_recordings` returns the library as Home Assistant shows it, from the topics
+it already holds - nothing is asked of the receiver, and no disk is woken:
+
+```yaml
+action: enigma2_mqtt.get_recordings
+target:
+  entity_id: media_player.dekoder_salon
+response_variable: library
+```
+
+```json
+{"read": 1792050000, "reason": "start",
+ "locations": [{"path": "/media/hdd/movie", "mounted": true, "free_mb": 412330,
+                "folders": [{"slug": "movie", "path": "", "cut": 0,
+                             "recordings": [{"id": "3f9c2e4a1b7d5c60",
+                                             "file": "20261017 2015 - Channel - Title.ts",
+                                             "name": "Title", "description": "Short text",
+                                             "service_name": "Channel", "begin": 1792050000,
+                                             "duration": 3600, "size_mb": 2210}]}]}]}
+```
+
+Times are the epoch seconds the topics use, as `get_epg_grid` returns them; `file` is relative
+to its movie location, also in a subfolder (`Series/...`); `cut` is how many of the folder's
+oldest recordings the receiver left out. The hidden bouquets' recordings are left out, and so
+is a folder or a location with nothing left to show. Before the library has arrived, `read` is
+`null` and `locations` is empty. Like `get_epg_grid`, it is an answer and never a state
+attribute: a library is far too large for the recorder.
 
 #### Deleting a recording
 
@@ -2111,7 +2148,8 @@ setup screen or its web interface; it cannot be written over MQTT. The receiver 
 (`info.recording_trash`). Without the capability the action is refused before anything is
 sent, and says why: the permission is off, the trash is off, or the plugin or the image cannot
 do it. Also refused here: an id the library does not show (hidden ones included) and one that
-is being recorded right now. The receiver refuses one that is being played. The delete is
+is being recorded right now. The receiver refuses one that is being played, one whose move
+into the trash failed, and every delete while its plugin is being updated. The delete is
 proved by the library, read again by the receiver, no longer listing the id, within sixty
 seconds.
 
@@ -2138,6 +2176,7 @@ the platform an action was registered on, and one box has exactly one media play
 | `enigma2_mqtt.stop_stream` | `host`, `sref` (optional) · on every receiver; refused before anything is sent unless it names the `stream_stop` capability ([§4.7](#47-streams)) |
 | `enigma2_mqtt.show_list` | `title`, `text`, `rows`, `timeout` (5-600, default 60), `default`; **can return a response**: how the list ended ([below](#show_list)); refused before anything is sent unless the receiver names the `list` capability |
 | `enigma2_mqtt.delete_recording` | `id` · on every receiver; refused before anything is sent unless it names the `recording_delete` capability ([§4.8](#48-recordings)) |
+| `enigma2_mqtt.get_recordings` | - · **returns a response**: the recording library as Home Assistant shows it ([§4.8](#48-recordings)) · refused unless the receiver names the `recordings` capability |
 
 `begin` and `end` take a date and time or the epoch seconds the topics use; both end up as
 epoch seconds on the wire.

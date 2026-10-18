@@ -53,6 +53,7 @@ from .choice_list import (
 )
 from .const import (
     CAPABILITY_RECORDING_PLAY,
+    CAPABILITY_RECORDINGS,
     CAPABILITY_STREAM_STOP,
     DELETE_RECORDING_REASONS,
     DOMAIN,
@@ -72,7 +73,7 @@ from .const import (
     TOPIC_TIMERS,
 )
 from .notify import check_toast, message_payload
-from .recordings import active_recording_ids, parse_recording_id, plays
+from .recordings import active_recording_ids, library_response, parse_recording_id, plays
 
 SERVICE_ZAP = "zap"
 SERVICE_SELECT_BOUQUET = "select_bouquet"
@@ -86,6 +87,7 @@ SERVICE_SET_HA_MODE = "set_ha_mode"
 SERVICE_GET_EPG_GRID = "get_epg_grid"
 SERVICE_STOP_STREAM = "stop_stream"
 SERVICE_DELETE_RECORDING = "delete_recording"
+SERVICE_GET_RECORDINGS = "get_recordings"
 SERVICE_SHOW_LIST = "show_list"
 
 ATTR_SREF = "sref"
@@ -268,13 +270,13 @@ async def async_play_recording(box: Enigma2Box, value: Any) -> None:
     """
     if CAPABILITY_RECORDING_PLAY not in box.capabilities:
         raise _invalid("recording_play_unsupported")
-    rec_id, (location, folder, recording) = _listed_recording(box, value)
+    rec_id, (location, _folder, recording) = _listed_recording(box, value)
     if not box.available:
         raise _invalid("recording_receiver_offline")
     await box.async_command(
         "play_recording",
         json.dumps({"id": rec_id}),
-        effect=lambda: plays(box.state.service, location, folder, recording),
+        effect=lambda: plays(box.state.service, location, recording),
         reasons=PLAY_RECORDING_REASONS,
     )
 
@@ -476,6 +478,21 @@ class Enigma2Actions:
         """Move one recording into the receiver's trash, by its id."""
         await async_delete_recording(self.box, id)
 
+    async def async_get_recordings(self) -> ServiceResponse:
+        """Return the recording library as Home Assistant shows it.
+
+        From the retained topics the integration already holds: nothing is asked of the
+        receiver, and no disk is woken. The hidden-bouquets option applies exactly as in
+        the media browser - a hidden recording is left out, and a folder or a location with
+        nothing left to show with it. Before the library has arrived the answer says so:
+        `read` is null and there are no locations. Like `get_epg_grid`, it is an answer and
+        not a state attribute: a library is far too large for the recorder.
+        """
+        box = self.box
+        if CAPABILITY_RECORDINGS not in box.capabilities:
+            raise _invalid("recordings_unsupported")
+        return library_response(box.state.recordings_index, box.visible_library())
+
     async def async_get_epg_grid(self, bouquet: str | None = None) -> ServiceResponse:
         """Return what is on, per bouquet, from the retained grid topics.
 
@@ -607,6 +624,12 @@ def async_setup_services() -> None:
     )
     platform.async_register_entity_service(
         SERVICE_DELETE_RECORDING, DELETE_RECORDING_SCHEMA, "async_delete_recording"
+    )
+    platform.async_register_entity_service(
+        SERVICE_GET_RECORDINGS,
+        None,
+        "async_get_recordings",
+        supports_response=SupportsResponse.ONLY,
     )
     platform.async_register_entity_service(
         SERVICE_GET_EPG_GRID,

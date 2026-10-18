@@ -617,6 +617,10 @@
         }
       }
     },
+    "get_recordings": {
+      "name": "Pobierz nagrania",
+      "description": "Zwraca bibliotekę nagrań dekodera tak, jak pokazuje ją Home Assistant: lokalizacje nagrań, ich foldery i nagrania każdego folderu z ich ID, plikiem, tytułem, opisem, kanałem, początkiem, długością i rozmiarem. Nagrania bukietów ukrytych w „Ostatnio oglądane” są pomijane, tak samo jak folder albo lokalizacja, w której nie zostaje nic do pokazania. Odczytywane z tego, co dekoder już opublikował; nic nie budzi jego dysku."
+    },
     "delete_recording": {
       "name": "Usuń nagranie",
       "description": "Przenosi jedno nagranie do kosza dekodera. Tylko na dekoderze, którego własne ustawienie na to pozwala: nic nie jest usuwane na zawsze, a przy wyłączonym koszu dekodera nic nie jest usuwane w ogóle.",
@@ -924,6 +928,10 @@
     "list_default_unknown": {"message": "Wiersz domyślny musi być identyfikatorem jednego z wierszy listy."},
     "list_too_long": {"message": "Lista zajmuje {size} bajtów, a dekoder czyta najwyżej {limit}. Skróć etykiety lub tekst albo użyj mniej wierszy."},
     "list_not_utf8": {"message": "Lista zawiera znak, którego nie da się wysłać."},
+    "recordings_unsupported": {"message": "Ten dekoder nie publikuje swojej biblioteki nagrań: jego wtyczka jest starsza niż 0.5.0 albo jego obraz tego nie oferuje."},
+    "play_recording_busy": {"message": "Wtyczka jest właśnie aktualizowana na dekoderze. Spróbuj ponownie po zakończeniu aktualizacji."},
+    "delete_recording_busy": {"message": "Wtyczka jest właśnie aktualizowana na dekoderze. Spróbuj ponownie po zakończeniu aktualizacji."},
+    "recordings_refresh_busy": {"message": "Wtyczka jest właśnie aktualizowana na dekoderze. Spróbuj ponownie po zakończeniu aktualizacji."},
     "recording_id_invalid": {"message": "ID nagrania to 16 cyfr szesnastkowych."},
     "recording_unknown": {"message": "Biblioteka dekodera nie zawiera nagrania o ID {id}. Mogło zostać usunięte albo jest jednym z najstarszych nagrań folderu zbyt dużego, by pokazać go w całości."},
     "recording_play_unsupported": {"message": "Ten dekoder nie może odtworzyć nagrania z Home Assistanta: jego wtyczka jest starsza niż 0.5.0 albo jego obraz tego nie oferuje."},

@@ -32,9 +32,10 @@ recording, by its id). Resolving a recording for any player is refused with a se
 the receiver's media player does not resolve it, it sends `cmd/play_recording`.
 
 The tree is the receiver's library as its topics list it - every movie location with its
-folders, the receiver's trash and the recordings of hidden bouquets left out there - and a
-folder the receiver cut to fit one packet says how many it left out. With one movie
-location its folders are listed directly under "Recordings".
+folders, the receiver's trash left out there - without the recordings the hidden-bouquets
+option hides, and without a folder or a location left with nothing to show. A folder the
+receiver cut to fit one packet says how many it left out. With one movie location to show,
+its folders are listed directly under "Recordings".
 """
 
 from __future__ import annotations
@@ -190,45 +191,47 @@ def browse_recordings(
     """
     if CAPABILITY_RECORDINGS not in box.capabilities:
         raise _unknown(BrowseError)
-    locations = box.recording_locations
+    # Only what the library shows: a folder with no recording the options leave visible,
+    # and a location with no such folder, are not listed and cannot be opened.
+    shown = box.visible_library()
     if kind == KIND_RECORDINGS:
         listing = recordings_entry(box, title)
-        if len(locations) == 1:
-            listing.children = [
-                _folder_entry(box, locations[0], folder) for folder in locations[0]["folders"]
-            ]
+        if len(shown) == 1:
+            location, folders = shown[0]
+            listing.children = [_folder_entry(box, location, folder) for folder, _ in folders]
         else:
-            listing.children = [_location_entry(box, location) for location in locations]
+            listing.children = [_location_entry(box, location) for location, _ in shown]
         return listing
     if kind == KIND_LOCATION:
-        for location in locations:
+        for location, folders in shown:
             if location["path"] == reference:
                 listing = _location_entry(box, location)
-                listing.children = [
-                    _folder_entry(box, location, folder) for folder in location["folders"]
-                ]
+                listing.children = [_folder_entry(box, location, folder) for folder, _ in folders]
                 return listing
         raise _unknown(BrowseError)
-    if kind == KIND_FOLDER and (found := box.recording_folder(reference)) is not None:
-        location, folder = found
-        playable = CAPABILITY_RECORDING_PLAY in box.capabilities
-        listing = _folder_entry(box, location, folder)
-        listing.children = [
-            BrowseMediaSource(
-                domain=DOMAIN,
-                identifier=_identifier(box.node_id, KIND_RECORDING, recording["id"]),
-                media_class=MediaClass.VIDEO,
-                media_content_type=MEDIA_TYPE_RECORDING,
-                title=recording_title(recording),
-                can_play=playable,
-                can_expand=False,
-            )
-            for recording in box.recordings_in(folder["slug"])
-        ]
-        # The recordings the receiver left out of this folder to keep its topic inside one
-        # packet: the oldest ones, which the browser counts below the list.
-        listing.not_shown = folder["cut"] or 0
-        return listing
+    if kind == KIND_FOLDER:
+        for location, folders in shown:
+            for folder, recordings in folders:
+                if folder["slug"] != reference:
+                    continue
+                playable = CAPABILITY_RECORDING_PLAY in box.capabilities
+                listing = _folder_entry(box, location, folder)
+                listing.children = [
+                    BrowseMediaSource(
+                        domain=DOMAIN,
+                        identifier=_identifier(box.node_id, KIND_RECORDING, recording["id"]),
+                        media_class=MediaClass.VIDEO,
+                        media_content_type=MEDIA_TYPE_RECORDING,
+                        title=recording_title(recording),
+                        can_play=playable,
+                        can_expand=False,
+                    )
+                    for recording in recordings
+                ]
+                # The recordings the receiver left out of this folder to keep its topic
+                # inside one packet: the oldest ones, which the browser counts below the list.
+                listing.not_shown = folder["cut"] or 0
+                return listing
     raise _unknown(BrowseError)
 
 
