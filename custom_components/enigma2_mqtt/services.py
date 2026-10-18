@@ -435,6 +435,12 @@ def _target_count(entity: Enigma2Actions, call: ServiceCall) -> int:
 
     The receivers' media players, among those the call names - by entity, device, area,
     floor or label - or all of them for `all`, as `entity_service_call` picks them.
+
+    It does not ask Home Assistant's per-user entity permissions, which that resolution
+    applies: for `all`, a user who is not an administrator is served only the receivers they
+    may control. So such a user allowed one of two receivers is counted two targets, and that
+    one receiver's refusal comes back as its entry rather than raised. A target that names a
+    receiver the user may not control is refused by Home Assistant before this runs.
     """
     platform = getattr(entity, "platform", None)
     entities = platform.domain_platform_entities if platform is not None else {}

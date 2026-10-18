@@ -43,16 +43,16 @@ earlier - the list stays on the television, and a choice made after the receiver
 answered.
 
 **3. The list's id is the command's id.** Sixteen random hexadecimal digits in the envelope of
-[ADR-0010](0010-a-command-carries-an-id-and-a-refusal-is-matched-by-it.md); the answer and a
-refusal on `last_error` say it back. A list is never sent bare - `list` implies `command_id`, and
-a list whose envelope would pass the receiver's 4096 bytes is refused before it is sent, rather
-than sent without the id that makes its answer readable. A refusal ends the wait only when it says
-the list's id: one with another id, or without one, is about another command or another client's
-list. The refusal is read as it arrives, whether the plugin published it retained or
-not - while a silent self-update holds the receiver it sends the doors' refusal of a list non-retained,
-so that it cannot outlive a downgrade's retraction. A message published while the subscription is
-open reaches it with the retain flag clear either way; only the broker's replay of an older
-`last_error` on subscribing carries the flag, and that one is never a list's answer.
+[ADR-0010](0010-a-command-carries-an-id-and-a-refusal-is-matched-by-it.md); the answer and a refusal
+on `last_error` say it back. A list is never sent bare - `list` implies `command_id`, and a list
+whose envelope would pass the receiver's 4096 bytes is refused before it is sent, rather than sent
+without the id that makes its answer readable. A refusal ends the wait only when it says the list's
+id: one with another id, or without one, is about another command or another client's list. The
+refusal is read as it arrives, whether the plugin published it retained or not - while a silent
+self-update holds the receiver it sends the doors' refusal of a list non-retained, so that it cannot
+outlive a downgrade's retraction. A message published while the subscription is open reaches it with
+the retain flag clear either way; only the broker's replay of an older `last_error` on subscribing
+carries the flag, and that one is never a list's answer.
 
 **4. The answer is never queued.** The plugin takes an unacknowledged answer out of its client's
 queue when the broker connection drops, as it does `menu_action`: a choice made while the broker is

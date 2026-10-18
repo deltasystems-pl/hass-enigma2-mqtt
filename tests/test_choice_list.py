@@ -36,7 +36,12 @@ from homeassistant.components.device_automation import DeviceAutomationType
 from homeassistant.components.mqtt import ReceiveMessage
 from homeassistant.core import Event, HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import (
+    area_registry as ar,
+    device_registry as dr,
+    entity_registry as er,
+    label_registry as lr,
+)
 from homeassistant.setup import async_setup_component
 import homeassistant.util.dt as dt_util
 import pytest
@@ -1830,3 +1835,130 @@ async def test_a_live_refusal_during_a_silent_self_update_ends_the_wait(
     assert raised.value.translation_key == "list_refused"
     assert raised.value.translation_placeholders == {"reason": "an update holds the receiver"}
     assert box.lists is not None and box.lists.waiting == 0
+
+
+# ------------------------------------------------------ how the targets are counted --
+
+
+def _target_by(hass: HomeAssistant, how: str) -> dict[str, Any]:
+    """Both receivers, named the four other ways a target can name them."""
+    devices = dr.async_get(hass)
+    entities = er.async_get(hass)
+    device_ids = [
+        entry.runtime_data.device_id for entry in hass.config_entries.async_entries(DOMAIN)
+    ]
+    if how == "device":
+        return {"device_id": device_ids}
+    if how == "area":
+        area = ar.async_get(hass).async_get_or_create("Dom")
+        for device_id in device_ids:
+            devices.async_update_device(device_id, area_id=area.id)
+        return {"area_id": area.id}
+    if how == "label":
+        label = lr.async_get(hass).async_create("Telewizory")
+        for entity_id in (PLAYER, PLAYER_TWO):
+            if entities.async_get(entity_id) is not None:
+                entities.async_update_entity(entity_id, labels={label.label_id})
+        return {"label_id": label.label_id}
+    return {"entity_id": "all"}
+
+
+@pytest.mark.parametrize("how", ["device", "area", "label", "all"])
+async def test_every_way_of_naming_two_receivers_gives_each_its_own_entry(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    how: str,
+) -> None:
+    """Whether the two are named by device, area, label or `all`, the one that cannot show a
+    list answers in its own entry - which needs both to be counted as the targets they are."""
+    await _box(hass, config_entry, box_on_the_broker)
+    await _second_box(hass, box_on_the_broker, INFO)
+    await _answer_on(
+        hass,
+        LIST_TOPIC,
+        lambda list_id: _answer(hass, {"id": list_id, "ending": "picked", "row": "open"}),
+    )
+    target = _target_by(hass, how)
+
+    response = await hass.services.async_call(
+        DOMAIN, "show_list", {**target, **DOORBELL}, blocking=True, return_response=True
+    )
+
+    assert response == {
+        PLAYER: {"ending": "picked", "row": "open", "label": "Open the gate"},
+        PLAYER_TWO: {
+            "ending": "refused",
+            "error": "This receiver cannot show a list of choices. It needs a plugin release "
+            "that offers one.",
+            "row": None,
+            "label": None,
+        },
+    }
+
+
+@pytest.mark.parametrize("how", ["device", "area", "label", "all"])
+async def test_one_receiver_named_any_way_still_raises(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    how: str,
+) -> None:
+    """The second receiver can show no list here, and it is the only one named - so the call
+    raises, whichever way it was named."""
+    await _box(hass, config_entry, box_on_the_broker, INFO)
+    target = _target_by(hass, how)
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await hass.services.async_call(
+            DOMAIN, "show_list", {**target, **DOORBELL}, blocking=True, return_response=True
+        )
+
+    assert raised.value.translation_key == "list_unsupported"
+
+
+# ------------------------------------------------------------ the 4096-byte limit --
+
+
+def _sized(target: int, label: str = "A") -> dict[str, Any]:
+    """A one-row list whose envelope is exactly `target` bytes in UTF-8, padded by its icon:
+    a name the plugin does not know, which is sent as it is."""
+    def size(padding: int) -> int:
+        request = ListRequest(
+            title="T", rows=(ListRow("a", label, icon="i" * (padding + 1)),), timeout=60
+        )
+        return len(choice_list.command_envelope("0" * 16, request.payload()).encode("utf-8"))
+
+    padding = target - size(0)
+    assert size(padding) == target
+    return {"title": "T", "rows": [{"id": "a", "label": label, "icon": "i" * (padding + 1)}]}
+
+
+@pytest.mark.parametrize("label", ["A", "\u017c\u00f3\u0142w"], ids=["ascii", "polish"])
+def test_a_list_of_exactly_4096_bytes_is_sent_and_4097_is_refused(label: str) -> None:
+    assert COMMAND_MAX_BYTES == 4096
+    request = build_list(_sized(4096, label))
+    wire = choice_list.command_envelope("0" * 16, request.payload())
+    assert len(wire.encode("utf-8")) == 4096
+
+    refused = _refused(_sized(4097, label))
+    assert refused.translation_key == "list_too_long"
+    assert refused.translation_placeholders == {"size": "4097", "limit": "4096"}
+
+
+async def test_the_4096_bytes_are_what_the_broker_carries(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    await _box(hass, config_entry, box_on_the_broker)
+    receiver = await Receiver(hass).arm()
+
+    await _show(hass, _sized(4096, "\u017c\u00f3\u0142w"), response=False)
+
+    (wire, _list_id, _payload) = receiver.heard[0]
+    text = wire.decode() if isinstance(wire, (bytes, bytearray)) else wire
+    assert len(text.encode("utf-8")) == 4096

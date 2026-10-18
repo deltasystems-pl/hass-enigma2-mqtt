@@ -73,25 +73,24 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   settings form and the SSH steps carry the menu over as it is stored when they save.
 - **A list of choices on the television** (plugin 0.5.0, for a receiver that claims `list`;
   DOCUMENTATION.md "show_list" and [ADR-0014](docs/adr/0014-a-list-of-choices.md)). The action
-  `enigma2_mqtt.show_list` puts a question on the television - a title, an optional text and 1 to
-  24 rows, each with an id, a label and optionally a colour or number key and an icon - with a
-  timeout of 5 to 600 seconds (60 by default) and an optional default row. Titles, the text and
-  labels are cleaned exactly as the receiver cleans them - no backslash, no invisible format
-  character or half surrogate pair, controls and separators made spaces, cut, the ends stripped - before blank is judged,
-  so the label reported back is the one on the screen. Every rule is checked
-  before anything is published, with a translated error naming the field and the row; the list
-  goes out in its envelope, whose 16-digit id is the list's, and only once the broker has confirmed
-  the subscription its answer arrives on. Called with a response, the action waits and returns
-  `ending` (`picked`, `timeout`, `dismissed`, `replaced`, `closed`, or `no_answer` 15 seconds after
-  the timeout), `row` and `label`; without one it returns once the list is sent. Aimed at several
-  receivers, each answers in its own entry, and one that refuses or cannot be reached says so in
-  its entry (`ending: refused` with the sentence) rather than raising and losing the others. A refusal on
-  `last_error` that says the list's id ends the wait with the receiver's sentence, and unloading
-  the entry ends every wait. Every readable answer fires `enigma2_mqtt_list_answer` - with the
-  row's label for a list sent from here - and three device triggers follow it: a row was picked
-  (any row, or a given row id), the list timed out, the list was dismissed. An answer is untrusted
-  input: a malformed, retained, duplicate or foreign one is dropped with one log line per cause
-  (SECURITY.md).
+  `enigma2_mqtt.show_list` puts a question on the television - a title, an optional text and 1 to 24
+  rows, each with an id, a label and optionally a colour or number key and an icon - with a timeout
+  of 5 to 600 seconds (60 by default) and an optional default row. Titles, the text and labels are
+  cleaned exactly as the receiver cleans them - no backslash, no invisible format character or half
+  surrogate pair, controls and separators made spaces, cut, the ends stripped - before blank is
+  judged, so the label reported back is the one on the screen. Every rule is checked before anything
+  is published, with a translated error naming the field and the row; the list goes out in its
+  envelope, whose 16-digit id is the list's, and only once the broker has confirmed the subscription
+  its answer arrives on. Called with a response, the action waits and returns `ending` (`picked`,
+  `timeout`, `dismissed`, `replaced`, `closed`, or `no_answer` 15 seconds after the timeout), `row`
+  and `label`; without one it returns once the list is sent. Aimed at several receivers, each
+  answers in its own entry, and one that refuses or cannot be reached says so in its entry (`ending:
+  refused` with the sentence) rather than raising and losing the others. A refusal on `last_error`
+  that says the list's id ends the wait with the receiver's sentence, and unloading the entry ends
+  every wait. Every readable answer fires `enigma2_mqtt_list_answer` - with the row's label for a
+  list sent from here - and three device triggers follow it: a row was picked (any row, or a given
+  row id), the list timed out, the list was dismissed. An answer is untrusted input: a malformed,
+  retained, duplicate or foreign one is dropped with one log line per cause (SECURITY.md).
 - **„Przezroczystość menu" and „Klawisz menu"** (*Menu transparency*, *Menu hotkey*; plugin 0.5.0,
   for a receiver that reports `menu_transparency`; DOCUMENTATION.md §4.4): a number (0-80 % in
   steps of 10) and a select (long HELP, long RED, F3, F4, off) for two settings of the receiver

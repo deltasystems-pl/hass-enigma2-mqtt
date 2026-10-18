@@ -2193,6 +2193,7 @@ player as every entity action's response is, `{"ending": ..., "row": ..., "label
 | `replaced` | a newer list was shown on that receiver - by this automation, another one, or another client | `null` | `null` |
 | `closed` | the receiver went to standby, or the plugin stopped (GUI restart, shutdown, update) | `null` | `null` |
 | `no_answer` | no answer came within `timeout` + 15 seconds | `null` | `null` |
+| `refused` | only with several receivers and a response: this receiver refused the list or could not be reached; the entry also has `error`, the sentence ([below](#show_list)) | `null` | `null` |
 
 **`no_answer` is Home Assistant's own.** The receiver never queues an answer while the broker is
 away - a late "open the gate" is worse than none - so a choice made then is lost, and so is a list
