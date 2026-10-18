@@ -431,7 +431,7 @@ The icons are the plugin's own, by name: `neutral`, `lamp`, `ceiling-light`, `bl
 | Control | Entities | What OK does | What the row shows |
 |---|---|---|---|
 | Button | `script`, `scene`, `button`, `input_button`, `automation` | `script.turn_on`, `scene.turn_on`, `button.press`, `input_button.press`, `automation.trigger` | nothing on the right |
-| Switch | `light`, `switch`, `input_boolean`, `fan`, `cover`, `lock` | the domain's `toggle`; for a cover `close_cover` when it is open and `open_cover` when it is closed; for a lock `unlock` when it is locked and `lock` when it is unlocked - by the state when OK arrives, not the one the row showed | the state in your language, green while on (open, locked), red while off |
+| Switch | `light`, `switch`, `input_boolean`, `fan`, `cover`, `lock` | the other state from the one the row showed: `turn_on` or `turn_off`, for a cover `open_cover` or `close_cover`, for a lock `lock` or `unlock` - nothing when the entity is already there. From a plugin that does not say what the row showed: the domain's `toggle`; for a cover `close_cover` when it is open and `open_cover` when it is closed; for a lock `unlock` when it is locked and `lock` when it is unlocked - by the state when OK arrives | the state in your language, green while on (open, locked), red while off |
 | Indicator | any entity except a script, scene, button, input button or automation, which are buttons only | nothing - it cannot be acted on | the state in your language, coloured where it is on or off; a sensor shows its reading with its unit, and a state that is neither on nor off has no colour |
 | List of options | `select`, `input_select`, `climate` (HVAC mode) | `select_option`, or `climate.set_hvac_mode` | the current option; a climate's modes in your language |
 | Slider | `light` (brightness), `cover` (position), `media_player` (volume), `number`, `input_number` | `light.turn_on` with `brightness_pct`, `cover.set_cover_position`, `media_player.volume_set`, `set_value` | the value with its unit. Brightness, position and volume run 0-100 % in steps of 10; a number runs over its own range, its step made coarser where it would have more than 200 |
@@ -486,6 +486,15 @@ behind", at the first such refusal; it goes by itself at the next action Home As
 its id across restarts and while only its name or icon change; bound to another entity or shown
 as another control, it gets a new id, so a press the receiver sent for the old binding cannot
 reach the new one. A service call that fails is logged; there is no repair.
+
+**A late OK on a switch repeats what you meant; it never does the opposite.** The receiver says
+which state the switch showed when you pressed OK, and Home Assistant puts the entity in the
+other one - `turn_on` for a lamp the row showed off, `close_cover` for a cover it showed open.
+So an OK that arrives late, after a stall on the network, or a second OK pressed before the row
+had changed, asks for the same thing as the first: when the entity is already there nothing is
+called, no event is fired, and the menu is published again so the row shows the state it is
+really in. A plugin that does not send what the row showed gets the plain toggle described in
+the table above ([ADR-0012](docs/adr/0012-receiver-menu.md) section 11).
 
 After an action was performed, Home Assistant fires the event **`enigma2_mqtt_menu_action`** -
 for a button once Home Assistant accepted the call (what the script or automation does after
