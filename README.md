@@ -23,6 +23,9 @@ plugin. You do not have to install it by hand: this integration can put it on th
 - Remote keys you can send from automations, and every key press on the real remote as an event.
   The four colour keys are device triggers, short or long press.
 - Messages on the TV: a popup, or a small toast in the corner on receivers that support it.
+- A question on the TV - "Doorbell: open the gate / ignore" - as a list of choices the viewer
+  answers with the remote. The action can wait for the answer and return it, and the answer is
+  also a device trigger (plugin 0.5.0).
 - The receiver's own zap history as a dropdown, so you can jump back to a recent channel.
 - Buttons for a screenshot, Wake-on-LAN and a GUI restart, and an EPG refresh where the receiver
   publishes EPG grids. Softcam restart and EPG import show up only after you allow them on the

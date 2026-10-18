@@ -44,6 +44,18 @@ mode is published without its text, whether the menu shows it as a text field or
 Anyone who can publish to the broker can also raise and clear the repair about the receiver's
 clock - a nuisance only, since it changes nothing but what that repair says.
 
+**A list of choices is answered by whoever publishes the answer.** `enigma2_mqtt.show_list`
+([DOCUMENTATION.md](DOCUMENTATION.md#show_list), [ADR-0014](docs/adr/0014-a-list-of-choices.md))
+puts a question on the television and returns the row the viewer picked. Like a message it needs
+no permission and no option, and so **anyone who can publish to the broker can show a list on the
+television, and can publish an answer to any list** - also to one this Home Assistant sent, whose
+id is on the broker for any subscriber to read. Home Assistant reads an answer as untrusted input:
+an id, an ending and a row of the contract's shape, a row the list it sent actually had, never a
+retained answer and never a second answer for the same id; anything else is dropped with one log
+line naming the cause, never the text. A well-formed forgery still reads exactly like a press on
+the remote. **An automation must not treat an answer as proof of who pressed what**: do not let an
+answer alone open a lock or disarm an alarm.
+
 **Editing the receiver menu from the receiver is off by default** ([ADR-0013](docs/adr/0013-menu-creator.md)).
 It is turned on per receiver in the integration's options (*Receiver menu -> Editing from the
 receiver*). Off, the catalogue on the broker says only `{"v": 1, "editing": false}` - nothing
