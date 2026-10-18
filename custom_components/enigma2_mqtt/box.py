@@ -3247,13 +3247,23 @@ class Enigma2Box:
         Kept whatever the index says so far, because the index can arrive after it.
         A folder published again as it was wakes nobody. At most `FOLDERS_MAX` folder topics
         are held - as many as an index may name - so retained topics that no index will ever
-        name cannot grow the store without bound.
+        name cannot grow the store without bound. When it is full, a folder the index names
+        takes the place of a topic it does not name; a topic the index does not name is not
+        taken then, and a retraction never displaces anything.
         """
         if not slug or "/" in slug:
             return
         folders = self.state.recording_folders
         if slug not in folders and len(folders) >= FOLDERS_MAX and not _retracted(msg.payload):
-            return
+            named = {
+                folder["slug"]
+                for location in self.recording_locations
+                for folder in location["folders"]
+            }
+            stale = next((held for held in folders if held not in named), None)
+            if slug not in named or stale is None:
+                return
+            del folders[stale]
         if _retracted(msg.payload):
             if folders.pop(slug, None) is None:
                 return

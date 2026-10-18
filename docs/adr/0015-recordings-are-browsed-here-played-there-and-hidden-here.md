@@ -84,8 +84,9 @@ minute for the move, so that its refusal reaches the household before Home Assis
 A play is proved by `service`: the image writes the path in a reference percent-encoded, and
 Home Assistant decodes it before comparing it with the location's resolved path and the file.
 
-**6. The entities stay modest.** One free-space sensor - the default movie location's, with every
-location in an attribute - rather than one per location; one diagnostic count; one binary
+**6. The entities stay modest.** One free-space sensor - the default movie location's, with the
+locations the library shows something in, and always the default one, in an attribute (decision
+3) - rather than one per location; one diagnostic count; one binary
 sensor for timeshift; one button. Every list attribute is unrecorded. Entities that follow a
 capability are never removed for it going quiet ([ADR-0011](0011-stream-facts-addresses-and-a-media-source.md)
 decision 9).

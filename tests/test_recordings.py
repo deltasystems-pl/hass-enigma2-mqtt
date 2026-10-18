@@ -608,6 +608,30 @@ async def test_what_is_hidden_follows_the_channel_list(
     assert entry.runtime_data.find_recording(MATCH["id"]) is not None
 
 
+async def test_what_is_hidden_follows_the_option_without_a_reload(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Options saved without a reload are read at once: the option is part of the cache."""
+    library(box_on_the_broker)
+    entry = hiding(config_entry, "Sport")
+    await _setup(hass, entry, box_on_the_broker)
+    box = entry.runtime_data
+    assert box.find_recording(MATCH["id"]) is None
+
+    hass.config_entries.async_update_entry(entry, options={"history_hidden_bouquets": []})
+    await hass.async_block_till_done()
+    assert entry.runtime_data is box
+    assert box.find_recording(MATCH["id"]) is not None
+    hass.config_entries.async_update_entry(
+        entry, options={"history_hidden_bouquets": ["Ulubione TV"]}
+    )
+    await hass.async_block_till_done()
+    assert box.find_recording(NEWS["id"]) is None
+
+
 async def test_without_the_option_a_recording_with_no_bouquet_is_shown(
     hass: HomeAssistant,
     mqtt_mock,
@@ -769,12 +793,102 @@ async def test_folder_topics_no_index_names_are_held_up_to_a_bound(
     await hass.async_block_till_done()
     assert "stale1" in box.state.recording_folders
     assert "stale2" not in box.state.recording_folders
-    # A folder already held is still updated, and a retraction is still taken.
+    # A folder already held is still updated, and displaces nothing.
     async_fire_mqtt_message(hass, folder_topic("movie"), json.dumps({"recordings": [NEWS]}))
-    async_fire_mqtt_message(hass, folder_topic("stale1"), "")
     await hass.async_block_till_done()
     assert box.state.recording_folders["movie"][0]["id"] == NEWS["id"]
+    assert "stale1" in box.state.recording_folders
+    # And a retraction is still taken.
+    async_fire_mqtt_message(hass, folder_topic("stale1"), "")
+    await hass.async_block_till_done()
     assert "stale1" not in box.state.recording_folders
+
+
+async def test_when_full_a_named_folder_displaces_a_topic_no_index_names(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    library(box_on_the_broker)
+    await _setup(hass, config_entry, box_on_the_broker)
+    box = config_entry.runtime_data
+    monkeypatch.setattr(box_module, "FOLDERS_MAX", len(box.state.recording_folders) + 2)
+    for slug in ("junk1", "junk2"):
+        async_fire_mqtt_message(hass, folder_topic(slug), json.dumps(FOLDER_SERIES))
+    await hass.async_block_till_done()
+    held = set(box.state.recording_folders)
+
+    # A retraction of a folder that is not held displaces nothing, also when it is named.
+    named = json.loads(json.dumps(INDEX))
+    named["locations"][0]["folders"].append(
+        {"slug": "newfolder", "path": "New", "count": 1, "size_mb": 1, "cut": 0}
+    )
+    async_fire_mqtt_message(hass, INDEX_TOPIC, json.dumps({**named, "read": INDEX["read"] + 1}))
+    async_fire_mqtt_message(hass, folder_topic("newfolder"), "")
+    await hass.async_block_till_done()
+    assert set(box.state.recording_folders) == held
+
+    # A folder the index names takes the place of one it does not.
+    fresh = {**NEWS, "id": "bbbb000011112222", "file": "New/x.ts"}
+    async_fire_mqtt_message(hass, folder_topic("newfolder"), json.dumps({"recordings": [fresh]}))
+    await hass.async_block_till_done()
+    assert "newfolder" in box.state.recording_folders
+    assert len(box.state.recording_folders) == len(held)
+    assert {"junk1", "junk2"} - set(box.state.recording_folders)
+    assert box.find_recording(fresh["id"]) is not None
+
+    # A topic no index names takes nobody's place, and one held named folder is never pushed out.
+    async_fire_mqtt_message(hass, folder_topic("junk3"), json.dumps(FOLDER_SERIES))
+    await hass.async_block_till_done()
+    assert "junk3" not in box.state.recording_folders
+    assert {"movie", "movie_series", "newfolder"} <= set(box.state.recording_folders)
+
+
+async def test_when_full_of_named_folders_another_named_one_is_not_taken(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Nothing the index names is pushed out, and nothing fails for want of room."""
+    library(box_on_the_broker)
+    await _setup(hass, config_entry, box_on_the_broker)
+    box = config_entry.runtime_data
+    monkeypatch.setattr(box_module, "FOLDERS_MAX", len(box.state.recording_folders))
+    held = dict(box.state.recording_folders)
+    named = json.loads(json.dumps(INDEX))
+    named["locations"][0]["folders"].append(
+        {"slug": "newfolder", "path": "New", "count": 1, "size_mb": 1, "cut": 0}
+    )
+    async_fire_mqtt_message(hass, INDEX_TOPIC, json.dumps({**named, "read": INDEX["read"] + 1}))
+    caplog.clear()
+
+    async_fire_mqtt_message(hass, folder_topic("newfolder"), json.dumps(FOLDER_SERIES))
+    await hass.async_block_till_done()
+    assert box.state.recording_folders == held
+    assert not [record for record in caplog.records if record.levelname == "ERROR"]
+
+
+async def test_when_full_a_held_folder_is_still_retracted(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    library(box_on_the_broker)
+    await _setup(hass, config_entry, box_on_the_broker)
+    box = config_entry.runtime_data
+    monkeypatch.setattr(box_module, "FOLDERS_MAX", len(box.state.recording_folders))
+
+    async_fire_mqtt_message(hass, folder_topic("movie_series"), "")
+    await hass.async_block_till_done()
+    assert "movie_series" not in box.state.recording_folders
+    assert hass.states.get(LIBRARY).state == "3"
 
 
 # ------------------------------------------------------------------- refresh
@@ -891,6 +1005,33 @@ async def test_an_index_republished_without_a_new_read_is_no_answer(
         "path": LOCATION, **{key: INDEX["locations"][0][key] for key in ("mounted", "free_mb")},
         **moved,
     }
+
+
+async def test_two_reads_in_quick_succession_each_answer_a_press(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The receiver's `read` grows with every read, also two in one second."""
+    monkeypatch.setattr(button_module, "RECORDINGS_READ_TIMEOUT", 1)
+    library(box_on_the_broker)
+    await _setup(hass, config_entry, box_on_the_broker)
+    reads = iter((INDEX["read"] + 1, INDEX["read"] + 2))
+
+    await _arm(
+        hass,
+        "recordings_refresh",
+        lambda _id, _payload: async_fire_mqtt_message(
+            hass, INDEX_TOPIC, json.dumps({**INDEX, "read": next(reads), "reason": "refresh"})
+        ),
+    )
+    for _ in range(2):
+        await hass.services.async_call(
+            "button", "press", {ATTR_ENTITY_ID: REFRESH}, blocking=True
+        )
+    assert config_entry.runtime_data.state.recordings_index["read"] == INDEX["read"] + 2
 
 
 async def test_a_replayed_index_is_not_the_answer_to_a_refresh(
@@ -1231,6 +1372,62 @@ async def test_a_recording_already_playing_is_played_again_and_proved_at_once(
         json.loads(opened_command(payload)[1])
         for payload in published_payloads(mqtt_mock, command_topic("play_recording"))
     ] == [{"id": NEWS["id"]}]
+
+
+@pytest.mark.parametrize(
+    ("timeshift", "timeout"),
+    [
+        pytest.param({"active": True, "paused": False}, 60, id="buffer"),
+        pytest.param({"active": False}, None, id="no buffer"),
+        pytest.param(None, None, id="never said"),
+    ],
+)
+async def test_only_a_running_buffer_makes_the_play_wait_a_minute(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+    timeshift: dict[str, Any] | None,
+    timeout: int | None,
+) -> None:
+    library(box_on_the_broker)
+    if timeshift is not None:
+        box_on_the_broker[TIMESHIFT_TOPIC] = json.dumps(timeshift)
+    await _setup(hass, config_entry, box_on_the_broker)
+    asked: list[tuple[str, dict[str, Any]]] = []
+
+    async def _command(self, name: str, payload: str, **kwargs: Any) -> None:
+        asked.append((name, kwargs))
+
+    monkeypatch.setattr(box_module.Enigma2Box, "async_command", _command)
+    await _play(hass, "recording", NEWS["id"])
+    ((name, kwargs),) = asked
+    assert name == "play_recording"
+    # Without a buffer the command's own wait applies: the ten seconds of a zap.
+    assert kwargs.get("timeout") == timeout
+
+
+async def test_a_delete_waits_ninety_seconds(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Longer than the receiver's own minute for the move, so its sentence comes first."""
+    deletable(box_on_the_broker)
+    await _setup(hass, config_entry, box_on_the_broker)
+    asked: list[tuple[str, dict[str, Any]]] = []
+
+    async def _command(self, name: str, payload: str, **kwargs: Any) -> None:
+        asked.append((name, kwargs))
+
+    monkeypatch.setattr(box_module.Enigma2Box, "async_command", _command)
+    await _delete(hass, NEWS["id"])
+    ((name, kwargs),) = asked
+    assert name == "delete_recording"
+    assert kwargs["timeout"] == 90
 
 
 async def test_with_timeshift_running_play_waits_for_the_viewer(
