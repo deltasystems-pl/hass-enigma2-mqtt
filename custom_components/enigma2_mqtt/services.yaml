@@ -197,3 +197,98 @@ stop_stream:
       example: "1:0:19:283D:3FB:1:C00000:0:0:0:"
       selector:
         text:
+
+show_list:
+  target:
+    entity:
+      - integration: enigma2_mqtt
+        domain: media_player
+  fields:
+    title:
+      required: true
+      example: "Doorbell"
+      selector:
+        text:
+    text:
+      example: "Someone is at the gate."
+      selector:
+        text:
+          multiline: true
+    rows:
+      required: true
+      example: '[{"id": "open", "label": "Open the gate", "key": "green", "icon": "gate"}, {"id": "ignore", "label": "Ignore", "key": "red"}]'
+      selector:
+        object:
+          multiple: true
+          label_field: label
+          description_field: id
+          translation_key: list_row
+          fields:
+            id:
+              required: true
+              selector:
+                text:
+            label:
+              required: true
+              selector:
+                text:
+            key:
+              selector:
+                select:
+                  translation_key: list_key
+                  options:
+                    - red
+                    - green
+                    - yellow
+                    - blue
+                    - "1"
+                    - "2"
+                    - "3"
+                    - "4"
+                    - "5"
+                    - "6"
+                    - "7"
+                    - "8"
+                    - "9"
+            icon:
+              selector:
+                select:
+                  translation_key: menu_icon
+                  options:
+                    - neutral
+                    - lamp
+                    - ceiling-light
+                    - blinds
+                    - scene
+                    - script
+                    - power
+                    - fan
+                    - lock
+                    - radiator
+                    - thermometer
+                    - tv
+                    - speaker
+                    - door
+                    - gate
+                    - garage
+                    - alarm
+                    - camera
+                    - sofa
+                    - bed
+                    - kitchen
+                    - garden
+                    - movie
+                    - note
+                    - home
+    timeout:
+      default: 60
+      selector:
+        number:
+          min: 5
+          max: 600
+          unit_of_measurement: s
+          mode: box
+    default:
+      example: "ignore"
+      selector:
+        text:

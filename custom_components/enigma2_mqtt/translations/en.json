@@ -603,10 +603,42 @@
       "yellow_short": "Yellow button pressed",
       "yellow_long": "Yellow button held",
       "blue_short": "Blue button pressed",
-      "blue_long": "Blue button held"
+      "blue_long": "Blue button held",
+      "list_picked": "A row of a list was picked",
+      "list_timeout": "A list timed out",
+      "list_dismissed": "A list was dismissed"
+    },
+    "extra_fields": {
+      "row": "Row id (empty: any row)"
     }
   },
   "services": {
+    "show_list": {
+      "name": "Show list of choices",
+      "description": "Puts a list of choices on the television, on top of whatever is on screen, and the viewer picks one row with the remote. Called with a response, it waits until the list is answered and returns how it ended: ending, row and label. Without one it returns as soon as the list is sent; the answer still fires the device triggers and the event enigma2_mqtt_list_answer.",
+      "fields": {
+        "title": {
+          "name": "Title",
+          "description": "The question, at most 60 characters."
+        },
+        "text": {
+          "name": "Text",
+          "description": "One or two lines under the title, at most 200 characters."
+        },
+        "rows": {
+          "name": "Rows",
+          "description": "1 to 24 rows, in the order they are shown. Each has an id (1 to 32 letters, digits or . _ : -), which is what the answer says, and a label of at most 60 characters; optionally a key - a colour key or a digit - that picks the row at once, and an icon."
+        },
+        "timeout": {
+          "name": "Timeout",
+          "description": "How long the list stays on screen, in seconds: 5 to 600. A list always has one."
+        },
+        "default": {
+          "name": "Default row",
+          "description": "The id of the row the selection starts on. When the list times out, the answer names this row."
+        }
+      }
+    },
     "stop_stream": {
       "name": "Stop stream",
       "description": "Ends one stream the receiver is serving to another device. A player that reconnects by itself opens it again: stopping a client is not blocking it.",
@@ -755,6 +787,31 @@
     }
   },
   "selector": {
+    "list_row": {
+      "fields": {
+        "id": "Row id",
+        "label": "Label",
+        "key": "Key",
+        "icon": "Icon"
+      }
+    },
+    "list_key": {
+      "options": {
+        "red": "Red",
+        "green": "Green",
+        "yellow": "Yellow",
+        "blue": "Blue",
+        "1": "1",
+        "2": "2",
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9"
+      }
+    },
     "menu_direction": {
       "options": {
         "up": "Up",
@@ -858,6 +915,27 @@
     }
   },
   "exceptions": {
+    "list_unsupported": {"message": "This receiver cannot show a list of choices. It needs a plugin release that offers one."},
+    "list_offline": {"message": "The receiver is not connected to the broker, so it cannot show a list of choices."},
+    "list_not_subscribed": {"message": "Home Assistant is not receiving this receiver's answers from the broker yet, so the list was not sent. Try again in a moment."},
+    "list_unloaded": {"message": "The receiver was removed from Home Assistant or reloaded before the list was answered."},
+    "list_refused": {"message": "The receiver did not show the list: {reason}"},
+    "list_title_blank": {"message": "The list needs a title."},
+    "list_member_not_text": {"message": "The list's {member} must be a text."},
+    "list_rows_not_list": {"message": "The rows must be a list, each row with an id and a label."},
+    "list_rows_count": {"message": "A list has {min} to {max} rows; this one has {count}."},
+    "list_row_not_mapping": {"message": "Row {row} must have an id and a label."},
+    "list_row_member_unknown": {"message": "Row {row} has {member}, which a row does not have. A row has id, label, key and icon."},
+    "list_row_member_not_text": {"message": "Row {row}: the {member} must be a text."},
+    "list_row_id_invalid": {"message": "Row {row} needs an id of 1 to {max} characters, each a letter, a digit or one of . _ : -"},
+    "list_row_id_duplicate": {"message": "Row {row} has the id {id}, which an earlier row already has."},
+    "list_row_label_blank": {"message": "Row {row} needs a label."},
+    "list_row_key_invalid": {"message": "Row {row}: the key must be red, green, yellow, blue or a digit from 1 to 9."},
+    "list_row_key_duplicate": {"message": "Row {row} has the key {key}, which an earlier row already has."},
+    "list_timeout_invalid": {"message": "The timeout must be a whole number of seconds from {min} to {max}."},
+    "list_default_unknown": {"message": "The default row must be the id of one of the list's rows."},
+    "list_too_long": {"message": "The list takes {size} bytes and the receiver reads at most {limit}. Shorten the labels or the text, or use fewer rows."},
+    "list_not_utf8": {"message": "The list holds a character that cannot be sent."},
     "menu_transparency_step": {"message": "{value} % is not a menu transparency the receiver takes: it takes 0 to 80 % in steps of 10."},
     "stream_source_unknown": {"message": "That receiver, bouquet or channel is not offered for streaming here. Open the media browser again and pick from what is there now."},
     "stream_player_browser": {"message": "The browser cannot play a receiver's transport stream. Choose a media player that decodes it itself, such as Kodi, VLC or an Android TV player."},

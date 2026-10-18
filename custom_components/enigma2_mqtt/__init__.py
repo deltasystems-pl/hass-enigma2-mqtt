@@ -24,6 +24,7 @@ from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
 
 from .box import Enigma2Box, Enigma2MqttConfigEntry, command_topic, normalise_mac
+from .choice_list import ChoiceLists
 from .const import (
     CONF_BASE_TOPIC,
     CONF_NODE_ID,
@@ -136,6 +137,9 @@ async def async_setup_entry(
     box.menu_action_handler = menu.async_action_received
     creator = MenuCreator(hass, entry, box, menu)
     box.menu_edit_handler = creator.async_edit_received
+    # The lists of choices, for the same reason: an answer the broker delivers at once is
+    # read. It publishes nothing until a list is shown, and `box.async_stop` ends its waits.
+    box.lists = ChoiceLists(hass, box)
     await box.async_start()
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

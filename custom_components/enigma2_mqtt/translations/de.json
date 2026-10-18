@@ -576,10 +576,42 @@
       "yellow_short": "Gelbe Taste gedrückt",
       "yellow_long": "Gelbe Taste gehalten",
       "blue_short": "Blaue Taste gedrückt",
-      "blue_long": "Blaue Taste gehalten"
+      "blue_long": "Blaue Taste gehalten",
+      "list_picked": "Zeile einer Liste gewählt",
+      "list_timeout": "Zeit einer Liste abgelaufen",
+      "list_dismissed": "Liste geschlossen"
+    },
+    "extra_fields": {
+      "row": "Zeilen-ID (leer: jede Zeile)"
     }
   },
   "services": {
+    "show_list": {
+      "name": "Auswahlliste anzeigen",
+      "description": "Zeigt auf dem Fernseher eine Auswahlliste über allem, was gerade zu sehen ist, und wer zuschaut, wählt mit der Fernbedienung eine Zeile. Mit Antwort aufgerufen, wartet die Aktion, bis die Liste beantwortet ist, und gibt zurück, wie sie geendet hat: ending, row und label. Ohne Antwort kehrt sie zurück, sobald die Liste gesendet ist; die Antwort löst trotzdem die Geräteauslöser und das Ereignis enigma2_mqtt_list_answer aus.",
+      "fields": {
+        "title": {
+          "name": "Titel",
+          "description": "Die Frage, höchstens 60 Zeichen."
+        },
+        "text": {
+          "name": "Text",
+          "description": "Eine oder zwei Zeilen unter dem Titel, höchstens 200 Zeichen."
+        },
+        "rows": {
+          "name": "Zeilen",
+          "description": "1 bis 24 Zeilen, in der angezeigten Reihenfolge. Jede hat eine ID (1 bis 32 Buchstaben, Ziffern oder . _ : -), die die Antwort nennt, und eine Beschriftung von höchstens 60 Zeichen; dazu optional eine Taste - eine Farbtaste oder eine Ziffer -, die die Zeile sofort wählt, und ein Symbol."
+        },
+        "timeout": {
+          "name": "Anzeigedauer",
+          "description": "Wie lange die Liste stehen bleibt, in Sekunden: 5 bis 600. Eine Liste hat immer eine."
+        },
+        "default": {
+          "name": "Standardzeile",
+          "description": "Die ID der Zeile, auf der die Auswahl beginnt. Läuft die Zeit ab, nennt die Antwort diese Zeile."
+        }
+      }
+    },
     "stop_stream": {
       "name": "Stream stoppen",
       "description": "Beendet einen Stream, den der Receiver an ein anderes Gerät sendet. Ein Player, der sich von selbst neu verbindet, öffnet ihn wieder: Einen Client zu stoppen heißt nicht, ihn zu sperren.",
@@ -728,6 +760,31 @@
     }
   },
   "selector": {
+    "list_row": {
+      "fields": {
+        "id": "Zeilen-ID",
+        "label": "Beschriftung",
+        "key": "Taste",
+        "icon": "Symbol"
+      }
+    },
+    "list_key": {
+      "options": {
+        "red": "Rot",
+        "green": "Grün",
+        "yellow": "Gelb",
+        "blue": "Blau",
+        "1": "1",
+        "2": "2",
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9"
+      }
+    },
     "menu_direction": {
       "options": {
         "up": "Nach oben",
@@ -831,6 +888,27 @@
     }
   },
   "exceptions": {
+    "list_unsupported": {"message": "Dieser Receiver kann keine Auswahlliste anzeigen. Er braucht ein Plugin-Release, das eine anbietet."},
+    "list_offline": {"message": "Der Receiver ist nicht mit dem Broker verbunden und kann daher keine Auswahlliste anzeigen."},
+    "list_not_subscribed": {"message": "Home Assistant empfängt die Antworten dieses Receivers noch nicht vom Broker, daher wurde die Liste nicht gesendet. Versuche es gleich noch einmal."},
+    "list_unloaded": {"message": "Der Receiver wurde aus Home Assistant entfernt oder neu geladen, bevor die Liste beantwortet wurde."},
+    "list_refused": {"message": "Der Receiver hat die Liste nicht angezeigt: {reason}"},
+    "list_title_blank": {"message": "Die Liste braucht einen Titel."},
+    "list_member_not_text": {"message": "Das Feld {member} der Liste muss ein Text sein."},
+    "list_rows_not_list": {"message": "Die Zeilen müssen eine Liste sein, jede Zeile mit einer ID und einer Beschriftung."},
+    "list_rows_count": {"message": "Eine Liste hat {min} bis {max} Zeilen; diese hat {count}."},
+    "list_row_not_mapping": {"message": "Zeile {row} braucht eine ID und eine Beschriftung."},
+    "list_row_member_unknown": {"message": "Zeile {row} hat das Feld {member}, das eine Zeile nicht hat. Eine Zeile hat id, label, key und icon."},
+    "list_row_member_not_text": {"message": "Zeile {row}: Das Feld {member} muss ein Text sein."},
+    "list_row_id_invalid": {"message": "Zeile {row} braucht eine ID aus 1 bis {max} Zeichen, jedes ein Buchstabe, eine Ziffer oder eines von . _ : -"},
+    "list_row_id_duplicate": {"message": "Zeile {row} hat die ID {id}, die schon eine frühere Zeile hat."},
+    "list_row_label_blank": {"message": "Zeile {row} braucht eine Beschriftung."},
+    "list_row_key_invalid": {"message": "Zeile {row}: Die Taste muss red, green, yellow, blue oder eine Ziffer von 1 bis 9 sein."},
+    "list_row_key_duplicate": {"message": "Zeile {row} hat die Taste {key}, die schon eine frühere Zeile hat."},
+    "list_timeout_invalid": {"message": "Die Anzeigedauer muss eine ganze Zahl von Sekunden zwischen {min} und {max} sein."},
+    "list_default_unknown": {"message": "Die Standardzeile muss die ID einer der Zeilen der Liste sein."},
+    "list_too_long": {"message": "Die Liste belegt {size} Bytes, und der Receiver liest höchstens {limit}. Kürze die Beschriftungen oder den Text oder nimm weniger Zeilen."},
+    "list_not_utf8": {"message": "Die Liste enthält ein Zeichen, das sich nicht senden lässt."},
     "menu_transparency_step": {"message": "Eine Menütransparenz von {value} % nimmt der Receiver nicht an: Er nimmt 0 bis 80 % in Zehnerschritten."},
     "stream_source_unknown": {"message": "Dieser Receiver, dieses Bouquet oder dieser Sender wird hier nicht zum Streamen angeboten. Öffne den Medienbrowser erneut und wähle aus dem, was jetzt dort steht."},
     "stream_player_browser": {"message": "Der Browser kann den Transportstrom eines Receivers nicht abspielen. Wähle einen Media Player, der ihn selbst dekodiert, etwa Kodi, VLC oder einen Player auf Android TV."},

@@ -576,10 +576,42 @@
       "yellow_short": "Naciśnięto żółty przycisk",
       "yellow_long": "Przytrzymano żółty przycisk",
       "blue_short": "Naciśnięto niebieski przycisk",
-      "blue_long": "Przytrzymano niebieski przycisk"
+      "blue_long": "Przytrzymano niebieski przycisk",
+      "list_picked": "Wybrano wiersz listy",
+      "list_timeout": "Minął czas listy",
+      "list_dismissed": "Widz zamknął listę"
+    },
+    "extra_fields": {
+      "row": "Identyfikator wiersza (puste: dowolny wiersz)"
     }
   },
   "services": {
+    "show_list": {
+      "name": "Pokaż listę wyboru",
+      "description": "Wyświetla na telewizorze listę wyboru, ponad tym, co jest na ekranie, a widz wybiera pilotem jeden wiersz. Wywołana z odpowiedzią czeka, aż lista zostanie rozstrzygnięta, i zwraca, jak się zakończyła: ending, row i label. Bez odpowiedzi kończy się zaraz po wysłaniu listy; odpowiedź i tak uruchamia wyzwalacze urządzenia i zdarzenie enigma2_mqtt_list_answer.",
+      "fields": {
+        "title": {
+          "name": "Tytuł",
+          "description": "Pytanie, najwyżej 60 znaków."
+        },
+        "text": {
+          "name": "Tekst",
+          "description": "Jeden lub dwa wiersze pod tytułem, najwyżej 200 znaków."
+        },
+        "rows": {
+          "name": "Wiersze",
+          "description": "Od 1 do 24 wierszy, w kolejności wyświetlania. Każdy ma identyfikator (od 1 do 32 liter, cyfr lub znaków . _ : -), który podaje odpowiedź, i etykietę do 60 znaków; opcjonalnie klawisz - kolorowy albo cyfrę - który od razu wybiera wiersz, oraz ikonę."
+        },
+        "timeout": {
+          "name": "Czas wyświetlania",
+          "description": "Jak długo lista zostaje na ekranie, w sekundach: od 5 do 600. Lista zawsze go ma."
+        },
+        "default": {
+          "name": "Wiersz domyślny",
+          "description": "Identyfikator wiersza, na którym zaczyna się zaznaczenie. Gdy czas minie, odpowiedź podaje ten wiersz."
+        }
+      }
+    },
     "stop_stream": {
       "name": "Zatrzymaj strumień",
       "description": "Kończy jeden strumień, który dekoder wysyła do innego urządzenia. Odtwarzacz, który sam łączy się ponownie, otworzy go znowu: zatrzymanie klienta nie jest jego blokadą.",
@@ -728,6 +760,31 @@
     }
   },
   "selector": {
+    "list_row": {
+      "fields": {
+        "id": "Identyfikator wiersza",
+        "label": "Etykieta",
+        "key": "Klawisz",
+        "icon": "Ikona"
+      }
+    },
+    "list_key": {
+      "options": {
+        "red": "Czerwony",
+        "green": "Zielony",
+        "yellow": "Żółty",
+        "blue": "Niebieski",
+        "1": "1",
+        "2": "2",
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9"
+      }
+    },
     "menu_direction": {
       "options": {
         "up": "W górę",
@@ -831,6 +888,27 @@
     }
   },
   "exceptions": {
+    "list_unsupported": {"message": "Ten dekoder nie potrafi wyświetlić listy wyboru. Potrzebuje wydania wtyczki, które ją oferuje."},
+    "list_offline": {"message": "Dekoder nie jest połączony z brokerem, więc nie może wyświetlić listy wyboru."},
+    "list_not_subscribed": {"message": "Home Assistant nie odbiera jeszcze z brokera odpowiedzi tego dekodera, więc listy nie wysłano. Spróbuj ponownie za chwilę."},
+    "list_unloaded": {"message": "Dekoder został usunięty z Home Assistanta lub przeładowany, zanim lista doczekała się odpowiedzi."},
+    "list_refused": {"message": "Dekoder nie wyświetlił listy: {reason}"},
+    "list_title_blank": {"message": "Lista potrzebuje tytułu."},
+    "list_member_not_text": {"message": "Pole {member} listy musi być tekstem."},
+    "list_rows_not_list": {"message": "Wiersze muszą być listą, a każdy wiersz musi mieć identyfikator i etykietę."},
+    "list_rows_count": {"message": "Lista ma od {min} do {max} wierszy, a ta ma {count}."},
+    "list_row_not_mapping": {"message": "Wiersz {row} musi mieć identyfikator i etykietę."},
+    "list_row_member_unknown": {"message": "Wiersz {row} ma pole {member}, którego wiersz nie ma. Wiersz ma pola id, label, key i icon."},
+    "list_row_member_not_text": {"message": "Wiersz {row}: pole {member} musi być tekstem."},
+    "list_row_id_invalid": {"message": "Wiersz {row} potrzebuje identyfikatora od 1 do {max} znaków, z których każdy jest literą, cyfrą lub jednym ze znaków . _ : -"},
+    "list_row_id_duplicate": {"message": "Wiersz {row} ma identyfikator {id}, który ma już wcześniejszy wiersz."},
+    "list_row_label_blank": {"message": "Wiersz {row} potrzebuje etykiety."},
+    "list_row_key_invalid": {"message": "Wiersz {row}: klawisz musi być jednym z red, green, yellow, blue albo cyfrą od 1 do 9."},
+    "list_row_key_duplicate": {"message": "Wiersz {row} ma klawisz {key}, który ma już wcześniejszy wiersz."},
+    "list_timeout_invalid": {"message": "Czas wyświetlania musi być całkowitą liczbą sekund od {min} do {max}."},
+    "list_default_unknown": {"message": "Wiersz domyślny musi być identyfikatorem jednego z wierszy listy."},
+    "list_too_long": {"message": "Lista zajmuje {size} bajtów, a dekoder czyta najwyżej {limit}. Skróć etykiety lub tekst albo użyj mniej wierszy."},
+    "list_not_utf8": {"message": "Lista zawiera znak, którego nie da się wysłać."},
     "menu_transparency_step": {"message": "Dekoder nie przyjmie przezroczystości menu {value} %: przyjmuje od 0 do 80 % co 10."},
     "stream_source_unknown": {"message": "Tego dekodera, bukietu albo kanału nie ma wśród oferowanych tu do strumieniowania. Otwórz przeglądarkę mediów ponownie i wskaż coś, co jest na niej teraz."},
     "stream_player_browser": {"message": "Przeglądarka nie odtworzy strumienia transportowego dekodera. Wybierz odtwarzacz, który sam go dekoduje, na przykład Kodi, VLC albo odtwarzacz na Android TV."},

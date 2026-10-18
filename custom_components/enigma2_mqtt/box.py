@@ -120,6 +120,7 @@ from .const import (
     TOPIC_INFO,
     TOPIC_KEY,
     TOPIC_LAST_ERROR,
+    TOPIC_LIST_ANSWER,
     TOPIC_LOCAL_ERROR,
     TOPIC_MENU_ACTION,
     TOPIC_MENU_EDIT,
@@ -148,6 +149,7 @@ from .stream_facts import (
 )
 
 if TYPE_CHECKING:
+    from .choice_list import ChoiceLists
     from .own_go2rtc import Go2rtcFollower
     from .picture import PiconResolver
 
@@ -1109,6 +1111,9 @@ class Enigma2Box:
         # Who checks and stores an edited menu from the receiver's web interface: the menu
         # creator, set when the entry is set up.
         self.menu_edit_handler: Callable[[ReceiveMessage], None] | None = None
+        # The lists of choices Home Assistant shows on this receiver, and the answers they
+        # are waited for with: set when the entry is set up, stopped with the box.
+        self.lists: ChoiceLists | None = None
         # Finds and fetches channel picons through the receiver's web interface: set
         # when the entry is set up, stopped with the box.
         self.picons: PiconResolver | None = None
@@ -1723,6 +1728,13 @@ class Enigma2Box:
         self._pending.clear()
         for question in self._questions:
             question.answer(None)
+        if self.lists is not None:
+            self.lists.async_stop()
+
+    @property
+    def subscribed(self) -> bool:
+        """Return whether the broker has confirmed the subscription to this box's topics."""
+        return self._subscribed.is_set()
 
     async def async_wait_subscribed(self, timeout: float = SUBSCRIBE_TIMEOUT) -> None:
         """Wait until the broker is actually sending this box's topics to us.
@@ -1800,6 +1812,20 @@ class Enigma2Box:
             sent_as(command_id)
         await mqtt.async_publish(
             self.hass, self.command_topic(name), wire, qos=qos, retain=False
+        )
+
+    async def async_publish_enveloped(self, name: str, wire: str) -> None:
+        """Publish a command that is already in its envelope, under an id its caller made.
+
+        For `cmd/list` (`choice_list.py`), whose answer is matched by the list's id and by
+        nothing else: it must never go out bare, the way `async_wire_payload` sends a command
+        that fits only without an envelope. So the caller builds the envelope
+        (`command_envelope`), refuses one over the limit, and waits for this box's
+        subscription before it notes the id it is about to publish. QoS 1, never retained,
+        as every command.
+        """
+        await mqtt.async_publish(
+            self.hass, self.command_topic(name), wire, qos=1, retain=False
         )
 
     async def async_command(
@@ -1991,6 +2017,9 @@ class Enigma2Box:
         elif suffix == TOPIC_MENU_EDIT:
             if self.menu_edit_handler is not None:
                 self.menu_edit_handler(msg)
+        elif suffix == TOPIC_LIST_ANSWER:
+            if self.lists is not None:
+                self.lists.async_answer_received(msg)
         elif suffix == TOPIC_UPDATE:
             self._update_received(msg)
         else:
@@ -3125,6 +3154,9 @@ class Enigma2Box:
                     else error.get("cmd") == "stream_playable"
                 ):
                     question.answer(None)
+            # A list that could not be shown is refused by its id, and by nothing else.
+            if self.lists is not None:
+                self.lists.async_refusal_received(error)
         self._async_updated(TOPIC_LAST_ERROR)
 
     # ------------------------------------------------------------ channel list
