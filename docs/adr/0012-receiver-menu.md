@@ -52,7 +52,8 @@ passed every check that needs no service call - the row, whether the last menu c
 action its control takes, its entity's availability and the value, all checked before the
 action is counted - so an action refused for any cause costs nothing, and junk on the broker
 cannot use up the second a real press needs; a key held down, or anyone on the broker, cannot
-turn the menu into a stream of service calls. A selector's value is checked against the options
+turn the menu into a stream of service calls. A toggle whose target is already met calls no
+service and is neither counted nor held (section 11). A selector's value is checked against the options
 in the words of the last menu published, which are the words the receiver shows. "Still being
 performed" depends on the control. A button - a script, a scene, an automation, a button
 entity - is fire-and-forget: its call is made without waiting for what it starts, so a script
@@ -105,7 +106,8 @@ saved, when the receiver comes back online, when the broker connection comes bac
 restarted without persistence has lost the retained menu, and the receiver then says `online`
 without having been seen offline), and when a bound entity changes: the first change at
 once and a burst after it as one publish half a second later, which keeps both "at most one every
-0.5 s" and "within 1 s of a change". A change the payload does not show publishes nothing. Eight
+0.5 s" and "within 1 s of a change". A change the payload does not show publishes nothing - except after a toggle whose target was
+already met, which publishes the unchanged menu again (section 11). Eight
 groups, 24 entries per list, labels at 60, state texts at 24, options at 24 of 60, units at 8; the
 whole payload under 64 KiB - measured with the `rev` it goes out with - dropping from the end
 with one warning per thing left out. A row left out is not on the receiver, and an action naming

@@ -361,6 +361,39 @@ async def test_a_met_intent_on_a_row_whose_call_is_in_flight_is_not_refused(
     await hass.async_block_till_done(wait_background_tasks=True)
 
 
+async def test_a_met_intent_leaves_its_row_free_for_the_next_press(
+    hass: HomeAssistant, menu_box: Any, calls: list[ServiceCall], caplog
+) -> None:
+    """Never held as the row's action in progress: a real toggle right after it is taken."""
+    fire_action(hass, "r_lamp", "toggle", seen=False, action_id="000000000001")
+    await hass.async_block_till_done(wait_background_tasks=True)
+    fire_action(hass, "r_lamp", "toggle", seen=True, action_id="000000000002")
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert "(busy" not in caplog.text
+    assert _performed(calls) == [("light", "turn_off", {"entity_id": "light.salon"})]
+
+
+async def test_a_met_intent_delivered_twice_publishes_the_menu_once(
+    hass: HomeAssistant, menu_box: Any, mqtt_mock, calls: list[ServiceCall], caplog
+) -> None:
+    """QoS 1 may deliver it again; the id says it is the same press, and it is refused."""
+    await _quiet(hass)
+    before = len(menu_publishes(mqtt_mock))
+    fire_action(hass, "r_lamp", "toggle", seen=False, action_id="000000000001")
+    await hass.async_block_till_done()
+    await _quiet(hass)
+    assert len(menu_publishes(mqtt_mock)) == before + 1
+
+    fire_action(hass, "r_lamp", "toggle", seen=False, action_id="000000000001")
+    await hass.async_block_till_done()
+    await _quiet(hass)
+
+    assert "(duplicate: 000000000001)" in caplog.text
+    assert len(menu_publishes(mqtt_mock)) == before + 1
+    assert calls == []
+
+
 async def test_a_met_intent_stamped_now_clears_the_clock_repair(
     hass: HomeAssistant, menu_box: Any, calls: list[ServiceCall]
 ) -> None:

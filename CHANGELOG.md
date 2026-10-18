@@ -35,7 +35,7 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   `turn_on` or `turn_off`, `open_cover` or `close_cover`, `lock` or `unlock` - or nothing when
   the entity is already there, publishing the menu again so the row is redrawn: an OK that
   arrives late or twice repeats what the viewer meant and never inverts it. An action without
-  `seen` toggles as before. A
+  `seen`, or with `null` (a row showing no state), toggles as before. A
   receiver whose clock is behind gets a repair, „the receiver's clock is behind", at the first
   action refused for it; the next accepted action removes it.
   A button - a script, a scene, an automation, a button entity - does not wait for what it
