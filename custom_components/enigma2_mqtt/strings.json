@@ -1,6 +1,7 @@
 {
   "title": "Enigma2 MQTT",
   "common": {
+    "media_recordings": "Recordings",
     "menu_top_level": "Top list",
     "menu_empty": "The menu is empty.",
     "menu_state_unavailable": "Unavailable",
@@ -267,7 +268,7 @@
           "check_github_releases": "On, the plugin's signed list of versions is also fetched automatically, at most once every 24 hours, one list shared by all receivers; a check downloads that list and nothing else. Off, it is fetched only when somebody presses “Check for plugin updates”.",
           "source_list_scope": "“Every bouquet on offer” puts the channels of all of them in one list, which can be very long. “The active bouquet” shows only the list the receiver itself is on, as the “Channel” select does; a receiver that publishes no active bouquet keeps the long list.",
           "player_picture": "Screenshot shows the screenshot, and the picon of the new channel only between a channel change and the next screenshot. Channel picon always shows the picon, and the screenshot only for a channel without one. Home Assistant fetches picons from the receiver's web interface (OpenWebif).",
-          "history_hidden_bouquets": "Channels of these bouquets are left out of “Recently watched”, and while anything is chosen so is a channel whose bouquet cannot be checked. This hides them in that one entity only: the other entities, the receiver's own history screen and the broker still show them, and “Recently watched (all)”, once that entity is enabled, puts the channel playing now into Home Assistant's history. With plugin 0.5.0 the same bouquets are also kept out of what Home Assistant shows about streams: a stream client on such a channel is listed without the channel, and such a channel gets no stream address and is not offered as a media source.",
+          "history_hidden_bouquets": "Channels of these bouquets are left out of “Recently watched”, and while anything is chosen so is a channel whose bouquet cannot be checked. This hides them in that one entity only: the other entities, the receiver's own history screen and the broker still show them, and “Recently watched (all)”, once that entity is enabled, puts the channel playing now into Home Assistant's history. With plugin 0.5.0 the same bouquets are also kept out of what Home Assistant shows about streams: a stream client on such a channel is listed without the channel, and such a channel gets no stream address and is not offered as a media source. Their recordings are left out of the receiver's recordings in the media browser and cannot be played or deleted from here, and a running one is shown without its title.",
           "configure_ssh": "The “Force plugin reinstall (SSH)” button appears once SSH credentials are stored. It is disabled by default; enable it on the device page.",
           "keep_ssh_credentials": "Untick to forget the stored SSH credentials. The update card then has no install path, and the “Force plugin reinstall (SSH)” button is removed."
         }
@@ -360,6 +361,7 @@
       },
       "interlaced": {"name": "Interlaced picture"},
       "volume_passthrough": {"name": "Audio passthrough"},
+      "timeshift": {"name": "Timeshift"},
       "recording_disk": {
         "name": "Recording disk"
       },
@@ -425,6 +427,7 @@
       "force_reinstall": {
         "name": "Force plugin reinstall (SSH)"
       },
+      "recordings_refresh": {"name": "Refresh recordings"},
       "clear_error": {
         "name": "Clear last error"
       }
@@ -473,6 +476,8 @@
       "active_recordings": {
         "name": "Active recordings"
       },
+      "recording_free_space": {"name": "Free recording space"},
+      "recording_library": {"name": "Recordings in library"},
       "next_timer": {
         "name": "Next timer"
       },
@@ -636,6 +641,20 @@
         "default": {
           "name": "Default row",
           "description": "The id of the row the selection starts on. When the list times out, the answer names this row."
+        }
+      }
+    },
+    "get_recordings": {
+      "name": "Get recordings",
+      "description": "Returns the receiver's recording library as Home Assistant shows it: its movie locations, their folders and each folder's recordings with their ID, file, title, description, channel, start, length and size. Recordings of the bouquets hidden from “Recently watched” are left out, and so is a folder or a location with nothing left to show. Read from what the receiver has already published; nothing wakes its disk."
+    },
+    "delete_recording": {
+      "name": "Delete recording",
+      "description": "Moves one recording into the receiver's trash. Only for a receiver whose own setting allows it: nothing is ever deleted for good, and with the receiver's trash switched off nothing is deleted at all.",
+      "fields": {
+        "id": {
+          "name": "Recording ID",
+          "description": "The recording's ID: 16 hexadecimal digits, as the receiver's library and the running recordings on “Active recordings” give it."
         }
       }
     },
@@ -936,6 +955,29 @@
     "list_default_unknown": {"message": "The default row must be the id of one of the list's rows."},
     "list_too_long": {"message": "The list takes {size} bytes and the receiver reads at most {limit}. Shorten the labels or the text, or use fewer rows."},
     "list_not_utf8": {"message": "The list holds a character that cannot be sent."},
+    "recordings_unsupported": {"message": "This receiver does not publish its recording library: its plugin is older than 0.5.0, or its image does not offer it."},
+    "play_recording_busy": {"message": "The plugin is being updated on the receiver. Try again when the update has finished."},
+    "delete_recording_busy": {"message": "The plugin is being updated on the receiver. Try again when the update has finished."},
+    "recordings_refresh_busy": {"message": "The plugin is being updated on the receiver. Try again when the update has finished."},
+    "play_recording_timeshift_kept": {"message": "The viewer chose to keep timeshift when the receiver asked, so the recording was not played."},
+    "delete_recording_in_progress": {"message": "The receiver is still moving another recording to its trash. Try again in a moment."},
+    "recording_delete_not_ready": {"message": "Deleting is allowed on the receiver and its trash is on, but the receiver does not offer it yet: its plugin has not read the recording library since it started. Try again in a moment."},
+    "recording_id_invalid": {"message": "A recording's ID is 16 hexadecimal digits."},
+    "recording_unknown": {"message": "The receiver's library does not list a recording with the ID {id}. It may have been deleted, or be one of the oldest recordings of a folder too large to list whole."},
+    "recording_play_unsupported": {"message": "This receiver cannot play a recording from Home Assistant: its plugin is older than 0.5.0, or its image does not offer it."},
+    "recording_receiver_offline": {"message": "The receiver is not connected to the broker, so nothing was sent."},
+    "recording_other_receiver": {"message": "That recording belongs to another receiver. Play it on that receiver's media player."},
+    "recording_plays_on_receiver": {"message": "A recording is played by the receiver itself, on its television. Choose the receiver's own media player to play it."},
+    "recording_delete_not_permitted": {"message": "Deleting recordings from Home Assistant is switched off on the receiver. It can only be switched on in the plugin's settings on the receiver itself."},
+    "recording_delete_trash_off": {"message": "The receiver's trash is switched off, so nothing is deleted: a recording deleted from Home Assistant only ever goes to the receiver's trash. Switch the trash on in the receiver's settings."},
+    "recording_delete_unsupported": {"message": "This receiver cannot delete a recording from Home Assistant: its plugin is older than 0.5.0, or its image has no trash."},
+    "delete_recording_in_use": {"message": "That recording is being recorded or played, and cannot be deleted now."},
+    "delete_recording_not_permitted": {"message": "Deleting recordings from Home Assistant is switched off on the receiver. It can only be switched on in the plugin's settings on the receiver itself."},
+    "delete_recording_trash_off": {"message": "The receiver's trash is switched off, so nothing is deleted: a recording deleted from Home Assistant only ever goes to the receiver's trash. Switch the trash on in the receiver's settings."},
+    "delete_recording_not_in_library": {"message": "The receiver's library does not list that recording any more."},
+    "delete_recording_file_gone": {"message": "The recording's file is no longer on the receiver."},
+    "play_recording_not_in_library": {"message": "The receiver's library does not list that recording any more."},
+    "play_recording_file_gone": {"message": "The recording's file is no longer on the receiver."},
     "menu_transparency_step": {"message": "{value} % is not a menu transparency the receiver takes: it takes 0 to 80 % in steps of 10."},
     "stream_source_unknown": {"message": "That receiver, bouquet or channel is not offered for streaming here. Open the media browser again and pick from what is there now."},
     "stream_player_browser": {"message": "The browser cannot play a receiver's transport stream. Choose a media player that decodes it itself, such as Kodi, VLC or an Android TV player."},

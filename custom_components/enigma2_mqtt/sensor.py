@@ -52,12 +52,14 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.typing import StateType
 import homeassistant.util.dt as dt_util
 
-from .box import Enigma2Box, Enigma2MqttConfigEntry, Enigma2State
+from .box import Enigma2Box, Enigma2MqttConfigEntry, Enigma2State, capabilities_of
 from .const import (
     CAPABILITY_BOUQUET_CONTEXT,
     CAPABILITY_EPG_GRID,
     CAPABILITY_EPG_IMPORT,
     CAPABILITY_PROCESS,
+    CAPABILITY_RECORDING_DETAILS,
+    CAPABILITY_RECORDINGS,
     CAPABILITY_SERVICE_CODECS,
     CAPABILITY_SOFTCAM,
     CAPABILITY_STREAM_CLIENTS,
@@ -81,6 +83,8 @@ from .const import (
     TOPIC_OSCAM,
     TOPIC_PROCESS,
     TOPIC_RECORDING,
+    TOPIC_RECORDING_FOLDERS,
+    TOPIC_RECORDINGS,
     TOPIC_SERVICE,
     TOPIC_SOFTCAM,
     TOPIC_STREAM_CLIENTS,
@@ -88,6 +92,7 @@ from .const import (
     WITHHELD_ATTRIBUTE_MAX,
 )
 from .entity import Enigma2Entity, OptionalEntities
+from .recordings import active_recordings, iso
 from .stream_facts import audio_attributes, audio_codec, audio_language, frame_rate, video_codec
 
 PARALLEL_UPDATES = 0
@@ -127,11 +132,24 @@ def _event_attributes(state: Enigma2State, which: str) -> dict[str, Any]:
     }
 
 
-def _active_recordings(state: Enigma2State) -> list[Any]:
-    """Return the recordings running right now."""
-    recording = state.recording or {}
-    active = recording.get("active")
-    return active if isinstance(active, list) else []
+def _active_count(state: Enigma2State) -> int:
+    """Return how many recordings run right now, hidden ones included."""
+    active = (state.recording or {}).get("active")
+    if not isinstance(active, list):
+        return 0
+    return sum(1 for entry in active if isinstance(entry, dict))
+
+
+def _active_recordings(box: Enigma2Box) -> list[Any]:
+    """Return the recordings running right now, with their details where the box has them.
+
+    A recording of a service the options hide is shown without what names it.
+    """
+    return active_recordings(
+        box.state.recording,
+        details=CAPABILITY_RECORDING_DETAILS in capabilities_of(box.state),
+        hidden=box.service_hidden,
+    )
 
 
 def _next_timer(state: Enigma2State) -> datetime | None:
@@ -321,6 +339,10 @@ class Enigma2SensorDescription(SensorEntityDescription):
     topics: tuple[str, ...]
     value_fn: Callable[[Enigma2State], StateType | datetime]
     attributes_fn: Callable[[Enigma2State], dict[str, Any]] | None = None
+    # For a value or attributes that need the box and not only its state: what the
+    # options hide is the box's to judge. Used instead of the two above when given.
+    box_value_fn: Callable[[Enigma2Box], StateType | datetime] | None = None
+    box_attributes_fn: Callable[[Enigma2Box], dict[str, Any]] | None = None
 
 
 SENSORS: tuple[Enigma2SensorDescription, ...] = (
@@ -350,10 +372,13 @@ SENSORS: tuple[Enigma2SensorDescription, ...] = (
     ),
     Enigma2SensorDescription(
         key="active_recordings",
-        topics=(TOPIC_RECORDING,),
+        # `info` too: whether the details are there follows its capability list, which can
+        # arrive after the recordings it describes. And the channel list, which what is
+        # hidden follows.
+        topics=(TOPIC_RECORDING, TOPIC_INFO, TOPIC_CHANNELS),
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda state: len(_active_recordings(state)),
-        attributes_fn=lambda state: {"recordings": _active_recordings(state)},
+        value_fn=_active_count,
+        box_attributes_fn=lambda box: {"recordings": _active_recordings(box)},
     ),
     Enigma2SensorDescription(
         key="next_timer",
@@ -621,6 +646,92 @@ SERVICE_CODEC_SENSORS: tuple[Enigma2SensorDescription, ...] = (
     ),
 )
 
+def _free_space(state: Enigma2State) -> int | None:
+    """Return the free space of the default movie location - the one listed first - in MiB."""
+    locations = (state.recordings_index or {}).get("locations") or []
+    return locations[0]["free_mb"] if locations else None
+
+
+def _locations(box: Enigma2Box) -> dict[str, Any]:
+    """Return each movie location's path, whether it is mounted, and its free space.
+
+    The default location, listed first, always - its free space is the state. Every other
+    only while the library shows something in it (`Enigma2Box.visible_library`), as every
+    list of the library here: a location holding only a hidden bouquet's recordings is not
+    named.
+    """
+    locations = (box.state.recordings_index or {}).get("locations")
+    if locations is None:
+        return {"locations": None}
+    shown = {id(location) for location, _folders in box.visible_library()}
+    return {
+        "locations": [
+            {
+                "path": location["path"],
+                "mounted": location["mounted"],
+                "free_mb": location["free_mb"],
+            }
+            for number, location in enumerate(locations)
+            if number == 0 or id(location) in shown
+        ]
+    }
+
+
+def _library_attributes(box: Enigma2Box) -> dict[str, Any]:
+    """Return when and why the library was read, and what the count leaves out.
+
+    Of the folders and locations the library shows (`Enigma2Box.visible_library`).
+    `left_out` is the receiver's own number of recordings it left out of those folders,
+    too large for one packet - the oldest ones, of every bouquet, since nothing here can
+    judge a recording it was not sent.
+    """
+    index = box.state.recordings_index
+    shown = box.visible_library()
+    folders = [folder for _location, location_folders in shown for folder, _ in location_folders]
+    return {
+        "left_out": None if index is None else sum(folder["cut"] or 0 for folder in folders),
+        "folder_count": None if index is None else len(folders),
+        "location_count": None if index is None else len(shown),
+        "read": iso((index or {}).get("read")),
+        "reason": (index or {}).get("reason"),
+    }
+
+
+# The recording library, from its index (`recordings`): how much room the movie locations
+# have left, and how many recordings there are. The count moves only when the receiver reads
+# its library again - a recording starts or ends, one is deleted, a location is mounted, or
+# somebody presses "Refresh recordings" - because nothing reads the disk on a timer. The free
+# space moves then too, and at the receiver's minute mount check when it has changed, which
+# reads no directory. The default location's free space, listed first, is the state; the
+# locations with something to show are in an attribute.
+RECORDINGS_SENSORS: tuple[Enigma2SensorDescription, ...] = (
+    Enigma2SensorDescription(
+        key="recording_free_space",
+        # The folder topics and the channel list as well: which locations the attribute
+        # names follows what is hidden.
+        topics=(TOPIC_RECORDINGS, TOPIC_RECORDING_FOLDERS, TOPIC_CHANNELS),
+        device_class=SensorDeviceClass.DATA_SIZE,
+        native_unit_of_measurement=UnitOfInformation.MEBIBYTES,
+        suggested_unit_of_measurement=UnitOfInformation.GIBIBYTES,
+        suggested_display_precision=1,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=_free_space,
+        box_attributes_fn=_locations,
+    ),
+    # How many recordings the library shows: those of every folder's topic that the
+    # options do not hide. The folder topics and the channel list move it, as well as the
+    # index.
+    Enigma2SensorDescription(
+        key="recording_library",
+        topics=(TOPIC_RECORDINGS, TOPIC_RECORDING_FOLDERS, TOPIC_CHANNELS),
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda _state: None,
+        box_value_fn=lambda box: box.visible_recording_count(),
+        box_attributes_fn=_library_attributes,
+    ),
+)
+
 KEY_EPG_ACTIVE_BOUQUET = "epg_active_bouquet"
 KEY_STREAM_CLIENTS = "stream_clients"
 
@@ -756,6 +867,21 @@ async def async_setup_entry(
         ).start()
     )
 
+    library = {description.key: description for description in RECORDINGS_SENSORS}
+    entry.async_on_unload(
+        OptionalEntities(
+            hass,
+            box,
+            "sensor",
+            list(library),
+            lambda key: Enigma2Sensor(box, library[key]),
+            lambda: CAPABILITY_RECORDINGS in box.capabilities,
+            # Never removed, for the reason the softcam sensor above gives.
+            lambda: False,
+            async_add_entities,
+        ).start()
+    )
+
     withheld = {description.key: description for description in WITHHELD_SENSORS}
     # Whether this receiver has had the sensor before. Read once: the registry entry is
     # made by the first creation and nothing here ever removes it.
@@ -820,8 +946,9 @@ class Enigma2Sensor(Enigma2Entity, SensorEntity):
 
     # A plot summary and a list of running recordings are kilobytes that change every
     # quarter of an hour. The state is worth recording; these are not. Nor is the list
-    # of a service's audio tracks, rewritten whenever another one is picked.
-    _unrecorded_attributes = frozenset({"long", "recordings", "audio_tracks"})
+    # of a service's audio tracks, rewritten whenever another one is picked, nor the list
+    # of movie locations beside the free space.
+    _unrecorded_attributes = frozenset({"long", "recordings", "audio_tracks", "locations"})
 
     def __init__(self, box: Enigma2Box, description: Enigma2SensorDescription) -> None:
         """Set up the sensor from its description."""
@@ -832,8 +959,14 @@ class Enigma2Sensor(Enigma2Entity, SensorEntity):
     def _async_read_state(self) -> None:
         """Read the value, and the attributes that explain it."""
         description = self.entity_description
-        self._attr_native_value = description.value_fn(self.box.state)
-        if description.attributes_fn is not None:
+        self._attr_native_value = (
+            description.box_value_fn(self.box)
+            if description.box_value_fn is not None
+            else description.value_fn(self.box.state)
+        )
+        if description.box_attributes_fn is not None:
+            self._attr_extra_state_attributes = description.box_attributes_fn(self.box)
+        elif description.attributes_fn is not None:
             self._attr_extra_state_attributes = description.attributes_fn(self.box.state)
 
 

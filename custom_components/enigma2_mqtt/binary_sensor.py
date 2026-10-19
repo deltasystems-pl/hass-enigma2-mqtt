@@ -5,6 +5,10 @@ what an automation should read before it does anything that would interrupt a
 recording. „Dysk nagrań" exists because a recording disk that silently unmounts is a
 receiver that records nothing and says nothing - which is the whole reason the plugin
 publishes `hdd` at all.
+
+"Timeshift" is on while the receiver keeps a timeshift buffer, from a plugin that claims
+the capability; whether it is paused, whether the picture comes from the buffer and since
+when the buffer runs are its attributes.
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from .box import Enigma2Box, Enigma2MqttConfigEntry, Enigma2State
 from .const import (
     CAPABILITY_SERVICE_CODECS,
+    CAPABILITY_TIMESHIFT,
     CAPABILITY_VOLUME_PASSTHROUGH,
     CONF_CAM_TELEMETRY,
     CONF_OSCAM_TELEMETRY,
@@ -33,9 +38,11 @@ from .const import (
     TOPIC_OSCAM,
     TOPIC_RECORDING,
     TOPIC_SERVICE,
+    TOPIC_TIMESHIFT,
     TOPIC_VOLUME,
 )
 from .entity import Enigma2Entity, OptionalEntities
+from .recordings import iso
 from .stream_facts import interlaced, volume_passthrough
 
 PARALLEL_UPDATES = 0
@@ -149,6 +156,23 @@ VOLUME_BINARY_SENSORS: tuple[Enigma2BinarySensorDescription, ...] = (
 )
 
 
+# On while a timeshift buffer runs. A receiver that keeps none says `false`, and the three
+# attributes are then empty: a buffer that is not running is neither paused, nor played
+# from, nor started.
+TIMESHIFT_BINARY_SENSORS: tuple[Enigma2BinarySensorDescription, ...] = (
+    Enigma2BinarySensorDescription(
+        key="timeshift",
+        topics=(TOPIC_TIMESHIFT,),
+        value_fn=lambda state: (state.timeshift or {}).get("active"),
+        attributes_fn=lambda state: {
+            "paused": (state.timeshift or {}).get("paused"),
+            "behind": (state.timeshift or {}).get("behind"),
+            "since": iso((state.timeshift or {}).get("since")),
+        },
+    ),
+)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: Enigma2MqttConfigEntry,
@@ -198,6 +222,21 @@ async def async_setup_entry(
             lambda: CAPABILITY_SERVICE_CODECS in box.capabilities,
             # Never removed: a capability that goes quiet is an older plugin or a
             # receiver that has not answered yet, not a decision.
+            lambda: False,
+            async_add_entities,
+        ).start()
+    )
+
+    timeshift = {description.key: description for description in TIMESHIFT_BINARY_SENSORS}
+    entry.async_on_unload(
+        OptionalEntities(
+            hass,
+            box,
+            "binary_sensor",
+            list(timeshift),
+            lambda key: Enigma2BinarySensor(box, timeshift[key]),
+            lambda: CAPABILITY_TIMESHIFT in box.capabilities,
+            # Never removed, for the same reason as the codec sensor above.
             lambda: False,
             async_add_entities,
         ).start()

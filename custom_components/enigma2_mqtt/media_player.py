@@ -58,9 +58,11 @@ from .const import (
     ATTR_STREAM_NAME,
     ATTR_STREAM_URL,
     ATTR_VOLUME_PASSTHROUGH,
+    CAPABILITY_RECORDINGS,
     CAPABILITY_STREAM,
     CAPABILITY_VOLUME_PASSTHROUGH,
     DOMAIN,
+    MEDIA_TYPE_RECORDING,
     TOPIC_BOUQUET,
     TOPIC_CHANNELS,
     TOPIC_EPG,
@@ -73,7 +75,12 @@ from .const import (
 )
 from .entity import Enigma2Entity
 from .picture import PendingPicon, Picture, PlayerPicture, player_picture_mode
-from .services import Enigma2Actions, async_select_bouquet, async_setup_services
+from .services import (
+    Enigma2Actions,
+    async_play_recording,
+    async_select_bouquet,
+    async_setup_services,
+)
 from .stream_facts import stream_name, volume_passthrough
 
 PARALLEL_UPDATES = 0
@@ -321,7 +328,29 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
     async def async_play_media(
         self, media_type: MediaType | str, media_id: str, **kwargs: Any
     ) -> None:
-        """Zap to a service reference, or to a channel name."""
+        """Zap to a service reference or a channel name, or play one of the recordings.
+
+        A recording is named by its id with the `recording` type, or by the media source
+        id the media browser hands over; either way it is played by the receiver, on the
+        television, and nothing is resolved to an address.
+        """
+        # Imported here: the media source imports this module for the picons.
+        from .media_source import (  # noqa: PLC0415
+            KIND_RECORDING,
+            parse_media_id,
+            recording_id_from_media,
+        )
+
+        parsed = parse_media_id(media_id)
+        if media_type == MEDIA_TYPE_RECORDING or (
+            parsed is not None and parsed[1] == KIND_RECORDING
+        ):
+            if parsed is not None and parsed[0] != self.box.node_id:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN, translation_key="recording_other_receiver"
+                )
+            await async_play_recording(self.box, recording_id_from_media(media_id))
+            return
         if media_type in (MediaType.CHANNEL, MediaType.CHANNELS):
             await self.box.async_publish_cmd("zap", media_id)
             return
@@ -349,9 +378,31 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
         media_content_type: MediaType | str | None = None,
         media_content_id: str | None = None,
     ) -> BrowseMedia:
-        """Walk the bouquets the box published, then the channels in one of them."""
+        """Walk the bouquets the box published, then the channels in one of them.
+
+        Beside the bouquets, for a receiver that claims `recordings`, is its recording
+        library: the media source's branch for it, which only this player offers.
+        """
+        # Imported here: the media source imports this module for the picons.
+        from .media_source import (  # noqa: PLC0415
+            KIND_RECORDING,
+            async_recordings_title,
+            browse_recordings,
+            parse_media_id,
+            recordings_entry,
+        )
+
+        if media_content_id and (parsed := parse_media_id(media_content_id)) is not None:
+            node_id, kind, reference = parsed
+            if node_id != self.box.node_id or kind is None or kind == KIND_RECORDING:
+                raise BrowseError(f"Unknown media {media_content_id}")
+            return browse_recordings(
+                self.box, kind, reference, await async_recordings_title(self.hass)
+            )
+
         bouquets = self.box.bouquets
-        if not bouquets:
+        library = CAPABILITY_RECORDINGS in self.box.capabilities
+        if not bouquets and not library:
             raise BrowseError(
                 "This receiver has not published its channel list yet. Check that the "
                 "plugin is running and that at least one bouquet is selected on its "
@@ -373,15 +424,22 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
             can_expand=True,
             children_media_class=MediaClass.DIRECTORY,
             children=[
-                BrowseMedia(
-                    media_class=MediaClass.DIRECTORY,
-                    media_content_id=f"{BROWSE_BOUQUET_PREFIX}{bouquet.get('sref', '')}",
-                    media_content_type=MEDIA_TYPE_BOUQUET,
-                    title=bouquet.get("name") or "",
-                    can_play="bouquet_context" in self.box.capabilities,
-                    can_expand=True,
-                )
-                for bouquet in bouquets
+                *(
+                    [recordings_entry(self.box, await async_recordings_title(self.hass))]
+                    if library
+                    else []
+                ),
+                *(
+                    BrowseMedia(
+                        media_class=MediaClass.DIRECTORY,
+                        media_content_id=f"{BROWSE_BOUQUET_PREFIX}{bouquet.get('sref', '')}",
+                        media_content_type=MEDIA_TYPE_BOUQUET,
+                        title=bouquet.get("name") or "",
+                        can_play="bouquet_context" in self.box.capabilities,
+                        can_expand=True,
+                    )
+                    for bouquet in bouquets
+                ),
             ],
         )
 

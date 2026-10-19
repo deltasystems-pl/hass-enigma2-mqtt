@@ -1,6 +1,7 @@
 {
   "title": "Enigma2 MQTT",
   "common": {
+    "media_recordings": "Aufnahmen",
     "menu_top_level": "Hauptliste",
     "menu_empty": "Das Menü ist leer.",
     "menu_state_unavailable": "Nicht verfügbar",
@@ -240,7 +241,7 @@
           "check_github_releases": "Eingeschaltet wird die signierte Versionsliste des Plugins zusätzlich selbsttätig geholt, höchstens einmal alle 24 Stunden, eine für alle Receiver; eine Prüfung lädt diese Liste und sonst nichts. Ausgeschaltet wird sie nur geholt, wenn jemand „Nach Plugin-Updates suchen“ drückt.",
           "source_list_scope": "„Alle angebotenen Bouquets“ legt die Sender aller Bouquets in eine Liste, die sehr lang werden kann. „Das aktive Bouquet“ zeigt nur die Liste, auf der der Receiver selbst steht, wie die Auswahl „Kanal“; ein Receiver, der kein aktives Bouquet veröffentlicht, behält die lange Liste.",
           "player_picture": "Bildschirmfoto zeigt das Bildschirmfoto und das Picon des neuen Senders nur zwischen einem Senderwechsel und dem nächsten Bildschirmfoto. Sender-Picon zeigt immer das Picon und das Bildschirmfoto nur bei einem Sender ohne Picon. Home Assistant holt die Picons von der Weboberfläche des Receivers (OpenWebif).",
-          "history_hidden_bouquets": "Sender dieser Bouquets erscheinen nicht in „Zuletzt gesehen“, und solange hier etwas gewählt ist, wird auch ein Sender ausgelassen, dessen Bouquet sich nicht prüfen lässt. Das blendet sie nur in dieser einen Entität aus: Die anderen Entitäten, der Verlaufsbildschirm des Receivers und der Broker zeigen sie weiter, und „Zuletzt gesehen (alle)“ schreibt, sobald diese Entität aktiviert ist, den laufenden Sender in den Verlauf von Home Assistant. Mit Plugin 0.5.0 bleiben dieselben Bouquets auch aus dem heraus, was Home Assistant über Streams zeigt: Ein Stream-Client auf einem solchen Sender wird ohne den Sender aufgeführt, und ein solcher Sender bekommt keine Stream-Adresse und wird nicht als Medienquelle angeboten.",
+          "history_hidden_bouquets": "Sender dieser Bouquets erscheinen nicht in „Zuletzt gesehen“, und solange hier etwas gewählt ist, wird auch ein Sender ausgelassen, dessen Bouquet sich nicht prüfen lässt. Das blendet sie nur in dieser einen Entität aus: Die anderen Entitäten, der Verlaufsbildschirm des Receivers und der Broker zeigen sie weiter, und „Zuletzt gesehen (alle)“ schreibt, sobald diese Entität aktiviert ist, den laufenden Sender in den Verlauf von Home Assistant. Mit Plugin 0.5.0 bleiben dieselben Bouquets auch aus dem heraus, was Home Assistant über Streams zeigt: Ein Stream-Client auf einem solchen Sender wird ohne den Sender aufgeführt, und ein solcher Sender bekommt keine Stream-Adresse und wird nicht als Medienquelle angeboten. Aufnahmen dieser Sender fehlen in den Aufnahmen des Receivers im Medienbrowser und lassen sich von hier weder abspielen noch löschen, und eine laufende Aufnahme wird ohne ihren Titel gezeigt.",
           "configure_ssh": "Die Schaltfläche „Plugin-Neuinstallation erzwingen (SSH)“ erscheint, sobald SSH-Zugangsdaten gespeichert sind. Sie ist standardmäßig deaktiviert; aktiviere sie auf der Geräteseite.",
           "keep_ssh_credentials": "Abwählen, um die gespeicherten SSH-Zugangsdaten zu vergessen. Die Update-Karte kann dann nicht mehr installieren, und die Schaltfläche „Plugin-Neuinstallation erzwingen (SSH)“ wird entfernt."
         }
@@ -333,6 +334,7 @@
       },
       "interlaced": {"name": "Bild im Zeilensprung"},
       "volume_passthrough": {"name": "Audio-Passthrough"},
+      "timeshift": {"name": "Timeshift"},
       "recording_disk": {
         "name": "Aufnahmefestplatte"
       },
@@ -398,6 +400,7 @@
       "force_reinstall": {
         "name": "Plugin-Neuinstallation erzwingen (SSH)"
       },
+      "recordings_refresh": {"name": "Aufnahmen neu einlesen"},
       "clear_error": {
         "name": "Letzten Fehler löschen"
       }
@@ -446,6 +449,8 @@
       "active_recordings": {
         "name": "Laufende Aufnahmen"
       },
+      "recording_free_space": {"name": "Freier Speicher für Aufnahmen"},
+      "recording_library": {"name": "Aufnahmen in der Bibliothek"},
       "next_timer": {
         "name": "Nächster Timer"
       },
@@ -609,6 +614,20 @@
         "default": {
           "name": "Standardzeile",
           "description": "Die ID der Zeile, auf der die Auswahl beginnt. Läuft die Zeit ab, nennt die Antwort diese Zeile."
+        }
+      }
+    },
+    "get_recordings": {
+      "name": "Aufnahmen abrufen",
+      "description": "Gibt die Aufnahmebibliothek des Receivers so zurück, wie Home Assistant sie zeigt: seine Aufnahmeorte, deren Ordner und die Aufnahmen jedes Ordners mit ID, Datei, Titel, Beschreibung, Sender, Beginn, Länge und Größe. Aufnahmen der in „Zuletzt gesehen“ ausgeblendeten Bouquets fehlen, ebenso ein Ordner oder ein Aufnahmeort, in dem nichts zu zeigen bleibt. Gelesen aus dem, was der Receiver schon veröffentlicht hat; nichts weckt seine Festplatte."
+    },
+    "delete_recording": {
+      "name": "Aufnahme löschen",
+      "description": "Verschiebt eine Aufnahme in den Papierkorb des Receivers. Nur bei einem Receiver, dessen eigene Einstellung es erlaubt: Nichts wird endgültig gelöscht, und bei ausgeschaltetem Papierkorb des Receivers wird gar nichts gelöscht.",
+      "fields": {
+        "id": {
+          "name": "Aufnahme-ID",
+          "description": "Die ID der Aufnahme: 16 Hexadezimalziffern, wie die Bibliothek des Receivers und die laufenden Aufnahmen in „Laufende Aufnahmen“ sie angeben."
         }
       }
     },
@@ -909,6 +928,29 @@
     "list_default_unknown": {"message": "Die Standardzeile muss die ID einer der Zeilen der Liste sein."},
     "list_too_long": {"message": "Die Liste belegt {size} Bytes, und der Receiver liest höchstens {limit}. Kürze die Beschriftungen oder den Text oder nimm weniger Zeilen."},
     "list_not_utf8": {"message": "Die Liste enthält ein Zeichen, das sich nicht senden lässt."},
+    "recordings_unsupported": {"message": "Dieser Receiver veröffentlicht seine Aufnahmebibliothek nicht: Sein Plugin ist älter als 0.5.0, oder sein Image bietet es nicht an."},
+    "play_recording_busy": {"message": "Das Plugin wird gerade auf dem Receiver aktualisiert. Versuche es erneut, wenn das Update fertig ist."},
+    "delete_recording_busy": {"message": "Das Plugin wird gerade auf dem Receiver aktualisiert. Versuche es erneut, wenn das Update fertig ist."},
+    "recordings_refresh_busy": {"message": "Das Plugin wird gerade auf dem Receiver aktualisiert. Versuche es erneut, wenn das Update fertig ist."},
+    "play_recording_timeshift_kept": {"message": "Der Zuschauer hat Timeshift behalten, als der Receiver gefragt hat, daher wurde die Aufnahme nicht abgespielt."},
+    "delete_recording_in_progress": {"message": "Der Receiver verschiebt gerade noch eine andere Aufnahme in den Papierkorb. Versuche es gleich noch einmal."},
+    "recording_delete_not_ready": {"message": "Löschen ist auf dem Receiver erlaubt und sein Papierkorb ist eingeschaltet, aber der Receiver bietet es noch nicht an: Sein Plugin hat die Aufnahmebibliothek seit dem Start noch nicht gelesen. Versuche es gleich noch einmal."},
+    "recording_id_invalid": {"message": "Die ID einer Aufnahme besteht aus 16 Hexadezimalziffern."},
+    "recording_unknown": {"message": "Die Bibliothek des Receivers führt keine Aufnahme mit der ID {id}. Sie wurde vielleicht gelöscht oder gehört zu den ältesten Aufnahmen eines Ordners, der zu groß ist, um ganz aufgeführt zu werden."},
+    "recording_play_unsupported": {"message": "Dieser Receiver kann keine Aufnahme aus Home Assistant abspielen: Sein Plugin ist älter als 0.5.0, oder sein Image bietet es nicht an."},
+    "recording_receiver_offline": {"message": "Der Receiver ist nicht mit dem Broker verbunden, daher wurde nichts gesendet."},
+    "recording_other_receiver": {"message": "Diese Aufnahme gehört zu einem anderen Receiver. Spiele sie im Mediaplayer dieses Receivers ab."},
+    "recording_plays_on_receiver": {"message": "Eine Aufnahme spielt der Receiver selbst ab, auf seinem Fernseher. Wähle dafür den Mediaplayer des Receivers."},
+    "recording_delete_not_permitted": {"message": "Das Löschen von Aufnahmen aus Home Assistant ist auf dem Receiver ausgeschaltet. Es lässt sich nur in den Plugin-Einstellungen auf dem Receiver selbst einschalten."},
+    "recording_delete_trash_off": {"message": "Der Papierkorb des Receivers ist ausgeschaltet, daher wird nichts gelöscht: Eine aus Home Assistant gelöschte Aufnahme landet immer nur im Papierkorb des Receivers. Schalte den Papierkorb in den Einstellungen des Receivers ein."},
+    "recording_delete_unsupported": {"message": "Dieser Receiver kann keine Aufnahme aus Home Assistant löschen: Sein Plugin ist älter als 0.5.0, oder sein Image hat keinen Papierkorb."},
+    "delete_recording_in_use": {"message": "Diese Aufnahme wird gerade aufgenommen oder abgespielt und kann jetzt nicht gelöscht werden."},
+    "delete_recording_not_permitted": {"message": "Das Löschen von Aufnahmen aus Home Assistant ist auf dem Receiver ausgeschaltet. Es lässt sich nur in den Plugin-Einstellungen auf dem Receiver selbst einschalten."},
+    "delete_recording_trash_off": {"message": "Der Papierkorb des Receivers ist ausgeschaltet, daher wird nichts gelöscht: Eine aus Home Assistant gelöschte Aufnahme landet immer nur im Papierkorb des Receivers. Schalte den Papierkorb in den Einstellungen des Receivers ein."},
+    "delete_recording_not_in_library": {"message": "Die Bibliothek des Receivers führt diese Aufnahme nicht mehr."},
+    "delete_recording_file_gone": {"message": "Die Datei dieser Aufnahme ist nicht mehr auf dem Receiver."},
+    "play_recording_not_in_library": {"message": "Die Bibliothek des Receivers führt diese Aufnahme nicht mehr."},
+    "play_recording_file_gone": {"message": "Die Datei dieser Aufnahme ist nicht mehr auf dem Receiver."},
     "menu_transparency_step": {"message": "Eine Menütransparenz von {value} % nimmt der Receiver nicht an: Er nimmt 0 bis 80 % in Zehnerschritten."},
     "stream_source_unknown": {"message": "Dieser Receiver, dieses Bouquet oder dieser Sender wird hier nicht zum Streamen angeboten. Öffne den Medienbrowser erneut und wähle aus dem, was jetzt dort steht."},
     "stream_player_browser": {"message": "Der Browser kann den Transportstrom eines Receivers nicht abspielen. Wähle einen Media Player, der ihn selbst dekodiert, etwa Kodi, VLC oder einen Player auf Android TV."},

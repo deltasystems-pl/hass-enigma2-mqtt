@@ -84,6 +84,7 @@ from .const import (
     ATTR_WAKE_ON_LAN,
     CAPABILITY_EPG_IMPORT,
     CAPABILITY_HISTORY_CLEAR,
+    CAPABILITY_RECORDINGS,
     CAPABILITY_SOFTCAM,
     CLEAR_ERROR_SINCE,
     CONF_BASE_TOPIC,
@@ -93,9 +94,12 @@ from .const import (
     DOMAIN,
     HISTORY_CLEAR_FAILURES,
     HISTORY_CLEAR_REASONS,
+    RECORDINGS_READ_TIMEOUT,
+    RECORDINGS_REFRESH_REASONS,
     SIGNAL_FORCE_REINSTALL,
     TOPIC_EPG_IMPORT,
     TOPIC_LAST_ERROR,
+    TOPIC_RECORDINGS,
     TOPIC_SCREEN,
     TOPIC_ZAP_HISTORY,
     WAKE_ON_LAN_NOT_SUPPORTED,
@@ -284,6 +288,38 @@ async def _async_clear_error(box: Enigma2Box) -> None:
     box.async_clear_error_record()
 
 
+async def _async_recordings_refresh(box: Enigma2Box) -> None:
+    """Ask the receiver to read its recording library now, and wait for the new index.
+
+    The proof is an index that arrived **after** the press, is not the broker's replay, and
+    says a read later than the one held before the press. The receiver also publishes the
+    index again when free space moves, with `read` as it was, and that is no answer: a read
+    is told by its `read`. A refresh asked for while a read is already running is answered
+    by that read. The wait is longer than a command's: this is the one press that may spin a
+    sleeping disk up before the directories can be read.
+    """
+    before = box.updates.get(TOPIC_RECORDINGS, 0)
+    read_before = (box.state.recordings_index or {}).get("read")
+
+    def read_again() -> bool:
+        index = box.state.recordings_index
+        return (
+            box.updates.get(TOPIC_RECORDINGS, 0) > before
+            and not box.state.recordings_index_retained
+            and index is not None
+            and index["read"] is not None
+            and index["read"] != read_before
+        )
+
+    await box.async_command(
+        "recordings_refresh",
+        PRESS,
+        effect=read_again,
+        timeout=RECORDINGS_READ_TIMEOUT,
+        reasons=RECORDINGS_REFRESH_REASONS,
+    )
+
+
 @dataclass(frozen=True, kw_only=True)
 class Enigma2ButtonDescription(ButtonEntityDescription):
     """A button, and what pressing it does."""
@@ -409,6 +445,18 @@ CLEAR_ERROR_BUTTON = Enigma2ButtonDescription(
 )
 
 
+# "Refresh recordings": the receiver reads its recording library again now. It reads it at
+# its own start and after every event that changes it - a recording starting or ending, a
+# delete, a movie location mounted or unmounted - and never on a timer, so a recording copied
+# onto the disk by other means is listed after this press. A configuration entity, because
+# it may wake a sleeping disk and is not something a dashboard needs.
+RECORDINGS_REFRESH_BUTTON = Enigma2ButtonDescription(
+    key="recordings_refresh",
+    entity_category=EntityCategory.CONFIG,
+    press_fn=_async_recordings_refresh,
+)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: Enigma2MqttConfigEntry,
@@ -451,6 +499,7 @@ async def async_setup_entry(
             EPG_IMPORT_BUTTON,
             HISTORY_CLEAR_BUTTON,
             CLEAR_ERROR_BUTTON,
+            RECORDINGS_REFRESH_BUTTON,
         )
     }
 
@@ -598,6 +647,20 @@ async def async_setup_entry(
             lambda: box.plugin_at_least(CLEAR_ERROR_SINCE) is True,
             # Never removed. A receiver taken back to an older plugin keeps the entity,
             # as it keeps every other one, and the button is unavailable there instead.
+            lambda: False,
+            async_add_entities,
+        ).start()
+    )
+
+    entry.async_on_unload(
+        OptionalEntities(
+            hass,
+            box,
+            "button",
+            [RECORDINGS_REFRESH_BUTTON.key],
+            factory,
+            lambda: CAPABILITY_RECORDINGS in box.capabilities,
+            # Never removed, for the reason the history button above gives.
             lambda: False,
             async_add_entities,
         ).start()

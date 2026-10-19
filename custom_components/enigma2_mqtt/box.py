@@ -49,6 +49,7 @@ from .const import (
     ATTR_PRESS,
     CAPABILITY_CHANNEL_TOPICS,
     CAPABILITY_COMMAND_ID,
+    CAPABILITY_RECORDING_DELETE,
     CAPABILITY_SELF_UPDATE,
     CAPABILITY_STREAM,
     CAPABILITY_STREAM_STOP,
@@ -67,6 +68,7 @@ from .const import (
     CONF_NAME,
     CONF_NODE_ID,
     CONF_RECEIVER_HOST,
+    CONF_RECORDING_DELETE_ALLOWED,
     CONF_SCREENSHOT,
     CONF_SOFTCAM_RESTART_ALLOWED,
     CONF_SOURCE_LIST_SCOPE,
@@ -83,6 +85,7 @@ from .const import (
     ERROR_TEXT_MAX,
     EVENT_KEY,
     INFO_NOT_PUBLISHED,
+    INFO_RECORDING_TRASH,
     INFO_WOL,
     KEY_PREFIX,
     MANUFACTURERS,
@@ -128,6 +131,8 @@ from .const import (
     TOPIC_POWER,
     TOPIC_PROCESS,
     TOPIC_RECORDING,
+    TOPIC_RECORDING_FOLDERS,
+    TOPIC_RECORDINGS,
     TOPIC_RELAY_REQUEST,
     TOPIC_SCREEN,
     TOPIC_SERVICE,
@@ -136,10 +141,18 @@ from .const import (
     TOPIC_STREAM_CLIENTS,
     TOPIC_STREAM_PLAYABLE,
     TOPIC_TIMERS,
+    TOPIC_TIMESHIFT,
     TOPIC_TUNER,
     TOPIC_UPDATE,
     TOPIC_VOLUME,
     TOPIC_ZAP_HISTORY,
+)
+from .recordings import (
+    FOLDERS_MAX,
+    normalise_folder,
+    normalise_index,
+    normalise_timeshift,
+    visible,
 )
 from .stream_facts import (
     build_stream_url,
@@ -253,6 +266,16 @@ PROCESS_BOUNDS: Final[dict[str, int]] = {
 }
 
 type Enigma2MqttConfigEntry = ConfigEntry[Enigma2Box]
+
+
+def capabilities_of(state: Enigma2State) -> list[str]:
+    """Return the capabilities a box's state names: from `info`, or from the announcement.
+
+    `Enigma2Box.capabilities`, for a reader that is handed the state and not the box.
+    """
+    source = state.info or state.announcement
+    capabilities = source.get("capabilities")
+    return list(capabilities) if isinstance(capabilities, list) else []
 
 
 def state_topic(base_topic: str, node_id: str, suffix: str) -> str:
@@ -1052,6 +1075,18 @@ class Enigma2State:
     screen: bytes | None = None
     screen_updated: datetime | None = None
     epg_grid: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # The timeshift state, normalised (`recordings.normalise_timeshift`). None until the
+    # topic arrives, and again after a retraction.
+    timeshift: dict[str, Any] | None = None
+    # The recording library: the `recordings` index, normalised (`recordings.normalise_index`),
+    # and each folder's `recordings/<slug>` by slug (`recordings.normalise_folder`). A folder
+    # topic is kept as it arrives, whatever the index says so far - the two arrive in no
+    # order - and read only for a folder the index names.
+    recordings_index: dict[str, Any] | None = None
+    # Whether the last index arrived retained: the broker's replay of an earlier read,
+    # which is never the answer to a refresh just asked for.
+    recordings_index_retained: bool = False
+    recording_folders: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
 
 class Enigma2Box:
@@ -1142,6 +1177,11 @@ class Enigma2Box:
         # When the broker's answer to that request arrived, to know the same delivery
         # again should the wildcard subscription be handed it too.
         self._refetch_answered: float | None = None
+        # The library as Home Assistant shows it, the key it was built for, and its
+        # recordings by id (`visible_library`). Rebuilt only when what it is judged by moved.
+        self._library_key: tuple[Any, ...] | None = None
+        self._library: list[Any] = []
+        self._library_ids: dict[str, tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = {}
 
     # ------------------------------------------------------------------ properties
 
@@ -1158,9 +1198,7 @@ class Enigma2Box:
     @property
     def capabilities(self) -> list[str]:
         """Return the feature areas the plugin managed to hook on this image."""
-        source = self.state.info or self.state.announcement
-        capabilities = source.get("capabilities")
-        return list(capabilities) if isinstance(capabilities, list) else []
+        return capabilities_of(self.state)
 
     @property
     def capabilities_declared(self) -> bool:
@@ -1983,6 +2021,12 @@ class Enigma2Box:
             self._stream_clients_received(msg)
         elif suffix.startswith(f"{TOPIC_EPG_GRID}/"):
             self._epg_grid_received(suffix[len(TOPIC_EPG_GRID) + 1 :], msg.payload)
+        elif suffix == TOPIC_TIMESHIFT:
+            self._timeshift_received(msg)
+        elif suffix == TOPIC_RECORDINGS:
+            self._recordings_index_received(msg)
+        elif suffix.startswith(f"{TOPIC_RECORDINGS}/"):
+            self._recording_folder_received(suffix[len(TOPIC_RECORDINGS) + 1 :], msg)
         elif suffix == TOPIC_CHANNELS:
             self._channels_received(msg)
         elif suffix.startswith(f"{TOPIC_CHANNELS}/"):
@@ -3158,6 +3202,197 @@ class Enigma2Box:
             if self.lists is not None:
                 self.lists.async_refusal_received(error)
         self._async_updated(TOPIC_LAST_ERROR)
+
+    # --------------------------------------------------------------- recordings
+
+    @callback
+    def _timeshift_received(self, msg: ReceiveMessage) -> None:
+        """Track the timeshift state: a retraction clears it, a payload not JSON is ignored."""
+        if _retracted(msg.payload):
+            self.state.timeshift = None
+        elif (payload := parse_json_payload(msg.payload)) is None:
+            return
+        else:
+            self.state.timeshift = normalise_timeshift(payload)
+        self._async_updated(TOPIC_TIMESHIFT)
+
+    @callback
+    def _recordings_index_received(self, msg: ReceiveMessage) -> None:
+        """Track the library index.
+
+        The answers every retained topic here gets: an empty payload is a retraction and
+        clears it, a payload that is not a JSON object leaves the last good one alone. An
+        index equal to the one held - the broker's replay at a reconnect, or the same index
+        published again - changes nothing and wakes nobody: a new read of the library always
+        says a new `read`, and that is what a refresh waits for.
+        """
+        if _retracted(msg.payload):
+            if self.state.recordings_index is None:
+                return
+            self.state.recordings_index = None
+        elif (payload := parse_json_payload(msg.payload)) is None:
+            return
+        else:
+            index = normalise_index(payload)
+            if index == self.state.recordings_index:
+                return
+            self.state.recordings_index = index
+        self.state.recordings_index_retained = msg.retain
+        self._async_updated(TOPIC_RECORDINGS)
+
+    @callback
+    def _recording_folder_received(self, slug: str, msg: ReceiveMessage) -> None:
+        """Track one folder's `recordings/<slug>`, or forget it when it is retracted.
+
+        Kept whatever the index says so far, because the index can arrive after it.
+        A folder published again as it was wakes nobody. At most `FOLDERS_MAX` folder topics
+        are held - as many as an index may name - so retained topics that no index will ever
+        name cannot grow the store without bound. When it is full, a folder the index names
+        takes the place of a topic it does not name; a topic the index does not name is not
+        taken then, and a retraction never displaces anything.
+        """
+        if not slug or "/" in slug:
+            return
+        folders = self.state.recording_folders
+        if slug not in folders and len(folders) >= FOLDERS_MAX and not _retracted(msg.payload):
+            named = {
+                folder["slug"]
+                for location in self.recording_locations
+                for folder in location["folders"]
+            }
+            stale = next((held for held in folders if held not in named), None)
+            if slug not in named or stale is None:
+                return
+            del folders[stale]
+        if _retracted(msg.payload):
+            if folders.pop(slug, None) is None:
+                return
+        elif (payload := parse_json_payload(msg.payload)) is None:
+            return
+        else:
+            recordings = normalise_folder(payload)
+            if folders.get(slug) == recordings:
+                return
+            folders[slug] = recordings
+        self._async_updated(TOPIC_RECORDING_FOLDERS)
+
+    @property
+    def recording_locations(self) -> list[dict[str, Any]]:
+        """Return the movie locations of the library index, or none while there is none."""
+        return list((self.state.recordings_index or {}).get("locations") or [])
+
+    def visible_library(
+        self,
+    ) -> list[tuple[dict[str, Any], list[tuple[dict[str, Any], list[dict[str, Any]]]]]]:
+        """Return the library as Home Assistant shows it: locations, folders, recordings.
+
+        Every list Home Assistant builds of the library is this one - the media browser,
+        `get_recordings`, the library's counts, what may be played or deleted. A folder is
+        in it only with at least one recording the options do not hide, and a location
+        only with at least one such folder: the name of a folder that holds nothing but a
+        hidden bouquet's recordings says what is in it.
+        """
+        # Built once for every state of what it is judged by - the index, the folder topics,
+        # the channel list and the option - because a delete's proof asks for it on every
+        # message of every topic, and a large library takes a tenth of a second to filter.
+        # Reading `channel_list` first brings its generation up to date.
+        _ = self.channel_list
+        key = (
+            self.updates.get(TOPIC_RECORDINGS, 0),
+            self.updates.get(TOPIC_RECORDING_FOLDERS, 0),
+            id(self.state.recordings_index),
+            self._channel_generation,
+            frozenset(self.hidden_bouquet_names),
+        )
+        if key == self._library_key:
+            return self._library
+        shown = []
+        ids: dict[str, tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = {}
+        for location in self.recording_locations:
+            folders = [
+                (folder, recordings)
+                for folder in location["folders"]
+                # The folder is the index's own, so its topic is read without looking it up.
+                if (
+                    recordings := visible(
+                        self.state.recording_folders.get(folder["slug"]) or [],
+                        self.service_hidden,
+                    )
+                )
+            ]
+            if folders:
+                shown.append((location, folders))
+                for folder, recordings in folders:
+                    for recording in recordings:
+                        ids.setdefault(recording["id"], (location, folder, recording))
+        self._library_key, self._library, self._library_ids = key, shown, ids
+        return shown
+
+    def visible_recording_count(self) -> int | None:
+        """Return how many recordings the library shows, or None while there is no index."""
+        if self.state.recordings_index is None:
+            return None
+        return sum(
+            len(recordings)
+            for _location, folders in self.visible_library()
+            for _folder, recordings in folders
+        )
+
+    def find_recording(
+        self, rec_id: str
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]] | None:
+        """Return a recording the library shows, with its location and folder, by its id.
+
+        A hidden one is not found: it is played or deleted from here exactly as often as
+        it is shown here, which is never.
+        """
+        self.visible_library()
+        return self._library_ids.get(rec_id)
+
+    @property
+    def recording_delete_permission(self) -> bool | None:
+        """Return the receiver's own answer about deleting recordings, if it gave one.
+
+        `recording_delete_allowed` is set on the receiver and cannot be written over MQTT.
+        None is a plugin that does not report it, which is not a "no".
+        """
+        settings = self.state.info.get("settings")
+        if not isinstance(settings, dict):
+            return None
+        value = settings.get(CONF_RECORDING_DELETE_ALLOWED)
+        return value if isinstance(value, bool) else None
+
+    @property
+    def recording_trash(self) -> bool | None:
+        """Return whether the receiver says its trash is on; None when it does not say."""
+        value = self.state.info.get(INFO_RECORDING_TRASH)
+        return value if isinstance(value, bool) else None
+
+    def recording_delete_refusal(self) -> str | None:
+        """Return why a delete cannot be asked of this receiver now, or None when it can.
+
+        The receiver claims `recording_delete` only while its permission is on and its
+        trash is there to receive the recording, so a receiver that claims it is asked.
+        One that does not is refused here, with the reason its `info` gives: the
+        permission off, then the trash off; a receiver that says neither has a plugin or
+        an image that cannot do it. A retracted `info` claims nothing. The answer is a
+        translation key.
+        """
+        if not self.info_retracted and CAPABILITY_RECORDING_DELETE in self.capabilities:
+            return None
+        if self.recording_delete_permission is False:
+            return "recording_delete_not_permitted"
+        if self.recording_trash is False:
+            return "recording_delete_trash_off"
+        if (
+            not self.info_retracted
+            and self.recording_delete_permission is True
+            and self.recording_trash is True
+        ):
+            # Both are on and the receiver does not claim the delete yet: its plugin has
+            # not read the library since it started.
+            return "recording_delete_not_ready"
+        return "recording_delete_unsupported"
 
     # ------------------------------------------------------------ channel list
 
