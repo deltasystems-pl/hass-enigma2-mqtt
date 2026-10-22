@@ -61,6 +61,8 @@ PHRASES: dict[str, dict[str, str]] = {
         "channels": "the complete channel list (every bouquet in one message)",
         "bouquet_channels": "the channel list of the bouquet “{bouquet}”",
         "epg_grid": "the EPG of the bouquet “{bouquet}”",
+        "hidden_bouquet_channels": "the channel list of a bouquet hidden in Home Assistant",
+        "hidden_epg_grid": "the EPG of a bouquet hidden in Home Assistant",
         "discovery": "the MQTT discovery message of the device",
         "other": "the topic `{topic}`",
         "more": "and {count} more",
@@ -69,6 +71,8 @@ PHRASES: dict[str, dict[str, str]] = {
         "channels": "pełna lista kanałów (wszystkie bukiety w jednej wiadomości)",
         "bouquet_channels": "lista kanałów bukietu „{bouquet}”",
         "epg_grid": "EPG bukietu „{bouquet}”",
+        "hidden_bouquet_channels": "lista kanałów bukietu ukrytego w Home Assistancie",
+        "hidden_epg_grid": "EPG bukietu ukrytego w Home Assistancie",
         "discovery": "wiadomość wykrywania MQTT (discovery) urządzenia",
         "other": "temat `{topic}`",
         "more": "i jeszcze {count}",
@@ -77,6 +81,10 @@ PHRASES: dict[str, dict[str, str]] = {
         "channels": "die vollständige Senderliste (alle Bouquets in einer Nachricht)",
         "bouquet_channels": "die Senderliste des Bouquets „{bouquet}“",
         "epg_grid": "das EPG des Bouquets „{bouquet}“",
+        "hidden_bouquet_channels": (
+            "die Senderliste eines in Home Assistant ausgeblendeten Bouquets"
+        ),
+        "hidden_epg_grid": "das EPG eines in Home Assistant ausgeblendeten Bouquets",
         "discovery": "die MQTT-Discovery-Nachricht des Geräts",
         "other": "das Topic `{topic}`",
         "more": "und {count} weitere",
@@ -212,9 +220,11 @@ def describe(box: Enigma2Box, topic: str, language: str) -> str:
         if topic.startswith(prefix) and slug and "/" not in slug:
             # The grid's slug is the channel topic's for nearly every bouquet, and the
             # index is the only place that still names a bouquet whose topic is gone.
-            return phrases[key].format(
-                bouquet=plain_name(box.bouquet_name_for_slug(slug), slug)
-            )
+            # A bouquet the hidden-bouquets option names is not named here either.
+            name = box.bouquet_name_for_slug(slug)
+            if name in box.hidden_bouquet_names:
+                return phrases[f"hidden_{key}"]
+            return phrases[key].format(bouquet=plain_name(name, slug))
     if "/" in topic and topic.endswith("/config"):
         return phrases["discovery"]
     return phrases["other"].format(topic=plain_name(topic))
@@ -234,7 +244,9 @@ def withheld_lines(box: Enigma2Box, language: str) -> str:
         lines.append(describe(box, entry["topic"], language))
         if entry["topic"] == TOPIC_CHANNELS:
             lines.extend(
-                phrases["bouquet_channels"].format(bouquet=plain_name(name))
+                phrases["hidden_bouquet_channels"]
+                if name in box.hidden_bouquet_names
+                else phrases["bouquet_channels"].format(bouquet=plain_name(name))
                 for name in box.bouquet_names_without_topic()
             )
     shown = lines[:WITHHELD_ISSUE_MAX]

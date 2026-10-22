@@ -430,8 +430,8 @@ class Enigma2BouquetSelect(Enigma2Select):
     def _async_read_state(self) -> None:
         """List the bouquets on offer, and mark the one the receiver is on.
 
-        A bouquet the hidden-bouquets option names is not offered; while the receiver is
-        on one, nothing is marked.
+        A bouquet the hidden-bouquets option names is not offered, and nothing is marked
+        while the receiver is on one: the select never names a hidden bouquet.
         """
         active = self.box.active_bouquet
         self._set_options(

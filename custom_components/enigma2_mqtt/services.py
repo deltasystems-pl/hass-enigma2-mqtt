@@ -349,6 +349,10 @@ class Enigma2Actions:
                 effect=lambda: same_service((box.state.service or {}).get("sref"), sref),
             )
             return
+        # By name, a channel of a hidden bouquet is one Home Assistant does not offer; by
+        # reference it is taken, because a reference was not picked from anything shown.
+        if box.channel_name_hidden(name):
+            raise _invalid("unknown_channel", channel=name)
         await box.async_command(
             "zap",
             json.dumps({"name": name}),
@@ -527,6 +531,9 @@ class Enigma2Actions:
         grids = [
             {"slug": slug, **grid} for slug, grid in sorted(box.state.epg_grid.items())
         ]
+        # A hidden bouquet's grid is left out, and so is a channel of one wherever a grid
+        # lists it - also asked for by name, which then reads as a bouquet it does not know.
+        grids = [shown for grid in grids if (shown := box.shown_grid(grid)) is not None]
         if bouquet:
             grids = [
                 grid
