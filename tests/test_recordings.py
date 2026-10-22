@@ -610,6 +610,23 @@ async def test_only_a_recording_of_a_hidden_bouquet_by_name_is_hidden(
     assert entry.runtime_data.find_recording(MATCH["id"]) is not None
 
 
+async def test_the_recording_rule_takes_any_value_the_receiver_sends(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Called with the raw bouquet too: anything but a hidden name hides nothing, never raises."""
+    library(box_on_the_broker)
+    entry = hiding(config_entry, "Sport")
+    await _setup(hass, entry, box_on_the_broker)
+    box = entry.runtime_data
+
+    assert box.recording_hidden(EUROSPORT, "Sport") is True
+    for bouquet in (None, ["Sport"], {"name": "Sport"}, 1, "", "Ulubione TV"):
+        assert box.recording_hidden(EUROSPORT, bouquet) is False, bouquet
+
+
 async def test_a_hidden_bouquet_without_its_channels_hides_only_its_own_recordings(
     hass: HomeAssistant,
     mqtt_mock,
