@@ -189,7 +189,10 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
     every other bouquet there; „Bukiet" does not offer it, and the source list and „Kanał"
     leave its channels out wherever they are listed - empty while a hidden bouquet's
     channels are not known. Playing it as a bouquet and `select_bouquet` with it are
-    refused. Its channels are still zapped to by their service reference. The option's name is unchanged; its help text
+    refused, and so is a zap by a name only a hidden channel has. The EPG sensor and
+    `get_epg_grid` leave hidden bouquets and their channels out, and the withheld
+    repair does not name a hidden bouquet. The channel being watched is still shown
+    and recorded. Its channels are still zapped to by their service reference. The option's name is unchanged; its help text
     says what else it now hides.
 - **What is on the decoder** (plugin 0.5.0, `service_codecs`): four diagnostic sensors -
   „Kodek obrazu", „Liczba klatek na sekundę", „Kodek dźwięku", „Język dźwięku" - and the

@@ -72,8 +72,10 @@ make it stop. **A folder left with no recording to show is not listed, nor a loc
 with no such folder** - in the media browser, `get_recordings` or any count - because a
 folder's name can say what it holds. The free-space sensor's list of locations follows the same
 rule, with one exception: the default location is always in it, because its free space is the
-sensor's state. A running recording is judged only when the receiver sends its bouquet, with
-the details; an older plugin's entries carry none and keep the attributes they always had.
+sensor's state. A running recording from an older plugin carries no bouquet and is judged by
+its channel alone, with the same rule. Before any channel list has arrived - retained
+recordings can land first - every recording is hidden while the option names a bouquet,
+because which channels a hidden bouquet holds is not known yet.
 
 **4. Delete moves a recording into the receiver's trash, and only there, behind the receiver's
 permission.** `enigma2_mqtt.delete_recording` is refused before anything is sent unless the

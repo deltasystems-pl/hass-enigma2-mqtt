@@ -1185,7 +1185,8 @@ class Enigma2MqttOptionsFlow(ReceiverMenuSteps, OptionsFlowWithReload):
                     )
                 ),
                 # The same list as the bouquets above, options ignored for the same
-                # reason, and read by one entity only: "Ostatnio oglądane".
+                # reason. Read by everything that lists bouquets or channels: what it
+                # hides is not offered anywhere in Home Assistant.
                 vol.Optional(
                     CONF_HISTORY_HIDDEN_BOUQUETS, default=[]
                 ): selector.SelectSelector(
