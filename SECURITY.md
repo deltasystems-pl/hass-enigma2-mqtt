@@ -137,32 +137,8 @@ hides nothing on the network.
 
 **Streams** (since the release after 0.4.0, with plugin 0.5.0;
 [DOCUMENTATION.md §4.7](DOCUMENTATION.md#47-streams)). Home Assistant opens no stream and
-carries no video. Two things about streams do leave it:
+carries no video. One thing about streams does leave it:
 
-- **Your own go2rtc, if you name one.** While an address is set in a receiver's options, Home
-  Assistant sends that address `PUT /api/streams?name=<name>&src=<source>` when the channel
-  on that receiver changes. **Home Assistant calls an address you typed**, whatever it is, and
-  sends it the stream name and the source and nothing else - no token of Home Assistant's, no
-  body, no redirect followed. When go2rtc answers with anything but a 2xx, Home Assistant
-  also reads the stream back from the same address (`GET /api/streams?src=<name>`, the same
-  limits), because go2rtc can answer 400 for a change it did make; at most the first 512
-  bytes of the error answer are read, and at most 80 characters of its first line reach the
-  log - after percent-decoding, and with the source, the receiver's stream address, the
-  service reference, the receiver's host (as reached, typed and reported), written IP
-  addresses and anything with a scheme taken out. A host name that is not the receiver's
-  can remain. The source is your template
-  with the receiver's stream address in it, which contains the receiver's address and the
-  service reference of the channel that is on. If the address you typed carries a user name
-  and a password, they are sent to that host as HTTP basic authentication, over plain HTTP
-  if the address says `http://`; they are stored in the config entry like every option, are
-  never written to the log or a repair - both name the host alone - and are redacted in the
-  diagnostics download. It is off while the address is empty. Nothing on the broker can set
-  or change the address, the name or the template. What a broker client **can** do is the
-  same as for picons, below: forge the `info.ip` and the `stream` port and path of a receiver
-  without a typed host, and so choose the address *inside* the source your go2rtc is told to
-  fetch. go2rtc would then open `http://<that address>:<that port>/<path>` on your network.
-  The path takes only letters, digits and `/ . _ ~ -` around the reference; the address
-  rule is the picons' rule. Typing the receiver's host closes the address half of it.
 - **The stream address handed to a player.** The media player's `stream_url` attribute and
   the media source give a player the receiver's own stream address, plain HTTP on the
   receiver's stream port. The player fetches it from the receiver directly. No address is

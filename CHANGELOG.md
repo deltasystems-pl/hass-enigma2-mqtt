@@ -161,29 +161,14 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
     "not stopped" a translated failure. Nothing is sent for a receiver that is offline, and
     two hidden streams to one host are refused with a sentence of their own: neither
     reference is shown anywhere, so they are stopped on the receiver.
-  - **Your own go2rtc, optional and off while empty**: a new section of the options form with
-    the address of a go2rtc you run, a stream name and a source template (default
-    `ffmpeg:{url}#video=h264#audio=opus#audio=aac`). While the address is set, Home Assistant
-    keeps that one stream on the channel the receiver is on with
-    `PUT /api/streams?name=..&src=..` at every channel change - not in standby, not for a
-    hidden channel, not while a login is wanted. A template with a space is refused on the
-    form, because go2rtc refuses such a source. A failure is one warning and one repair until
-    it works again; while it is pending, every channel change sends a request, also one back
-    to the channel go2rtc last took, and the retry sends the channel the receiver is on now.
-    An error answer is read back first: go2rtc 1.9.14 answers 400 when it
-    cannot save its configuration file although it did re-point the stream, and a stream
-    found with exactly the source sent counts as done, with one warning that go2rtc could not
-    save it. Every channel change rewrites the stream's entry in go2rtc's file, and a card
-    already open keeps the previous channel - and its tuner - until it is reopened. Home
-    Assistant's own `go2rtc` and `stream` integrations are not used. The media player names
-    the stream in `go2rtc_stream`. Emptying the address switches it all off and removes the
-    repair; the stream itself stays in your go2rtc, under its name and on the last channel it
-    was sent, because the integration does not delete it - delete it in go2rtc's web interface
-    or with `DELETE <go2rtc address>/api/streams?src=<stream name>` (DOCUMENTATION.md §4.7).
+  - **No go2rtc option.** Development builds had an option that kept one stream of a go2rtc
+    you run on the channel the receiver is on; it is not coming. On its own it gave nothing to
+    watch. For a preview in a browser, run a transcoder such as go2rtc yourself and point it at
+    `stream_url` (DOCUMENTATION.md §4.7).
   - **Hidden bouquets are hidden here too.** The plugin publishes every stream client and
     every channel; a channel of a bouquet the option **Bouquets hidden from "Recently
     watched"** names gets no stream address and no stream name, is not in the media source,
-    is not sent to go2rtc, and a client on it is listed without its channel. Such a client can
+    and a client on it is listed without its channel. Such a client can
     still be stopped, by its address alone. The receiver's media player does not list such a
     bouquet in its browser either, nor open it by an old link, and leaves its channels out of
     every other bouquet there; „Bukiet" does not offer it, and the source list and „Kanał"
@@ -208,8 +193,7 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   another track within five seconds, and a codec that changes under the same track within
   thirty.
 - The diagnostics download carries the stream facts as normalised, the stream clients as
-  counts only, and the state of the go2rtc option; the go2rtc address is redacted
-  (DOCUMENTATION.md §7).
+  counts only (DOCUMENTATION.md §7).
 - **The channel list is read one bouquet a topic.** From plugin 0.5.0 on a receiver publishes
   its bouquets on `bouquets` and each bouquet's channels on `channels/<bouquet_slug>`, and says so
   with the capability `channel_topics`. A receiver whose channel list is too big for one MQTT

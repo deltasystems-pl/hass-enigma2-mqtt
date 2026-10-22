@@ -20,8 +20,7 @@ stable across reinstalls of the plugin and of Home Assistant.
 `<base_topic>/<node_id>/cmd/#`. Everything the entities show and do goes over the broker.
 The other connections the integration opens are few, and [SECURITY.md](SECURITY.md) lists
 them: SSH and the receiver's web interface when you ask it to install, update or remove the
-plugin; the receiver's web interface for channel picons; and, only if you name one in the
-options, one request per channel change to your own go2rtc ([§4.7](#47-streams)).
+plugin; and the receiver's web interface for channel picons.
 
 ```
 Enigma2 box                         MQTT broker                    Home Assistant
@@ -346,7 +345,7 @@ appears.
 | **Bouquets to offer** | every bouquet the box publishes | Which bouquets feed the media player's channel list and the media browser. The choices are the bouquets on the `channels` topic, and a name can be typed for one the box has not published yet. This narrows the plugin's own `bouquets_for_select`; it cannot widen it. |
 | **Channels in the media player's source list** | every bouquet on offer | What `media_player.source_list` holds, and nothing else. **Every bouquet on offer** is what this integration has always done and stays the default, so an existing installation does not change under an automation that names a channel; on a receiver with about a thousand channels it is a dropdown of about a thousand rows. **The active bouquet** is the short list the receiver's own channel ± is walking, which is also what the „Kanał" select shows. `select_source` follows this setting; the `zap` action takes a service reference and does not. Three cases keep the long list whatever is chosen, because there is nothing to shorten it to and an empty source list would leave no way to change channel: a receiver that publishes no channel-list context (an older plugin without `bouquet_context`), a context naming a bouquet the **Bouquets to offer** option excludes or the **Bouquets hidden from "Recently watched"** option hides, and a context naming a bouquet with no playable channel in it. An excluded bouquet and one without a playable channel are logged as a warning, once per bouquet; a hidden one is not named in the log. 🔴 This setting is **not** about the recorder: Home Assistant declares `source_list` an unrecorded attribute and the recorder removes it before it measures a state against its size limit, so the long list never reached the database in the first place. |
 | **Picture on the media player card** | screenshot | Which picture the media player shows. **Screenshot** shows the screenshot of the television the plugin publishes, as before, and the picon of the new channel only between a channel change and the next screenshot: the last screenshot still shows the previous channel then. With screenshots off on the receiver no next one arrives, and the picon stays. **Channel picon** always shows the picon of the current channel, and the screenshot only for a channel that has none. Home Assistant fetches picons from the receiver's web interface (OpenWebif, plain HTTP on port 80) and serves them itself; [§4.1](#41-media-player) says which address it asks, how, and what happens when that fails. The „Ekran" image entity is the screenshot in both settings. |
-| **Bouquets hidden from "Recently watched"** („Bukiety ukryte w „Ostatnio oglądane"") | none | Which bouquets' channels [„Ostatnio oglądane"](#46-selects) leaves out; „Ostatnio oglądane (wszystkie)" is untouched. **Hidden bouquets and their channels are not offered in lists, selects, the browser, the EPG of other channels or recordings, but the channel being watched is still shown and recorded** - the media player, „Kanał", the channel and programme sensors show what is on, as an automation expects. In detail: „Bukiet" does not offer it (and reads `unknown` while the receiver is on it), the media player's browser neither lists nor opens it, and the media player's source list, its browser and „Kanał" leave a channel of a hidden bouquet out wherever it is listed - also one it shares with a visible bouquet, and also while the receiver is on the hidden bouquet itself. Playing a hidden bouquet (`bouquet:<sref>`) and `enigma2_mqtt.select_bouquet` with one are refused before anything is sent. The EPG sensor (`epg_active_bouquet`) reads as no bouquet while the receiver is on a hidden one and leaves a hidden bouquet's channels out of any other grid, and `enigma2_mqtt.get_epg_grid` returns no hidden bouquet's grid - also asked for by name - and no hidden channel in any other. A zap by a name only a hidden bouquet's channel has - `select_source`, `play_media` with `channel_name`, the `zap` action's `name` - is refused as an unknown channel, and where a name is shared, the copy that is offered is the one tuned. The repair that lists what the receiver withheld does not name a hidden bouquet.** A channel of it is still zapped to by its service reference. While a hidden bouquet's channels are not known - the receiver withheld its list, or it has not arrived - which channels to leave out is not known either, and the source list, the browser's channels and „Kanał" shrink to nothing until it is. The choices are the bouquets on the `channels` topic, and a name can be typed. With it empty every entry shows. With a bouquet chosen, an entry shows only when its bouquet is a published bouquet that is not hidden **and** its channel is not a member of any hidden bouquet, so a channel of a hidden bouquet reached through another one stays hidden. While anything is chosen, an entry that cannot be checked - no bouquet path, a radio bouquet, a bouquet the plugin does not publish - is hidden too. And while a hidden bouquet is listed without its channels - plugin 0.5.0 could not publish that bouquet's own topic, or it has not arrived - every entry is hidden, because which channels to hide is what is missing. A hidden name that is no longer on the `channels` topic is logged once. 🔴 **This is a filter in Home Assistant, not privacy on the network**: the receiver publishes every entry of its history on `zap_history` and every channel of every bouquet on `channels`, retained, to any broker login; its own History Zap screen, the plugin's OpenWebif page and „Ostatnio oglądane (wszystkie)" show everything. See [§4.6](#46-selects) for what the recorder keeps. **With plugin 0.5.0 the same bouquets are also kept out of what Home Assistant shows about streams** ([§4.7](#47-streams)): a stream client on such a channel is listed without the channel, such a channel gets no stream address and no stream name, it is not offered as a media source, and your go2rtc is not pointed at it. And a recording the receiver names under a hidden bouquet, or of a channel of one, is not in the media browser or the library's count and cannot be played or deleted from here, while a running one is shown without its title; a recording with no bouquet is shown when no hidden bouquet holds its channel ([§4.8](#48-recordings)). The option's name still says only "Recently watched". |
+| **Bouquets hidden from "Recently watched"** („Bukiety ukryte w „Ostatnio oglądane"") | none | Which bouquets' channels [„Ostatnio oglądane"](#46-selects) leaves out; „Ostatnio oglądane (wszystkie)" is untouched. **Hidden bouquets and their channels are not offered in lists, selects, the browser, the EPG of other channels or recordings, but the channel being watched is still shown and recorded** - the media player, „Kanał", the channel and programme sensors show what is on, as an automation expects. In detail: „Bukiet" does not offer it (and reads `unknown` while the receiver is on it), the media player's browser neither lists nor opens it, and the media player's source list, its browser and „Kanał" leave a channel of a hidden bouquet out wherever it is listed - also one it shares with a visible bouquet, and also while the receiver is on the hidden bouquet itself. Playing a hidden bouquet (`bouquet:<sref>`) and `enigma2_mqtt.select_bouquet` with one are refused before anything is sent. The EPG sensor (`epg_active_bouquet`) reads as no bouquet while the receiver is on a hidden one and leaves a hidden bouquet's channels out of any other grid, and `enigma2_mqtt.get_epg_grid` returns no hidden bouquet's grid - also asked for by name - and no hidden channel in any other. A zap by a name only a hidden bouquet's channel has - `select_source`, `play_media` with `channel_name`, the `zap` action's `name` - is refused as an unknown channel, and where a name is shared, the copy that is offered is the one tuned. The repair that lists what the receiver withheld does not name a hidden bouquet.** A channel of it is still zapped to by its service reference. While a hidden bouquet's channels are not known - the receiver withheld its list, or it has not arrived - which channels to leave out is not known either, and the source list, the browser's channels and „Kanał" shrink to nothing until it is. The choices are the bouquets on the `channels` topic, and a name can be typed. With it empty every entry shows. With a bouquet chosen, an entry shows only when its bouquet is a published bouquet that is not hidden **and** its channel is not a member of any hidden bouquet, so a channel of a hidden bouquet reached through another one stays hidden. While anything is chosen, an entry that cannot be checked - no bouquet path, a radio bouquet, a bouquet the plugin does not publish - is hidden too. And while a hidden bouquet is listed without its channels - plugin 0.5.0 could not publish that bouquet's own topic, or it has not arrived - every entry is hidden, because which channels to hide is what is missing. A hidden name that is no longer on the `channels` topic is logged once. 🔴 **This is a filter in Home Assistant, not privacy on the network**: the receiver publishes every entry of its history on `zap_history` and every channel of every bouquet on `channels`, retained, to any broker login; its own History Zap screen, the plugin's OpenWebif page and „Ostatnio oglądane (wszystkie)" show everything. See [§4.6](#46-selects) for what the recorder keeps. **With plugin 0.5.0 the same bouquets are also kept out of what Home Assistant shows about streams** ([§4.7](#47-streams)): a stream client on such a channel is listed without the channel, such a channel gets no stream address and no stream name, and it is not offered as a media source. And a recording the receiver names under a hidden bouquet, or of a channel of one, is not in the media browser or the library's count and cannot be played or deleted from here, while a running one is shown without its title; a recording with no bouquet is shown when no hidden bouquet holds its channel ([§4.8](#48-recordings)). The option's name still says only "Recently watched". |
 | **Check daily for available plugin versions** | off | Off means this integration asks nothing on its own. The plugin's **signed release index** - `releases.json` and its signature from the plugin's fixed HTTPS origin, `https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/` - is fetched only when somebody presses **Check for plugin updates** (*Sprawdź aktualizacje wtyczki*), or uses Home Assistant's own "Check for updates" while this option is on. On, it is also fetched **at most once every 24 hours**, one index for every receiver. It is fetched with a verified TLS context and no redirects, at most 64 KiB, and it is accepted only when its Ed25519 signature verifies with a key built into this integration and its serial rises by the rule in [ADR-0008](docs/adr/0008-signed-plugin-index.md) - the same rule the receiver applies. Manual checks share a ten-minute limit. The index, its signature, the stamps and the record of accepted serials are kept in `.storage/enigma2_mqtt.release_index`, so a reload or a restart asks nothing again; the old `.storage/enigma2_mqtt.release_check` is removed. **Every newly accepted index is announced**: a warning in the log and a persistent notification with its serial, its key, the versions it adds and withdraws, and its floor - the index is signed in the plugin repository's CI, so an index nobody expected must be visible. It is then published, retained, on `enigma2mqtt/release_index`, where every receiver on plugin 0.4.0 or later verifies it again - the way a receiver with no internet of its own learns of releases - and put back, verified first, when the first receiver is set up and at every reconnect to the broker, if the broker lost it. What the broker retains there is read first: an index of a higher-ranked key, or a newer one of the same key - such as an index signed with the plugin's spare key in an emergency - is never overwritten, and when the rule accepts it, Home Assistant takes it and announces it like any new index. An index and a signature that do not match are read once more before they are judged, because a publication can land between the two requests; a pair that still does not verify is reported as "could not be verified", and the log keeps a warning. Nothing else is downloaded on a check; a release package is downloaded only when somebody installs it (see [Buttons and update](#45-buttons-and-update)). |
 
 When a recent plugin advertises its configurable publishers, the same form also controls key
@@ -378,18 +377,6 @@ will restart its softcam at all is `softcam_restart_allowed`, set on the box und
 Plugins -> MQTT Bridge*. A setting that *enables* a command is deliberately outside what
 anything holding publish rights on the broker can reach, so the plugin refuses it on
 `cmd/config`; these two only tune a command it has already been permitted to run.
-
-**Your own go2rtc (optional)** („Własne go2rtc (opcjonalnie)") is a section of the same form, shown for a
-receiver that claims the `stream` capability, and collapsed until it is in use. Three fields:
-
-| Field | Default | What it is |
-|---|---|---|
-| **go2rtc address** | empty, which is "off" | The address of the API of a go2rtc you run yourself, for example `http://homeassistant.local:1984` for the go2rtc add-on. `http://` or `https://`, a host, optionally a port and a path in front of the API; nothing after it. Emptying it switches the feature off; the stream stays in your go2rtc ([§4.7](#47-streams)). |
-| **Stream name** | `enigma2_<node_id>` | The one stream Home Assistant keeps up to date there. Letters, digits, `_`, `-` and `.`, at most 64 characters - this integration's own, conservative rule. |
-| **Source template** | `ffmpeg:{url}#video=h264#audio=opus#audio=aac` | What go2rtc is given to play, with `{url}` - exactly once - where the receiver's stream address goes. **No white space**: go2rtc refuses a source that contains a space, so the form refuses the template with a sentence that says so. |
-
-Nothing is stored for a field left at its default, and nothing at all while the address is
-empty. [§4.7](#47-streams) says what is sent, when, and what the template is for.
 
 ### Receiver menu
 
@@ -821,8 +808,7 @@ while the box is unreachable, because that is precisely when somebody wants to w
   the screen and nothing anybody can hear; `false` while it decodes the track; `null` when it
   cannot tell. The volume stays settable either way ([§4.4](#44-binary-sensors-switches-number)).
 - **Stream address** - for a receiver that claims `stream` (plugin 0.5.0), the attributes
-  `stream_url`, `stream_name` and `stream_authentication`, and `go2rtc_stream` while your own
-  go2rtc is set in the options. [§4.7](#47-streams) has all four.
+  `stream_url`, `stream_name` and `stream_authentication`. [§4.7](#47-streams) has all three.
 
 ### 4.2 Remote, notify, event, image
 
@@ -1727,8 +1713,7 @@ plugin's `docs/TOPICS.md` and its ADR-0014.
 Every enigma2 image serves the transport stream of a service over HTTP to whoever asks.
 Plugin 0.5.0 publishes what is needed to use that - where the stream server is, who it is
 serving, whether a service could be played right now - and this integration turns it into an
-address, a media source and, if you want it, one stream of your own go2rtc that follows the
-channel. **It starts no stream itself, carries no video and makes no camera entity**: the
+address and a media source. **It starts no stream itself, carries no video and makes no camera entity**: the
 reasons are in [ADR-0011](docs/adr/0011-stream-facts-addresses-and-a-media-source.md).
 Everything in this section exists only for a receiver whose `info` names the capability beside
 it.
@@ -1756,7 +1741,6 @@ For a receiver that claims `stream`, the media player has these attributes:
 | `stream_url` | The address the receiver serves the channel on the decoder at, or `null` |
 | `stream_name` | A stable name for that channel's stream, or `null` |
 | `stream_authentication` | `true` when the receiver's stream server wants a login, `false` when it does not, `null` when the image has no such setting |
-| `go2rtc_stream` | The name of the stream your own go2rtc is kept on this channel under - only while a go2rtc address is set in the options |
 
 **How the address is built:** `http://<host>:<port><path>`. The port and the form of the path
 are the receiver's own, from the `stream` topic (on every image today `8001` and `/<service
@@ -1918,128 +1902,11 @@ data:
   (`HomeAssistantError`). No permission on the receiver guards the command: whoever may publish
   to its command topics may already change the channel and put it into standby.
 
-#### Your own go2rtc
+#### A preview in a browser
 
-go2rtc turns a transport stream into something a browser plays. If you run one - the go2rtc
-add-on, for instance - set its address in the [options](#options), and Home Assistant keeps
-**one** of its streams on the channel the receiver is on. That is all it does there: it does
-not install, configure or query your go2rtc, and Home Assistant's own `go2rtc` and `stream`
-integrations are not involved.
-
-**What is sent.** When the service on the decoder changes, and once after start-up when the
-first `service` has arrived:
-
-```
-PUT <go2rtc address>/api/streams?name=<stream name>&src=<source>
-```
-
-`<source>` is the source template with the receiver's stream address in the place of `{url}`.
-With the defaults, for the example receiver on TVP 1 HD:
-
-```
-name = enigma2_vuuno4kse_005301
-src  = ffmpeg:http://192.0.2.12:8001/1:0:19:283D:3FB:1:C00000:0:0:0:#video=h264#audio=opus#audio=aac
-```
-
-The same channel published again - the resolution became known, another audio track - sends
-nothing. Zapping through channels sends the requests that had time to finish and ends on the
-last channel. Going back to the channel go2rtc last took sends nothing either, while every
-request has worked; **while a failure is pending**, every channel change sends a request,
-also one back to that channel, because what go2rtc holds after a failure is not known - and
-the one that works clears the repair.
-
-**When it does not re-point**, and the stream stays on the last channel it was given:
-
-- in standby and while the receiver is offline, as the media player keeps its last picture;
-- for a channel of a hidden bouquet. Pointing the stream at nothing was considered and
-  rejected: it is a second kind of request that says "something hidden is on", and it breaks
-  the card for the channel that was fine;
-- while the receiver's stream server wants a login.
-
-**What is known about go2rtc**, measured against go2rtc 1.9.14:
-
-- **A source that contains a space is refused** with HTTP 400, "source with spaces may be
-  insecure". That is why the options form refuses a template with white space, and why a
-  filter with spaces has to be a **named template** in your own `go2rtc.yaml`.
-- **go2rtc cannot read the receiver's stream port without `ffmpeg:`** in front of the address.
-- **WebRTC needs `#audio=opus`; MSE takes AAC.** The default template asks for both.
-- **Every channel change rewrites the stream's entry in go2rtc's configuration file.** A
-  request that changes the source makes go2rtc save it there; the same source again leaves the
-  file alone.
-- **A request can be answered 400 and still have worked.** When go2rtc cannot write its
-  configuration file - a `streams` key written in flow style, such as `streams: {}`, is one
-  measured case - it answers 400 (`yaml: line 7: did not find expected key`, or similar), after
-  it has already re-pointed the stream in memory. So on any answer that is not a 2xx, Home
-  Assistant reads the stream back (`GET <go2rtc address>/api/streams?src=<stream name>`, with
-  the same limits as the request). When the stream is there with exactly one producer, and
-  that producer has exactly the source that was sent, the channel change counts as done: no
-  repair, no retry, and **one** warning in the log - once until the entry is reloaded (saving
-  its options reloads it) or Home Assistant restarts - saying that go2rtc could not save its
-  configuration, with the status and the start of go2rtc's answer. Of that answer at most 512
-  bytes are read; it is percent-decoded (at most twice); then the source, the receiver's
-  stream address, the service reference and the receiver's host (as Home Assistant reaches it,
-  as typed and as reported) are removed wherever they appear, in any case; then only the first
-  line is kept, written IPv4 and IPv6 addresses and anything with a scheme (`http://...`,
-  `ffmpeg:...`) are removed, and the rest is cut to 80 printable ASCII characters. A host name
-  that is not the receiver's can remain. go2rtc's file then still holds an older source, which is what the
-  stream is after a restart of go2rtc until the next channel change; writing `streams:` in
-  block style, or removing it, ends that. A read-back that fails or shows another source
-  leaves the failure as it was (below).
-- **A card or player that is already open keeps showing the previous channel.** After a
-  re-point, a viewer that was connected stays on the old source - and go2rtc keeps the
-  receiver's stream of that channel open, and with it a tuner - until the viewer reconnects;
-  go2rtc lists it under no consumer meanwhile. Measured with an HTTP MP4 viewer
-  (`/api/stream.mp4`) on go2rtc 1.9.14. **Open the card after the channel change**, on a tap,
-  rather than leaving it open across one.
-
-**A recipe.** In your `go2rtc.yaml` (the add-on's configuration), a named template that
-deinterlaces - most broadcast channels are interlaced, and a browser shows the combing - and
-an input line with a read timeout, so that a channel that is not being descrambled does not
-leave an `ffmpeg` waiting for ever:
-
-```yaml
-ffmpeg:
-  # A custom video template needs its own -map 0:v:0.
-  tv: "-map 0:v:0 -c:v libx264 -preset:v superfast -tune:v zerolatency -vf yadif -g:v 50"
-  # The input side for http sources, with a ten-second read timeout (microseconds).
-  http: "-rw_timeout 10000000 -fflags nobuffer -flags low_delay -i {input}"
-```
-
-Then, in the receiver's options, the source template `ffmpeg:{url}#video=tv#audio=opus#audio=aac`.
-Those two lines are an example to adapt, written from ffmpeg's and go2rtc's documentation;
-this project measured the refusal of spaces and the need for `ffmpeg:`, not these templates.
-
-On a dashboard, show the stream **by its name through the go2rtc add-on's ingress path**. A
-page of Home Assistant served over HTTPS may not load `http://<host>:1984/...` - the browser
-blocks it as mixed content - and the ingress path is on Home Assistant's own address:
-
-```yaml
-type: iframe
-url: /api/hassio_ingress/<the add-on's ingress token>/stream.html?src=enigma2_vuuno4kse_005301&mode=webrtc,mse
-aspect_ratio: "16:9"
-```
-
-The ingress token is the part after `/api/hassio_ingress/` in the address of the add-on's own
-*Open Web UI* page. The stream name is the one in the options, and the media player's
-`go2rtc_stream` attribute. **Put that card where it opens on a tap** - a subview, a popup - and
-not on a dashboard that is always on a wall: the page starts playing when it loads, go2rtc
-opens the receiver's stream for it, and that stream holds a tuner until the card is gone. A
-card left open across a channel change also goes on showing the channel it opened (above).
-
-**When it fails** - go2rtc does not answer within ten seconds, or answers anything but a 2xx
-that the read-back above does not confirm -
-Home Assistant logs one warning and raises one repair for the receiver, naming the host and
-the HTTP status. Both are said **once**, not at every channel change - also when the failure
-changes, from one status to another or to no answer at all; the one repair then says the
-latest - and the repair goes by itself with the first request that succeeds. A failed request is tried again at the next
-channel change and every five minutes, always with the channel the receiver is on at that
-moment, never an older one. The address is named by its host alone in the log and
-in the repair, and is redacted in the diagnostics download: an address you typed can carry a
-user name and a password for go2rtc's API. Emptying the address switches all of it off and
-removes the repair. **The stream itself stays in your go2rtc**, under its name and on the last
-channel it was sent: this integration does not delete it. Delete it there if you no longer
-want it - in go2rtc's web interface, or with
-`DELETE <go2rtc address>/api/streams?src=<stream name>` on its API.
+A browser cannot play the receiver's transport stream. To show the channel on a dashboard,
+run a transcoder such as go2rtc yourself and point it at `stream_url` (or at a per-channel
+stream named after `stream_name`); this integration does not talk to it.
 
 ### 4.8 Recordings
 
@@ -2600,10 +2467,7 @@ many bouquets, picons and "no picon" answers are held. No address, channel or pi
 `topics.stream` is what the receiver says about its stream server, normalised: the port, the
 form of the path and three flags; there is no host in it. `topics.stream_clients` is three
 counts - the image's count, the rows listed, and how many are transcoded - and never a
-client's address or channel, hidden or not. `box.go2rtc` says whether your own go2rtc is kept
-on the channel (`off`, `idle`, `ok` or `failed`), under which stream name, why the last
-request failed and with which HTTP status, and how many requests were sent; the go2rtc
-address in the options is redacted, because a typed address can carry a login.
+client's address or channel, hidden or not.
 
 One thing is stated rather than left to be worked out. The **`plugin`** block gives the version
 installed on the box, the version bundled here, the version this release was written against,
@@ -2887,10 +2751,8 @@ which address. The receiver publishes them whole, retained; the option that hide
 takes the channel out of what Home Assistant shows and offers, and hides nothing on the
 network ([§4.7](#47-streams)). The `clients` attribute is not recorded. The media player's
 `stream_url` is recorded with its state and contains the receiver's address and the service
-reference of the channel that is on - as `media_content_id` already does. The one thing in
-this section that leaves Home Assistant is the request to **your own go2rtc**, and only
-while you set its address: it carries the stream name and the source, which contains that
-same address and reference.
+reference of the channel that is on - as `media_content_id` already does. Nothing in this
+section leaves Home Assistant.
 
 The recording library is the same kind of record once more: every title, channel and file
 name the receiver has recorded, of every bouquet. The receiver publishes it whole, retained,
