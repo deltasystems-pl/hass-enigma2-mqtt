@@ -19,6 +19,7 @@ setup screen shows it.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from homeassistant.components.number import NumberEntity, NumberMode
@@ -273,6 +274,13 @@ class Enigma2MenuComboGap(PluginSettingEntity, NumberEntity):
         The receiver refuses a gap that is not a whole number of tenths of a second rather
         than rounding it, and so it is refused here, before anything is sent.
         """
+        # Not a number, or no end to it, is not a gap: refused, not rounded into an error.
+        if not math.isfinite(value):
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="menu_combo_gap_step",
+                translation_placeholders={"value": f"{value:g}"},
+            )
         milliseconds = gap_ms(value)
         if (
             not MENU_COMBO_GAP_MS_MIN <= milliseconds <= MENU_COMBO_GAP_MS_MAX

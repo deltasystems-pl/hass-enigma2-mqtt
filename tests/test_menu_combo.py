@@ -41,6 +41,8 @@ from .conftest import (
 from .menu_common import EDITOR_INFO, menu_entry
 from .test_translations import LANGUAGES, TRANSLATIONS
 
+NAN = float("nan")
+INF = float("inf")
 KEY = f"select.{SLUG}_menu_shortcut_key"
 PRESSES = f"number.{SLUG}_menu_shortcut_presses"
 GAP = f"number.{SLUG}_menu_shortcut_gap"
@@ -383,8 +385,8 @@ async def test_presses_that_are_not_whole_are_refused_before_anything_is_sent(
 @pytest.mark.parametrize(
     ("entity_class", "values"),
     [
-        (Enigma2MenuComboGap, (0.2, 0.29, 3.01, 3.1, 0.0, -1.2)),
-        (Enigma2MenuComboPresses, (1, 6, 0, -3)),
+        (Enigma2MenuComboGap, (0.2, 0.29, 3.01, 3.1, 0.0, -1.2, NAN, INF, -INF)),
+        (Enigma2MenuComboPresses, (1, 6, 0, -3, NAN, INF)),
     ],
 )
 async def test_the_entities_refuse_out_of_range_on_their_own(
@@ -484,3 +486,15 @@ async def test_diagnostics_carry_an_unbound_combo_and_its_reason(
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
 
     assert diagnostics["info"]["menu"] == menu
+
+
+async def test_a_gap_that_is_not_a_number_is_refused_through_the_action(
+    hass: HomeAssistant, mqtt_mock, box_on_the_broker: dict[str, str | bytes]
+) -> None:
+    await _setup(hass, box_on_the_broker, dict(SETTINGS))
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await _set_gap(hass, NAN)
+
+    assert raised.value.translation_key == "menu_combo_gap_step"
+    assert published_payloads(mqtt_mock, command_topic("config")) == []
