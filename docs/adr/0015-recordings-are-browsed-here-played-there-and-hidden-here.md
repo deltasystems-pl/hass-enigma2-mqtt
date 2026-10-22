@@ -52,13 +52,17 @@ listed directly.
 **3. The receiver lists everything; hiding is done here** - by the hidden-bouquets option, with
 a narrower rule than the one streams follow
 ([ADR-0011](0011-stream-facts-addresses-and-a-media-source.md) decision 5):
-`Enigma2Box.recording_hidden(sref, bouquet)` hides a recording **only when the bouquet the
-receiver names with it is one the option names**. A recording the receiver placed in no
-bouquet (`bouquet` null), or in one it does not publish, is shown; its channel is not looked up
-in the hidden bouquets. A recording is a file already made, and one with no bouquet is mostly an
-ordinary one - a channel since dropped from every bouquet, a radio service, a copied file;
-failing toward hiding took such recordings out of the library on a real receiver. (Amended
-before release; the first version used `service_hidden` and hid those too.) A recording
+`Enigma2Box.recording_hidden(sref, bouquet)` hides a recording **when the bouquet the receiver
+names with it is a hidden one, or its channel belongs to any hidden bouquet** - hidden means
+hidden everywhere in Home Assistant, so a channel of a hidden bouquet named under another one
+stays hidden. It is shown only when no hidden bouquet holds it. A recording the receiver placed
+in no bouquet (`bouquet` null), or in one it does not publish, is therefore shown when its
+channel is in no hidden bouquet: a recording is a file already made, and one with no bouquet
+is mostly an ordinary one - a channel since dropped from every bouquet, a radio service, a
+copied file - and hiding all of them took such recordings out of the library on a real
+receiver. Where membership cannot be told - a hidden bouquet listed without its channels, a
+recording without a reference - it still fails toward hiding. (Amended before release; the
+first version used `service_hidden` and hid every recording without a published bouquet.) A recording
 the option hides is not in the media browser, not in the count of the library, and cannot be
 played or deleted from here: Home Assistant refuses it as a recording it does not know. A running
 recording that the option hides is shown without its title, its channel, its bouquet, its file
