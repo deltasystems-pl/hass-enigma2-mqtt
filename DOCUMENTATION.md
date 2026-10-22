@@ -401,6 +401,31 @@ does: it shows what Home Assistant publishes and, when the viewer presses OK, se
 row and - for a slider, a list or a text - which value. Home Assistant performs it
 ([ADR-0012](docs/adr/0012-receiver-menu.md)).
 
+**Opening it with the television's remote: the press combo.** A TV remote that drives the
+receiver over HDMI-CEC has no HELP, no colour keys and no long press, so the hotkey cannot be
+pressed from it. A receiver whose `info.settings` carries `menu_combo_key` offers a second way,
+beside the hotkey: **one key pressed a number of times in quick succession** opens the menu. Three
+configuration entities on the receiver's device set it ([§4.4](#44-binary-sensors-switches-number),
+[§4.6](#46-selects)) - the same settings are on the receiver's own setup screen and its OpenWebif
+page:
+
+- **Klawisz kombinacji menu** (*Menu combo key*) - `off` (the default), `previous`, `exit`,
+  `playpause` or `stop`. A television's Back button usually reaches the receiver as `previous`
+  or `exit`; the receiver's `key` topic shows which one yours sends.
+- **Naciśnięcia kombinacji menu** (*Menu combo presses*) - how many presses, 2 to 5 (3 unless
+  changed).
+- **Odstęp kombinacji menu** (*Menu combo gap*) - the longest time between two presses, 0.3 to
+  3.0 s in steps of 0.1 s (1.2 s unless changed). A press later than that starts counting again.
+
+🔴 **While a combo key is set, that key no longer does what it did in live TV and the players.**
+There every press of it counts toward the menu and nothing else - a single press, and the presses
+before the last one, do nothing. On many images Back in live TV is a zap back to the previous
+channel; with `previous` as the combo key that zap is gone until the key is set to `off` again.
+In menus, lists and the EPG the key works as before. `info.menu.combo.replaces` names the image
+functions the key no longer reaches, and `info.menu.combo_reason` says why no combo is bound when
+`info.menu.combo` is `null` - both are in the diagnostics. A held key that the television sends
+as several presses counts as several presses.
+
 The menu is **one level of groups**, each a list of controls, plus controls at the top. At most
 **8 groups**, at most **24 entries** in the top list (groups and controls together) and at most 24
 controls in each group. The step shows the menu as it stands and offers *Add a group*, *Add a
@@ -1051,6 +1076,8 @@ quarter of an hour, and a database is not where a plot summary belongs.
 | `volume_passthrough` | *Passthrough dźwięku* | `<node_id>_volume_passthrough` | `volume` | on while the receiver's volume does nothing audible · only while the receiver names the `volume_passthrough` capability |
 | `interlaced` | *Obraz z przeplotem* | `<node_id>_interlaced` | `service` | on for an interlaced picture · diagnostic · **disabled by default** · only while the receiver names the `service_codecs` capability |
 | `menu_transparency` | *Przezroczystość menu* | `<node_id>_menu_transparency` | `info` | 0-80 % in steps of 10 <-> `cmd/config` `{"menu_transparency": n}` · configuration · only for a receiver whose `info.settings` carries `menu_transparency` |
+| `menu_combo_presses` | *Naciśnięcia kombinacji menu* | `<node_id>_menu_combo_presses` | `info` | 2-5 <-> `cmd/config` `{"menu_combo_presses": n}` · configuration · only for a receiver whose `info.settings` carries `menu_transparency` and `menu_combo_key` ([Receiver menu](#receiver-menu)) |
+| `menu_combo_gap` | *Odstęp kombinacji menu* | `<node_id>_menu_combo_gap` | `info` | 0.3-3.0 s in steps of 0.1 <-> `cmd/config` `{"menu_combo_gap_ms": ms}` - seconds here, milliseconds on the receiver · configuration · only for a receiver whose `info.settings` carries `menu_transparency` and `menu_combo_key` |
 
 The switches and the number are optimistic: they move the moment they are pressed and the
 state topic confirms a moment later. That is not `assumed_state` - the box does report back -
@@ -1091,6 +1118,15 @@ a refusal is raised as an error with the receiver's reason, and a transparency t
 multiple of 10 is refused before anything is sent. Both are created only for a receiver that
 reports `menu_transparency` - that plugin takes a `cmd/config` with a single key, an older one
 does not. A receiver that stops reporting them keeps the entities, unavailable.
+
+The press combo's three settings - **Klawisz kombinacji menu** ([§4.6](#46-selects)),
+**Naciśnięcia kombinacji menu** and **Odstęp kombinacji menu** - work the same way and are created
+together, for a receiver that also reports `menu_combo_key`; one whose plugin goes back to a
+version without the combo keeps all three, unavailable. The gap is shown in seconds and sent as
+milliseconds, rounded to the millisecond, so `1.2` goes out as `{"menu_combo_gap_ms": 1200}`; a
+gap that is not a whole number of tenths of a second, and a count of presses that is not a whole
+number, are refused before anything is sent. A gap the receiver reports off those steps is shown
+as it is, never rewritten.
 
 ### 4.5 Buttons and update
 
@@ -1552,6 +1588,7 @@ available while the receiver is offline over MQTT.
 | `zap_history_all` | *Ostatnio oglądane (wszystkie)* · **disabled by default** | `<node_id>_zap_history_all` | `zap_history`, `service`, `channels` | `cmd/zap_history` |
 | `plugin_install_version` | *Wersja wtyczki do instalacji* · diagnostic · **disabled by default** | `<node_id>_plugin_install_version` | `info` | none - stored in the entry's options (see the update entity) |
 | `menu_hotkey` | *Klawisz menu* · configuration | `<node_id>_menu_hotkey` | `info` | `cmd/config` `{"menu_hotkey": "<key>"}` - `help_long`, `red_long`, `f3`, `f4` or `off`; only for a receiver that reports `menu_transparency` and `menu_hotkey` ([§4.4](#44-binary-sensors-switches-number)) |
+| `menu_combo_key` | *Klawisz kombinacji menu* · configuration | `<node_id>_menu_combo_key` | `info` | `cmd/config` `{"menu_combo_key": "<key>"}` - `off`, `previous`, `exit`, `playpause` or `stop`; only for a receiver that reports `menu_transparency` and `menu_combo_key` ([Receiver menu](#receiver-menu)) |
 
 „Bukiet" and „Kanał" exist **only while the receiver names the `channels` and `bouquet_context` capabilities**.
 A plugin that cannot switch a channel-list context has nothing for either of them to do, and a
