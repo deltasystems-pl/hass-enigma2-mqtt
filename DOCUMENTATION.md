@@ -2878,8 +2878,8 @@ recorder:
 ```
 
 The zap history is the same kind of record. The receiver publishes it whole, retained, on the
-broker, and the option that hides bouquets from „Ostatnio oglądane" filters that one entity in
-Home Assistant - it hides nothing on the network. „Ostatnio oglądane (wszystkie)" is recorded
+broker, and the option that hides bouquets from „Ostatnio oglądane" filters what Home
+Assistant shows - it hides nothing on the network. „Ostatnio oglądane (wszystkie)" is recorded
 once enabled; [§4.6](#46-selects) shows how to exclude it.
 
 The stream clients are the same kind of record again: who is watching which channel from
