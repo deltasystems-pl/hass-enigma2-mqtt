@@ -21,8 +21,9 @@ lists, and Home Assistant sends nothing else: no command here names a file.
 service it was recorded from and the first published bouquet that holds it, exactly as
 `service` does, and every list Home Assistant shows is filtered by the hidden-bouquets
 option through `Enigma2Box.recording_hidden`: a recording is hidden when its bouquet is
-one the option names, and only then - one the receiver placed in no bouquet is shown. The
-functions here take that rule as `hidden`; they never decide it themselves.
+one the option names or its channel belongs to one, and one the receiver placed in no
+bouquet is shown when no hidden bouquet holds its channel. The functions here take that
+rule as `hidden`; they never decide it themselves.
 """
 
 from __future__ import annotations

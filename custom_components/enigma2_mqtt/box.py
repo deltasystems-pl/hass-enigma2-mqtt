@@ -2777,16 +2777,30 @@ class Enigma2Box:
         return not identity or identity in hidden_members
 
     def recording_hidden(self, sref: Any, bouquet: Any) -> bool:
-        """Return whether a recording is one the options hide: its bouquet is a hidden one.
+        """Return whether a recording is one the options hide.
 
-        Narrower than `service_hidden`, on purpose. A recording is a file that was already
-        made; the bouquet the receiver names with it is the one it found the service in,
-        and a recording it could place in no bouquet - a channel since removed from every
-        bouquet, a radio service, a file copied onto the disk - says nothing about a hidden
-        bouquet. Hiding those too took ordinary recordings out of the library. So only a
-        recording whose bouquet is named in the option is hidden; `sref` is not judged.
+        Hidden when the bouquet the receiver names with it is a hidden one, **or** its
+        channel is a member of any hidden bouquet - so a channel of a hidden bouquet that
+        the receiver names under another one stays hidden. Shown only when no hidden
+        bouquet holds it. Unlike `service_hidden`, a recording the receiver placed in no
+        bouquet, or in one it does not publish, is not hidden for that alone: a recording
+        is a file already made, and one without a bouquet is mostly an ordinary one - a
+        channel since dropped from every bouquet, a radio service, a copied file.
+
+        It still fails toward hiding where membership cannot be told: a hidden bouquet on
+        the list without its channels, or a recording with no usable reference.
         """
-        return isinstance(bouquet, str) and bouquet in self.hidden_bouquet_names
+        hidden = self.hidden_bouquet_names
+        if not hidden:
+            return False
+        if isinstance(bouquet, str) and bouquet in hidden:
+            return True
+        published = self.published_bouquets
+        self._warn_missing_hidden(hidden, published)
+        if (hidden_members := self._members_of_hidden(hidden, published)) is None:
+            return True
+        identity = service_identity(sref)
+        return not identity or identity in hidden_members
 
     def stream_url_for(self, sref: Any, bouquet: Any) -> str | None:
         """Return the address the receiver streams one service at, or None for none.
