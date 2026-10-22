@@ -1,12 +1,13 @@
-# ADR-0011: Stream facts, addresses and a media source - no camera, the user's own go2rtc, and hiding done here
+# ADR-0011: Stream facts, addresses and a media source - no camera, and hiding done here
 
 **Status:** accepted 2026-10-13
 **Date:** 2026-10-13
 **Amended:** 2026-10-14 - checked against the plugin's stream area as submitted for review;
 2026-10-14 - the zap-history selects are `unknown` until a history arrives, as decision 9 says
 for the stream clients; 2026-10-23 - decision 7 is superseded, see below
-**Extends:** [ADR-0000](0000-prd.md) §7 - Home Assistant now also sends one request per channel
-change to a go2rtc address the user typed, and hands players the receiver's own stream address.
+**Extends:** [ADR-0000](0000-prd.md) §7 - Home Assistant now hands players the receiver's own
+stream address. (It also sent one request per channel change to a go2rtc address the user
+typed, until decision 7 was superseded before release; the title said so too.)
 No telemetry, no cloud service and nothing outside the household's network are unchanged.
 The receiver's half is the plugin's ADR-0017, ADR-0018 and ADR-0019 and the `stream`,
 `stream_clients`, `stream_playable`, `service` and `volume` sections of its `docs/TOPICS.md`.
