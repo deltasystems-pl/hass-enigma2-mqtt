@@ -20,9 +20,9 @@ lists, and Home Assistant sends nothing else: no command here names a file.
 **The receiver lists every recording; hiding is done here.** Each recording carries the
 service it was recorded from and the first published bouquet that holds it, exactly as
 `service` does, and every list Home Assistant shows is filtered by the hidden-bouquets
-option through `Enigma2Box.service_hidden` - the rule the zap history, the stream
-clients and the media source already follow, failing toward hiding. The functions here
-take that rule as `hidden`; they never decide it themselves.
+option through `Enigma2Box.recording_hidden`: a recording is hidden when its bouquet is
+one the option names, and only then - one the receiver placed in no bouquet is shown. The
+functions here take that rule as `hidden`; they never decide it themselves.
 """
 
 from __future__ import annotations
@@ -39,12 +39,12 @@ import homeassistant.util.dt as dt_util
 # what a person types is lowered before it is compared (`parse_recording_id`).
 RECORDING_ID: Final = re.compile(r"[0-9a-f]{16}")
 
-# Whether a service, named by its reference and the bouquet the receiver gives with it, is
-# one the options hide (`Enigma2Box.service_hidden`).
+# Whether a recording, named by its service reference and the bouquet the receiver gives
+# with it, is one the options hide (`Enigma2Box.recording_hidden`).
 type HiddenRule = Callable[[Any, Any], bool]
 
 # The longest service reference kept, the bound the stream clients' rows use too; a longer one
-# is no reference, and is then hidden whenever anything is.
+# is no reference.
 SREF_MAX: Final = 512
 # A short description is cut here on the receiver; a longer one is cut here too.
 DESCRIPTION_MAX: Final = 200
@@ -137,7 +137,7 @@ def active_recordings(
     usable, so a template can read them without asking whether they are there. Without
     the capability they are left out altogether.
 
-    Every entry also says `hidden`. One whose service the options hide keeps its times
+    Every entry also says `hidden`. One whose bouquet the options hide keeps its times
     and `instant`, and loses everything that names the programme, the channel or the
     file - the rule the stream clients' rows follow. It is not left out: how many
     recordings run is what the count, the "Recording" sensor and every guard on the

@@ -544,33 +544,38 @@ async def test_a_hidden_bouquet_leaves_the_count_the_browser_and_the_actions(
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """The option hides by bouquet name, and a recording with no bouquet fails toward hiding."""
+    """The option hides by bouquet name; a recording with no bouquet is shown."""
     deletable(box_on_the_broker)
     await _setup(hass, hiding(config_entry, "Sport"), box_on_the_broker)
 
-    # NEWS and EPISODE are shown; MATCH is in the hidden bouquet and NO_BOUQUET cannot be
-    # checked against the option.
-    assert hass.states.get(LIBRARY).state == "2"
+    # NEWS, NO_BOUQUET and EPISODE are shown; MATCH is in the hidden bouquet.
+    assert hass.states.get(LIBRARY).state == "3"
     folder = await media_source.async_browse_media(hass, f"{RECEIVER}/f/movie")
-    assert [child.identifier for child in folder.children] == [f"{NODE_ID}/p/{NEWS['id']}"]
+    assert [child.identifier for child in folder.children] == [
+        f"{NODE_ID}/p/{NEWS['id']}",
+        f"{NODE_ID}/p/{NO_BOUQUET['id']}",
+    ]
 
-    for hidden in (MATCH["id"], NO_BOUQUET["id"]):
-        with pytest.raises(ServiceValidationError) as raised:
-            await _play(hass, "recording", hidden)
-        assert raised.value.translation_key == "recording_unknown"
-        with pytest.raises(ServiceValidationError) as raised:
-            await _delete(hass, hidden)
-        assert raised.value.translation_key == "recording_unknown"
+    with pytest.raises(ServiceValidationError) as raised:
+        await _play(hass, "recording", MATCH["id"])
+    assert raised.value.translation_key == "recording_unknown"
+    with pytest.raises(ServiceValidationError) as raised:
+        await _delete(hass, MATCH["id"])
+    assert raised.value.translation_key == "recording_unknown"
     assert published_payloads(mqtt_mock, command_topic("play_recording")) == []
     assert published_payloads(mqtt_mock, command_topic("delete_recording")) == []
 
+    box = hass.config_entries.async_entries("enigma2_mqtt")[0].runtime_data
+    assert box.find_recording(NO_BOUQUET["id"]) is not None
 
-async def test_a_channel_of_a_hidden_bouquet_stays_hidden_under_another_bouquet(
+
+async def test_a_recording_is_judged_by_the_bouquet_the_receiver_names_with_it(
     hass: HomeAssistant,
     mqtt_mock,
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
+    """Not by its channel: a channel of a hidden bouquet named under another one is shown."""
     library(box_on_the_broker)
     box_on_the_broker[folder_topic("movie")] = json.dumps(
         {"recordings": [{**MATCH, "bouquet": "Ulubione TV"}, NEWS]}
@@ -578,34 +583,54 @@ async def test_a_channel_of_a_hidden_bouquet_stays_hidden_under_another_bouquet(
     await _setup(hass, hiding(config_entry, "Sport"), box_on_the_broker)
 
     folder = await media_source.async_browse_media(hass, f"{RECEIVER}/f/movie")
-    assert [child.identifier for child in folder.children] == [f"{NODE_ID}/p/{NEWS['id']}"]
+    assert [child.identifier for child in folder.children] == [
+        f"{NODE_ID}/p/{MATCH['id']}",
+        f"{NODE_ID}/p/{NEWS['id']}",
+    ]
 
 
-async def test_what_is_hidden_follows_the_channel_list(
+@pytest.mark.parametrize(
+    "bouquet", [None, "", "Not on the channel list", 7, ["Sport"], "sport", "Sport "]
+)
+async def test_only_a_recording_of_a_hidden_bouquet_by_name_is_hidden(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    bouquet: Any,
+) -> None:
+    """No bouquet, an unpublished one or a name that is not exactly a hidden one: shown."""
+    library(box_on_the_broker)
+    box_on_the_broker[folder_topic("movie")] = json.dumps(
+        {"recordings": [{**MATCH, "bouquet": bouquet}]}
+    )
+    entry = hiding(config_entry, "Sport")
+    await _setup(hass, entry, box_on_the_broker)
+
+    assert entry.runtime_data.find_recording(MATCH["id"]) is not None
+
+
+async def test_a_hidden_bouquet_without_its_channels_hides_only_its_own_recordings(
     hass: HomeAssistant,
     mqtt_mock,
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """The library is judged again when the channel list moves, not only when it does."""
+    """Which channels the hidden bouquet holds is not asked: the library ignores it."""
     library(box_on_the_broker)
-    box_on_the_broker[folder_topic("movie")] = json.dumps(
-        {"recordings": [{**MATCH, "bouquet": "Ulubione TV"}, NEWS]}
-    )
     entry = hiding(config_entry, "Sport")
     await _setup(hass, entry, box_on_the_broker)
-    # Eurosport 1 is a channel of the hidden "Sport", so its recording is hidden wherever
-    # it is listed.
-    assert hass.states.get(LIBRARY).state == "2"
+    assert hass.states.get(LIBRARY).state == "3"
 
     channels = json.loads(json.dumps(CHANNELS))
-    channels["bouquets"][1]["channels"] = [
-        channel for channel in channels["bouquets"][1]["channels"] if channel["sref"] != EUROSPORT
-    ]
+    for bouquet in channels["bouquets"]:
+        if bouquet["name"] == "Sport":
+            bouquet["channels"] = []
     async_fire_mqtt_message(hass, CHANNELS_TOPIC, json.dumps(channels))
     await hass.async_block_till_done()
     assert hass.states.get(LIBRARY).state == "3"
-    assert entry.runtime_data.find_recording(MATCH["id"]) is not None
+    assert entry.runtime_data.find_recording(MATCH["id"]) is None
+    assert entry.runtime_data.find_recording(NO_BOUQUET["id"]) is not None
 
 
 async def test_what_is_hidden_follows_the_option_without_a_reload(
@@ -707,6 +732,29 @@ async def test_an_older_plugins_running_recording_keeps_its_attributes(
     await _setup(hass, hiding(config_entry, "Sport"), box_on_the_broker)
 
     assert hass.states.get(ACTIVE).attributes["recordings"] == [{**entry, "hidden": False}]
+
+
+@pytest.mark.parametrize("bouquet", [None, "Not on the channel list", "Ulubione TV"])
+async def test_a_running_recording_outside_the_hidden_bouquets_is_named(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+    bouquet: Any,
+) -> None:
+    """The library's rule: no bouquet, or one that is not hidden, hides nothing."""
+    library(box_on_the_broker)
+    running = {
+        "name": "Mecz", "sref": EUROSPORT, "begin": 1, "end": 2, "bouquet": bouquet,
+        "service_name": "Eurosport 1", "description": "d", "location": LOCATION,
+        "file": MATCH["file"], "id": MATCH["id"], "instant": False,
+    }
+    box_on_the_broker[RECORDING_TOPIC] = json.dumps({"active": [running], "next": None})
+    await _setup(hass, hiding(config_entry, "Sport"), box_on_the_broker)
+
+    (row,) = hass.states.get(ACTIVE).attributes["recordings"]
+    assert row["hidden"] is False
+    assert (row["name"], row["sref"], row["bouquet"]) == ("Mecz", EUROSPORT, bouquet)
 
 
 async def test_a_hidden_running_recording_is_counted_and_not_named(
@@ -1105,9 +1153,9 @@ async def test_a_folder_and_a_location_with_nothing_to_show_are_left_out(
     )
     await _setup(hass, hiding(config_entry, "Ulubione TV"), box_on_the_broker)
 
-    # Shown: MATCH alone. NEWS, EPISODE and the USB film are in the hidden bouquet, and
-    # NO_BOUQUET cannot be checked against the option - so "Series" and the USB location
-    # have nothing to show, and the one location left is opened straight away.
+    # Shown: MATCH and NO_BOUQUET. NEWS, EPISODE and the USB film are in the hidden bouquet,
+    # so "Series" and the USB location have nothing to show, and the one location left is
+    # opened straight away.
     top = await media_source.async_browse_media(hass, f"{RECEIVER}/r")
     assert [child.title for child in top.children] == ["movie"]
     for gone in (
@@ -1119,7 +1167,7 @@ async def test_a_folder_and_a_location_with_nothing_to_show_are_left_out(
             await media_source.async_browse_media(hass, gone)
 
     state = hass.states.get(LIBRARY)
-    assert state.state == "1"
+    assert state.state == "2"
     assert state.attributes["folder_count"] == 1
     assert state.attributes["location_count"] == 1
     # The four the receiver cut from "Series" are not counted: that folder is not shown.
@@ -1725,7 +1773,10 @@ async def test_get_recordings_returns_what_the_library_shows(
                         "slug": "movie",
                         "path": "",
                         "cut": 0,
-                        "recordings": [{key: NEWS[key] for key in fields}],
+                        "recordings": [
+                            {key: NEWS[key] for key in fields},
+                            {key: NO_BOUQUET[key] for key in fields},
+                        ],
                     },
                     {
                         "slug": "movie_series",

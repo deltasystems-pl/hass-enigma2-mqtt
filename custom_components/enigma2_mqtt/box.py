@@ -2776,6 +2776,18 @@ class Enigma2Box:
         identity = service_identity(sref)
         return not identity or identity in hidden_members
 
+    def recording_hidden(self, sref: Any, bouquet: Any) -> bool:
+        """Return whether a recording is one the options hide: its bouquet is a hidden one.
+
+        Narrower than `service_hidden`, on purpose. A recording is a file that was already
+        made; the bouquet the receiver names with it is the one it found the service in,
+        and a recording it could place in no bouquet - a channel since removed from every
+        bouquet, a radio service, a file copied onto the disk - says nothing about a hidden
+        bouquet. Hiding those too took ordinary recordings out of the library. So only a
+        recording whose bouquet is named in the option is hidden; `sref` is not judged.
+        """
+        return isinstance(bouquet, str) and bouquet in self.hidden_bouquet_names
+
     def stream_url_for(self, sref: Any, bouquet: Any) -> str | None:
         """Return the address the receiver streams one service at, or None for none.
 
@@ -3316,7 +3328,7 @@ class Enigma2Box:
                 if (
                     recordings := visible(
                         self.state.recording_folders.get(folder["slug"]) or [],
-                        self.service_hidden,
+                        self.recording_hidden,
                     )
                 )
             ]

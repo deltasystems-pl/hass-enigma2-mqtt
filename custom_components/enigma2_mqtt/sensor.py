@@ -143,12 +143,14 @@ def _active_count(state: Enigma2State) -> int:
 def _active_recordings(box: Enigma2Box) -> list[Any]:
     """Return the recordings running right now, with their details where the box has them.
 
-    A recording of a service the options hide is shown without what names it.
+    A recording of a bouquet the options hide is shown without what names it - the
+    library's rule (`Enigma2Box.recording_hidden`), so a recording is hidden while it runs
+    exactly when it will be hidden in the library.
     """
     return active_recordings(
         box.state.recording,
         details=CAPABILITY_RECORDING_DETAILS in capabilities_of(box.state),
-        hidden=box.service_hidden,
+        hidden=box.recording_hidden,
     )
 
 
