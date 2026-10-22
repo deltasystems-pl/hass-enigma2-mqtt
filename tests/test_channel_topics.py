@@ -594,9 +594,9 @@ async def test_an_incomplete_list_is_held_back_and_then_shown_as_far_as_it_goes(
     # Sport is the hidden bouquet, so the bouquet select does not offer it.
     assert options(hass, BOUQUET_SELECT) == ["Ulubione TV"]
     assert box.bouquet_names == ["Ulubione TV", "Sport"]
-    assert options(hass, CHANNEL_SELECT) == (
-        ["TVP 1 HD", "TVN HD"] if "ulubione" in arrived else []
-    )
+    # Either Ulubione's list or the hidden Sport's is missing: the channel select has
+    # nothing it may offer.
+    assert options(hass, CHANNEL_SELECT) == []
     assert [bouquet["listed"] for bouquet in listing.bouquets] == [
         "ulubione" in arrived,
         "sport" in arrived,
@@ -669,8 +669,10 @@ async def test_a_withheld_hidden_bouquet_stays_listed_and_hides_everything(
     assert box.channel_list.complete is True
     # Sport is the hidden bouquet, so the bouquet select does not offer it.
     assert options(hass, BOUQUET_SELECT) == ["Ulubione TV"]
-    assert options(hass, CHANNEL_SELECT) == ["TVP 1 HD", "TVN HD"]
-    assert hass.states.get(PLAYER).attributes["source_list"] == ["TVP 1 HD", "TVN HD"]
+    # The hidden bouquet's channels are not known, so no channel can be told apart from
+    # them: the channel select and the source list offer nothing.
+    assert options(hass, CHANNEL_SELECT) == []
+    assert hass.states.get(PLAYER).attributes.get("source_list") is None
     assert box.bouquet_by_sref(SPORT["sref"])["channels"] == []
     assert box.bouquet_by_sref(SPORT["sref"])["count"] == 2
     assert options(hass, HISTORY_SELECT) == []
@@ -1219,7 +1221,9 @@ async def test_a_retracted_bouquet_topic_leaves_the_bouquet_without_channels(
 
     # Sport is the hidden bouquet, so the bouquet select does not offer it.
     assert options(hass, BOUQUET_SELECT) == ["Ulubione TV"]
-    assert hass.states.get(PLAYER).attributes["source_list"] == ["TVP 1 HD", "TVN HD"]
+    # The hidden bouquet's channels are not known, so no channel can be told apart from
+    # them: the channel select and the source list offer nothing.
+    assert hass.states.get(PLAYER).attributes.get("source_list") is None
     assert options(hass, HISTORY_SELECT) == []
     assert box.channel_list.complete is False
 
@@ -1322,13 +1326,15 @@ async def test_bouquets_is_the_index_and_bouquet_is_the_one_in_use(
     assert box.state.bouquet_index["bouquets"] == index["bouquets"]
     # Sport is hidden: not offered, so nothing is marked while the receiver is on it.
     assert hass.states.get(BOUQUET_SELECT).state == STATE_UNKNOWN
-    assert options(hass, CHANNEL_SELECT) == ["Eurosport 1", "TVN HD"]
+    # And "Kanal" offers none of its channels.
+    assert options(hass, CHANNEL_SELECT) == []
     # A level below `bouquets` is nothing this reads.
     await publish(hass, f"{BOUQUETS_TOPIC}/sport", list_of(ULUBIONE))
     await publish(hass, f"{list_topic('sport')}/deeper", list_of(ULUBIONE))
     await settle(hass)
 
-    assert options(hass, CHANNEL_SELECT) == ["Eurosport 1", "TVN HD"]
+    # Sport's list is untouched (read on the box: the hidden bouquet's select is empty).
+    assert box.bouquet_by_sref(SPORT["sref"])["channels"] == SPORT["channels"]
     assert sorted(box.state.bouquet_channels) == ["sport", "ulubione_tv"]
 
 
@@ -1583,12 +1589,11 @@ async def test_with_channels_withheld_such_a_bouquet_has_no_list_and_nothing_wai
     ]
     assert box.bouquet_by_sref(NO_SLUG["sref"])["channels"] == []
     assert box.bouquet_by_sref(NO_SLUG["sref"])["count"] == 2
-    # A hidden bouquet's channels are not drawn on; the slug-less one has none here.
-    assert hass.states.get(PLAYER).attributes["source_list"] == [
-        "TVP 1 HD",
-        "TVN HD",
-        *(["Eurosport 1"] if hidden != "Sport" else []),
-    ]
+    # Hidden and without its list, the slug-less bouquet leaves nothing to offer; with
+    # Sport hidden, Sport's channels are left out.
+    assert hass.states.get(PLAYER).attributes.get("source_list") == (
+        None if hidden == NO_SLUG_NAME else ["TVP 1 HD", "TVN HD"]
+    )
     assert options(hass, HISTORY_SELECT) == filtered
 
 

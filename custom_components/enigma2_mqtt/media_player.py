@@ -363,15 +363,7 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
                 if media_id.startswith(BROWSE_BOUQUET_PREFIX)
                 else media_id
             )
-            # A hidden bouquet is not offered here, so it is refused as one not offered.
-            if (bouquet := self.box.bouquet_by_sref(sref)) is not None and bouquet.get(
-                "name"
-            ) in self.box.hidden_bouquet_names:
-                raise ServiceValidationError(
-                    translation_domain=DOMAIN,
-                    translation_key="bouquet_not_published",
-                    translation_placeholders={"bouquet": sref},
-                )
+            # Refuses a hidden bouquet as one not offered, like the action does.
             await async_select_bouquet(self.box, sref)
             return
         raise ServiceValidationError(

@@ -464,10 +464,21 @@ class Enigma2ChannelSelect(Enigma2Select):
         receiver is on the radio list, or on a bouquet nobody chose to publish. An
         invented option would be worse than an empty one: it would claim the select can
         go back to it.
+
+        A channel of a bouquet the hidden-bouquets option names is never offered - not
+        while the receiver is on a visible bouquet that shares it, and not while it is on
+        the hidden one itself, which then leaves nothing to offer. The rule is the media
+        source's (`channel_streamable`), so it fails toward hiding the same way.
         """
         active = self.box.active_bouquet
+        channels = (active or {}).get("channels") or []
+        if active is not None and self.box.hidden_bouquet_names:
+            # On a hidden bouquet every channel is one of its own, so every one goes.
+            channels = [
+                channel for channel in channels if self.box.channel_streamable(active, channel)
+            ]
         self._set_options(
-            _named_entries((active or {}).get("channels") or []),
+            _named_entries(channels),
             (self.box.state.service or {}).get("sref"),
         )
 

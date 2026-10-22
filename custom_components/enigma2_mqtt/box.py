@@ -1634,19 +1634,19 @@ class Enigma2Box:
         „Kanał" select numbers them instead, because it is scoped to one bouquet and a
         repeat inside one bouquet is a channel that would otherwise be unreachable.
 
-        A bouquet the hidden-bouquets option names is not drawn on. Its channels are
-        judged by name only through the bouquets that are: a channel it shares with one
-        of them is still offered, because the list is the way to change channel at all,
-        and a hidden bouquet withheld by the receiver would otherwise empty it.
+        A channel of a bouquet the hidden-bouquets option names is left out wherever it is
+        listed (`channel_streamable`, the media source's rule), so a hidden bouquet adds
+        nothing. That rule fails toward hiding: while a hidden bouquet's channels are not
+        known, which ones to leave out is not known either, and the list offers nothing.
         """
         names: list[str] = []
         seen: set[str] = set()
         hidden = self.hidden_bouquet_names
         for bouquet in self.scoped_bouquets:
-            if bouquet.get("name") in hidden:
-                continue
             for channel in bouquet["channels"]:
                 if not isinstance(channel, dict):
+                    continue
+                if hidden and not self.channel_streamable(bouquet, channel):
                     continue
                 name = channel.get("name")
                 if isinstance(name, str) and name and name not in seen:

@@ -814,8 +814,7 @@ async def test_the_option_keeps_the_hidden_bouquet_out_of_bouquet_and_the_source
     config_entry: MockConfigEntry,
 ) -> None:
     """"Bukiet" does not offer the hidden bouquet and marks nothing while it is on, and
-    the media player's source list does not draw on it; "Kanał", which follows the
-    receiver's own context, still lists that bouquet's channels."""
+    the media player's source list and "Kanal" offer none of its channels."""
     capable(box_on_the_broker, "bouquet_context")
     box_on_the_broker[BOUQUET_TOPIC] = json.dumps(
         {"name": SPORT["name"], "sref": SPORT["sref"]}
@@ -826,7 +825,7 @@ async def test_the_option_keeps_the_hidden_bouquet_out_of_bouquet_and_the_source
 
     assert options(hass, BOUQUET_SELECT) == ["Ulubione TV"]
     assert hass.states.get(BOUQUET_SELECT).state == "unknown"
-    assert options(hass, CHANNEL_SELECT) == ["Eurosport 1", "TVN HD"]
+    assert options(hass, CHANNEL_SELECT) == []
     assert "Eurosport 1" not in hass.states.get(PLAYER).attributes[ATTR_INPUT_SOURCE_LIST]
     assert options(hass, HISTORY_SELECT) == ["TVP 1 HD"]
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
 
 from homeassistant.components.media_player import (
     ATTR_INPUT_SOURCE,
@@ -887,9 +888,119 @@ async def test_playing_a_hidden_bouquet_is_refused_before_anything_is_sent(
                 **{ATTR_MEDIA_CONTENT_TYPE: "bouquet", ATTR_MEDIA_CONTENT_ID: media_id},
             )
         assert raised.value.translation_key == "bouquet_not_published"
+    # The action refuses it the same way; the shown bouquet is still taken.
+    with pytest.raises(ServiceValidationError) as raised:
+        await hass.services.async_call(
+            "enigma2_mqtt",
+            "select_bouquet",
+            {ATTR_ENTITY_ID: PLAYER, "sref": SPORT["sref"]},
+            blocking=True,
+        )
+    assert raised.value.translation_key == "bouquet_not_published"
     assert not [
         call for call in mqtt_mock.async_publish.call_args_list
         if call.args[0] == command_topic("bouquet")
+    ]
+
+
+async def test_the_source_list_leaves_out_a_channel_a_hidden_bouquet_shares(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    box_on_the_broker[CHANNELS_TOPIC] = _sharing_eurosport()
+    await async_setup_box(hass, _hiding(config_entry, "Sport"))
+
+    assert hass.states.get(PLAYER).attributes["source_list"] == ["TVP 1 HD", "TVN HD"]
+
+
+async def test_without_the_option_the_source_list_has_every_channel(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    box_on_the_broker[CHANNELS_TOPIC] = _sharing_eurosport()
+    await async_setup_box(hass, config_entry)
+
+    assert hass.states.get(PLAYER).attributes["source_list"] == [
+        "TVP 1 HD",
+        "TVN HD",
+        "Eurosport 1",
+    ]
+
+
+async def test_while_a_hidden_bouquets_channels_are_unknown_nothing_is_offered(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Fails toward hiding: the source list, the browser and "Kanal" offer nothing."""
+    box_on_the_broker[INFO_TOPIC] = json.dumps(
+        {**INFO, "capabilities": [*INFO["capabilities"], "bouquet_context"]}
+    )
+    box_on_the_broker[BOUQUET_TOPIC] = json.dumps(BOUQUET)
+    await async_setup_box(hass, _hiding(config_entry, "Sport"))
+    box = hass.config_entries.async_entries("enigma2_mqtt")[0].runtime_data
+    entity = _player(hass)
+    root = await entity.async_browse_media()
+
+    with patch.object(type(box), "_members_of_hidden", lambda *_args: None):
+        assert box.channel_names == []
+        shown = await entity.async_browse_media(
+            media_content_id=root.children[0].media_content_id
+        )
+        assert shown.children == []
+        # Wake the entities that read the channel list, as a new payload would.
+        box._async_updated(CHANNELS_TOPIC.rsplit("/", 1)[-1])
+        await hass.async_block_till_done()
+        assert hass.states.get(PLAYER).attributes.get("source_list") is None
+        assert hass.states.get(CHANNEL_SELECT).attributes["options"] == []
+
+
+async def test_kanal_leaves_out_a_channel_of_a_hidden_bouquet_wherever_the_receiver_is(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    box_on_the_broker[INFO_TOPIC] = json.dumps(
+        {**INFO, "capabilities": [*INFO["capabilities"], "bouquet_context"]}
+    )
+    box_on_the_broker[CHANNELS_TOPIC] = _sharing_eurosport()
+    box_on_the_broker[BOUQUET_TOPIC] = json.dumps(BOUQUET)
+    await async_setup_box(hass, _hiding(config_entry, "Sport"))
+
+    # On "Ulubione TV", which shares Eurosport 1 with the hidden "Sport".
+    assert hass.states.get(CHANNEL_SELECT).attributes["options"] == ["TVP 1 HD", "TVN HD"]
+
+    # On "Sport" itself: nothing to offer.
+    async_fire_mqtt_message(hass, BOUQUET_TOPIC, json.dumps(SPORT_CONTEXT))
+    await hass.async_block_till_done()
+    state = hass.states.get(CHANNEL_SELECT)
+    assert state.attributes["options"] == []
+    assert state.state == STATE_UNKNOWN
+
+
+async def test_without_the_option_kanal_lists_the_whole_bouquet(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    box_on_the_broker[INFO_TOPIC] = json.dumps(
+        {**INFO, "capabilities": [*INFO["capabilities"], "bouquet_context"]}
+    )
+    box_on_the_broker[CHANNELS_TOPIC] = _sharing_eurosport()
+    box_on_the_broker[BOUQUET_TOPIC] = json.dumps(BOUQUET)
+    await async_setup_box(hass, config_entry)
+
+    assert hass.states.get(CHANNEL_SELECT).attributes["options"] == [
+        "TVP 1 HD",
+        "TVN HD",
+        "Eurosport 1",
     ]
 
 
