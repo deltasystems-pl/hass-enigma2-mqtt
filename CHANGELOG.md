@@ -34,7 +34,9 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   returns the library as Home Assistant shows it, from the topics already held. The receiver
   lists every recording; the hidden-bouquets option keeps a hidden bouquet's recordings out of
   the browser, the action and the count, refuses to play or delete them, and shows a running
-  one without its title; a folder or a location left with nothing to show is not listed.
+  one without its title; a folder or a location left with nothing to show is not listed. Only a
+  recording whose bouquet is named in the option is hidden: one the receiver placed in no
+  bouquet is shown.
   The receiver's refusals of these commands are said in the household's language, also a play
   the viewer declined by keeping timeshift and a delete asked for while another is being moved.
 - **The receiver menu** (plugin 0.5.0, for a receiver that claims `menu`; DOCUMENTATION.md
@@ -126,7 +128,8 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   `previous`, `exit`, play/pause, stop) pressed 2-5 times, each press within 0.3-3.0 s of the one
   before. A select and two numbers, configuration entities written like the two above; the gap is
   shown in seconds and sent as `menu_combo_gap_ms`. While a key is set it no longer does what it
-  did in live TV and the players (on many images Back zaps to the previous channel there).
+  did in live TV - `previous` in the players too (on many images Back zaps to the previous
+  channel in live TV).
   `info.menu.combo` and `combo_reason` reach the diagnostics as the receiver sends them.
 
 - **Stream facts, a stream address and a media source** (plugin 0.5.0, for a receiver that
@@ -181,8 +184,10 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
     every channel; a channel of a bouquet the option **Bouquets hidden from "Recently
     watched"** names gets no stream address and no stream name, is not in the media source,
     is not sent to go2rtc, and a client on it is listed without its channel. Such a client can
-    still be stopped, by its address alone. The option's name is unchanged; its help text says
-    what else it now hides.
+    still be stopped, by its address alone. The receiver's media player does not list such a
+    bouquet in its browser either, nor open it by an old link; its channels are still played
+    and zapped to by their service reference. The option's name is unchanged; its help text
+    says what else it now hides.
 - **What is on the decoder** (plugin 0.5.0, `service_codecs`): four diagnostic sensors -
   „Kodek obrazu", „Liczba klatek na sekundę", „Kodek dźwięku", „Język dźwięku" - and the
   binary sensor „Obraz z przeplotem", disabled by default like the tuner's numbers. The audio

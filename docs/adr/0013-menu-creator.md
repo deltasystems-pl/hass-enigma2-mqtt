@@ -153,7 +153,11 @@ accepts - and waits until `info.settings` says the new value; a refusal on `last
 They are created for a receiver whose `info.settings` carries `menu_transparency` (the hotkey also
 needs `menu_hotkey`), never removed by this integration when a later `info` stops carrying it -
 that is an older plugin or one that has not answered yet - and unavailable meanwhile. Their values
-are always the receiver's: no default of them is kept on this side.
+are always the receiver's: no default of them is kept on this side. The menu shortcut's three
+settings - a key pressed a number of times opens the menu: "Menu shortcut key", "Menu shortcut
+presses" and "Menu shortcut gap" (seconds here, `menu_combo_gap_ms` on the receiver) - follow the
+same rule, created together for a receiver whose `info.settings` carries `menu_transparency` and
+`menu_combo_key`.
 
 ## Consequences
 
