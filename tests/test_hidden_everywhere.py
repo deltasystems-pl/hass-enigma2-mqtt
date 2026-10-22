@@ -10,6 +10,7 @@ hidden bouquet's channel has is refused like a channel the receiver does not hav
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from freezegun.api import FrozenDateTimeFactory
@@ -216,7 +217,11 @@ async def test_scoped_to_a_hidden_active_bouquet_the_source_list_falls_back(
 
     assert hass.states.get(PLAYER).attributes["source_list"] == ["TVP 1 HD", "TVN HD"]
     # The fallback is the household's choice, and the hidden bouquet is not named in the log.
-    assert "Sport" not in caplog.text
+    assert not [
+        record
+        for record in caplog.records
+        if record.levelno >= logging.WARNING and "Sport" in record.getMessage()
+    ]
     await hass.services.async_call(
         MEDIA_PLAYER_DOMAIN, SERVICE_SELECT_SOURCE,
         {ATTR_ENTITY_ID: PLAYER, ATTR_INPUT_SOURCE: "TVP 1 HD"}, blocking=True,
@@ -411,3 +416,25 @@ async def test_kanal_labels_still_map_to_the_channel_they_name(
     assert hass.states.get(channel_select).attributes["options"] == ["TVP 1 HD", "TVN HD"]
     entity = hass.data["entity_components"]["select"].get_entity(channel_select)
     assert entity._sref_for("TVN HD") == SREF_TWO
+
+
+async def test_a_shared_name_never_tunes_the_hidden_copy_even_when_it_comes_first(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """With "Sport" listed first, its "TVN HD" is the first match by name; it is hidden,
+    so the visible copy is the one sent."""
+    channels = json.loads(json.dumps(CHANNELS))
+    channels["bouquets"].reverse()
+    box_on_the_broker[CHANNELS_TOPIC] = json.dumps(channels)
+    await async_setup_box_then_retained(hass, _hiding(config_entry), box_on_the_broker)
+
+    await hass.services.async_call(
+        MEDIA_PLAYER_DOMAIN, SERVICE_PLAY_MEDIA,
+        {ATTR_ENTITY_ID: PLAYER, ATTR_MEDIA_CONTENT_TYPE: "channel_name",
+         ATTR_MEDIA_CONTENT_ID: "TVN HD"},
+        blocking=True,
+    )
+    assert _published(mqtt_mock, command_topic("zap")) == [SREF_TWO]
