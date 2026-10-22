@@ -41,9 +41,9 @@ from .conftest import (
 from .menu_common import EDITOR_INFO, menu_entry
 from .test_translations import LANGUAGES, TRANSLATIONS
 
-KEY = f"select.{SLUG}_menu_combo_key"
-PRESSES = f"number.{SLUG}_menu_combo_presses"
-GAP = f"number.{SLUG}_menu_combo_gap"
+KEY = f"select.{SLUG}_menu_shortcut_key"
+PRESSES = f"number.{SLUG}_menu_shortcut_presses"
+GAP = f"number.{SLUG}_menu_shortcut_gap"
 COMBO = (KEY, PRESSES, GAP)
 SETTINGS = {
     "menu_allowed": True,

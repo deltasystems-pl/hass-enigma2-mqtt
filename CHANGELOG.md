@@ -119,8 +119,8 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   steps of 10) and a select (long HELP, long RED, F3, F4, off) for two settings of the receiver
   menu, each written with a `cmd/config` that carries only its own key and confirmed by
   `info.settings`.
-- **The press combo** - „Klawisz kombinacji menu", „Naciśnięcia kombinacji menu" and „Odstęp
-  kombinacji menu" (*Menu combo key*, *Menu combo presses*, *Menu combo gap*; plugin 0.5.0, for a
+- **The menu shortcut** - „Skrót menu: klawisz", „Skrót menu: liczba naciśnięć" and „Skrót
+  menu: odstęp" (*Menu shortcut key*, *Menu shortcut presses*, *Menu shortcut gap*; plugin 0.5.0, for a
   receiver that reports `menu_combo_key`; DOCUMENTATION.md, Receiver menu): a second way to open
   the receiver menu, for a TV remote driving the receiver over HDMI-CEC - one key (off, Back as
   `previous`, `exit`, play/pause, stop) pressed 2-5 times, each press within 0.3-3.0 s of the one

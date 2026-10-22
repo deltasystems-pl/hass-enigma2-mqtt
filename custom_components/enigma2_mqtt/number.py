@@ -10,7 +10,7 @@ person writing it is thinking in.
 background is, 0-80 % in tens, written with a partial `cmd/config` (ADR-0013). It exists
 for a receiver that reports the setting.
 
-"Menu combo presses" and "Menu combo gap" are the other two settings of the press combo
+"Menu shortcut presses" and "Menu shortcut gap" are the other two settings of the press combo
 (the key is a select): how many presses open the menu, and the longest time allowed
 between two of them. They exist for a receiver that reports `menu_combo_key`. The gap is
 the receiver's in milliseconds and shown here in seconds, which is how the receiver's own

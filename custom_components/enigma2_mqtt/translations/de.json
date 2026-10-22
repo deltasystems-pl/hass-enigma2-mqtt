@@ -431,10 +431,10 @@
         "name": "Menütransparenz"
       },
       "menu_combo_presses": {
-        "name": "Menü-Kombi-Anzahl"
+        "name": "Menü-Kurzbefehl: Anzahl"
       },
       "menu_combo_gap": {
-        "name": "Menü-Kombi-Abstand"
+        "name": "Menü-Kurzbefehl: Abstand"
       }
     },
     "remote": {
@@ -577,7 +577,7 @@
         }
       },
       "menu_combo_key": {
-        "name": "Menü-Kombitaste",
+        "name": "Menü-Kurzbefehl: Taste",
         "state": {
           "off": "Aus",
           "previous": "Zurück (previous)",

@@ -431,10 +431,10 @@
         "name": "Przezroczystość menu"
       },
       "menu_combo_presses": {
-        "name": "Naciśnięcia kombinacji menu"
+        "name": "Skrót menu: liczba naciśnięć"
       },
       "menu_combo_gap": {
-        "name": "Odstęp kombinacji menu"
+        "name": "Skrót menu: odstęp"
       }
     },
     "remote": {
@@ -577,7 +577,7 @@
         }
       },
       "menu_combo_key": {
-        "name": "Klawisz kombinacji menu",
+        "name": "Skrót menu: klawisz",
         "state": {
           "off": "Wyłączony",
           "previous": "Wstecz (previous)",

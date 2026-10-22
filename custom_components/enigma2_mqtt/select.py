@@ -339,7 +339,8 @@ class Enigma2MenuComboKeySelect(PluginSettingEntity, SelectEntity):
     The combo opens the receiver menu when one key is pressed a number of times in quick
     succession - for a TV remote driving the receiver over HDMI-CEC, which has none of the
     hotkey's keys and no long press. While a key is set, the receiver takes it from the
-    image in live TV and the players; `off` gives it back. Written with a partial
+    image in live TV - `previous` in the players as well; `off` gives it back. Written
+    with a partial
     `cmd/config` like the hotkey; `info.menu.combo` says whether it is bound.
     """
 
