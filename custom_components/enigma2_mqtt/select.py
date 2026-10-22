@@ -53,7 +53,9 @@ from .const import (
     CAPABILITY_ZAP_HISTORY,
     CONF_PLUGIN_TARGET_VERSION,
     DOMAIN,
+    MENU_COMBO_KEYS,
     MENU_HOTKEYS,
+    SETTING_MENU_COMBO_KEY,
     SETTING_MENU_HOTKEY,
     SIGNAL_RELEASE_INDEX,
     SIGNAL_TARGET_VERSION,
@@ -217,6 +219,20 @@ async def async_setup_entry(
             hass,
             box,
             Platform.SELECT,
+            (SETTING_MENU_COMBO_KEY,),
+            lambda _key: Enigma2MenuComboKeySelect(box),
+            lambda: menu_settings_reported(box, SETTING_MENU_COMBO_KEY),
+            # Never removed, like the hotkey: unavailable while not reported.
+            lambda: False,
+            async_add_entities,
+        ).start()
+    )
+
+    entry.async_on_unload(
+        OptionalEntities(
+            hass,
+            box,
+            Platform.SELECT,
             (KEY_ZAP_HISTORY, KEY_ZAP_HISTORY_ALL),
             _create,
             lambda: CAPABILITY_ZAP_HISTORY in box.capabilities,
@@ -311,6 +327,32 @@ class Enigma2MenuHotkeySelect(PluginSettingEntity, SelectEntity):
     def _async_read_state(self) -> None:
         reported = self.reported()
         self._attr_current_option = reported if reported in MENU_HOTKEYS else None
+
+    async def async_select_option(self, option: str) -> None:
+        """Write the key and wait until the receiver reports it."""
+        await self.async_write_setting(option)
+
+
+class Enigma2MenuComboKeySelect(PluginSettingEntity, SelectEntity):
+    """The key of the press combo, as the receiver reports it.
+
+    The combo opens the receiver menu when one key is pressed a number of times in quick
+    succession - for a TV remote driving the receiver over HDMI-CEC, which has none of the
+    hotkey's keys and no long press. While a key is set, the receiver takes it from the
+    image in live TV and the players; `off` gives it back. Written with a partial
+    `cmd/config` like the hotkey; `info.menu.combo` says whether it is bound.
+    """
+
+    _attr_options = list(MENU_COMBO_KEYS)
+
+    def __init__(self, box: Enigma2Box) -> None:
+        """Follow `info.settings.menu_combo_key`."""
+        super().__init__(box, SETTING_MENU_COMBO_KEY, SETTING_MENU_COMBO_KEY)
+
+    @callback
+    def _async_read_state(self) -> None:
+        reported = self.reported()
+        self._attr_current_option = reported if reported in MENU_COMBO_KEYS else None
 
     async def async_select_option(self, option: str) -> None:
         """Write the key and wait until the receiver reports it."""

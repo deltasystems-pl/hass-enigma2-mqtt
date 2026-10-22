@@ -456,6 +456,12 @@
       },
       "menu_transparency": {
         "name": "Menu transparency"
+      },
+      "menu_combo_presses": {
+        "name": "Menu combo presses"
+      },
+      "menu_combo_gap": {
+        "name": "Menu combo gap"
       }
     },
     "remote": {
@@ -595,6 +601,16 @@
           "f3": "F3",
           "f4": "F4",
           "off": "Off"
+        }
+      },
+      "menu_combo_key": {
+        "name": "Menu combo key",
+        "state": {
+          "off": "Off",
+          "previous": "Back (previous)",
+          "exit": "Exit",
+          "playpause": "Play/pause",
+          "stop": "Stop"
         }
       }
     }
@@ -979,6 +995,8 @@
     "play_recording_not_in_library": {"message": "The receiver's library does not list that recording any more."},
     "play_recording_file_gone": {"message": "The recording's file is no longer on the receiver."},
     "menu_transparency_step": {"message": "{value} % is not a menu transparency the receiver takes: it takes 0 to 80 % in steps of 10."},
+    "menu_combo_presses_step": {"message": "{value} is not a number of presses the receiver takes: it takes 2 to 5."},
+    "menu_combo_gap_step": {"message": "{value} s is not a gap the receiver takes: it takes 0.3 to 3.0 s in steps of 0.1 s."},
     "stream_source_unknown": {"message": "That receiver, bouquet or channel is not offered for streaming here. Open the media browser again and pick from what is there now."},
     "stream_player_browser": {"message": "The browser cannot play a receiver's transport stream. Choose a media player that decodes it itself, such as Kodi, VLC or an Android TV player."},
     "stream_player_cast": {"message": "Chromecast cannot play a receiver's transport stream. Choose a media player that decodes it itself, such as Kodi, VLC or an Android TV player."},

@@ -429,6 +429,12 @@
       },
       "menu_transparency": {
         "name": "Menütransparenz"
+      },
+      "menu_combo_presses": {
+        "name": "Menü-Kombi-Anzahl"
+      },
+      "menu_combo_gap": {
+        "name": "Menü-Kombi-Abstand"
       }
     },
     "remote": {
@@ -568,6 +574,16 @@
           "f3": "F3",
           "f4": "F4",
           "off": "Aus"
+        }
+      },
+      "menu_combo_key": {
+        "name": "Menü-Kombitaste",
+        "state": {
+          "off": "Aus",
+          "previous": "Zurück (previous)",
+          "exit": "Exit",
+          "playpause": "Wiedergabe/Pause",
+          "stop": "Stopp"
         }
       }
     }
@@ -952,6 +968,8 @@
     "play_recording_not_in_library": {"message": "Die Bibliothek des Receivers führt diese Aufnahme nicht mehr."},
     "play_recording_file_gone": {"message": "Die Datei dieser Aufnahme ist nicht mehr auf dem Receiver."},
     "menu_transparency_step": {"message": "Eine Menütransparenz von {value} % nimmt der Receiver nicht an: Er nimmt 0 bis 80 % in Zehnerschritten."},
+    "menu_combo_presses_step": {"message": "{value} Tastendrücke nimmt der Receiver nicht an: Er nimmt 2 bis 5."},
+    "menu_combo_gap_step": {"message": "Einen Abstand von {value} s nimmt der Receiver nicht an: Er nimmt 0,3 bis 3,0 s in Schritten von 0,1 s."},
     "stream_source_unknown": {"message": "Dieser Receiver, dieses Bouquet oder dieser Sender wird hier nicht zum Streamen angeboten. Öffne den Medienbrowser erneut und wähle aus dem, was jetzt dort steht."},
     "stream_player_browser": {"message": "Der Browser kann den Transportstrom eines Receivers nicht abspielen. Wähle einen Media Player, der ihn selbst dekodiert, etwa Kodi, VLC oder einen Player auf Android TV."},
     "stream_player_cast": {"message": "Chromecast kann den Transportstrom eines Receivers nicht abspielen. Wähle einen Media Player, der ihn selbst dekodiert, etwa Kodi, VLC oder einen Player auf Android TV."},

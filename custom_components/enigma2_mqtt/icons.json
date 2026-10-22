@@ -133,6 +133,12 @@
       },
       "menu_transparency": {
         "default": "mdi:circle-opacity"
+      },
+      "menu_combo_presses": {
+        "default": "mdi:counter"
+      },
+      "menu_combo_gap": {
+        "default": "mdi:timer-outline"
       }
     },
     "remote": {
@@ -297,6 +303,9 @@
       },
       "menu_hotkey": {
         "default": "mdi:remote"
+      },
+      "menu_combo_key": {
+        "default": "mdi:gesture-double-tap"
       }
     }
   },

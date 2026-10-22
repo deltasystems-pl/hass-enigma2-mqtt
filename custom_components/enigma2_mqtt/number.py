@@ -9,6 +9,12 @@ person writing it is thinking in.
 "Menu transparency" is the receiver's own setting of how see-through the menu's
 background is, 0-80 % in tens, written with a partial `cmd/config` (ADR-0013). It exists
 for a receiver that reports the setting.
+
+"Menu combo presses" and "Menu combo gap" are the other two settings of the press combo
+(the key is a select): how many presses open the menu, and the longest time allowed
+between two of them. They exist for a receiver that reports `menu_combo_key`. The gap is
+the receiver's in milliseconds and shown here in seconds, which is how the receiver's own
+setup screen shows it.
 """
 
 from __future__ import annotations
@@ -16,7 +22,7 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.components.number import NumberEntity, NumberMode
-from homeassistant.const import PERCENTAGE, Platform
+from homeassistant.const import PERCENTAGE, Platform, UnitOfTime
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -26,9 +32,17 @@ from .const import (
     ATTR_VOLUME_PASSTHROUGH,
     CAPABILITY_VOLUME_PASSTHROUGH,
     DOMAIN,
+    MENU_COMBO_GAP_MS_MAX,
+    MENU_COMBO_GAP_MS_MIN,
+    MENU_COMBO_GAP_MS_STEP,
+    MENU_COMBO_PRESSES_MAX,
+    MENU_COMBO_PRESSES_MIN,
     MENU_TRANSPARENCY_MAX,
     MENU_TRANSPARENCY_MIN,
     MENU_TRANSPARENCY_STEP,
+    SETTING_MENU_COMBO_GAP_MS,
+    SETTING_MENU_COMBO_KEY,
+    SETTING_MENU_COMBO_PRESSES,
     SETTING_MENU_TRANSPARENCY,
     TOPIC_INFO,
     TOPIC_VOLUME,
@@ -42,6 +56,10 @@ from .entity import (
 from .stream_facts import volume_passthrough
 
 PARALLEL_UPDATES = 0
+
+# The gap's entity key is not its setting's name: the entity speaks seconds, the setting
+# milliseconds.
+KEY_MENU_COMBO_GAP = "menu_combo_gap"
 
 
 async def async_setup_entry(
@@ -62,6 +80,27 @@ async def async_setup_entry(
             lambda: menu_settings_reported(box),
             # Never removed: a receiver that stops reporting the setting is an older plugin
             # or one that has not answered yet, and the entity is unavailable meanwhile.
+            lambda: False,
+            async_add_entities,
+        ).start()
+    )
+
+    def _combo(key: str) -> NumberEntity:
+        if key == KEY_MENU_COMBO_GAP:
+            return Enigma2MenuComboGap(box)
+        return Enigma2MenuComboPresses(box)
+
+    entry.async_on_unload(
+        OptionalEntities(
+            hass,
+            box,
+            Platform.NUMBER,
+            (SETTING_MENU_COMBO_PRESSES, KEY_MENU_COMBO_GAP),
+            _combo,
+            # The key says the receiver has the combo; each number is unavailable while
+            # its own setting is not reported.
+            lambda: menu_settings_reported(box, SETTING_MENU_COMBO_KEY),
+            # Never removed, like the transparency.
             lambda: False,
             async_add_entities,
         ).start()
@@ -160,3 +199,88 @@ class Enigma2MenuTransparency(PluginSettingEntity, NumberEntity):
                 translation_placeholders={"value": f"{value:g}"},
             )
         await self.async_write_setting(percent)
+
+
+def reported_integer(value: Any) -> int | None:
+    """A reported whole number as it is - never put on a step or into a range - else None."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def gap_ms(seconds: float) -> int:
+    """The gap in seconds as the milliseconds the receiver takes, rounded to the nearest.
+
+    Rounding absorbs the float noise a slider or a template leaves (1.2000000001 is 1200);
+    it does not make a value that is off the steps acceptable - that is checked after.
+    """
+    return round(seconds * 1000)
+
+
+class Enigma2MenuComboPresses(PluginSettingEntity, NumberEntity):
+    """How many presses of the combo key open the receiver menu, as the receiver reports it."""
+
+    _attr_native_min_value = MENU_COMBO_PRESSES_MIN
+    _attr_native_max_value = MENU_COMBO_PRESSES_MAX
+    _attr_native_step = 1
+    _attr_mode = NumberMode.SLIDER
+
+    def __init__(self, box: Enigma2Box) -> None:
+        """Follow `info.settings.menu_combo_presses`."""
+        super().__init__(box, SETTING_MENU_COMBO_PRESSES, SETTING_MENU_COMBO_PRESSES)
+
+    @callback
+    def _async_read_state(self) -> None:
+        self._attr_native_value = reported_integer(self.reported())
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Write the count and wait until the receiver reports it."""
+        if (
+            not float(value).is_integer()
+            or not MENU_COMBO_PRESSES_MIN <= (presses := int(value)) <= MENU_COMBO_PRESSES_MAX
+        ):
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="menu_combo_presses_step",
+                translation_placeholders={"value": f"{value:g}"},
+            )
+        await self.async_write_setting(presses)
+
+
+class Enigma2MenuComboGap(PluginSettingEntity, NumberEntity):
+    """The longest time between two presses of the combo, in seconds.
+
+    The receiver keeps it in milliseconds, 300-3000 in hundreds; this shows what it
+    reports divided by a thousand, also a value off those steps, which is never rewritten.
+    """
+
+    _attr_native_min_value = MENU_COMBO_GAP_MS_MIN / 1000
+    _attr_native_max_value = MENU_COMBO_GAP_MS_MAX / 1000
+    _attr_native_step = MENU_COMBO_GAP_MS_STEP / 1000
+    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+    _attr_mode = NumberMode.SLIDER
+
+    def __init__(self, box: Enigma2Box) -> None:
+        """Follow `info.settings.menu_combo_gap_ms`."""
+        super().__init__(box, KEY_MENU_COMBO_GAP, SETTING_MENU_COMBO_GAP_MS)
+
+    @callback
+    def _async_read_state(self) -> None:
+        milliseconds = reported_integer(self.reported())
+        self._attr_native_value = None if milliseconds is None else milliseconds / 1000
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Write the gap in milliseconds and wait until the receiver reports it.
+
+        The receiver refuses a gap that is not a whole number of tenths of a second rather
+        than rounding it, and so it is refused here, before anything is sent.
+        """
+        milliseconds = gap_ms(value)
+        if (
+            not MENU_COMBO_GAP_MS_MIN <= milliseconds <= MENU_COMBO_GAP_MS_MAX
+            or milliseconds % MENU_COMBO_GAP_MS_STEP
+        ):
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="menu_combo_gap_step",
+                translation_placeholders={"value": f"{value:g}"},
+            )
+        await self.async_write_setting(milliseconds)
