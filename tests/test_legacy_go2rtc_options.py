@@ -120,3 +120,27 @@ async def test_the_options_form_has_no_go2rtc_and_a_save_drops_the_old_keys(
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert not [key for key in entry.options if key.startswith("go2rtc")]
+
+
+async def test_removing_the_entry_deletes_a_leftover_go2rtc_repair(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    entry = _with_legacy(config_entry)
+    await async_setup_box(hass, entry)
+    # Raised after setup, as a repair restored from an older store would stand.
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        f"go2rtc_{entry.entry_id}",
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="go2rtc_unreachable",
+    )
+
+    assert await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert ir.async_get(hass).async_get_issue(DOMAIN, f"go2rtc_{entry.entry_id}") is None

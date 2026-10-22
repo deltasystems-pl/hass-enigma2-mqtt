@@ -257,6 +257,8 @@ async def async_remove_entry(
     # The receiver's repair goes with it, and with it the record that it was ignored.
     async_delete_withheld_issue(hass, entry.entry_id)
     async_delete_clock_issue(hass, entry.entry_id)
+    # And a repair a development build raised about its go2rtc option, if one is left.
+    ir.async_delete_issue(hass, DOMAIN, f"{LEGACY_GO2RTC_ISSUE_PREFIX}{entry.entry_id}")
     # So does the count its update card kept for the card after a reload.
     async_forget_stood_still(hass, entry.entry_id)
     try:
