@@ -33,6 +33,7 @@ from unittest.mock import patch
 
 from homeassistant.components import mqtt
 from homeassistant.components.media_player import DATA_COMPONENT
+from homeassistant.components.media_player.errors import BrowseError
 from homeassistant.const import EVENT_STATE_CHANGED, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
@@ -250,14 +251,20 @@ async def readers(hass: HomeAssistant, box: Enigma2Box) -> dict[str, Any]:
     """Return what every reader of the channel list says, in one comparable value."""
     player = hass.data[DATA_COMPONENT].get_entity(PLAYER)
     root = await player.async_browse_media()
-    sport = await player.async_browse_media("bouquet", f"bouquet:{SPORT['sref']}")
+    # A hidden bouquet cannot be opened in the browser; that is what it says then.
+    try:
+        sport = await player.async_browse_media("bouquet", f"bouquet:{SPORT['sref']}")
+    except BrowseError:
+        browse_sport: Any = "refused"
+    else:
+        browse_sport = [(child.title, child.media_content_id) for child in sport.children]
     return {
         "bouquet_select": (options(hass, BOUQUET_SELECT), hass.states.get(BOUQUET_SELECT).state),
         "channel_select": (options(hass, CHANNEL_SELECT), hass.states.get(CHANNEL_SELECT).state),
         "history_select": (options(hass, HISTORY_SELECT), hass.states.get(HISTORY_SELECT).state),
         "sources": hass.states.get(PLAYER).attributes.get("source_list"),
         "browse_root": [(child.title, child.media_content_id) for child in root.children],
-        "browse_sport": [(child.title, child.media_content_id) for child in sport.children],
+        "browse_sport": browse_sport,
         "bouquet_names": box.bouquet_names,
         "published": [
             (bouquet["name"], bouquet["sref"], bouquet["channels"])
@@ -282,11 +289,9 @@ EXPECTED: dict[str, Any] = {
     "channel_select": (["TVP 1 HD", "TVN HD"], "TVP 1 HD"),
     "history_select": (["TVP 1 HD"], "TVP 1 HD"),
     "sources": ["TVP 1 HD", "TVN HD", "Eurosport 1"],
-    "browse_root": [
-        ("Ulubione TV", f"bouquet:{ULUBIONE['sref']}"),
-        ("Sport", f"bouquet:{SPORT['sref']}"),
-    ],
-    "browse_sport": [("Eurosport 1", EUROSPORT), ("TVN HD", TVN_IN_SPORT)],
+    # Sport is the hidden bouquet: the player's browser neither lists nor opens it.
+    "browse_root": [("Ulubione TV", f"bouquet:{ULUBIONE['sref']}")],
+    "browse_sport": "refused",
     "bouquet_names": ["Ulubione TV", "Sport"],
     "published": [
         ("Ulubione TV", ULUBIONE["sref"], ULUBIONE["channels"]),
