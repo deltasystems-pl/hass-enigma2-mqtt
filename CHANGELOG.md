@@ -186,9 +186,10 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
     is not sent to go2rtc, and a client on it is listed without its channel. Such a client can
     still be stopped, by its address alone. The receiver's media player does not list such a
     bouquet in its browser either, nor open it by an old link, and leaves its channels out of
-    every other bouquet there; „Bukiet" does not offer it, the source list does not draw on
-    it, and playing it as a bouquet is refused. Its channels are still played and zapped to
-    by their service reference. The option's name is unchanged; its help text
+    every other bouquet there; „Bukiet" does not offer it, and the source list and „Kanał"
+    leave its channels out wherever they are listed - empty while a hidden bouquet's
+    channels are not known. Playing it as a bouquet and `select_bouquet` with it are
+    refused. Its channels are still zapped to by their service reference. The option's name is unchanged; its help text
     says what else it now hides.
 - **What is on the decoder** (plugin 0.5.0, `service_codecs`): four diagnostic sensors -
   „Kodek obrazu", „Liczba klatek na sekundę", „Kodek dźwięku", „Język dźwięku" - and the
