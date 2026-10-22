@@ -1,6 +1,6 @@
 """A hidden bouquet is offered nowhere: the EPG, the source list's scope, zaps by name.
 
-The option „Bukiety ukryte w „Ostatnio oglądane"" takes a bouquet and its channels out of
+The option "Bouquets hidden from Recently watched" takes a bouquet and its channels out of
 every list Home Assistant shows - selects, the browser, the EPG of other channels, the
 recordings - and out of the repair that names what the receiver withheld. What is on the
 screen stays visible, and a zap by service reference is not judged; a zap by a name only a
@@ -281,7 +281,7 @@ async def test_a_name_shared_with_a_hidden_channel_zaps_the_offered_one(
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """„TVN HD" is in both bouquets: the copy in "Sport" is hidden, the other is sent."""
+    """"TVN HD" is in both bouquets: the copy in "Sport" is hidden, the other is sent."""
     await async_setup_box_then_retained(hass, _hiding(config_entry), box_on_the_broker)
 
     await hass.services.async_call(
@@ -366,7 +366,7 @@ async def test_the_withheld_repair_does_not_name_a_hidden_bouquet(
     assert "Sport" not in text
     assert "the channel list of a bouquet hidden in Home Assistant" in text
     assert "the EPG of a bouquet hidden in Home Assistant" in text
-    assert "the EPG of the bouquet “Ulubione TV”" in text
+    assert "the EPG of the bouquet \u201cUlubione TV\u201d" in text
     for language in ("pl", "de"):
         assert "Sport" not in withheld_lines(entry.runtime_data, language), language
 
