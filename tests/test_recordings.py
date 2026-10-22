@@ -768,18 +768,74 @@ async def test_without_details_the_running_recordings_keep_their_shape(
     ]
 
 
-async def test_an_older_plugins_running_recording_keeps_its_attributes(
+async def test_an_older_plugins_running_recording_is_judged_by_its_channel(
     hass: HomeAssistant,
     mqtt_mock,
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """Without `bouquet` there is nothing to judge: the option changes nothing here."""
-    entry = {"name": "News", "sref": EUROSPORT, "begin": 1, "end": 2}
-    box_on_the_broker[RECORDING_TOPIC] = json.dumps({"active": [entry], "next": None})
+    """Without `bouquet`: shown with its attributes unless a hidden bouquet holds it."""
+    shown = {"name": "News", "sref": SREF, "begin": 1, "end": 2}
+    concealed = {"name": "Mecz", "sref": EUROSPORT, "begin": 3, "end": 4}
+    box_on_the_broker[RECORDING_TOPIC] = json.dumps(
+        {"active": [shown, concealed], "next": None}
+    )
     await _setup(hass, hiding(config_entry, "Sport"), box_on_the_broker)
 
+    assert hass.states.get(ACTIVE).attributes["recordings"] == [
+        {**shown, "hidden": False},
+        {"name": None, "sref": None, "begin": 3, "end": 4, "hidden": True},
+    ]
+    assert hass.states.get(ACTIVE).state == "2"
+
+
+async def test_without_the_option_an_older_plugins_running_recording_keeps_its_attributes(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    entry = {"name": "Mecz", "sref": EUROSPORT, "begin": 1, "end": 2}
+    box_on_the_broker[RECORDING_TOPIC] = json.dumps({"active": [entry], "next": None})
+    await _setup(hass, config_entry, box_on_the_broker)
+
     assert hass.states.get(ACTIVE).attributes["recordings"] == [{**entry, "hidden": False}]
+
+
+async def test_before_the_channel_list_every_recording_a_hidden_bouquet_could_hold_is_hidden(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """Retained recordings can land before the channels: membership cannot be told yet."""
+    library(box_on_the_broker)
+    box_on_the_broker.pop(CHANNELS_TOPIC)
+    box_on_the_broker[folder_topic("movie")] = json.dumps(
+        {"recordings": [{**MATCH, "bouquet": "Ulubione TV"}, NEWS]}
+    )
+    running = {
+        "name": "Mecz", "sref": EUROSPORT, "begin": 1, "end": 2, "bouquet": "Ulubione TV",
+        "service_name": "Eurosport 1", "description": "d", "location": LOCATION,
+        "file": MATCH["file"], "id": MATCH["id"], "instant": False,
+    }
+    box_on_the_broker[RECORDING_TOPIC] = json.dumps({"active": [running], "next": None})
+    entry = hiding(config_entry, "Sport")
+    await _setup(hass, entry, box_on_the_broker)
+    box = entry.runtime_data
+
+    assert hass.states.get(LIBRARY).state == "0"
+    assert box.find_recording(MATCH["id"]) is None
+    assert box.find_recording(NEWS["id"]) is None
+    assert hass.states.get(ACTIVE).attributes["recordings"][0]["name"] is None
+
+    # The list arrives: what no hidden bouquet holds is shown again.
+    async_fire_mqtt_message(hass, CHANNELS_TOPIC, json.dumps(CHANNELS))
+    await hass.async_block_till_done()
+    assert box.find_recording(NEWS["id"]) is not None
+    assert box.find_recording(MATCH["id"]) is None
+    # NEWS here, and EPISODE in the series folder.
+    assert hass.states.get(LIBRARY).state == "2"
 
 
 @pytest.mark.parametrize("bouquet", [None, "Not on the channel list", "Ulubione TV"])

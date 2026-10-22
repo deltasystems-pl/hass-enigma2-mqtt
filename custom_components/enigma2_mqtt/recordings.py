@@ -144,9 +144,8 @@ def active_recordings(
     recordings run is what the count, the "Recording" sensor and every guard on the
     receiver are about, and a recording that holds a tuner is not hidden by a dashboard.
 
-    Hiding is judged only for an entry that carries `bouquet`, which a plugin sends with
-    the details. An older plugin's entry has none, and keeps exactly the attributes it
-    always had: the rule could only ever say "hidden" about it, for every recording.
+    An older plugin's entry carries no `bouquet`; it is judged by its service reference
+    alone, with the same rule - hidden when a hidden bouquet holds its channel.
     """
     active = recording.get("active") if isinstance(recording, dict) else None
     rows: list[dict[str, Any]] = []
@@ -171,7 +170,7 @@ def active_recordings(
                     "instant": _flag(entry.get("instant")),
                 }
             )
-        concealed = "bouquet" in entry and hidden(entry.get("sref"), entry.get("bouquet"))
+        concealed = hidden(entry.get("sref"), entry.get("bouquet"))
         if concealed:
             for key in _ACTIVE_REVEALING:
                 if key in row:

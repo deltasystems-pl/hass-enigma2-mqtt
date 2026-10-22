@@ -2795,8 +2795,9 @@ class Enigma2Box:
         is a file already made, and one without a bouquet is mostly an ordinary one - a
         channel since dropped from every bouquet, a radio service, a copied file.
 
-        It still fails toward hiding where membership cannot be told: a hidden bouquet on
-        the list without its channels, or a recording with no usable reference.
+        It still fails toward hiding where membership cannot be told: before any channel
+        list has arrived - retained recordings can land first - a hidden bouquet on the
+        list without its channels, or a recording with no usable reference.
         """
         hidden = self.hidden_bouquet_names
         if not hidden:
@@ -2831,6 +2832,8 @@ class Enigma2Box:
             return None
         if self.service_hidden(sref, bouquet):
             return None
+        if self.channel_list.source == CHANNEL_SOURCE_NONE:
+            return True
         return build_stream_url(self.picon_lookup_url, stream, sref)
 
     @callback
