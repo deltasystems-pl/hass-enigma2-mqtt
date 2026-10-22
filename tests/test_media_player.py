@@ -734,6 +734,66 @@ async def test_browsing_an_unknown_bouquet_is_an_error(
         await _player(hass).async_browse_media(media_content_id="bouquet:nonsense")
 
 
+def _hiding(entry: MockConfigEntry, *bouquets: str) -> MockConfigEntry:
+    return MockConfigEntry(
+        domain=entry.domain,
+        title=entry.title,
+        unique_id=entry.unique_id,
+        data=dict(entry.data),
+        options={"history_hidden_bouquets": list(bouquets)},
+    )
+
+
+async def test_a_hidden_bouquet_is_not_listed_nor_opened_in_the_browser(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The hidden-bouquets option keeps a bouquet out of the player's browser, as out of
+    the media source; a link to it from before is refused like an unknown one."""
+    await async_setup_box(hass, _hiding(config_entry, "Sport"))
+    entity = _player(hass)
+
+    root = await entity.async_browse_media()
+    assert [child.title for child in root.children] == ["Ulubione TV"]
+    with pytest.raises(BrowseError):
+        await entity.async_browse_media(media_content_id=f"bouquet:{SPORT['sref']}")
+    shown = await entity.async_browse_media(media_content_id=root.children[0].media_content_id)
+    assert [child.title for child in shown.children] == ["TVP 1 HD", "TVN HD"]
+
+
+async def test_hiding_every_bouquet_leaves_an_empty_browser_not_an_error(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    await async_setup_box(hass, _hiding(config_entry, "Sport", "Ulubione TV"))
+
+    root = await _player(hass).async_browse_media()
+    assert root.children == []
+
+
+async def test_a_channel_of_a_hidden_bouquet_is_still_zapped_to_by_its_reference(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """The option decides what is listed, not what may be played."""
+    await async_setup_box(hass, _hiding(config_entry, "Sport"))
+    eurosport = SPORT["channels"][0]["sref"]
+
+    await _call(
+        hass,
+        SERVICE_PLAY_MEDIA,
+        **{ATTR_MEDIA_CONTENT_TYPE: "channel", ATTR_MEDIA_CONTENT_ID: eurosport},
+    )
+
+    assert_published(mqtt_mock, command_topic("zap"), eurosport)
+
+
 async def test_browsing_a_box_with_no_channel_list_is_an_error(
     hass: HomeAssistant,
     mqtt_mock,

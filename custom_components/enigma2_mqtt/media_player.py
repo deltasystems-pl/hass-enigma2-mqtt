@@ -409,9 +409,15 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
                 "setup screen."
             )
 
+        # A bouquet the hidden-bouquets option names is not listed and cannot be opened here,
+        # as in the media source. Playing a channel by its reference is not judged by it.
+        hidden = self.box.hidden_bouquet_names
+        listed = [bouquet for bouquet in bouquets if bouquet.get("name") not in hidden]
+
         if media_content_id and media_content_id.startswith(BROWSE_BOUQUET_PREFIX):
             sref = media_content_id[len(BROWSE_BOUQUET_PREFIX) :]
-            if (bouquet := self.box.bouquet_by_sref(sref)) is None:
+            bouquet = self.box.bouquet_by_sref(sref)
+            if bouquet is None or bouquet.get("name") in hidden:
                 raise BrowseError(f"Unknown bouquet {sref}")
             return self._browse_bouquet(bouquet)
 
@@ -438,7 +444,7 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
                         can_play="bouquet_context" in self.box.capabilities,
                         can_expand=True,
                     )
-                    for bouquet in bouquets
+                    for bouquet in listed
                 ),
             ],
         )
