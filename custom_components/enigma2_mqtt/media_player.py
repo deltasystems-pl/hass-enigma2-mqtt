@@ -363,6 +363,15 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
                 if media_id.startswith(BROWSE_BOUQUET_PREFIX)
                 else media_id
             )
+            # A hidden bouquet is not offered here, so it is refused as one not offered.
+            if (bouquet := self.box.bouquet_by_sref(sref)) is not None and bouquet.get(
+                "name"
+            ) in self.box.hidden_bouquet_names:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="bouquet_not_published",
+                    translation_placeholders={"bouquet": sref},
+                )
             await async_select_bouquet(self.box, sref)
             return
         raise ServiceValidationError(
@@ -471,7 +480,10 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
                 thumbnail=thumbnail(channel["sref"]),
             )
             for channel in bouquet["channels"]
-            if isinstance(channel, dict) and channel.get("sref")
+            if isinstance(channel, dict)
+            and channel.get("sref")
+            # A channel of a hidden bouquet is left out wherever it is listed.
+            and self.box.channel_streamable(bouquet, channel)
         ]
         return BrowseMedia(
             media_class=MediaClass.DIRECTORY,

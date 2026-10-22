@@ -285,11 +285,12 @@ async def readers(hass: HomeAssistant, box: Enigma2Box) -> dict[str, Any]:
 
 # What every reader says about the example receiver, whichever topics carried its list.
 EXPECTED: dict[str, Any] = {
-    "bouquet_select": (["Ulubione TV", "Sport"], "Ulubione TV"),
+    # Sport is the hidden bouquet: the bouquet select, the player's sources and its browser
+    # leave it and its channels out, and the browser does not open it.
+    "bouquet_select": (["Ulubione TV"], "Ulubione TV"),
     "channel_select": (["TVP 1 HD", "TVN HD"], "TVP 1 HD"),
     "history_select": (["TVP 1 HD"], "TVP 1 HD"),
-    "sources": ["TVP 1 HD", "TVN HD", "Eurosport 1"],
-    # Sport is the hidden bouquet: the player's browser neither lists nor opens it.
+    "sources": ["TVP 1 HD", "TVN HD"],
     "browse_root": [("Ulubione TV", f"bouquet:{ULUBIONE['sref']}")],
     "browse_sport": "refused",
     "bouquet_names": ["Ulubione TV", "Sport"],
@@ -298,7 +299,7 @@ EXPECTED: dict[str, Any] = {
         ("Sport", SPORT["sref"], SPORT["channels"]),
     ],
     "offered": ["Ulubione TV", "Sport"],
-    "channel_names": ["TVP 1 HD", "TVN HD", "Eurosport 1"],
+    "channel_names": ["TVP 1 HD", "TVN HD"],
     "named_tvn": [SREF_TWO, TVN_IN_SPORT],
     "by_sref": "Sport",
     "name_of": "Eurosport 1",
@@ -590,7 +591,8 @@ async def test_an_incomplete_list_is_held_back_and_then_shown_as_far_as_it_goes(
     listing = box.channel_list
     assert listing.source == "bouquet_topics"
     assert listing.complete is False
-    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV", "Sport"]
+    # Sport is the hidden bouquet, so the bouquet select does not offer it.
+    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV"]
     assert box.bouquet_names == ["Ulubione TV", "Sport"]
     assert options(hass, CHANNEL_SELECT) == (
         ["TVP 1 HD", "TVN HD"] if "ulubione" in arrived else []
@@ -665,7 +667,8 @@ async def test_a_withheld_hidden_bouquet_stays_listed_and_hides_everything(
     # Complete as it stands - no settle time is waited out for a topic that is withheld.
     assert box.channel_list.source == "bouquet_topics"
     assert box.channel_list.complete is True
-    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV", "Sport"]
+    # Sport is the hidden bouquet, so the bouquet select does not offer it.
+    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV"]
     assert options(hass, CHANNEL_SELECT) == ["TVP 1 HD", "TVN HD"]
     assert hass.states.get(PLAYER).attributes["source_list"] == ["TVP 1 HD", "TVN HD"]
     assert box.bouquet_by_sref(SPORT["sref"])["channels"] == []
@@ -715,7 +718,8 @@ async def test_the_withheld_list_named_after_the_topics_completes_the_list_at_on
     )
 
     assert box.channel_list.complete is True
-    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV", "Sport"]
+    # Sport is the hidden bouquet, so the bouquet select does not offer it.
+    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV"]
     assert options(hass, HISTORY_SELECT) == []
 
     # And when the bouquet fits again: the topic arrives and the entry goes, in any order.
@@ -728,8 +732,8 @@ async def test_the_withheld_list_named_after_the_topics_completes_the_list_at_on
     # The entry going changed nothing about the list, so nobody was woken for it.
     assert box.channel_list is listing
     assert box.updates["channels"] == counted
+    # Sport is hidden, so its list arriving does not move the player's sources.
     assert [lists for entity_id, _s, lists in changes if entity_id == PLAYER] == [
-        ["TVP 1 HD", "TVN HD"],
         EXPECTED["sources"],
     ]
 
@@ -1213,7 +1217,8 @@ async def test_a_retracted_bouquet_topic_leaves_the_bouquet_without_channels(
 
     await settle(hass)
 
-    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV", "Sport"]
+    # Sport is the hidden bouquet, so the bouquet select does not offer it.
+    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV"]
     assert hass.states.get(PLAYER).attributes["source_list"] == ["TVP 1 HD", "TVN HD"]
     assert options(hass, HISTORY_SELECT) == []
     assert box.channel_list.complete is False
@@ -1315,7 +1320,8 @@ async def test_bouquets_is_the_index_and_bouquet_is_the_one_in_use(
 
     assert box.state.bouquet == {"name": "Sport", "sref": SPORT["sref"]}
     assert box.state.bouquet_index["bouquets"] == index["bouquets"]
-    assert hass.states.get(BOUQUET_SELECT).state == "Sport"
+    # Sport is hidden: not offered, so nothing is marked while the receiver is on it.
+    assert hass.states.get(BOUQUET_SELECT).state == STATE_UNKNOWN
     assert options(hass, CHANNEL_SELECT) == ["Eurosport 1", "TVN HD"]
     # A level below `bouquets` is nothing this reads.
     await publish(hass, f"{BOUQUETS_TOPIC}/sport", list_of(ULUBIONE))
@@ -1385,16 +1391,22 @@ THREE_FILTERED = {
     NO_SLUG_NAME: ["TVP 1 HD", "Eurosport 1"],
     "Sport": ["TVP 1 HD", "Pervyi kanal"],
 }
+# What the player's sources offer, by which bouquet is the hidden one: neither the hidden
+# bouquet nor a channel of it.
+THREE_SOURCES = {
+    NO_SLUG_NAME: ["TVP 1 HD", "TVN HD", "Eurosport 1"],
+    "Sport": ["TVP 1 HD", "TVN HD", "Pervyi kanal", "Rossiya 1"],
+}
 
 
 def three_expected(hidden: str) -> dict[str, Any]:
     """Return what every reader says about the receiver with the slug-less bouquet."""
     names = ["Ulubione TV", NO_SLUG_NAME, "Sport"]
     return {
-        "bouquet_select": (names, "Ulubione TV"),
+        "bouquet_select": ([name for name in names if name != hidden], "Ulubione TV"),
         "channel_select": (["TVP 1 HD", "TVN HD"], "TVP 1 HD"),
         "history_select": (THREE_FILTERED[hidden], "TVP 1 HD"),
-        "sources": ["TVP 1 HD", "TVN HD", "Pervyi kanal", "Rossiya 1", "Eurosport 1"],
+        "sources": THREE_SOURCES[hidden],
         "bouquet_names": names,
         "published": [
             (bouquet["name"], bouquet["sref"], bouquet["channels"])
@@ -1566,13 +1578,16 @@ async def test_with_channels_withheld_such_a_bouquet_has_no_list_and_nothing_wai
     assert listing.source == "bouquet_topics"
     assert listing.complete is True
     assert [bouquet["listed"] for bouquet in listing.bouquets] == [True, False, True]
-    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV", NO_SLUG_NAME, "Sport"]
+    assert options(hass, BOUQUET_SELECT) == [
+        name for name in ("Ulubione TV", NO_SLUG_NAME, "Sport") if name != hidden
+    ]
     assert box.bouquet_by_sref(NO_SLUG["sref"])["channels"] == []
     assert box.bouquet_by_sref(NO_SLUG["sref"])["count"] == 2
+    # A hidden bouquet's channels are not drawn on; the slug-less one has none here.
     assert hass.states.get(PLAYER).attributes["source_list"] == [
         "TVP 1 HD",
         "TVN HD",
-        "Eurosport 1",
+        *(["Eurosport 1"] if hidden != "Sport" else []),
     ]
     assert options(hass, HISTORY_SELECT) == filtered
 
@@ -1782,7 +1797,8 @@ async def test_a_bouquet_without_a_topic_appearing_when_the_broker_has_no_channe
 
     assert box.state.channels_released is False
     assert box.channel_list.complete is False
-    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV", NO_SLUG_NAME, "Sport"]
+    # The slug-less bouquet is the hidden one, so the bouquet select does not offer it.
+    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV", "Sport"]
     assert box.bouquet_by_sref(NO_SLUG["sref"])["channels"] == []
     assert options(hass, HISTORY_SELECT) == []
 
@@ -2194,11 +2210,7 @@ async def test_a_new_stamp_on_the_same_list_rebuilds_nothing(
     )
 
     assert built == [1]
-    assert hass.states.get(PLAYER).attributes["source_list"] == [
-        "TVP 1 HD",
-        "TVN HD",
-        "Eurosport 1",
-    ]
+    assert box.bouquet_by_sref(SPORT["sref"])["channels"] == SPORT["channels"][:1]
 
 
 async def test_the_capability_is_taken_from_an_announcement_that_arrives_last(
@@ -2229,7 +2241,12 @@ async def test_the_capability_is_taken_from_an_announcement_that_arrives_last(
     )
 
     assert box.channel_list.source == "bouquet_topics"
-    assert hass.states.get(PLAYER).attributes["source_list"] == EXPECTED["sources"]
+    # Nothing is hidden here, so every bouquet feeds the list.
+    assert hass.states.get(PLAYER).attributes["source_list"] == [
+        "TVP 1 HD",
+        "TVN HD",
+        "Eurosport 1",
+    ]
 
 
 # ------------------------------------------------------------------- diagnostics

@@ -1633,10 +1633,18 @@ class Enigma2Box:
         is one channel, and a source list with "TVP 1 HD" twice helps nobody. The
         „Kanał" select numbers them instead, because it is scoped to one bouquet and a
         repeat inside one bouquet is a channel that would otherwise be unreachable.
+
+        A bouquet the hidden-bouquets option names is not drawn on. Its channels are
+        judged by name only through the bouquets that are: a channel it shares with one
+        of them is still offered, because the list is the way to change channel at all,
+        and a hidden bouquet withheld by the receiver would otherwise empty it.
         """
         names: list[str] = []
         seen: set[str] = set()
+        hidden = self.hidden_bouquet_names
         for bouquet in self.scoped_bouquets:
+            if bouquet.get("name") in hidden:
+                continue
             for channel in bouquet["channels"]:
                 if not isinstance(channel, dict):
                     continue

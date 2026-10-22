@@ -428,10 +428,14 @@ class Enigma2BouquetSelect(Enigma2Select):
 
     @callback
     def _async_read_state(self) -> None:
-        """List the bouquets on offer, and mark the one the receiver is on."""
+        """List the bouquets on offer, and mark the one the receiver is on.
+
+        A bouquet the hidden-bouquets option names is not offered; while the receiver is
+        on one, nothing is marked.
+        """
         active = self.box.active_bouquet
         self._set_options(
-            _named_entries(self.box.bouquets),
+            _named_entries(self.box.streamable_bouquets()),
             (active or {}).get("sref"),
         )
 

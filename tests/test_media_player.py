@@ -31,6 +31,7 @@ from homeassistant.const import (
     SERVICE_MEDIA_PREVIOUS_TRACK,
     SERVICE_TURN_OFF,
     SERVICE_TURN_ON,
+    STATE_UNKNOWN,
 )
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
@@ -71,6 +72,7 @@ from .conftest import (
 
 PLAYER = "media_player.dekoder_salon"
 CHANNEL_SELECT = "select.dekoder_salon_channel"
+BOUQUET_SELECT = "select.dekoder_salon_bouquet"
 
 SPORT = CHANNELS["bouquets"][1]
 SPORT_CONTEXT = {"name": SPORT["name"], "sref": SPORT["sref"]}
@@ -792,6 +794,103 @@ async def test_a_channel_of_a_hidden_bouquet_is_still_zapped_to_by_its_reference
     )
 
     assert_published(mqtt_mock, command_topic("zap"), eurosport)
+
+
+def _sharing_eurosport() -> str:
+    """The example channel list with Eurosport 1 in "Ulubione TV" as well as in "Sport"."""
+    channels = json.loads(json.dumps(CHANNELS))
+    channels["bouquets"][0]["channels"].append(dict(SPORT["channels"][0]))
+    return json.dumps(channels)
+
+
+async def test_a_channel_of_a_hidden_bouquet_is_left_out_of_every_bouquet_in_the_browser(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """As in the media source: hidden wherever it is listed, not only in its own bouquet."""
+    box_on_the_broker[CHANNELS_TOPIC] = _sharing_eurosport()
+    await async_setup_box(hass, _hiding(config_entry, "Sport"))
+    entity = _player(hass)
+
+    root = await entity.async_browse_media()
+    shown = await entity.async_browse_media(media_content_id=root.children[0].media_content_id)
+    assert [child.title for child in shown.children] == ["TVP 1 HD", "TVN HD"]
+
+
+async def test_without_the_option_the_browser_lists_every_channel(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    box_on_the_broker[CHANNELS_TOPIC] = _sharing_eurosport()
+    await async_setup_box(hass, config_entry)
+    entity = _player(hass)
+
+    root = await entity.async_browse_media()
+    shown = await entity.async_browse_media(media_content_id=root.children[0].media_content_id)
+    assert [child.title for child in shown.children] == ["TVP 1 HD", "TVN HD", "Eurosport 1"]
+    assert [child.title for child in root.children] == ["Ulubione TV", "Sport"]
+
+
+async def test_the_source_list_does_not_draw_on_a_hidden_bouquet(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    await async_setup_box(hass, _hiding(config_entry, "Sport"))
+    assert hass.states.get(PLAYER).attributes["source_list"] == ["TVP 1 HD", "TVN HD"]
+
+
+async def test_the_bouquet_select_does_not_offer_a_hidden_bouquet(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """And marks nothing while the receiver is on it."""
+    box_on_the_broker[INFO_TOPIC] = json.dumps(
+        {**INFO, "capabilities": [*INFO["capabilities"], "bouquet_context"]}
+    )
+    await async_setup_box(hass, _hiding(config_entry, "Sport"))
+
+    async_fire_mqtt_message(hass, BOUQUET_TOPIC, json.dumps(BOUQUET))
+    await hass.async_block_till_done()
+    state = hass.states.get(BOUQUET_SELECT)
+    assert state.attributes["options"] == ["Ulubione TV"]
+    assert state.state == "Ulubione TV"
+
+    async_fire_mqtt_message(hass, BOUQUET_TOPIC, json.dumps(SPORT_CONTEXT))
+    await hass.async_block_till_done()
+    assert hass.states.get(BOUQUET_SELECT).state == STATE_UNKNOWN
+
+
+async def test_playing_a_hidden_bouquet_is_refused_before_anything_is_sent(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    box_on_the_broker[INFO_TOPIC] = json.dumps(
+        {**INFO, "capabilities": [*INFO["capabilities"], "bouquet_context"]}
+    )
+    await async_setup_box(hass, _hiding(config_entry, "Sport"))
+
+    for media_id in (f"bouquet:{SPORT['sref']}", SPORT["sref"]):
+        with pytest.raises(ServiceValidationError) as raised:
+            await _call(
+                hass,
+                SERVICE_PLAY_MEDIA,
+                **{ATTR_MEDIA_CONTENT_TYPE: "bouquet", ATTR_MEDIA_CONTENT_ID: media_id},
+            )
+        assert raised.value.translation_key == "bouquet_not_published"
+    assert not [
+        call for call in mqtt_mock.async_publish.call_args_list
+        if call.args[0] == command_topic("bouquet")
+    ]
 
 
 async def test_browsing_a_box_with_no_channel_list_is_an_error(
