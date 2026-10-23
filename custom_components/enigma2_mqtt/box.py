@@ -1688,15 +1688,24 @@ class Enigma2Box:
         return matches
 
     def channel_name_hidden(self, name: str) -> bool:
-        """Return whether a zap by this name would reach only channels the options hide.
+        """Return whether a zap by this name must be refused as a hidden channel's.
 
-        A name no bouquet has is not "hidden": that is the plain unknown channel.
+        True when a copy of the name is a hidden bouquet's channel and no copy is
+        offered. The copies are looked for in every bouquet the receiver published, not
+        only in those the bouquets option offers: the plugin resolves a name against its
+        own bouquets, so a hidden bouquet left out of that option still holds a copy it
+        would tune. A name no bouquet has is not "hidden": that is the plain unknown
+        channel, and the receiver says so itself.
         """
-        return (
-            bool(self.hidden_bouquet_names)
-            and bool(self.channels_named(name))
-            and not self.channels_named(name, offered=True)
+        if not self.hidden_bouquet_names:
+            return False
+        hidden_copy = any(
+            not self.channel_streamable(bouquet, channel)
+            for bouquet in self.published_bouquets
+            for channel in bouquet.get("channels") or []
+            if isinstance(channel, dict) and channel.get("name") == name
         )
+        return hidden_copy and not self.channels_named(name, offered=True)
 
     def bouquet_by_sref(self, sref: str) -> dict[str, Any] | None:
         """Return one selected bouquet by its service reference.

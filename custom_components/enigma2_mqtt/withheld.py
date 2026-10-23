@@ -220,9 +220,11 @@ def describe(box: Enigma2Box, topic: str, language: str) -> str:
         if topic.startswith(prefix) and slug and "/" not in slug:
             # The grid's slug is the channel topic's for nearly every bouquet, and the
             # index is the only place that still names a bouquet whose topic is gone.
-            # A bouquet the hidden-bouquets option names is not named here either.
+            # A bouquet the hidden-bouquets option names is not named here either, and
+            # while the option names any, neither is one the index cannot name: its bare
+            # slug could be a hidden bouquet's.
             name = box.bouquet_name_for_slug(slug)
-            if name in box.hidden_bouquet_names:
+            if name in box.hidden_bouquet_names or (name is None and box.hidden_bouquet_names):
                 return phrases[f"hidden_{key}"]
             return phrases[key].format(bouquet=plain_name(name, slug))
     if "/" in topic and topic.endswith("/config"):

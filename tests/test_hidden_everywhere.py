@@ -438,3 +438,91 @@ async def test_a_shared_name_never_tunes_the_hidden_copy_even_when_it_comes_firs
         blocking=True,
     )
     assert _published(mqtt_mock, command_topic("zap")) == [SREF_TWO]
+
+
+async def test_a_hidden_channels_name_is_refused_also_outside_the_offered_bouquets(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """"Sport" hidden and not offered either: the plugin would still tune its channel by
+    name, so the zap action refuses the name."""
+    entry = _hiding(config_entry, bouquets=["Ulubione TV"])
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await hass.services.async_call(
+            "enigma2_mqtt", "zap", {ATTR_ENTITY_ID: PLAYER, "name": "Eurosport 1"},
+            blocking=True,
+        )
+    assert raised.value.translation_key == "unknown_channel"
+    assert _published(mqtt_mock, command_topic("zap")) == []
+    # A name only an unoffered, visible bouquet has is the plain case: the receiver
+    # answers for it, Home Assistant does not refuse it as hidden.
+    assert entry.runtime_data.channel_name_hidden("No such channel") is False
+
+
+async def test_without_the_hidden_option_an_unoffered_bouquets_name_is_not_judged(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    entry = _entry(config_entry, bouquets=["Ulubione TV"])
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+
+    assert entry.runtime_data.channel_name_hidden("Eurosport 1") is False
+
+
+async def test_the_withheld_repair_names_no_bare_slug_while_bouquets_are_hidden(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """A slug the index does not name could be a hidden bouquet's."""
+    box_on_the_broker[INFO_TOPIC] = json.dumps(
+        {
+            **INFO,
+            "not_published": [
+                {"topic": "channels/secret_slug", "bytes": 2, "limit": 1},
+                {"topic": "epg_grid/secret_slug", "bytes": 2, "limit": 1},
+            ],
+        }
+    )
+    entry = _hiding(config_entry)
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+
+    text = withheld_lines(entry.runtime_data, "en")
+    assert "secret_slug" not in text
+    assert "the channel list of a bouquet hidden in Home Assistant" in text
+    assert "the EPG of a bouquet hidden in Home Assistant" in text
+
+
+async def test_without_the_hidden_option_the_withheld_repair_names_the_slug(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    box_on_the_broker[INFO_TOPIC] = json.dumps(
+        {**INFO, "not_published": [{"topic": "epg_grid/secret_slug", "bytes": 2, "limit": 1}]}
+    )
+    await async_setup_box_then_retained(hass, config_entry, box_on_the_broker)
+
+    assert "secret_slug" in withheld_lines(config_entry.runtime_data, "en")
+
+
+async def test_a_name_with_an_offered_copy_is_not_refused_as_hidden(
+    hass: HomeAssistant,
+    mqtt_mock,
+    box_on_the_broker: dict[str, str | bytes],
+    config_entry: MockConfigEntry,
+) -> None:
+    """"TVN HD" has a copy in the hidden "Sport" and one that is offered."""
+    entry = _hiding(config_entry)
+    await async_setup_box_then_retained(hass, entry, box_on_the_broker)
+
+    assert entry.runtime_data.channel_name_hidden("TVN HD") is False
+    assert entry.runtime_data.channel_name_hidden("Eurosport 1") is True
