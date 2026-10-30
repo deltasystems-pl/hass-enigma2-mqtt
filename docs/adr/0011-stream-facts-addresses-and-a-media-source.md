@@ -1,12 +1,13 @@
-# ADR-0011: Stream facts, addresses and a media source - no camera, the user's own go2rtc, and hiding done here
+# ADR-0011: Stream facts, addresses and a media source - no camera, and hiding done here
 
 **Status:** accepted 2026-10-13
 **Date:** 2026-10-13
 **Amended:** 2026-10-14 - checked against the plugin's stream area as submitted for review;
 2026-10-14 - the zap-history selects are `unknown` until a history arrives, as decision 9 says
-for the stream clients
-**Extends:** [ADR-0000](0000-prd.md) §7 - Home Assistant now also sends one request per channel
-change to a go2rtc address the user typed, and hands players the receiver's own stream address.
+for the stream clients; 2026-10-23 - decision 7 is superseded, see below
+**Extends:** [ADR-0000](0000-prd.md) §7 - Home Assistant now hands players the receiver's own
+stream address. (It also sent one request per channel change to a go2rtc address the user
+typed, until decision 7 was superseded before release; the title said so too.)
 No telemetry, no cloud service and nothing outside the household's network are unchanged.
 The receiver's half is the plugin's ADR-0017, ADR-0018 and ADR-0019 and the `stream`,
 `stream_clients`, `stream_playable`, `service` and `volume` sections of its `docs/TOPICS.md`.
@@ -72,7 +73,12 @@ tree is shown to every player. Before an address is handed out the receiver is a
 channel could be played now, where it claims it can be asked; "no" is refused, and no answer
 within three seconds is not a "no".
 
-**7. go2rtc is the user's, and is told one thing.** An address in the options switches it on:
+**7. go2rtc is the user's, and is told one thing.** *Superseded 2026-10-23, before
+release: the option is removed and Home Assistant sends nothing to a go2rtc. On its own it
+gave nothing to watch - a stream kept there still needed a card, a source template and a
+transcoder set up by hand, and every channel change rewrote go2rtc's configuration. A user
+who wants a preview runs a transcoder such as go2rtc themselves and points it at the
+`stream_url` attribute. The decision as it stood:* An address in the options switches it on:
 one stream, one name, re-pointed with `PUT /api/streams?name=..&src=..` when the service on the
 decoder changes. Home Assistant does not install, configure or query that go2rtc, and sends it
 nothing else. It does not re-point in standby, for a hidden channel or while a login is wanted;

@@ -163,7 +163,6 @@ from .stream_facts import (
 
 if TYPE_CHECKING:
     from .choice_list import ChoiceLists
-    from .own_go2rtc import Go2rtcFollower
     from .picture import PiconResolver
 
 _LOGGER = logging.getLogger(__name__)
@@ -1152,9 +1151,6 @@ class Enigma2Box:
         # Finds and fetches channel picons through the receiver's web interface: set
         # when the entry is set up, stopped with the box.
         self.picons: PiconResolver | None = None
-        # Keeps the user's own go2rtc on the channel that is on, where the options
-        # name one: set when the entry is set up.
-        self.go2rtc: Go2rtcFollower | None = None
         # The channel list last shown from the per-bouquet topics; None while the combined
         # `channels` topic is the source. See `channel_list`.
         self._topic_list: ChannelList | None = None

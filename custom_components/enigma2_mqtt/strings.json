@@ -218,22 +218,6 @@
       "settings": {
         "title": "Receiver options",
         "description": "The receiver reports the MAC address {mac}. Magic packets go there unless another one is given below.",
-        "sections": {
-          "go2rtc": {
-            "name": "Your own go2rtc (optional)",
-            "description": "Keeps one stream of a go2rtc you run yourself on the channel the receiver is on, so that a dashboard card can show it. Off while the address is empty.",
-            "data": {
-              "go2rtc_url": "go2rtc address",
-              "go2rtc_stream": "Stream name",
-              "go2rtc_source": "Source template"
-            },
-            "data_description": {
-              "go2rtc_url": "The address of your go2rtc's API, for example `{go2rtc_example_url}` for the go2rtc add-on. At every channel change Home Assistant sends it the name and the source below, and nothing else.",
-              "go2rtc_stream": "The name of the one stream Home Assistant keeps up to date there. Letters, digits, `_`, `-` and `.` only. Left empty, it is `enigma2_` followed by the receiver's node ID.",
-              "go2rtc_source": "What go2rtc is given to play. The receiver's stream address goes where the default has its placeholder in curly brackets. No spaces: go2rtc refuses a source that contains one, so a filter with spaces belongs in a named template in go2rtc's own configuration. Keep `ffmpeg:` in front; go2rtc cannot read the receiver's stream without it."
-            }
-          }
-        },
         "data": {
           "dangerous_buttons": "Show the deep standby and reboot buttons",
           "wol_mac": "Wake-on-LAN MAC address",
@@ -286,10 +270,6 @@
       "menu_place_full": "There is no room left there; choose another place.",
       "plugin_unavailable": "The receiver is not connected, so its privacy settings were not changed. Try again when it is online.",
       "plugin_config_failed": "The receiver did not confirm the new privacy settings. Its previous settings and these Home Assistant options were kept.",
-      "go2rtc_invalid_url": "The go2rtc address is not a web address. Write it as `{go2rtc_url_form}`, with nothing after the address, or leave it empty to switch this off.",
-      "go2rtc_invalid_stream": "The go2rtc stream name may hold only letters, digits, `_`, `-` and `.`, and at most 64 characters.",
-      "go2rtc_source_spaces": "The go2rtc source template contains a space, and go2rtc refuses such a source. Put a filter that needs spaces into a named template in go2rtc's own configuration and name it here, for example `#video=tv`.",
-      "go2rtc_source_placeholder": "The go2rtc source template has to contain the placeholder for the receiver's stream address exactly once, as the default value does.",
       "invalid_mac": "That is not a MAC address. Write it as `00:00:5e:00:53:01`, `00-00-5e-00-53-01`, `0000.5e00.5301` or `00005e005301`, or leave the field empty to use the address the receiver reports.",
       "uninstall_not_confirmed": "Tick the box to remove the plugin. Nothing has been sent to the receiver.",
       "downgrade_not_confirmed": "Tick the box to install the older version."
@@ -932,14 +912,6 @@
     }
   },
   "issues": {
-    "go2rtc_unreachable": {
-      "title": "{name}: go2rtc does not answer",
-      "description": "Home Assistant keeps the stream “{stream}” of the go2rtc at {host} on the channel {name} is on, as set in the receiver's options. go2rtc did not answer, so that stream still shows an earlier channel, or nothing.\n\nCheck that go2rtc is running and that the address in the options is the address of its API (for the go2rtc add-on: port 1984). Home Assistant tries again at the next channel change and every five minutes.\n\nThis notice goes away by itself once go2rtc takes the stream again. To stop using go2rtc, empty its address in the receiver's options."
-    },
-    "go2rtc_refused": {
-      "title": "{name}: go2rtc refused the stream",
-      "description": "The go2rtc at {host} answered HTTP {status} when Home Assistant set its stream “{stream}” to the channel {name} is on, so that stream still shows an earlier channel, or nothing.\n\nCheck the source template in the receiver's options: go2rtc refuses a source that contains a space, and a named template used in it has to exist in go2rtc's own configuration. A 401 or 403 means that go2rtc's API asks for a login.\n\nThis notice goes away by itself once go2rtc takes the stream again. To stop using go2rtc, empty its address in the receiver's options."
-    },
     "payloads_withheld": {
       "title": "{name}: the receiver is not publishing everything",
       "description": "The plugin on {name} did not publish the following, because each of these messages would exceed the size one MQTT message may have and the broker would close the connection:\n\n{withheld}\n\nIn Home Assistant this means: the channels of a bouquet whose list is missing are not offered, and a bouquet without its EPG shows no programmes.\n\nTo get them back, limit the bouquets the plugin publishes with its `bouquets_for_select` setting on the receiver (the plugin's setup screen or its OpenWebif page), or split a very large bouquet into smaller ones. Lowering `epg_grid_events` does not bring a missing EPG back: the plugin already shortens it as far as it can before it gives up on it.\n\nThis notice goes away by itself once the receiver publishes everything again."
