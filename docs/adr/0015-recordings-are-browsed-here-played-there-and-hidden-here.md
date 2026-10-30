@@ -49,12 +49,22 @@ for any player is refused with a sentence. `media_player.play_media` on the rece
 the type `recording` with the id, for an automation. With one movie location its folders are
 listed directly.
 
-**3. The receiver lists everything; hiding is done here** - the rule of
-[ADR-0011](0011-stream-facts-addresses-and-a-media-source.md) decision 5, by the same function,
-`Enigma2Box.service_hidden(sref, bouquet)`, failing toward hiding in the same cases. A recording
+**3. The receiver lists everything; hiding is done here** - by the hidden-bouquets option, with
+a narrower rule than the one streams follow
+([ADR-0011](0011-stream-facts-addresses-and-a-media-source.md) decision 5):
+`Enigma2Box.recording_hidden(sref, bouquet)` hides a recording **when the bouquet the receiver
+names with it is a hidden one, or its channel belongs to any hidden bouquet** - hidden means
+hidden everywhere in Home Assistant, so a channel of a hidden bouquet named under another one
+stays hidden. It is shown only when no hidden bouquet holds it. A recording the receiver placed
+in no bouquet (`bouquet` null), or in one it does not publish, is therefore shown when its
+channel is in no hidden bouquet: a recording is a file already made, and one with no bouquet
+is mostly an ordinary one - a channel since dropped from every bouquet, a radio service, a
+copied file - and hiding all of them took such recordings out of the library on a real
+receiver. Where membership cannot be told - a hidden bouquet listed without its channels, a
+recording without a reference - it still fails toward hiding. (Amended before release; the
+first version used `service_hidden` and hid every recording without a published bouquet.) A recording
 the option hides is not in the media browser, not in the count of the library, and cannot be
-played or deleted from here: Home Assistant refuses it as a recording it does not know. With the
-option set, a recording the receiver placed in no published bouquet is hidden too. A running
+played or deleted from here: Home Assistant refuses it as a recording it does not know. A running
 recording that the option hides is shown without its title, its channel, its bouquet, its file
 and its id, and marked `hidden` - but it is counted, as a hidden stream client is: it holds a
 tuner, the "Recording" sensor and every guard on the receiver count it, and a dashboard does not
@@ -62,8 +72,10 @@ make it stop. **A folder left with no recording to show is not listed, nor a loc
 with no such folder** - in the media browser, `get_recordings` or any count - because a
 folder's name can say what it holds. The free-space sensor's list of locations follows the same
 rule, with one exception: the default location is always in it, because its free space is the
-sensor's state. A running recording is judged only when the receiver sends its bouquet, with
-the details; an older plugin's entries carry none and keep the attributes they always had.
+sensor's state. A running recording from an older plugin carries no bouquet and is judged by
+its channel alone, with the same rule. Before any channel list has arrived - retained
+recordings can land first - every recording is hidden while the option names a bouquet,
+because which channels a hidden bouquet holds is not known yet.
 
 **4. Delete moves a recording into the receiver's trash, and only there, behind the receiver's
 permission.** `enigma2_mqtt.delete_recording` is refused before anything is sent unless the

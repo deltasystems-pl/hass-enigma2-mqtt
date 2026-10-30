@@ -181,10 +181,15 @@ def _invalid(key: str, **placeholders: str) -> ServiceValidationError:
 
 
 async def async_select_bouquet(box: Enigma2Box, sref: str) -> None:
-    """Activate a published bouquet and wait for a fresh context readback."""
+    """Activate a published bouquet and wait for a fresh context readback.
+
+    A bouquet the hidden-bouquets option names is refused as one not offered: it is not
+    offered anywhere in Home Assistant, so it cannot be chosen from here either.
+    """
     if "bouquet_context" not in box.capabilities:
         raise _invalid("bouquet_context_unsupported")
-    if box.bouquet_by_sref(sref) is None:
+    bouquet = box.bouquet_by_sref(sref)
+    if bouquet is None or bouquet.get("name") in box.hidden_bouquet_names:
         raise _invalid("bouquet_not_published", bouquet=sref)
     before = box.updates.get(TOPIC_BOUQUET, 0)
     await box.async_command(
@@ -344,6 +349,10 @@ class Enigma2Actions:
                 effect=lambda: same_service((box.state.service or {}).get("sref"), sref),
             )
             return
+        # By name, a channel of a hidden bouquet is one Home Assistant does not offer; by
+        # reference it is taken, because a reference was not picked from anything shown.
+        if box.channel_name_hidden(name):
+            raise _invalid("unknown_channel", channel=name)
         await box.async_command(
             "zap",
             json.dumps({"name": name}),
@@ -522,6 +531,9 @@ class Enigma2Actions:
         grids = [
             {"slug": slug, **grid} for slug, grid in sorted(box.state.epg_grid.items())
         ]
+        # A hidden bouquet's grid is left out, and so is a channel of one wherever a grid
+        # lists it - also asked for by name, which then reads as a bouquet it does not know.
+        grids = [shown for grid in grids if (shown := box.shown_grid(grid)) is not None]
         if bouquet:
             grids = [
                 grid

@@ -143,12 +143,14 @@ def _active_count(state: Enigma2State) -> int:
 def _active_recordings(box: Enigma2Box) -> list[Any]:
     """Return the recordings running right now, with their details where the box has them.
 
-    A recording of a service the options hide is shown without what names it.
+    A recording of a bouquet the options hide is shown without what names it - the
+    library's rule (`Enigma2Box.recording_hidden`), so a recording is hidden while it runs
+    exactly when it will be hidden in the library.
     """
     return active_recordings(
         box.state.recording,
         details=CAPABILITY_RECORDING_DETAILS in capabilities_of(box.state),
-        hidden=box.service_hidden,
+        hidden=box.recording_hidden,
     )
 
 
@@ -1062,7 +1064,8 @@ class Enigma2EpgActiveBouquetSensor(Enigma2Entity, SensorEntity):
         super().__init__(
             box,
             KEY_EPG_ACTIVE_BOUQUET,
-            topics=(TOPIC_BOUQUET, TOPIC_EPG_GRID),
+            # The channel list too: which channels a hidden bouquet holds is read there.
+            topics=(TOPIC_BOUQUET, TOPIC_EPG_GRID, TOPIC_CHANNELS),
             requires=TOPIC_BOUQUET,
         )
         self._attr_native_value = None
@@ -1087,13 +1090,17 @@ class Enigma2EpgActiveBouquetSensor(Enigma2Entity, SensorEntity):
         Both fields of the context being null is ordinary operation and means „not in a
         bouquet"; a context without a readable name is read the same way, since there
         is nothing to match a grid against.
+
+        A bouquet the hidden-bouquets option names reads as no bouquet as well, and a
+        channel of a hidden bouquet is left out of any other bouquet's grid
+        (`Enigma2Box.shown_grid`).
         """
         name = (self.box.state.bouquet or {}).get("name")
-        if not isinstance(name, str) or not name:
+        if not isinstance(name, str) or not name or name in self.box.hidden_bouquet_names:
             return False, None
         for grid in self.box.state.epg_grid.values():
             if isinstance(grid, dict) and grid.get("bouquet") == name:
-                return True, grid
+                return True, self.box.shown_grid(grid)
         return True, None
 
     @callback

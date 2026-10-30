@@ -1585,15 +1585,20 @@ class Enigma2Box:
         Three cases cannot be narrowed at all, and every one of them falls back to the
         full list rather than to nothing: a box that has published no context (an older
         plugin with no `bouquet_context`, or one that has not answered yet), a context
-        naming a bouquet the bouquets option has filtered out, and a context naming a
-        bouquet that holds no playable channel. An empty source list would leave the
-        media player with no way to change channel at all, which is worse than a list
-        that is longer than asked for.
+        naming a bouquet the bouquets option has filtered out or the hidden-bouquets
+        option hides, and a context naming a bouquet that holds no playable channel. An
+        empty source list would leave the media player with no way to change channel at
+        all, which is worse than a list that is longer than asked for.
         """
         scope = self.entry.options.get(CONF_SOURCE_LIST_SCOPE, DEFAULT_SOURCE_LIST_SCOPE)
         if scope != SOURCE_LIST_SCOPE_ACTIVE_BOUQUET:
             return self.bouquets
-        if (active := self.active_bouquet) is not None and active["channels"]:
+        if (
+            (active := self.active_bouquet) is not None
+            and active["channels"]
+            # A hidden bouquet is not offered, like one the bouquets option leaves out.
+            and active.get("name") not in self.hidden_bouquet_names
+        ):
             self._scope_fallback_warned = None
             return [active]
         self._warn_scope_fallback()
@@ -1609,8 +1614,9 @@ class Enigma2Box:
         """
         context = self.state.bouquet or {}
         name = context.get("name")
-        if not isinstance(name, str) or not name:
-            # No context at all is the documented older-plugin case and is not news.
+        if not isinstance(name, str) or not name or name in self.hidden_bouquet_names:
+            # No context at all is the documented older-plugin case and is not news; a
+            # hidden bouquet is the household's choice, and is not named in the log.
             self._scope_fallback_warned = None
             return
         if self._scope_fallback_warned == name:
@@ -1633,12 +1639,20 @@ class Enigma2Box:
         is one channel, and a source list with "TVP 1 HD" twice helps nobody. The
         „Kanał" select numbers them instead, because it is scoped to one bouquet and a
         repeat inside one bouquet is a channel that would otherwise be unreachable.
+
+        A channel of a bouquet the hidden-bouquets option names is left out wherever it is
+        listed (`channel_streamable`, the media source's rule), so a hidden bouquet adds
+        nothing. That rule fails toward hiding: while a hidden bouquet's channels are not
+        known, which ones to leave out is not known either, and the list offers nothing.
         """
         names: list[str] = []
         seen: set[str] = set()
+        hidden = self.hidden_bouquet_names
         for bouquet in self.scoped_bouquets:
             for channel in bouquet["channels"]:
                 if not isinstance(channel, dict):
+                    continue
+                if hidden and not self.channel_streamable(bouquet, channel):
                     continue
                 name = channel.get("name")
                 if isinstance(name, str) and name and name not in seen:
@@ -1647,20 +1661,51 @@ class Enigma2Box:
         return names
 
     def channels_named(
-        self, name: str, bouquets: Iterable[dict[str, Any]] | None = None
+        self,
+        name: str,
+        bouquets: Iterable[dict[str, Any]] | None = None,
+        *,
+        offered: bool = False,
     ) -> list[dict[str, Any]]:
         """Return every channel with this exact name, in the bouquets given.
 
         The default is every bouquet the options offer, which is the set the plugin
         would have to resolve a zap by name against. A caller that knows which copy is
         meant - the source list, scoped to the active bouquet - passes that instead.
+        `offered` keeps only the copies Home Assistant offers: none of a hidden
+        bouquet's channels, wherever they are listed (`channel_streamable`).
         """
+        hidden = offered and bool(self.hidden_bouquet_names)
         matches: list[dict[str, Any]] = []
         for bouquet in self.bouquets if bouquets is None else bouquets:
             for channel in bouquet.get("channels") or []:
-                if isinstance(channel, dict) and channel.get("name") == name:
+                if (
+                    isinstance(channel, dict)
+                    and channel.get("name") == name
+                    and (not hidden or self.channel_streamable(bouquet, channel))
+                ):
                     matches.append(channel)
         return matches
+
+    def channel_name_hidden(self, name: str) -> bool:
+        """Return whether a zap by this name must be refused as a hidden channel's.
+
+        True when a copy of the name is a hidden bouquet's channel and no copy is
+        offered. The copies are looked for in every bouquet the receiver published, not
+        only in those the bouquets option offers: the plugin resolves a name against its
+        own bouquets, so a hidden bouquet left out of that option still holds a copy it
+        would tune. A name no bouquet has is not "hidden": that is the plain unknown
+        channel, and the receiver says so itself.
+        """
+        if not self.hidden_bouquet_names:
+            return False
+        hidden_copy = any(
+            not self.channel_streamable(bouquet, channel)
+            for bouquet in self.published_bouquets
+            for channel in bouquet.get("channels") or []
+            if isinstance(channel, dict) and channel.get("name") == name
+        )
+        return hidden_copy and not self.channels_named(name, offered=True)
 
     def bouquet_by_sref(self, sref: str) -> dict[str, Any] | None:
         """Return one selected bouquet by its service reference.
@@ -2776,6 +2821,35 @@ class Enigma2Box:
         identity = service_identity(sref)
         return not identity or identity in hidden_members
 
+    def recording_hidden(self, sref: Any, bouquet: Any) -> bool:
+        """Return whether a recording is one the options hide.
+
+        Hidden when the bouquet the receiver names with it is a hidden one, **or** its
+        channel is a member of any hidden bouquet - so a channel of a hidden bouquet that
+        the receiver names under another one stays hidden. Shown only when no hidden
+        bouquet holds it. Unlike `service_hidden`, a recording the receiver placed in no
+        bouquet, or in one it does not publish, is not hidden for that alone: a recording
+        is a file already made, and one without a bouquet is mostly an ordinary one - a
+        channel since dropped from every bouquet, a radio service, a copied file.
+
+        It still fails toward hiding where membership cannot be told: before any channel
+        list has arrived - retained recordings can land first - a hidden bouquet on the
+        list without its channels, or a recording with no usable reference.
+        """
+        hidden = self.hidden_bouquet_names
+        if not hidden:
+            return False
+        if isinstance(bouquet, str) and bouquet in hidden:
+            return True
+        if self.channel_list.source == CHANNEL_SOURCE_NONE:
+            return True
+        published = self.published_bouquets
+        self._warn_missing_hidden(hidden, published)
+        if (hidden_members := self._members_of_hidden(hidden, published)) is None:
+            return True
+        identity = service_identity(sref)
+        return not identity or identity in hidden_members
+
     def stream_url_for(self, sref: Any, bouquet: Any) -> str | None:
         """Return the address the receiver streams one service at, or None for none.
 
@@ -2847,6 +2921,30 @@ class Enigma2Box:
             and bool(channel["sref"])
             and not self.service_hidden(channel["sref"], bouquet.get("name"))
         )
+
+    def shown_grid(self, grid: dict[str, Any]) -> dict[str, Any] | None:
+        """Return an EPG grid as Home Assistant may show it, or None for a hidden bouquet's.
+
+        A grid of a bouquet the hidden-bouquets option names is not shown at all, and a
+        channel of a hidden bouquet is left out of every other grid (`channel_streamable`,
+        judged in the grid's own bouquet). With the option empty the grid is as it came.
+        """
+        hidden = self.hidden_bouquet_names
+        if not hidden:
+            return grid
+        name = grid.get("bouquet")
+        if name in hidden:
+            return None
+        channels = grid.get("channels")
+        if not isinstance(channels, list):
+            return grid
+        owner = {"name": name}
+        return {
+            **grid,
+            "channels": [
+                channel for channel in channels if self.channel_streamable(owner, channel)
+            ],
+        }
 
     async def async_stream_playable(
         self, sref: str, timeout: float | None = None
@@ -3316,7 +3414,7 @@ class Enigma2Box:
                 if (
                     recordings := visible(
                         self.state.recording_folders.get(folder["slug"]) or [],
-                        self.service_hidden,
+                        self.recording_hidden,
                     )
                 )
             ]

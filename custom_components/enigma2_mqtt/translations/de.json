@@ -241,7 +241,7 @@
           "check_github_releases": "Eingeschaltet wird die signierte Versionsliste des Plugins zusätzlich selbsttätig geholt, höchstens einmal alle 24 Stunden, eine für alle Receiver; eine Prüfung lädt diese Liste und sonst nichts. Ausgeschaltet wird sie nur geholt, wenn jemand „Nach Plugin-Updates suchen“ drückt.",
           "source_list_scope": "„Alle angebotenen Bouquets“ legt die Sender aller Bouquets in eine Liste, die sehr lang werden kann. „Das aktive Bouquet“ zeigt nur die Liste, auf der der Receiver selbst steht, wie die Auswahl „Kanal“; ein Receiver, der kein aktives Bouquet veröffentlicht, behält die lange Liste.",
           "player_picture": "Bildschirmfoto zeigt das Bildschirmfoto und das Picon des neuen Senders nur zwischen einem Senderwechsel und dem nächsten Bildschirmfoto. Sender-Picon zeigt immer das Picon und das Bildschirmfoto nur bei einem Sender ohne Picon. Home Assistant holt die Picons von der Weboberfläche des Receivers (OpenWebif).",
-          "history_hidden_bouquets": "Sender dieser Bouquets erscheinen nicht in „Zuletzt gesehen“, und solange hier etwas gewählt ist, wird auch ein Sender ausgelassen, dessen Bouquet sich nicht prüfen lässt. Das blendet sie nur in dieser einen Entität aus: Die anderen Entitäten, der Verlaufsbildschirm des Receivers und der Broker zeigen sie weiter, und „Zuletzt gesehen (alle)“ schreibt, sobald diese Entität aktiviert ist, den laufenden Sender in den Verlauf von Home Assistant. Mit Plugin 0.5.0 bleiben dieselben Bouquets auch aus dem heraus, was Home Assistant über Streams zeigt: Ein Stream-Client auf einem solchen Sender wird ohne den Sender aufgeführt, und ein solcher Sender bekommt keine Stream-Adresse und wird nicht als Medienquelle angeboten. Aufnahmen dieser Sender fehlen in den Aufnahmen des Receivers im Medienbrowser und lassen sich von hier weder abspielen noch löschen, und eine laufende Aufnahme wird ohne ihren Titel gezeigt.",
+          "history_hidden_bouquets": "Sender dieser Bouquets erscheinen nicht in „Zuletzt gesehen“, und solange hier etwas gewählt ist, wird auch ein Sender ausgelassen, dessen Bouquet sich nicht prüfen lässt. Das blendet sie nur in Home Assistant aus: Der Verlaufsbildschirm des Receivers und der Broker zeigen sie weiter, und „Zuletzt gesehen (alle)“ schreibt, sobald diese Entität aktiviert ist, den laufenden Sender in den Verlauf von Home Assistant. Mit Plugin 0.5.0 bleiben dieselben Bouquets auch aus dem heraus, was Home Assistant über Streams zeigt: Ein Stream-Client auf einem solchen Sender wird ohne den Sender aufgeführt, und ein solcher Sender bekommt keine Stream-Adresse und wird nicht als Medienquelle angeboten. Aufnahmen dieser Sender fehlen in den Aufnahmen des Receivers im Medienbrowser und lassen sich von hier weder abspielen noch löschen, und eine laufende Aufnahme wird ohne ihren Titel gezeigt. Diese Bouquets und ihre Sender werden nicht in Listen, Auswahlfeldern, im Browser, im EPG anderer Sender oder in Aufnahmen angeboten, aber der gerade gesehene Sender wird weiter angezeigt und im Verlauf gespeichert. Solange die Sender eines ausgeblendeten Bouquets nicht bekannt sind, bieten die Listen keinen Sender an. Ein Sender lässt sich weiter über seine Referenz abspielen, nicht über seinen Namen. Eine Aufnahme, die der Receiver keinem Bouquet zuordnen konnte, wird gezeigt, wenn ihr Sender in keinem dieser Bouquets ist.",
           "configure_ssh": "Die Schaltfläche „Plugin-Neuinstallation erzwingen (SSH)“ erscheint, sobald SSH-Zugangsdaten gespeichert sind. Sie ist standardmäßig deaktiviert; aktiviere sie auf der Geräteseite.",
           "keep_ssh_credentials": "Abwählen, um die gespeicherten SSH-Zugangsdaten zu vergessen. Die Update-Karte kann dann nicht mehr installieren, und die Schaltfläche „Plugin-Neuinstallation erzwingen (SSH)“ wird entfernt."
         }
@@ -429,6 +429,12 @@
       },
       "menu_transparency": {
         "name": "Menütransparenz"
+      },
+      "menu_combo_presses": {
+        "name": "Menü-Kurzbefehl: Anzahl"
+      },
+      "menu_combo_gap": {
+        "name": "Menü-Kurzbefehl: Abstand"
       }
     },
     "remote": {
@@ -568,6 +574,16 @@
           "f3": "F3",
           "f4": "F4",
           "off": "Aus"
+        }
+      },
+      "menu_combo_key": {
+        "name": "Menü-Kurzbefehl: Taste",
+        "state": {
+          "off": "Aus",
+          "previous": "Zurück (previous)",
+          "exit": "Exit",
+          "playpause": "Wiedergabe/Pause",
+          "stop": "Stopp"
         }
       }
     }
@@ -952,6 +968,8 @@
     "play_recording_not_in_library": {"message": "Die Bibliothek des Receivers führt diese Aufnahme nicht mehr."},
     "play_recording_file_gone": {"message": "Die Datei dieser Aufnahme ist nicht mehr auf dem Receiver."},
     "menu_transparency_step": {"message": "Eine Menütransparenz von {value} % nimmt der Receiver nicht an: Er nimmt 0 bis 80 % in Zehnerschritten."},
+    "menu_combo_presses_step": {"message": "{value} Tastendrücke nimmt der Receiver nicht an: Er nimmt 2 bis 5."},
+    "menu_combo_gap_step": {"message": "Einen Abstand von {value} s nimmt der Receiver nicht an: Er nimmt 0,3 bis 3,0 s in Schritten von 0,1 s."},
     "stream_source_unknown": {"message": "Dieser Receiver, dieses Bouquet oder dieser Sender wird hier nicht zum Streamen angeboten. Öffne den Medienbrowser erneut und wähle aus dem, was jetzt dort steht."},
     "stream_player_browser": {"message": "Der Browser kann den Transportstrom eines Receivers nicht abspielen. Wähle einen Media Player, der ihn selbst dekodiert, etwa Kodi, VLC oder einen Player auf Android TV."},
     "stream_player_cast": {"message": "Chromecast kann den Transportstrom eines Receivers nicht abspielen. Wähle einen Media Player, der ihn selbst dekodiert, etwa Kodi, VLC oder einen Player auf Android TV."},

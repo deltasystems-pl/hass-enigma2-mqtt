@@ -314,10 +314,14 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
         A name the receiver has, but which this list is not currently offering, is
         refused with the way out rather than tuned: the scope is a deliberate choice
         about what the list holds, and silently ignoring it would make the list a lie.
+        A channel of a hidden bouquet is not on the list at all, and is refused as a
+        channel the receiver does not have.
         """
         box = self.box
         scoped = box.scoped_bouquets
-        if not box.channels_named(source, scoped) and box.channels_named(source):
+        if not box.channels_named(source, scoped, offered=True) and box.channels_named(
+            source, offered=True
+        ):
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="channel_not_in_active_bouquet",
@@ -363,6 +367,7 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
                 if media_id.startswith(BROWSE_BOUQUET_PREFIX)
                 else media_id
             )
+            # Refuses a hidden bouquet as one not offered, like the action does.
             await async_select_bouquet(self.box, sref)
             return
         raise ServiceValidationError(
@@ -409,9 +414,15 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
                 "setup screen."
             )
 
+        # A bouquet the hidden-bouquets option names is not listed and cannot be opened here,
+        # as in the media source. Playing a channel by its reference is not judged by it.
+        hidden = self.box.hidden_bouquet_names
+        listed = [bouquet for bouquet in bouquets if bouquet.get("name") not in hidden]
+
         if media_content_id and media_content_id.startswith(BROWSE_BOUQUET_PREFIX):
             sref = media_content_id[len(BROWSE_BOUQUET_PREFIX) :]
-            if (bouquet := self.box.bouquet_by_sref(sref)) is None:
+            bouquet = self.box.bouquet_by_sref(sref)
+            if bouquet is None or bouquet.get("name") in hidden:
                 raise BrowseError(f"Unknown bouquet {sref}")
             return self._browse_bouquet(bouquet)
 
@@ -438,7 +449,7 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
                         can_play="bouquet_context" in self.box.capabilities,
                         can_expand=True,
                     )
-                    for bouquet in bouquets
+                    for bouquet in listed
                 ),
             ],
         )
@@ -465,7 +476,10 @@ class Enigma2MediaPlayer(Enigma2Entity, Enigma2Actions, MediaPlayerEntity):
                 thumbnail=thumbnail(channel["sref"]),
             )
             for channel in bouquet["channels"]
-            if isinstance(channel, dict) and channel.get("sref")
+            if isinstance(channel, dict)
+            and channel.get("sref")
+            # A channel of a hidden bouquet is left out wherever it is listed.
+            and self.box.channel_streamable(bouquet, channel)
         ]
         return BrowseMedia(
             media_class=MediaClass.DIRECTORY,
@@ -519,9 +533,13 @@ async def async_zap_to_name(
     is the set the plugin itself would resolve it against. `prefer` only says which
     copy is meant once it is: a source list scoped to the active bouquet knows which
     „TVN HD" the household was looking at.
+
+    A name whose every copy is a channel of a hidden bouquet is refused as an unknown
+    channel, and where only some copies are, one that is offered is the one sent.
     """
     matches = box.channels_named(name)
-    if not matches:
+    offered = box.channels_named(name, offered=True)
+    if not offered:
         raise ServiceValidationError(
             translation_domain=DOMAIN,
             translation_key="unknown_channel",
@@ -530,5 +548,5 @@ async def async_zap_to_name(
     if len(matches) == 1:
         await box.async_publish_cmd("zap", json.dumps({"name": name}))
         return
-    preferred = box.channels_named(name, prefer) if prefer is not None else []
-    await box.async_publish_cmd("zap", (preferred or matches)[0].get("sref") or "")
+    preferred = box.channels_named(name, prefer, offered=True) if prefer is not None else []
+    await box.async_publish_cmd("zap", (preferred or offered)[0].get("sref") or "")

@@ -40,7 +40,10 @@ The recording library is summarised as its shape, as Home Assistant shows it: wh
 it was read, and per movie location with something to show whether it is mounted, its free
 space and its folders with something to show as counts, each by its slug - the address of
 its topic. Never a path or a recording's title, which describe what a household watches; a
-folder or a location holding only a hidden bouquet's recordings is left out, as everywhere.
+folder or a location holding only a hidden bouquet's recordings is not listed. The counts
+are the receiver's own, hidden recordings included, and the download is otherwise not
+filtered by the hidden-bouquets option: `topics.recording`, the running recordings, is the
+receiver's payload as it came, hidden ones with their titles.
 `timeshift` is kept as normalised: four values.
 """
 
@@ -316,7 +319,10 @@ def _summarise_stream_clients(clients: dict[str, Any] | None) -> dict[str, Any] 
 
 
 def _summarise_recordings(box: Enigma2Box) -> dict[str, Any] | None:
-    """Return the library as its shape: no path, no folder name, no title, nothing hidden."""
+    """Return the library as its shape: no path, no folder name, no title.
+
+    Only folders with a recording to show are listed; their counts are the receiver's.
+    """
     index = box.state.recordings_index
     if index is None:
         return None

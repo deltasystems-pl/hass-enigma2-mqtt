@@ -936,6 +936,20 @@ MENU_TRANSPARENCY_MAX: Final = 80
 MENU_TRANSPARENCY_STEP: Final = 10
 MENU_HOTKEYS: Final = ("help_long", "red_long", "f3", "f4", "off")
 
+# The press combo, a second way to open the menu: one key pressed a number of times, each
+# press within a gap of the one before. Three more keys of the same partial `cmd/config`;
+# a receiver that has it says so by reporting `menu_combo_key` in `info.settings`. The gap
+# travels in milliseconds and is shown in seconds.
+SETTING_MENU_COMBO_KEY: Final = "menu_combo_key"
+SETTING_MENU_COMBO_PRESSES: Final = "menu_combo_presses"
+SETTING_MENU_COMBO_GAP_MS: Final = "menu_combo_gap_ms"
+MENU_COMBO_KEYS: Final = ("off", "previous", "exit", "playpause", "stop")
+MENU_COMBO_PRESSES_MIN: Final = 2
+MENU_COMBO_PRESSES_MAX: Final = 5
+MENU_COMBO_GAP_MS_MIN: Final = 300
+MENU_COMBO_GAP_MS_MAX: Final = 3000
+MENU_COMBO_GAP_MS_STEP: Final = 100
+
 # A list of choices on the television, from a plugin after 0.4.0 (contract 1, additive;
 # `choice_list.py` and ADR-0014). Home Assistant publishes `cmd/list` - a title, an optional
 # text and labelled rows, each with an id - and the receiver answers once on `list_answer`

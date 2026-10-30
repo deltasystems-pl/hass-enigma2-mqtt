@@ -33,6 +33,7 @@ from unittest.mock import patch
 
 from homeassistant.components import mqtt
 from homeassistant.components.media_player import DATA_COMPONENT
+from homeassistant.components.media_player.errors import BrowseError
 from homeassistant.const import EVENT_STATE_CHANGED, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
@@ -250,14 +251,20 @@ async def readers(hass: HomeAssistant, box: Enigma2Box) -> dict[str, Any]:
     """Return what every reader of the channel list says, in one comparable value."""
     player = hass.data[DATA_COMPONENT].get_entity(PLAYER)
     root = await player.async_browse_media()
-    sport = await player.async_browse_media("bouquet", f"bouquet:{SPORT['sref']}")
+    # A hidden bouquet cannot be opened in the browser; that is what it says then.
+    try:
+        sport = await player.async_browse_media("bouquet", f"bouquet:{SPORT['sref']}")
+    except BrowseError:
+        browse_sport: Any = "refused"
+    else:
+        browse_sport = [(child.title, child.media_content_id) for child in sport.children]
     return {
         "bouquet_select": (options(hass, BOUQUET_SELECT), hass.states.get(BOUQUET_SELECT).state),
         "channel_select": (options(hass, CHANNEL_SELECT), hass.states.get(CHANNEL_SELECT).state),
         "history_select": (options(hass, HISTORY_SELECT), hass.states.get(HISTORY_SELECT).state),
         "sources": hass.states.get(PLAYER).attributes.get("source_list"),
         "browse_root": [(child.title, child.media_content_id) for child in root.children],
-        "browse_sport": [(child.title, child.media_content_id) for child in sport.children],
+        "browse_sport": browse_sport,
         "bouquet_names": box.bouquet_names,
         "published": [
             (bouquet["name"], bouquet["sref"], bouquet["channels"])
@@ -278,22 +285,21 @@ async def readers(hass: HomeAssistant, box: Enigma2Box) -> dict[str, Any]:
 
 # What every reader says about the example receiver, whichever topics carried its list.
 EXPECTED: dict[str, Any] = {
-    "bouquet_select": (["Ulubione TV", "Sport"], "Ulubione TV"),
+    # Sport is the hidden bouquet: the bouquet select, the player's sources and its browser
+    # leave it and its channels out, and the browser does not open it.
+    "bouquet_select": (["Ulubione TV"], "Ulubione TV"),
     "channel_select": (["TVP 1 HD", "TVN HD"], "TVP 1 HD"),
     "history_select": (["TVP 1 HD"], "TVP 1 HD"),
-    "sources": ["TVP 1 HD", "TVN HD", "Eurosport 1"],
-    "browse_root": [
-        ("Ulubione TV", f"bouquet:{ULUBIONE['sref']}"),
-        ("Sport", f"bouquet:{SPORT['sref']}"),
-    ],
-    "browse_sport": [("Eurosport 1", EUROSPORT), ("TVN HD", TVN_IN_SPORT)],
+    "sources": ["TVP 1 HD", "TVN HD"],
+    "browse_root": [("Ulubione TV", f"bouquet:{ULUBIONE['sref']}")],
+    "browse_sport": "refused",
     "bouquet_names": ["Ulubione TV", "Sport"],
     "published": [
         ("Ulubione TV", ULUBIONE["sref"], ULUBIONE["channels"]),
         ("Sport", SPORT["sref"], SPORT["channels"]),
     ],
     "offered": ["Ulubione TV", "Sport"],
-    "channel_names": ["TVP 1 HD", "TVN HD", "Eurosport 1"],
+    "channel_names": ["TVP 1 HD", "TVN HD"],
     "named_tvn": [SREF_TWO, TVN_IN_SPORT],
     "by_sref": "Sport",
     "name_of": "Eurosport 1",
@@ -585,11 +591,12 @@ async def test_an_incomplete_list_is_held_back_and_then_shown_as_far_as_it_goes(
     listing = box.channel_list
     assert listing.source == "bouquet_topics"
     assert listing.complete is False
-    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV", "Sport"]
+    # Sport is the hidden bouquet, so the bouquet select does not offer it.
+    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV"]
     assert box.bouquet_names == ["Ulubione TV", "Sport"]
-    assert options(hass, CHANNEL_SELECT) == (
-        ["TVP 1 HD", "TVN HD"] if "ulubione" in arrived else []
-    )
+    # Either Ulubione's list or the hidden Sport's is missing: the channel select has
+    # nothing it may offer.
+    assert options(hass, CHANNEL_SELECT) == []
     assert [bouquet["listed"] for bouquet in listing.bouquets] == [
         "ulubione" in arrived,
         "sport" in arrived,
@@ -660,9 +667,12 @@ async def test_a_withheld_hidden_bouquet_stays_listed_and_hides_everything(
     # Complete as it stands - no settle time is waited out for a topic that is withheld.
     assert box.channel_list.source == "bouquet_topics"
     assert box.channel_list.complete is True
-    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV", "Sport"]
-    assert options(hass, CHANNEL_SELECT) == ["TVP 1 HD", "TVN HD"]
-    assert hass.states.get(PLAYER).attributes["source_list"] == ["TVP 1 HD", "TVN HD"]
+    # Sport is the hidden bouquet, so the bouquet select does not offer it.
+    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV"]
+    # The hidden bouquet's channels are not known, so no channel can be told apart from
+    # them: the channel select and the source list offer nothing.
+    assert options(hass, CHANNEL_SELECT) == []
+    assert hass.states.get(PLAYER).attributes.get("source_list") is None
     assert box.bouquet_by_sref(SPORT["sref"])["channels"] == []
     assert box.bouquet_by_sref(SPORT["sref"])["count"] == 2
     assert options(hass, HISTORY_SELECT) == []
@@ -710,7 +720,8 @@ async def test_the_withheld_list_named_after_the_topics_completes_the_list_at_on
     )
 
     assert box.channel_list.complete is True
-    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV", "Sport"]
+    # Sport is the hidden bouquet, so the bouquet select does not offer it.
+    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV"]
     assert options(hass, HISTORY_SELECT) == []
 
     # And when the bouquet fits again: the topic arrives and the entry goes, in any order.
@@ -723,8 +734,8 @@ async def test_the_withheld_list_named_after_the_topics_completes_the_list_at_on
     # The entry going changed nothing about the list, so nobody was woken for it.
     assert box.channel_list is listing
     assert box.updates["channels"] == counted
+    # Sport is hidden, so its list arriving does not move the player's sources.
     assert [lists for entity_id, _s, lists in changes if entity_id == PLAYER] == [
-        ["TVP 1 HD", "TVN HD"],
         EXPECTED["sources"],
     ]
 
@@ -1208,8 +1219,11 @@ async def test_a_retracted_bouquet_topic_leaves_the_bouquet_without_channels(
 
     await settle(hass)
 
-    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV", "Sport"]
-    assert hass.states.get(PLAYER).attributes["source_list"] == ["TVP 1 HD", "TVN HD"]
+    # Sport is the hidden bouquet, so the bouquet select does not offer it.
+    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV"]
+    # The hidden bouquet's channels are not known, so no channel can be told apart from
+    # them: the channel select and the source list offer nothing.
+    assert hass.states.get(PLAYER).attributes.get("source_list") is None
     assert options(hass, HISTORY_SELECT) == []
     assert box.channel_list.complete is False
 
@@ -1310,14 +1324,17 @@ async def test_bouquets_is_the_index_and_bouquet_is_the_one_in_use(
 
     assert box.state.bouquet == {"name": "Sport", "sref": SPORT["sref"]}
     assert box.state.bouquet_index["bouquets"] == index["bouquets"]
-    assert hass.states.get(BOUQUET_SELECT).state == "Sport"
-    assert options(hass, CHANNEL_SELECT) == ["Eurosport 1", "TVN HD"]
+    # Sport is hidden: not offered, so nothing is marked while the receiver is on it.
+    assert hass.states.get(BOUQUET_SELECT).state == STATE_UNKNOWN
+    # And "Kanal" offers none of its channels.
+    assert options(hass, CHANNEL_SELECT) == []
     # A level below `bouquets` is nothing this reads.
     await publish(hass, f"{BOUQUETS_TOPIC}/sport", list_of(ULUBIONE))
     await publish(hass, f"{list_topic('sport')}/deeper", list_of(ULUBIONE))
     await settle(hass)
 
-    assert options(hass, CHANNEL_SELECT) == ["Eurosport 1", "TVN HD"]
+    # Sport's list is untouched (read on the box: the hidden bouquet's select is empty).
+    assert box.bouquet_by_sref(SPORT["sref"])["channels"] == SPORT["channels"]
     assert sorted(box.state.bouquet_channels) == ["sport", "ulubione_tv"]
 
 
@@ -1380,16 +1397,22 @@ THREE_FILTERED = {
     NO_SLUG_NAME: ["TVP 1 HD", "Eurosport 1"],
     "Sport": ["TVP 1 HD", "Pervyi kanal"],
 }
+# What the player's sources offer, by which bouquet is the hidden one: neither the hidden
+# bouquet nor a channel of it.
+THREE_SOURCES = {
+    NO_SLUG_NAME: ["TVP 1 HD", "TVN HD", "Eurosport 1"],
+    "Sport": ["TVP 1 HD", "TVN HD", "Pervyi kanal", "Rossiya 1"],
+}
 
 
 def three_expected(hidden: str) -> dict[str, Any]:
     """Return what every reader says about the receiver with the slug-less bouquet."""
     names = ["Ulubione TV", NO_SLUG_NAME, "Sport"]
     return {
-        "bouquet_select": (names, "Ulubione TV"),
+        "bouquet_select": ([name for name in names if name != hidden], "Ulubione TV"),
         "channel_select": (["TVP 1 HD", "TVN HD"], "TVP 1 HD"),
         "history_select": (THREE_FILTERED[hidden], "TVP 1 HD"),
-        "sources": ["TVP 1 HD", "TVN HD", "Pervyi kanal", "Rossiya 1", "Eurosport 1"],
+        "sources": THREE_SOURCES[hidden],
         "bouquet_names": names,
         "published": [
             (bouquet["name"], bouquet["sref"], bouquet["channels"])
@@ -1561,14 +1584,16 @@ async def test_with_channels_withheld_such_a_bouquet_has_no_list_and_nothing_wai
     assert listing.source == "bouquet_topics"
     assert listing.complete is True
     assert [bouquet["listed"] for bouquet in listing.bouquets] == [True, False, True]
-    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV", NO_SLUG_NAME, "Sport"]
+    assert options(hass, BOUQUET_SELECT) == [
+        name for name in ("Ulubione TV", NO_SLUG_NAME, "Sport") if name != hidden
+    ]
     assert box.bouquet_by_sref(NO_SLUG["sref"])["channels"] == []
     assert box.bouquet_by_sref(NO_SLUG["sref"])["count"] == 2
-    assert hass.states.get(PLAYER).attributes["source_list"] == [
-        "TVP 1 HD",
-        "TVN HD",
-        "Eurosport 1",
-    ]
+    # Hidden and without its list, the slug-less bouquet leaves nothing to offer; with
+    # Sport hidden, Sport's channels are left out.
+    assert hass.states.get(PLAYER).attributes.get("source_list") == (
+        None if hidden == NO_SLUG_NAME else ["TVP 1 HD", "TVN HD"]
+    )
     assert options(hass, HISTORY_SELECT) == filtered
 
 
@@ -1777,7 +1802,8 @@ async def test_a_bouquet_without_a_topic_appearing_when_the_broker_has_no_channe
 
     assert box.state.channels_released is False
     assert box.channel_list.complete is False
-    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV", NO_SLUG_NAME, "Sport"]
+    # The slug-less bouquet is the hidden one, so the bouquet select does not offer it.
+    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV", "Sport"]
     assert box.bouquet_by_sref(NO_SLUG["sref"])["channels"] == []
     assert options(hass, HISTORY_SELECT) == []
 
@@ -2189,11 +2215,7 @@ async def test_a_new_stamp_on_the_same_list_rebuilds_nothing(
     )
 
     assert built == [1]
-    assert hass.states.get(PLAYER).attributes["source_list"] == [
-        "TVP 1 HD",
-        "TVN HD",
-        "Eurosport 1",
-    ]
+    assert box.bouquet_by_sref(SPORT["sref"])["channels"] == SPORT["channels"][:1]
 
 
 async def test_the_capability_is_taken_from_an_announcement_that_arrives_last(
@@ -2224,7 +2246,12 @@ async def test_the_capability_is_taken_from_an_announcement_that_arrives_last(
     )
 
     assert box.channel_list.source == "bouquet_topics"
-    assert hass.states.get(PLAYER).attributes["source_list"] == EXPECTED["sources"]
+    # Nothing is hidden here, so every bouquet feeds the list.
+    assert hass.states.get(PLAYER).attributes["source_list"] == [
+        "TVP 1 HD",
+        "TVN HD",
+        "Eurosport 1",
+    ]
 
 
 # ------------------------------------------------------------------- diagnostics

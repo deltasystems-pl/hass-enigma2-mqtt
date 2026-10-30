@@ -344,9 +344,9 @@ appears.
 | **Show the deep standby and reboot buttons** | off | The Home Assistant half of the gate on „Głębokie uśpienie" and „Restart"; the receiver's own `deep_standby_allowed` is the other half, and [§4.5](#45-buttons-and-update) says how the two combine. Turning this off removes the buttons from the entity registry rather than leaving them behind unavailable. It is about what appears on a dashboard, **not** a safety mechanism: the plugin refuses both commands while a recording is running whatever is set here. |
 | **Wake-on-LAN MAC address** | the address the box reports on `info` | The target of the magic packet the „Obudź (WoL)" button, `media_player.turn_on` and `remote.turn_on` send. Set it when the receiver reports a different interface from the one that is plugged in - a box on Wi-Fi does not answer a packet sent to its cable port. Written as `00:00:5e:00:53:01`, `00-00-5e-00-53-01`, `0000.5e00.5301` or `00005e005301`, in any case; it is stored lower-case and colon-separated whichever you type, and anything that is not an address fails the form rather than failing later from inside `wake_on_lan`. Whichever address a packet would go to - the override, or the one the box reports - is registered on the device as its MAC connection, so the rest of Home Assistant knows it too. On current Home Assistant that connection does not merge devices across integrations, so a router or DHCP integration may still show a second card for the same receiver; it is there so that what *is* keyed on a MAC can find this one. A value stored by an earlier release that is not an address is dropped once at startup, with a line in the log. |
 | **Bouquets to offer** | every bouquet the box publishes | Which bouquets feed the media player's channel list and the media browser. The choices are the bouquets on the `channels` topic, and a name can be typed for one the box has not published yet. This narrows the plugin's own `bouquets_for_select`; it cannot widen it. |
-| **Channels in the media player's source list** | every bouquet on offer | What `media_player.source_list` holds, and nothing else. **Every bouquet on offer** is what this integration has always done and stays the default, so an existing installation does not change under an automation that names a channel; on a receiver with about a thousand channels it is a dropdown of about a thousand rows. **The active bouquet** is the short list the receiver's own channel ± is walking, which is also what the „Kanał" select shows. `select_source` follows this setting; the `zap` action takes a service reference and does not. Three cases keep the long list whatever is chosen, because there is nothing to shorten it to and an empty source list would leave no way to change channel: a receiver that publishes no channel-list context (an older plugin without `bouquet_context`), a context naming a bouquet the **Bouquets to offer** option excludes, and a context naming a bouquet with no playable channel in it. The last two are logged as a warning, once per bouquet. 🔴 This setting is **not** about the recorder: Home Assistant declares `source_list` an unrecorded attribute and the recorder removes it before it measures a state against its size limit, so the long list never reached the database in the first place. |
+| **Channels in the media player's source list** | every bouquet on offer | What `media_player.source_list` holds, and nothing else. **Every bouquet on offer** is what this integration has always done and stays the default, so an existing installation does not change under an automation that names a channel; on a receiver with about a thousand channels it is a dropdown of about a thousand rows. **The active bouquet** is the short list the receiver's own channel ± is walking, which is also what the „Kanał" select shows. `select_source` follows this setting; the `zap` action takes a service reference and does not. Three cases keep the long list whatever is chosen, because there is nothing to shorten it to and an empty source list would leave no way to change channel: a receiver that publishes no channel-list context (an older plugin without `bouquet_context`), a context naming a bouquet the **Bouquets to offer** option excludes or the **Bouquets hidden from "Recently watched"** option hides, and a context naming a bouquet with no playable channel in it. An excluded bouquet and one without a playable channel are logged as a warning, once per bouquet; a hidden one is not named in the log. 🔴 This setting is **not** about the recorder: Home Assistant declares `source_list` an unrecorded attribute and the recorder removes it before it measures a state against its size limit, so the long list never reached the database in the first place. |
 | **Picture on the media player card** | screenshot | Which picture the media player shows. **Screenshot** shows the screenshot of the television the plugin publishes, as before, and the picon of the new channel only between a channel change and the next screenshot: the last screenshot still shows the previous channel then. With screenshots off on the receiver no next one arrives, and the picon stays. **Channel picon** always shows the picon of the current channel, and the screenshot only for a channel that has none. Home Assistant fetches picons from the receiver's web interface (OpenWebif, plain HTTP on port 80) and serves them itself; [§4.1](#41-media-player) says which address it asks, how, and what happens when that fails. The „Ekran" image entity is the screenshot in both settings. |
-| **Bouquets hidden from "Recently watched"** („Bukiety ukryte w „Ostatnio oglądane"") | none | Which bouquets' channels [„Ostatnio oglądane"](#46-selects) leaves out - and that one entity only: „Ostatnio oglądane (wszystkie)", „Kanał", „Bukiet" and the media player are untouched. The choices are the bouquets on the `channels` topic, and a name can be typed. With it empty every entry shows. With a bouquet chosen, an entry shows only when its bouquet is a published bouquet that is not hidden **and** its channel is not a member of any hidden bouquet, so a channel of a hidden bouquet reached through another one stays hidden. While anything is chosen, an entry that cannot be checked - no bouquet path, a radio bouquet, a bouquet the plugin does not publish - is hidden too. And while a hidden bouquet is listed without its channels - plugin 0.5.0 could not publish that bouquet's own topic, or it has not arrived - every entry is hidden, because which channels to hide is what is missing. A hidden name that is no longer on the `channels` topic is logged once. 🔴 **This is a filter in Home Assistant, not privacy on the network**: the receiver publishes every entry of its history on `zap_history` and every channel of every bouquet on `channels`, retained, to any broker login; its own History Zap screen, the plugin's OpenWebif page and „Ostatnio oglądane (wszystkie)" show everything. See [§4.6](#46-selects) for what the recorder keeps. **With plugin 0.5.0 the same bouquets are also kept out of what Home Assistant shows about streams** ([§4.7](#47-streams)): a stream client on such a channel is listed without the channel, such a channel gets no stream address and no stream name, it is not offered as a media source, and your go2rtc is not pointed at it. And a recording of such a channel is not in the media browser or the library's count and cannot be played or deleted from here, while a running one is shown without its title ([§4.8](#48-recordings)). The option's name still says only "Recently watched". |
+| **Bouquets hidden from "Recently watched"** („Bukiety ukryte w „Ostatnio oglądane"") | none | Which bouquets' channels [„Ostatnio oglądane"](#46-selects) leaves out; „Ostatnio oglądane (wszystkie)" is untouched. **Hidden bouquets and their channels are not offered in lists, selects, the browser, the EPG of other channels or recordings, but the channel being watched is still shown and recorded** - the media player, „Kanał", the channel and programme sensors show what is on, as an automation expects. In detail: „Bukiet" does not offer it (and reads `unknown` while the receiver is on it), the media player's browser neither lists nor opens it, and the media player's source list, its browser and „Kanał" leave a channel of a hidden bouquet out wherever it is listed - also one it shares with a visible bouquet, and also while the receiver is on the hidden bouquet itself. Playing a hidden bouquet (`bouquet:<sref>`) and `enigma2_mqtt.select_bouquet` with one are refused before anything is sent. The EPG sensor (`epg_active_bouquet`) reads as no bouquet while the receiver is on a hidden one and leaves a hidden bouquet's channels out of any other grid, and `enigma2_mqtt.get_epg_grid` returns no hidden bouquet's grid - also asked for by name - and no hidden channel in any other. A zap by a name only a hidden bouquet's channel has - `select_source`, `play_media` with `channel_name`, the `zap` action's `name` - is refused as an unknown channel, and where a name is shared, the copy that is offered is the one tuned. The repair that lists what the receiver withheld does not name a hidden bouquet.** A channel of it is still zapped to by its service reference. While a hidden bouquet's channels are not known - the receiver withheld its list, or it has not arrived - which channels to leave out is not known either, and the source list, the browser's channels and „Kanał" shrink to nothing until it is. The choices are the bouquets on the `channels` topic, and a name can be typed. With it empty every entry shows. With a bouquet chosen, an entry shows only when its bouquet is a published bouquet that is not hidden **and** its channel is not a member of any hidden bouquet, so a channel of a hidden bouquet reached through another one stays hidden. While anything is chosen, an entry that cannot be checked - no bouquet path, a radio bouquet, a bouquet the plugin does not publish - is hidden too. And while a hidden bouquet is listed without its channels - plugin 0.5.0 could not publish that bouquet's own topic, or it has not arrived - every entry is hidden, because which channels to hide is what is missing. A hidden name that is no longer on the `channels` topic is logged once. 🔴 **This is a filter in Home Assistant, not privacy on the network**: the receiver publishes every entry of its history on `zap_history` and every channel of every bouquet on `channels`, retained, to any broker login; its own History Zap screen, the plugin's OpenWebif page and „Ostatnio oglądane (wszystkie)" show everything. See [§4.6](#46-selects) for what the recorder keeps. **With plugin 0.5.0 the same bouquets are also kept out of what Home Assistant shows about streams** ([§4.7](#47-streams)): a stream client on such a channel is listed without the channel, such a channel gets no stream address and no stream name, it is not offered as a media source, and your go2rtc is not pointed at it. And a recording the receiver names under a hidden bouquet, or of a channel of one, is not in the media browser or the library's count and cannot be played or deleted from here, while a running one is shown without its title; a recording with no bouquet is shown when no hidden bouquet holds its channel ([§4.8](#48-recordings)). The option's name still says only "Recently watched". |
 | **Check daily for available plugin versions** | off | Off means this integration asks nothing on its own. The plugin's **signed release index** - `releases.json` and its signature from the plugin's fixed HTTPS origin, `https://deltasystems-pl.github.io/enigma2-mqtt-bridge/feed/` - is fetched only when somebody presses **Check for plugin updates** (*Sprawdź aktualizacje wtyczki*), or uses Home Assistant's own "Check for updates" while this option is on. On, it is also fetched **at most once every 24 hours**, one index for every receiver. It is fetched with a verified TLS context and no redirects, at most 64 KiB, and it is accepted only when its Ed25519 signature verifies with a key built into this integration and its serial rises by the rule in [ADR-0008](docs/adr/0008-signed-plugin-index.md) - the same rule the receiver applies. Manual checks share a ten-minute limit. The index, its signature, the stamps and the record of accepted serials are kept in `.storage/enigma2_mqtt.release_index`, so a reload or a restart asks nothing again; the old `.storage/enigma2_mqtt.release_check` is removed. **Every newly accepted index is announced**: a warning in the log and a persistent notification with its serial, its key, the versions it adds and withdraws, and its floor - the index is signed in the plugin repository's CI, so an index nobody expected must be visible. It is then published, retained, on `enigma2mqtt/release_index`, where every receiver on plugin 0.4.0 or later verifies it again - the way a receiver with no internet of its own learns of releases - and put back, verified first, when the first receiver is set up and at every reconnect to the broker, if the broker lost it. What the broker retains there is read first: an index of a higher-ranked key, or a newer one of the same key - such as an index signed with the plugin's spare key in an emergency - is never overwritten, and when the rule accepts it, Home Assistant takes it and announces it like any new index. An index and a signature that do not match are read once more before they are judged, because a publication can land between the two requests; a pair that still does not verify is reported as "could not be verified", and the log keeps a warning. Nothing else is downloaded on a check; a release package is downloaded only when somebody installs it (see [Buttons and update](#45-buttons-and-update)). |
 
 When a recent plugin advertises its configurable publishers, the same form also controls key
@@ -400,6 +400,33 @@ on the receiver), and this is where its contents are chosen. The receiver never 
 does: it shows what Home Assistant publishes and, when the viewer presses OK, sends back which
 row and - for a slider, a list or a text - which value. Home Assistant performs it
 ([ADR-0012](docs/adr/0012-receiver-menu.md)).
+
+**Opening it with the television's remote: the menu shortcut.** A TV remote that drives the
+receiver over HDMI-CEC has no HELP, no colour keys and no long press, so the hotkey cannot be
+pressed from it. A receiver whose `info.settings` carries `menu_combo_key` offers a second way,
+beside the hotkey: **one key pressed a number of times in quick succession** opens the menu. Three
+configuration entities on the receiver's device set it ([§4.4](#44-binary-sensors-switches-number),
+[§4.6](#46-selects)) - the same settings are on the receiver's own setup screen and its OpenWebif
+page:
+
+- **Skrót menu: klawisz** (*Menu shortcut key*) - `off` (the default), `previous`, `exit`,
+  `playpause` or `stop`. A television's Back button usually reaches the receiver as `previous`
+  or `exit`; the receiver's `key` topic shows which one yours sends.
+- **Skrót menu: liczba naciśnięć** (*Menu shortcut presses*) - how many presses, 2 to 5 (3 unless
+  changed).
+- **Skrót menu: odstęp** (*Menu shortcut gap*) - the longest time between two presses, 0.3 to
+  3.0 s in steps of 0.1 s (1.2 s unless changed). A press later than that starts counting again.
+
+🔴 **While a shortcut key is set, that key no longer does what it did in live TV** - and with
+`previous`, in the players as well. Where it is taken, every press of it counts toward the menu
+and nothing else - a single press, and the presses before the last one, do nothing. On many
+images Back in live TV is a zap back to the previous channel; with `previous` as the shortcut key
+that zap is gone until the key is set to `off` again. `exit`, `stop` and `playpause` are taken in
+live TV only: over a playing recording or a media file they do what they always did, and do not
+count toward the menu there. In menus, lists and the EPG every key works as before. `info.menu.combo.replaces` names the image
+functions the key no longer reaches, and `info.menu.combo_reason` says why no combo is bound when
+`info.menu.combo` is `null` - both are in the diagnostics. A held key that the television sends
+as several presses counts as several presses.
 
 The menu is **one level of groups**, each a list of controls, plus controls at the top. At most
 **8 groups**, at most **24 entries** in the top list (groups and controls together) and at most 24
@@ -1051,6 +1078,8 @@ quarter of an hour, and a database is not where a plot summary belongs.
 | `volume_passthrough` | *Passthrough dźwięku* | `<node_id>_volume_passthrough` | `volume` | on while the receiver's volume does nothing audible · only while the receiver names the `volume_passthrough` capability |
 | `interlaced` | *Obraz z przeplotem* | `<node_id>_interlaced` | `service` | on for an interlaced picture · diagnostic · **disabled by default** · only while the receiver names the `service_codecs` capability |
 | `menu_transparency` | *Przezroczystość menu* | `<node_id>_menu_transparency` | `info` | 0-80 % in steps of 10 <-> `cmd/config` `{"menu_transparency": n}` · configuration · only for a receiver whose `info.settings` carries `menu_transparency` |
+| `menu_combo_presses` | *Skrót menu: liczba naciśnięć* | `<node_id>_menu_combo_presses` | `info` | 2-5 <-> `cmd/config` `{"menu_combo_presses": n}` · configuration · only for a receiver whose `info.settings` carries `menu_transparency` and `menu_combo_key` ([Receiver menu](#receiver-menu)) |
+| `menu_combo_gap` | *Skrót menu: odstęp* | `<node_id>_menu_combo_gap` | `info` | 0.3-3.0 s in steps of 0.1 <-> `cmd/config` `{"menu_combo_gap_ms": ms}` - seconds here, milliseconds on the receiver · configuration · only for a receiver whose `info.settings` carries `menu_transparency` and `menu_combo_key` |
 
 The switches and the number are optimistic: they move the moment they are pressed and the
 state topic confirms a moment later. That is not `assumed_state` - the box does report back -
@@ -1091,6 +1120,15 @@ a refusal is raised as an error with the receiver's reason, and a transparency t
 multiple of 10 is refused before anything is sent. Both are created only for a receiver that
 reports `menu_transparency` - that plugin takes a `cmd/config` with a single key, an older one
 does not. A receiver that stops reporting them keeps the entities, unavailable.
+
+The menu shortcut's three settings - **Skrót menu: klawisz** ([§4.6](#46-selects)),
+**Skrót menu: liczba naciśnięć** and **Skrót menu: odstęp** - work the same way and are created
+together, for a receiver that also reports `menu_combo_key`; one whose plugin goes back to a
+version without the combo keeps all three, unavailable. The gap is shown in seconds and sent as
+milliseconds, rounded to the millisecond, so `1.2` goes out as `{"menu_combo_gap_ms": 1200}`; a
+gap that is not a whole number of tenths of a second, and a count of presses that is not a whole
+number, are refused before anything is sent. A gap the receiver reports off those steps is shown
+as it is, never rewritten.
 
 ### 4.5 Buttons and update
 
@@ -1552,6 +1590,7 @@ available while the receiver is offline over MQTT.
 | `zap_history_all` | *Ostatnio oglądane (wszystkie)* · **disabled by default** | `<node_id>_zap_history_all` | `zap_history`, `service`, `channels` | `cmd/zap_history` |
 | `plugin_install_version` | *Wersja wtyczki do instalacji* · diagnostic · **disabled by default** | `<node_id>_plugin_install_version` | `info` | none - stored in the entry's options (see the update entity) |
 | `menu_hotkey` | *Klawisz menu* · configuration | `<node_id>_menu_hotkey` | `info` | `cmd/config` `{"menu_hotkey": "<key>"}` - `help_long`, `red_long`, `f3`, `f4` or `off`; only for a receiver that reports `menu_transparency` and `menu_hotkey` ([§4.4](#44-binary-sensors-switches-number)) |
+| `menu_combo_key` | *Skrót menu: klawisz* · configuration | `<node_id>_menu_combo_key` | `info` | `cmd/config` `{"menu_combo_key": "<key>"}` - `off`, `previous`, `exit`, `playpause` or `stop`; only for a receiver that reports `menu_transparency` and `menu_combo_key` ([Receiver menu](#receiver-menu)) |
 
 „Bukiet" and „Kanał" exist **only while the receiver names the `channels` and `bouquet_context` capabilities**.
 A plugin that cannot switch a channel-list context has nothing for either of them to do, and a
@@ -2014,15 +2053,21 @@ Everything here exists only for a receiver whose `info` names the capability bes
 
 **The receiver publishes the whole library to the broker**, as it publishes every channel and
 the zap history: every title, channel and file name, of every bouquet. **Hiding is done here**,
-by the option *Bouquets hidden from "Recently watched"* - the rule the zap history, the stream
-clients and the media source follow ([§4.7](#47-streams)). A recording of a channel of a hidden
-bouquet is not in the media browser, not in `get_recordings`, not in a count this integration
-makes, and cannot be played or deleted from here; a running one is shown without its title,
-channel and file. **A folder left with no recording to show is not listed either, nor is a
-movie location left with no such folder**, because a folder's name can say what is in it. With
-the option set, **a recording the receiver could not place in any published bouquet is hidden
-too**, because whether it belongs to a hidden one cannot be told. Anybody who can read the
-broker sees all of it.
+by the option *Bouquets hidden from "Recently watched"*: **a recording is hidden when the
+bouquet the receiver names with it is a hidden one, or when its channel belongs to any hidden
+bouquet**, so a channel of a hidden bouquet that the receiver names under another one stays
+hidden. It is shown only when no hidden bouquet holds it. Such a recording is not in the media
+browser, not in `get_recordings`, not in a count this integration makes, and cannot be played
+or deleted from here; a running one is shown without its title, channel and file. **A
+recording the receiver could not place in any bouquet (`bouquet` is `null`) is shown when its
+channel is in no hidden bouquet**, and so is one whose bouquet the receiver does not publish -
+the rule for streams ([§4.7](#47-streams)) hides those too, but a recording without a bouquet
+is mostly an ordinary one: a channel since dropped from every bouquet, a radio service, a file
+copied onto the disk. While a hidden bouquet is on the list without its channels, which ones
+to hide is not known, and every recording is hidden; so is one with no service reference. **A folder left
+with no recording to show is not listed either, nor is a movie location left with no such
+folder**, because a folder's name can say what is in it. Anybody who can read the broker sees
+all of it.
 
 **The library is read at the plugin's start and then only when something changes it** - a
 recording starts or ends, a recording is deleted, a movie location is mounted or unmounted -
@@ -2833,8 +2878,8 @@ recorder:
 ```
 
 The zap history is the same kind of record. The receiver publishes it whole, retained, on the
-broker, and the option that hides bouquets from „Ostatnio oglądane" filters that one entity in
-Home Assistant - it hides nothing on the network. „Ostatnio oglądane (wszystkie)" is recorded
+broker, and the option that hides bouquets from „Ostatnio oglądane" filters what Home
+Assistant shows - it hides nothing on the network. „Ostatnio oglądane (wszystkie)" is recorded
 once enabled; [§4.6](#46-selects) shows how to exclude it.
 
 The stream clients are the same kind of record again: who is watching which channel from

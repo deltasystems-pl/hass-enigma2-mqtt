@@ -807,17 +807,14 @@ async def test_a_hidden_channel_playing_is_never_the_filtered_state(
     assert hass.states.get(HISTORY_ALL_SELECT).state == "Eurosport 1"
 
 
-async def test_the_option_leaves_every_other_list_alone(
+async def test_the_option_keeps_the_hidden_bouquet_out_of_bouquet_and_the_sources(
     hass: HomeAssistant,
     mqtt_mock,
     box_on_the_broker: dict[str, str | bytes],
     config_entry: MockConfigEntry,
 ) -> None:
-    """"Kanał", "Bukiet" and the media player's source list still offer the hidden one.
-
-    The option is about one entity. Filtering anything else with it would take a
-    bouquet out of the controls somebody uses to change channel.
-    """
+    """"Bukiet" does not offer the hidden bouquet and marks nothing while it is on, and
+    the media player's source list and "Kanal" offer none of its channels."""
     capable(box_on_the_broker, "bouquet_context")
     box_on_the_broker[BOUQUET_TOPIC] = json.dumps(
         {"name": SPORT["name"], "sref": SPORT["sref"]}
@@ -826,10 +823,10 @@ async def test_the_option_leaves_every_other_list_alone(
     entry = hiding(config_entry, SPORT["name"])
     await async_setup_box_then_retained(hass, entry, box_on_the_broker)
 
-    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV", "Sport"]
-    assert hass.states.get(BOUQUET_SELECT).state == "Sport"
-    assert options(hass, CHANNEL_SELECT) == ["Eurosport 1", "TVN HD"]
-    assert "Eurosport 1" in hass.states.get(PLAYER).attributes[ATTR_INPUT_SOURCE_LIST]
+    assert options(hass, BOUQUET_SELECT) == ["Ulubione TV"]
+    assert hass.states.get(BOUQUET_SELECT).state == "unknown"
+    assert options(hass, CHANNEL_SELECT) == []
+    assert "Eurosport 1" not in hass.states.get(PLAYER).attributes[ATTR_INPUT_SOURCE_LIST]
     assert options(hass, HISTORY_SELECT) == ["TVP 1 HD"]
 
 
