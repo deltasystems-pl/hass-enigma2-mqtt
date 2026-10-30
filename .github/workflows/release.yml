@@ -31,7 +31,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Read the pinned source commit
         id: bundle
@@ -44,7 +44,7 @@ jobs:
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
 
       # With its tags: whether the commit is a release is whether it carries one.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           repository: deltasystems-pl/enigma2-mqtt-bridge
           ref: ${{ steps.bundle.outputs.commit }}
@@ -59,7 +59,7 @@ jobs:
     needs: [validate, bundle-is-release]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: The tag must match the manifest version
         run: |

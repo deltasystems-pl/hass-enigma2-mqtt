@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       # Pinned: this workflow is a gate in front of a published release, and a
       # moving ref is somebody else's push running in that position.
       - uses: home-assistant/actions/hassfest@58bff37c8947f690ace498be413a9b78d6f30f93  # master, 2026-09-21
@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: hacs/action@1ebf01c408f29afcb6406bd431bc98fd8cbb15aa  # main, 2026-09-21, after 22.5.0
         with:
           category: integration
@@ -41,8 +41,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.14"
       - name: Install the test harness
@@ -63,7 +63,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Read the pinned source commit
         id: bundle
@@ -78,14 +78,14 @@ jobs:
       # The whole history, tags included: the bundle builder decides the package's flavour by
       # whether the commit carries its release tag, and a shallow checkout carries none - which
       # would rebuild a release as a development build and fail the comparison below.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           repository: deltasystems-pl/enigma2-mqtt-bridge
           ref: ${{ steps.bundle.outputs.commit }}
           path: plugin-source
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.12"
 
@@ -107,7 +107,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       # The signed release index's vectors, its embedded keys and the contract's named
       # exceptions are written down in both repositories. Two readers that disagreed would each
@@ -123,7 +123,7 @@ jobs:
           test "${#commit}" -eq 40
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           repository: deltasystems-pl/enigma2-mqtt-bridge
           ref: ${{ steps.pin.outputs.commit }}
