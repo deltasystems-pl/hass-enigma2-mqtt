@@ -246,7 +246,7 @@ def test_the_release_workflow_builds_the_zip_only_after_the_gate() -> None:
     checkouts = [step for step in gate_job["steps"] if step.get("with", {}).get("repository")]
     assert checkouts == [
         {
-            "uses": "actions/checkout@v4",
+            "uses": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
             "with": {
                 "repository": "deltasystems-pl/enigma2-mqtt-bridge",
                 "ref": "${{ steps.bundle.outputs.commit }}",
