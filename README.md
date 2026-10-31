@@ -77,11 +77,10 @@ into `config/custom_components/enigma2_mqtt/` and restart. Do not keep a backup 
   fine).
 - A receiver on a Python 3 Enigma2 image. OpenViX 6.x and OpenATV 7.x are supported, OpenPLi 9
   and OpenBH 6 are best effort. So far it has been run on one box, a Vu+ Uno 4K SE on OpenViX 6.6.
-- Plugin 0.4.0 to go with integration 0.4.0; the installer brings that version. Plugin 0.2.0
-  and 0.3.x still work with it, without the update over MQTT.
-- Unreleased, on `main`: a receiver with a very large channel list is read one bouquet at a
-  time, and a repair says what the receiver could not publish. Both need plugin 0.5.0; with an
-  older plugin everything behaves as before.
+- Plugin 0.5.0 to go with integration 0.5.0; the installer brings that version. Plugin 0.2.0
+  to 0.4.0 still work with it, without what needs plugin 0.5.0 - the receiver menu, recordings,
+  stream facts, the channel list one bouquet at a time and the rest the changelog names - and
+  0.2.0 and 0.3.x also without the update over MQTT.
 - SSH access to the receiver, if the integration should install or update the plugin.
 
 ## Screenshots
@@ -130,5 +129,6 @@ a history. [How to exclude it](DOCUMENTATION.md#10-privacy).
 
 ## License
 
-[MIT](LICENSE). The receiver plugin is a separate program under GPL-2.0-or-later and ships
-here together with its source; see [NOTICE](NOTICE).
+[MIT](LICENSE). The receiver plugin is a separate program under GPL-2.0-or-later; its package,
+which carries Apache-2.0 icons, is distributed under GPL-3.0-or-later and ships here together
+with its source; see [NOTICE](NOTICE).

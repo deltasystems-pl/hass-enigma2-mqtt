@@ -1,6 +1,6 @@
 # ADR-0015: Recordings are browsed here, played there, deleted into the trash, and hidden here
 
-**Status:** proposed 2026-10-18
+**Status:** accepted 2026-10-31 with the 0.5.0 release that ships it; proposed 2026-10-18
 **Date:** 2026-10-18
 **Extends:** [ADR-0011](0011-stream-facts-addresses-and-a-media-source.md) - the media source
 gains a branch that only the receiver's own media player offers, and the hidden-bouquets rule

@@ -63,6 +63,27 @@ def test_any_other_commit_is_a_development_build(builder, repository, tag) -> No
     assert builder.flavour_for(repo, commit, "1.2.3") == "development"
 
 
+def test_the_licence_is_the_one_the_package_declares(builder, tmp_path) -> None:
+    """The bundle records the package's licence as the plugin's control file states it."""
+    control = tmp_path / "control"
+    control.write_text(
+        "Package: enigma2-plugin-extensions-mqttbridge\n"
+        "Version: @VERSION@\n"
+        "License: GPL-3.0-or-later AND Apache-2.0\n"
+        "Description: x\n",
+        encoding="utf-8",
+    )
+    assert builder.license_from(control) == "GPL-3.0-or-later AND Apache-2.0"
+
+
+@pytest.mark.parametrize("text", ["Package: x\n", "Package: x\nLicense:\n"])
+def test_a_control_file_without_a_licence_stops_the_build(builder, tmp_path, text) -> None:
+    control = tmp_path / "control"
+    control.write_text(text, encoding="utf-8")
+    with pytest.raises(SystemExit):
+        builder.license_from(control)
+
+
 def test_the_build_is_told_its_commit_time_and_flavour(builder, monkeypatch) -> None:
     monkeypatch.setenv("MQTTBRIDGE_BUILD_ORIGIN", "https://example.invalid/feed/")
     monkeypatch.setenv("MQTTBRIDGE_BUILD_INDEX_KEYS", "[]")

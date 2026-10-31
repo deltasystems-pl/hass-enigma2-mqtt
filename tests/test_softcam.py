@@ -938,6 +938,10 @@ RELEASE_INDEX_ENTITY_IDS = {
     "button.dekoder_salon_check_for_plugin_updates",
     "select.dekoder_salon_plugin_version_to_install",
 }
+# The clear-error button, created for a receiver whose `info.plugin` is 0.5.0 or later - which
+# the example receiver is from the release that bundles plugin 0.5.0 on, since it runs the
+# bundled version.
+CLEAR_ERROR_ENTITY_IDS = {"button.dekoder_salon_clear_last_error"}
 
 EVERYTHING_ON = {
     "deep_standby_allowed": True,
@@ -1030,4 +1034,5 @@ async def test_no_entity_id_this_integration_already_had_changes(
         *EPG_ENTITY_IDS,
         *EPG_IMPORT_ENTITY_IDS,
         *RELEASE_INDEX_ENTITY_IDS,
+        *CLEAR_ERROR_ENTITY_IDS,
     }

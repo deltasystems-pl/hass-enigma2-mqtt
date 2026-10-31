@@ -1,13 +1,13 @@
 {
-  "filename": "enigma2-plugin-extensions-mqttbridge_0.4.0_all.ipk",
-  "license": "GPL-2.0-or-later",
+  "filename": "enigma2-plugin-extensions-mqttbridge_0.5.0_all.ipk",
+  "license": "GPL-3.0-or-later AND Apache-2.0",
   "schema": 1,
-  "sha256": "7a6860a9b200dfc06d6a71eb26cdb0e4e02b8f163af97f523f7531e137295073",
-  "size": 370688,
-  "source_commit": "9e3fa9645cd20d50c2ad19fe08cc729e26101cd9",
-  "source_filename": "enigma2-mqtt-bridge-9e3fa9645cd20d50c2ad19fe08cc729e26101cd9.tar.gz",
-  "source_sha256": "d6c9d66097a02e2ea51c828e6b0f0b60021b7e0bb8126714c1b919fd959e8b78",
-  "source_size": 1245748,
-  "source_url": "https://github.com/deltasystems-pl/enigma2-mqtt-bridge/tree/9e3fa9645cd20d50c2ad19fe08cc729e26101cd9",
-  "version": "0.4.0"
+  "sha256": "4451e6b139d95f14caded0d4d512759377bbcae0dd2001172a7031f6c9005669",
+  "size": 571324,
+  "source_commit": "44cd6b1b3ed1d5f7885aa4c3587f8e81c5da5fef",
+  "source_filename": "enigma2-mqtt-bridge-44cd6b1b3ed1d5f7885aa4c3587f8e81c5da5fef.tar.gz",
+  "source_sha256": "9eec322377d8ac6bf706262466ead703c69bb4bdcaab019d8bf88354601fc7eb",
+  "source_size": 1753376,
+  "source_url": "https://github.com/deltasystems-pl/enigma2-mqtt-bridge/tree/44cd6b1b3ed1d5f7885aa4c3587f8e81c5da5fef",
+  "version": "0.5.0"
 }

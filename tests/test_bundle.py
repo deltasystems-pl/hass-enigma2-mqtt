@@ -158,7 +158,7 @@ def _install_bundle(monkeypatch, tmp_path: Path, **overrides) -> None:
         "source_size": source.stat().st_size,
         "source_commit": COMMIT,
         "source_url": "https://github.com/deltasystems-pl/enigma2-mqtt-bridge/tree/" + COMMIT,
-        "license": "GPL-2.0-or-later",
+        "license": "GPL-3.0-or-later AND Apache-2.0",
     }
     metadata.update(overrides)
     path = tmp_path / "metadata.json"
@@ -229,6 +229,8 @@ def test_a_package_that_is_not_an_ipk_is_refused(monkeypatch, tmp_path):
         {"source_sha256": "not-a-digest"},
         {"source_commit": "not-a-commit"},
         {"license": "MIT"},
+        # The source's licence, not the package's: the package says what it is distributed under.
+        {"license": "GPL-2.0-or-later"},
         {"size": True},
         {"size": 0},
     ],

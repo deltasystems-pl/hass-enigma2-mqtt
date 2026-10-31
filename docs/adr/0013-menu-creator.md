@@ -1,6 +1,6 @@
 # ADR-0013: The menu creator - Home Assistant publishes a catalogue, the receiver sends the edited menu back, Home Assistant decides and stores
 
-**Status:** proposed 2026-10-16, amended 2026-10-17 (editing from the receiver is opt-in, off by
+**Status:** accepted 2026-10-31 with the 0.5.0 release that ships it; proposed 2026-10-16, amended 2026-10-17 (editing from the receiver is opt-in, off by
 default; the catalogue keeps every entity the menu uses; an unchanged row is kept; an edit's text
 must be UTF-8 and is quoted only as ASCII)
 **Date:** 2026-10-16

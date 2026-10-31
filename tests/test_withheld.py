@@ -1047,20 +1047,11 @@ def test_the_learn_more_link_points_into_the_plugins_troubleshooting_document() 
     assert anchor and anchor == _github_anchor(anchor)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "the section the link points at was written after plugin 0.4.0, which is the "
-        "plugin source bundled here; this turns into a pass - and, being strict, into a "
-        "failure that says to remove this marker - when the bundle moves to a plugin "
-        "that has it"
-    ),
-)
 def test_the_learn_more_anchor_is_a_heading_of_the_bundled_plugins_document() -> None:
     """The anchor is checked against the plugin's own document, not against a copy here.
 
-    Until the bundled plugin has the section, the link is unverified by any test: it was
-    checked by hand against the plugin's `main`.
+    The section was written for plugin 0.5.0, the first bundle that has it; until then the
+    link was checked by hand against the plugin's `main`.
     """
     from custom_components.enigma2_mqtt.const import WITHHELD_LEARN_MORE_URL  # noqa: PLC0415
 
@@ -1074,7 +1065,7 @@ def test_the_learn_more_anchor_is_a_heading_of_the_bundled_plugins_document() ->
 
 
 def test_the_bundled_troubleshooting_document_is_read_at_all() -> None:
-    """The expected failure above must be about the anchor, not about reading the file."""
+    """The anchor test above must fail on the anchor, never on reading the file."""
     assert "## Reporting a problem" in _bundled_troubleshooting()
 
 

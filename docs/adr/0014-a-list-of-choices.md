@@ -1,6 +1,6 @@
 # ADR-0014: A list of choices - the receiver answers with a row id, once; the action returns it and the bus carries it
 
-**Status:** proposed 2026-10-18
+**Status:** accepted 2026-10-31 with the 0.5.0 release that ships it; proposed 2026-10-18
 **Date:** 2026-10-18
 **Extends:** [ADR-0010](0010-a-command-carries-an-id-and-a-refusal-is-matched-by-it.md) - the
 command's id is also the id an answer is matched by. The receiver's half is the plugin's list ADR

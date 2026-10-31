@@ -58,6 +58,20 @@ def version_from(path: Path) -> str:
     raise SystemExit("plugin version is missing or is not a string literal")
 
 
+def license_from(control: Path) -> str:
+    """The package's licence, as the plugin's `CONTROL/control` declares it.
+
+    Read rather than written down here: from 0.5.0 on the package is distributed under other
+    terms than the plugin's source (its NOTICE says why), and the bundle records the package's.
+    """
+    for line in control.read_text(encoding="utf-8").splitlines():
+        if line.startswith("License:"):
+            value = line.removeprefix("License:").strip()
+            if value:
+                return value
+    raise SystemExit("plugin control file declares no License")
+
+
 def flavour_for(plugin: Path, commit: str, version: str) -> str:
     """`release` when the commit carries the tag `v<version>`, `development` otherwise.
 
@@ -195,7 +209,7 @@ def main() -> None:
             "source_size": source_target.stat().st_size,
             "source_commit": commit,
             "source_url": f"{SOURCE_REPOSITORY}/tree/{commit}",
-            "license": "GPL-2.0-or-later",
+            "license": license_from(exported / "CONTROL/control"),
         }
         (staged / "metadata.json").write_text(
             json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"

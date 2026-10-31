@@ -12,12 +12,17 @@ SSH.
 
 That plugin is a SEPARATE PROGRAM. It is licensed under the GNU General Public License,
 version 2 or (at your option) any later version, because it imports and runs inside enigma2.
+From plugin 0.5.0 on its package (the IPK) also carries the receiver menu's icons, which are
+Apache-2.0; Apache-2.0 is compatible with version 3 of the GPL and not with version 2, so the
+package as a whole is distributed under the GPL version 3 or later, the "or later" of the
+plugin's own licence. The plugin's NOTICE, in its package and in its source, says this in full.
 Bundling it here is mere aggregation: it is not linked into, derived from, or combined with
 the Python code of this integration, and the MIT license of this repository does not apply
 to it.
 
   Plugin:   enigma2-plugin-extensions-mqttbridge
-  License:  GPL-2.0-or-later
+  License:  GPL-3.0-or-later AND Apache-2.0 (the package, as its control file declares it);
+            the source is GPL-2.0-or-later
   Source:   https://github.com/deltasystems-pl/enigma2-mqtt-bridge
 
 Every integration artifact that contains the IPK also contains its complete corresponding source
