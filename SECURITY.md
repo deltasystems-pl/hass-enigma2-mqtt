@@ -119,7 +119,7 @@ card a PNG or JPEG of at most 1 MiB that the host serves under `/picon/`. Nothin
 answer is used or shown. Typing the receiver's host when adding it (or with *Reconfigure*) closes
 this.
 
-**Recordings** (since the release after 0.4.0, with plugin 0.5.0;
+**Recordings** (since 0.5.0, with plugin 0.5.0;
 [DOCUMENTATION.md §4.8](DOCUMENTATION.md#48-recordings),
 [ADR-0015](docs/adr/0015-recordings-are-browsed-here-played-there-and-hidden-here.md)). A
 recording is played and deleted by an opaque id - sixteen hexadecimal digits of a hash of its
@@ -135,7 +135,7 @@ library, retained, to any broker login - every title, channel and file name of e
 the hidden-bouquets option filters what Home Assistant shows, counts, plays and deletes, and
 hides nothing on the network.
 
-**Streams** (since the release after 0.4.0, with plugin 0.5.0;
+**Streams** (since 0.5.0, with plugin 0.5.0;
 [DOCUMENTATION.md §4.7](DOCUMENTATION.md#47-streams)). Home Assistant opens no stream and
 carries no video. One thing about streams does leave it:
 

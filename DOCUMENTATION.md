@@ -61,7 +61,8 @@ works too: copy `custom_components/enigma2_mqtt` into your `config/custom_compon
 
 | Integration | Plugin | Status |
 |---|---|---|
-| 0.4.0 | 0.4.0 | current release |
+| 0.5.0 | 0.5.0 | current release |
+| 0.4.0 | 0.4.0 | superseded |
 | 0.3.1 | 0.3.0 | superseded |
 | 0.3.0 | 0.3.0 | superseded |
 | 0.2.0 | 0.2.0 | superseded |
@@ -69,7 +70,7 @@ works too: copy `custom_components/enigma2_mqtt` into your `config/custom_compon
 
 The integration ships the plugin it was built against, so the two move together. The bundle in
 this release is byte for byte the package on the plugin's own
-[releases page](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/tag/v0.4.0), and
+[releases page](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/tag/v0.5.0), and
 `custom_components/enigma2_mqtt/bundled/metadata.json` carries the SHA-256 to check it with.
 The integration refuses nothing when the versions differ, but the `update` entity tells you
 when the box runs a plugin older than the one this release was written against.

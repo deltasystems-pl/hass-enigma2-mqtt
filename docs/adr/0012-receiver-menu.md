@@ -1,6 +1,6 @@
 # ADR-0012: The receiver menu - the receiver sends a row id and a value, Home Assistant decides and performs
 
-**Status:** proposed 2026-10-15
+**Status:** accepted 2026-10-31 with the 0.5.0 release that ships it; proposed 2026-10-15
 **Date:** 2026-10-15
 **Amended:** 2026-10-18 - a toggle says what its row showed, and Home Assistant performs that
 intent rather than a flip (section 11)

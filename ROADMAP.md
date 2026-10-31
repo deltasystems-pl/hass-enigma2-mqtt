@@ -31,7 +31,7 @@ Where the integration stands and what comes next. What each release changed is i
 
 ## Where the releases fit
 
-HACS serves **0.4.0**, which bundles the receiver plugin's own **0.4.0** - the version its feed
+HACS serves **0.5.0**, which bundles the receiver plugin's own **0.5.0** - the version its feed
 serves - so the version on a receiver or in HACS says which release you are running.
 
 0.2.0 (fixes) and 0.3.0 (features) came out of two days of household use, which produced a list
@@ -40,8 +40,15 @@ of problems and a list of wants; the plan is
 that 0.3.0 added is [ADR-0004](docs/adr/0004-remote-uninstall.md) and
 [ADR-0006](docs/adr/0006-remote-uninstall-plugin-acts-ssh-verifies.md). 0.4.0 installs the
 plugin's releases from its signed release index, over MQTT through a receiver that updates itself
-or over SSH, as [ADR-0008](docs/adr/0008-signed-plugin-index.md) decides. Everything each release
-shipped is listed in [CHANGELOG.md](CHANGELOG.md).
+or over SSH, as [ADR-0008](docs/adr/0008-signed-plugin-index.md) decides. 0.5.0 adds, with plugin
+0.5.0, the receiver menu and its editor on the receiver
+([ADR-0012](docs/adr/0012-receiver-menu.md), [ADR-0013](docs/adr/0013-menu-creator.md)), a list
+of choices on the television ([ADR-0014](docs/adr/0014-a-list-of-choices.md)), the recordings
+([ADR-0015](docs/adr/0015-recordings-are-browsed-here-played-there-and-hidden-here.md)), stream
+facts and a media source ([ADR-0011](docs/adr/0011-stream-facts-addresses-and-a-media-source.md)),
+and commands matched to their refusals by an id
+([ADR-0010](docs/adr/0010-a-command-carries-an-id-and-a-refusal-is-matched-by-it.md)). Everything
+each release shipped is listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## Testers wanted
 

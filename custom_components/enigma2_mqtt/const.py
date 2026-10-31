@@ -230,8 +230,17 @@ PLUGIN_SETTING_DEFAULTS: Final[dict[str, object]] = {
     # them never reads them.
     "update_check": False,
     "update_allowed": False,
+    # Declared by the plugin from 0.5.0 on (the receiver menu, its press combo, and deleting
+    # recordings); a plugin that does not know them never reads them.
+    "menu_allowed": True,
+    "menu_hotkey": "help_long",
+    "menu_transparency": 20,
+    "menu_combo_key": "off",
+    "menu_combo_presses": 3,
+    "menu_combo_gap_ms": 1200,
     "log_level": "info",
     "epg_grid_events": 4,
+    "recording_delete_allowed": False,
 }
 
 # Seconds to wait for the plugin to echo a new `ha_mode` back on `info`. The plugin
@@ -616,7 +625,7 @@ MEDIA_TYPE_RECORDING: Final = "recording"
 # The plugin release this version of the integration is written against: the version
 # the update entity shows as the one to install when no bundle loads. With a bundle, the
 # bundle's own version decides.
-SUPPORTED_PLUGIN_VERSION: Final = "0.4.0"
+SUPPORTED_PLUGIN_VERSION: Final = "0.5.0"
 PLUGIN_RELEASES_URL: Final = (
     "https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases"
 )
@@ -644,6 +653,8 @@ PLUGIN_CONTRACT_EXCEPTIONS: Final = (
     "epg-grid-generated-means-changed",
     "timers-lists-finished",
     "zap-under-popup-recorded",
+    "oversize-payload-withheld",
+    "last-error-cleared-at-start",
 )
 
 # The plugin's signed release index: a fixed origin, not a setting. Fetched with verified

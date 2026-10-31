@@ -416,6 +416,8 @@ def test_the_contract_and_its_named_exceptions_are_pinned() -> None:
         "epg-grid-generated-means-changed",
         "timers-lists-finished",
         "zap-under-popup-recorded",
+        "oversize-payload-withheld",
+        "last-error-cleared-at-start",
     )
 
 

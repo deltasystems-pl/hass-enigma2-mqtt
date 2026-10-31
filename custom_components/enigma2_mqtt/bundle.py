@@ -152,7 +152,10 @@ def load_bundled_plugin() -> BundledPlugin:
         raise _fail()
     if not isinstance(source_commit, str) or _COMMIT.fullmatch(source_commit) is None:
         raise _fail()
-    if metadata.get("license") != "GPL-2.0-or-later":
+    # The package's licence, as its control file declares it: from plugin 0.5.0 on the package
+    # carries Apache-2.0 icons and is distributed under GPLv3 or later, while the plugin's source
+    # stays GPL-2.0-or-later (the plugin's NOTICE).
+    if metadata.get("license") != "GPL-3.0-or-later AND Apache-2.0":
         raise _fail()
     expected_package = f"enigma2-plugin-extensions-mqttbridge_{version}_all.ipk"
     expected_source = f"enigma2-mqtt-bridge-{source_commit}.tar.gz"

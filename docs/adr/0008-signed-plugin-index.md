@@ -101,8 +101,9 @@ bound inside a major: the plugin's rule lets a release add topics, members, comm
 and settings, add a value to an enumeration, add a refusal and tighten free text, and never remove,
 retype or change a meaning - except as a named in-major exception, which the plugin decides in the
 pull request that makes it, after checking it against this integration's code and citing it by file
-and line. Four are named so far: `zap-moves-channel-list` and `epg-grid-generated-means-changed` (0.3.0),
-`timers-lists-finished` and `zap-under-popup-recorded` (0.4.0).
+and line. Six are named so far: `zap-moves-channel-list` and `epg-grid-generated-means-changed` (0.3.0),
+`timers-lists-finished` and `zap-under-popup-recorded` (0.4.0), `oversize-payload-withheld` and
+`last-error-cleared-at-start` (0.5.0).
 
 This integration's half of the rule: ignore what it does not know, treat a value of an enumeration
 it does not know as unknown, and read a member it expects and does not find as the older plugin it

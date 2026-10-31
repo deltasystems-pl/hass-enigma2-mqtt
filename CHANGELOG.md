@@ -7,15 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.5.0] - 2026-10-31
+
 What is new here needs **plugin 0.5.0** on the receiver, except the picture option and the picon
 lookup, which work with any plugin. A receiver on plugin 0.4.0 or older is
 read as before: its `info` carries no `not_published` and it does not claim `channel_topics`, so
 it gets no repair and no new sensor, and its channel list comes from `channels`.
 
+The bundled plugin is, byte for byte, the plugin's own release v0.5.0
+([link](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/tag/v0.5.0)).
+Receivers on plugin 0.2.0 to 0.4.0 are still supported (the same contract, 1), without what
+needs plugin 0.5.0; such a receiver is updated to it from the update card - over MQTT where it
+updates itself, over SSH otherwise - or by hand.
+
 ### Added
 
 - **Recordings** (plugin 0.5.0; DOCUMENTATION.md §4.8 and
-  [ADR-0015](docs/adr/0015-recordings-are-browsed-here-played-there-and-hidden-here.md)).
+  [ADR-0015](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/v0.5.0/docs/adr/0015-recordings-are-browsed-here-played-there-and-hidden-here.md)).
   „Aktywne nagrania" carries each running recording's channel, bouquet, short description,
   movie location, file, library id and whether it was started by hand (`recording_details`),
   in its unrecorded `recordings` attribute, with `hidden` on every entry. New, each only for a
@@ -40,7 +50,7 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   The receiver's refusals of these commands are said in the household's language, also a play
   the viewer declined by keeping timeshift and a delete asked for while another is being moved.
 - **The receiver menu** (plugin 0.5.0, for a receiver that claims `menu`; DOCUMENTATION.md
-  "Receiver menu" and [ADR-0012](docs/adr/0012-receiver-menu.md)). The options gain *Receiver
+  "Receiver menu" and [ADR-0012](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/v0.5.0/docs/adr/0012-receiver-menu.md)). The options gain *Receiver
   menu* („Menu na dekoderze"): up to 8 groups and 24 entries per list of controls bound to
   entities, scenes and scripts with the entity picker, each a button, switch, indicator, list of
   options, slider or text field as its domain allows - any entity can be an indicator. Entries
@@ -73,7 +83,7 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   added.
 
 - **The menu creator** (plugin 0.5.0, for a receiver that claims `menu_editor`; DOCUMENTATION.md
-  "Editing the menu on the receiver" and [ADR-0013](docs/adr/0013-menu-creator.md)). The receiver
+  "Editing the menu on the receiver" and [ADR-0013](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/v0.5.0/docs/adr/0013-menu-creator.md)). The receiver
   menu can also be built on a page in the receiver's web interface. Home Assistant publishes a
   catalogue on `enigma2mqtt/menu_catalogue/<node_id>`, retained - every entity with a state, hidden,
   configuration and diagnostic ones marked, with its name, area and possible controls, and the
@@ -97,7 +107,7 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   unreadable; what an edit sent is quoted in answers and the log only as cut ASCII literals. The
   settings form and the SSH steps carry the menu over as it is stored when they save.
 - **A list of choices on the television** (plugin 0.5.0, for a receiver that claims `list`;
-  DOCUMENTATION.md "show_list" and [ADR-0014](docs/adr/0014-a-list-of-choices.md)). The action
+  DOCUMENTATION.md "show_list" and [ADR-0014](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/v0.5.0/docs/adr/0014-a-list-of-choices.md)). The action
   `enigma2_mqtt.show_list` puts a question on the television - a title, an optional text and 1 to 24
   rows, each with an id, a label and optionally a colour or number key and an icon - with a timeout
   of 5 to 600 seconds (60 by default) and an optional default row. Titles, the text and labels are
@@ -134,7 +144,7 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
 
 - **Stream facts, a stream address and a media source** (plugin 0.5.0, for a receiver that
   claims the capability named with each; DOCUMENTATION.md §4.7 and
-  [ADR-0011](docs/adr/0011-stream-facts-addresses-and-a-media-source.md)). The integration
+  [ADR-0011](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/v0.5.0/docs/adr/0011-stream-facts-addresses-and-a-media-source.md)). The integration
   starts no stream, carries no video and makes no camera entity.
   - **The media player says where the channel's stream is** (`stream`): the attributes
     `stream_url` - the receiver's own stream address of the channel on the decoder, built at
@@ -239,7 +249,7 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   shown as before. A screenshot does not say which channel it shows, so one taken of a channel
   that was only zapped through can replace the picon of the channel after it for a few seconds
   (DOCUMENTATION.md §3 and §4.1,
-  [ADR-0009](docs/adr/0009-player-picture-and-picons-from-openwebif.md)).
+  [ADR-0009](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/v0.5.0/docs/adr/0009-player-picture-and-picons-from-openwebif.md)).
 - **Picons are found the way OpenWebif finds them.** The player asks OpenWebif which picon the
   current channel has (`getpicon`), and the media browser asks for a bouquet's picons when the
   bouquet is opened (`getservices` with `picon=1`), instead of building one file name from the
@@ -282,7 +292,7 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   installer's `cmd/reset` after a downgrade and `cmd/bouquet` after a restart. Nothing waits
   for a refusal of those. The id is on no entity; the diagnostics download shows it inside `last_error`
   (DOCUMENTATION.md §5,
-  [ADR-0010](docs/adr/0010-a-command-carries-an-id-and-a-refusal-is-matched-by-it.md)).
+  [ADR-0010](https://github.com/deltasystems-pl/hass-enigma2-mqtt/blob/v0.5.0/docs/adr/0010-a-command-carries-an-id-and-a-refusal-is-matched-by-it.md)).
 
 ### Changed
 
@@ -304,6 +314,19 @@ it gets no repair and no new sensor, and its channel list comes from `channels`.
   download at start-up and fails without internet. A minimum accepts whatever later version
   Home Assistant brings. Home Assistant's manifest check (hassfest) now refuses the exact pin.
   The tests still run against 2.24.0.
+- **The bundled plugin is the plugin's 0.5.0 release**, a `release` build of commit `44cd6b1`,
+  byte for byte the package on the plugin's
+  [releases page](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/releases/tag/v0.5.0)
+  (SHA-256 `4451e6b139d95f14caded0d4d512759377bbcae0dd2001172a7031f6c9005669`). CI rebuilds it
+  byte for byte from that commit, and the checks shared with the plugin (vectors, keys, contract)
+  are pinned to the same commit; the contract's named exceptions now include the plugin's
+  `oversize-payload-withheld` and `last-error-cleared-at-start`.
+- **The bundled package is distributed under GPL-3.0-or-later.** From 0.5.0 on the plugin's
+  package carries the receiver menu's icons, which are Apache-2.0, and is distributed under the
+  terms of the GPL version 3 or later; the plugin's source stays GPL-2.0-or-later
+  ([NOTICE](https://github.com/deltasystems-pl/enigma2-mqtt-bridge/blob/v0.5.0/NOTICE)).
+  `bundled/metadata.json` records the package's licence as its control file declares it,
+  `GPL-3.0-or-later AND Apache-2.0`, and NOTICE says the same. This integration stays MIT.
 
 ### Fixed
 
@@ -1601,7 +1624,8 @@ actions the README describes arrive in a later release.
   every push, every pull request, once a week and on the release tag itself, and a release
   is only published when the tag, the manifest version and the changelog agree.
 
-[Unreleased]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/deltasystems-pl/hass-enigma2-mqtt/compare/v0.2.0...v0.3.0
